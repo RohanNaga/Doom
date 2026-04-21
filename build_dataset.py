@@ -19,8 +19,35 @@ import argparse
 import glob
 import os
 import re
+import shutil
 
 import numpy as np
+
+
+def _save_atomic(path, arr, required_bytes):
+    """Write np.save output to a .tmp path, fsync, then atomically rename.
+    Fails loud if there isn't enough free disk for the expected file size.
+    """
+    out_dir = os.path.dirname(path) or "."
+    free = shutil.disk_usage(out_dir).free
+    # Require 1GB headroom beyond the file itself to avoid other-user races.
+    headroom = 1 << 30
+    if free < required_bytes + headroom:
+        raise RuntimeError(
+            f"Not enough disk at {out_dir}: need ~{(required_bytes + headroom) / 1e9:.1f} GB, "
+            f"have {free / 1e9:.2f} GB free. Free space and retry."
+        )
+    tmp_path = path + ".tmp"
+    np.save(tmp_path, arr)
+    # Verify the file actually has the expected size before renaming.
+    actual = os.path.getsize(tmp_path)
+    if actual < required_bytes * 0.95:
+        os.remove(tmp_path)
+        raise RuntimeError(
+            f"Truncated write to {tmp_path}: expected ~{required_bytes} bytes, got {actual}. "
+            f"Likely ENOSPC — free space and retry."
+        )
+    os.replace(tmp_path, path)
 
 
 def main(args):
@@ -79,9 +106,9 @@ def main(args):
           f"  min={act_all.min()} max={act_all.max()}")
 
     os.makedirs(args.out_dir, exist_ok=True)
-    np.save(os.path.join(args.out_dir, "context_latents.npy"), ctx_all)
-    np.save(os.path.join(args.out_dir, "target_latents.npy"), tgt_all)
-    np.save(os.path.join(args.out_dir, "context_actions.npy"), act_all)
+    _save_atomic(os.path.join(args.out_dir, "context_latents.npy"), ctx_all, ctx_all.nbytes)
+    _save_atomic(os.path.join(args.out_dir, "target_latents.npy"), tgt_all, tgt_all.nbytes)
+    _save_atomic(os.path.join(args.out_dir, "context_actions.npy"), act_all, act_all.nbytes)
     print(f"Saved to {args.out_dir}/")
 
 
