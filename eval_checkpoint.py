@@ -134,5 +134,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-eval-segments", type=int, default=10)
     parser.add_argument("--eval-segment-size", type=int, default=8)
     parser.add_argument("--num-sample-steps", type=int, default=250)
+    parser.add_argument("--use-ema", action="store_true",
+                        help="Use EMA weights instead of the live model (default: live model).")
     args = parser.parse_args()
     main(args)
