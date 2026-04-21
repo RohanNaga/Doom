@@ -203,10 +203,17 @@ def main(args):
         return min(1.0, step / args.warmup_steps)
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(opt, _lr_lambda)
 
-    # Setup data:
-    context = f"{args.feature_path}/context_latents_debug.npy"
-    target = f"{args.feature_path}/target_latents_debug.npy"
-    action = f"{args.feature_path}/context_actions_debug.npy"
+    # Setup data. Prefer the full-dataset filenames; fall back to the debug files if those
+    # don't exist in feature_path (e.g. pointing at data/debug for smoke tests).
+    def _pick(full_name, debug_name):
+        full_path = os.path.join(args.feature_path, full_name)
+        debug_path = os.path.join(args.feature_path, debug_name)
+        if os.path.isfile(full_path):
+            return full_path
+        return debug_path
+    context = _pick("context_latents.npy", "context_latents_debug.npy")
+    target = _pick("target_latents.npy", "target_latents_debug.npy")
+    action = _pick("context_actions.npy", "context_actions_debug.npy")
 
     dataset = CustomDataset(context, target, action)
     loader = DataLoader(
