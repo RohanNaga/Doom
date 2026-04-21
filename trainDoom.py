@@ -183,7 +183,9 @@ def main(args):
         if accelerator.is_main_process:
             logger.info(f"Warm-start from {args.ckpt}: {len(missing)} missing, {len(unexpected)} unexpected keys")
 
-    ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
+    # Create an EMA copy for inference. Stored in bf16 to save ~1.35GB vs fp32 on a 16GB GPU;
+    # the quality impact is negligible because EMA is only read during sampling/eval.
+    ema = deepcopy(model).to(device).to(torch.bfloat16 if args.ema_bf16 else torch.float32)
     requires_grad(ema, False)
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     if accelerator.is_main_process:
@@ -368,6 +370,10 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--warmup-steps", type=int, default=500,
                         help="Linear warmup steps. Important for warm-started models.")
+    parser.add_argument("--ema-bf16", action="store_true", default=True,
+                        help="Store EMA weights in bf16 to save GPU memory. On by default.")
+    parser.add_argument("--no-ema-bf16", action="store_false", dest="ema_bf16",
+                        help="Force fp32 EMA (needs more memory).")
     parser.add_argument("--sample-every", type=int, default=500,
                         help="Decode + save a PNG grid from EMA every N steps. 0 to disable.")
     parser.add_argument("--num-sample-steps", type=int, default=50,
