@@ -241,7 +241,10 @@ def main(args):
     if accelerator.is_main_process and args.sample_every > 0:
         samples_dir = f"{experiment_dir}/samples"
         os.makedirs(samples_dir, exist_ok=True)
-        vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+        # VAE lives on CPU to save ~335MB of GPU memory on rank 0 (we're tight at 16GB/GPU
+        # with batch 16 + grad_ckpt + DDP). Decoding ~8 frames takes a few seconds — fine
+        # because we only sample every --sample-every steps.
+        vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to("cpu")
         vae.eval()
         requires_grad(vae, False)
         sample_diffusion = create_diffusion(timestep_respacing=str(args.num_sample_steps))
@@ -251,9 +254,9 @@ def main(args):
         eval_ctx = _ectx.to(device)
         eval_tgt = _etgt.to(device)
         eval_act = _eact.to(device)
-        # Save ground truth once: drop the padded bottom row, unscale, decode, save.
+        # Save ground truth once: drop the padded bottom row, unscale, decode on CPU, save.
         with torch.no_grad():
-            gt_latent = eval_tgt[:, :, :15, :] / 0.18215
+            gt_latent = (eval_tgt[:, :, :15, :].float() / 0.18215).cpu()
             gt_img = vae.decode(gt_latent).sample
         gt_img = (gt_img * 0.5 + 0.5).clamp(0, 1)
         save_image(gt_img, f"{samples_dir}/ground_truth.png", nrow=args.num_eval_samples)
@@ -277,8 +280,8 @@ def main(args):
                     ema, shape, noise, clip_denoised=False,
                     model_kwargs=model_kwargs, progress=False, device=device,
                 )
-            # VAE decode in fp32 outside the autocast context (VAE is native fp32).
-            samples = samples[:, :, :15, :].float() / 0.18215
+            # Move latents to CPU for VAE decode (VAE is on CPU to save GPU memory).
+            samples = (samples[:, :, :15, :].float() / 0.18215).cpu()
             imgs = vae.decode(samples).sample
         imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
         save_image(imgs, f"{samples_dir}/{step:07d}.png", nrow=args.num_eval_samples)
@@ -421,7 +424,7 @@ if __name__ == "__main__":
                         help="Decode + save a PNG grid from EMA every N steps. 0 to disable.")
     parser.add_argument("--num-sample-steps", type=int, default=50,
                         help="DDIM/DDPM sampling steps for in-training visualization.")
-    parser.add_argument("--num-eval-samples", type=int, default=4,
+    parser.add_argument("--num-eval-samples", type=int, default=8,
                         help="How many fixed context frames to track across training.")
     args = parser.parse_args()
     main(args)
