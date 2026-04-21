@@ -31,6 +31,7 @@ from accelerate import Accelerator
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
+import torch.nn.functional as F
 
 
 #################################################################################
@@ -104,7 +105,6 @@ class CustomDataset(Dataset):
     def __len__(self):
         return len(self.target)
 
-    import torch.nn.functional as F
 
     def __getitem__(self, idx):
         context = torch.from_numpy(self.context[idx]).float()   # (4, 4, 15, 20)
@@ -150,8 +150,9 @@ def main(args):
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
-        input_size=latent_size,
-        num_classes=args.num_classes
+        input_size=(16, 20),   # instead of 32
+        in_channels=20,         # 16 context + 4 target after channel concat
+        num_classes=args.num_classes,
     )
     # Note that parameter initialization is done within the DiT constructor
     model = model.to(device)

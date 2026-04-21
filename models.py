@@ -236,21 +236,25 @@ class DiT(nn.Module):
             return outputs
         return ckpt_forward
 
-    def forward(self, x, t, y):
+    def forward(self, x, t, action, context=None):
         """
-        Forward pass of DiT.
-        x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
-        t: (N,) tensor of diffusion timesteps
-        y: (N,) tensor of class labels
+        x:       (N, 4, H, W)       noisy target latent
+        t:       (N,)                timesteps
+        y:       (N,)                action class (was class label)
+        context: (N, 16, H, W)       clean history, channel-stacked (optional)
         """
-        x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
-        t = self.t_embedder(t)                   # (N, D)
-        y = self.y_embedder(y, self.training)    # (N, D)
-        c = t + y                                # (N, D)
+        if context is not None:
+            x = torch.cat([context, x], dim=1)   # (N, 20, H, W)
+        
+        x = self.x_embedder(x) + self.pos_embed
+        t = self.t_embedder(t)
+        y = self.y_embedder(action, self.training)
+        c = t + y
+
         for block in self.blocks:
-            x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)       # (N, T, D)
-        x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
-        x = self.unpatchify(x)                   # (N, out_channels, H, W)
+            x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)
+        x = self.final_layer(x, c)
+        x = self.unpatchify(x)
         return x
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
