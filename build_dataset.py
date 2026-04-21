@@ -38,7 +38,9 @@ def _save_atomic(path, arr, required_bytes):
             f"have {free / 1e9:.2f} GB free. Free space and retry."
         )
     tmp_path = path + ".tmp"
-    np.save(tmp_path, arr)
+    # Use a file object so np.save doesn't auto-append `.npy` to our tmp_path.
+    with open(tmp_path, "wb") as f:
+        np.save(f, arr)
     # Verify the file actually has the expected size before renaming.
     actual = os.path.getsize(tmp_path)
     if actual < required_bytes * 0.95:
