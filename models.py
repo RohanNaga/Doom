@@ -151,6 +151,7 @@ class DiT(nn.Module):
         input_size=32,
         patch_size=2,
         in_channels=4,
+        pred_channels=None,
         hidden_size=1152,
         depth=28,
         num_heads=16,
@@ -162,7 +163,11 @@ class DiT(nn.Module):
         super().__init__()
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
-        self.out_channels = in_channels * 2 if learn_sigma else in_channels
+        # pred_channels: number of predicted channels (the target). Defaults to in_channels for
+        # standard DiT, but for context-conditioned variants (DOOM: 16 context + 4 target = 20 in,
+        # 4 predicted) the prediction is only a subset of the input channels.
+        self.pred_channels = pred_channels if pred_channels is not None else in_channels
+        self.out_channels = self.pred_channels * 2 if learn_sigma else self.pred_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
 
@@ -177,6 +182,9 @@ class DiT(nn.Module):
             DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
+        # Gradient checkpointing is opt-in; at small token counts (e.g. DOOM 80 tokens) it's
+        # pure overhead, but at larger resolutions it saves substantial memory.
+        self.use_grad_ckpt = False
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -188,8 +196,9 @@ class DiT(nn.Module):
                     nn.init.constant_(module.bias, 0)
         self.apply(_basic_init)
 
-        # Initialize (and freeze) pos_embed by sin-cos embedding:
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.x_embedder.num_patches ** 0.5))
+        # Initialize (and freeze) pos_embed by sin-cos embedding.
+        # grid_size is a (gh, gw) tuple from timm's PatchEmbed when img_size is a tuple.
+        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], self.x_embedder.grid_size)
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
         # Initialize patch_embed like nn.Linear (instead of nn.Conv2d):
@@ -218,16 +227,16 @@ class DiT(nn.Module):
     def unpatchify(self, x):
         """
         x: (N, T, patch_size**2 * C)
-        imgs: (N, H, W, C)
+        imgs: (N, C, H, W)
         """
         c = self.out_channels
         p = self.x_embedder.patch_size[0]
-        h = w = int(x.shape[1] ** 0.5)
-        assert h * w == x.shape[1]
+        gh, gw = self.x_embedder.grid_size
+        assert gh * gw == x.shape[1]
 
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
+        x = x.reshape(shape=(x.shape[0], gh, gw, p, p, c))
         x = torch.einsum('nhwpqc->nchpwq', x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
+        imgs = x.reshape(shape=(x.shape[0], c, gh * p, gw * p))
         return imgs
     
     def ckpt_wrapper(self, module):
@@ -252,24 +261,25 @@ class DiT(nn.Module):
         c = t + y
 
         for block in self.blocks:
-            x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)
+            if self.use_grad_ckpt and self.training:
+                x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c, use_reentrant=False)
+            else:
+                x = block(x, c)
         x = self.final_layer(x, c)
         x = self.unpatchify(x)
         return x
 
-    def forward_with_cfg(self, x, t, y, cfg_scale):
+    def forward_with_cfg(self, x, t, y, cfg_scale, context=None):
         """
         Forward pass of DiT, but also batches the unconditional forward pass for classifier-free guidance.
         """
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
-        model_out = self.forward(combined, t, y)
-        # For exact reproducibility reasons, we apply classifier-free guidance on only
-        # three channels by default. The standard approach to cfg applies it to all channels.
-        # This can be done by uncommenting the following line and commenting-out the line following that.
-        # eps, rest = model_out[:, :self.in_channels], model_out[:, self.in_channels:]
-        eps, rest = model_out[:, :3], model_out[:, 3:]
+        model_out = self.forward(combined, t, y, context=context)
+        # CFG applied to the predicted (epsilon) channels only; remaining channels are
+        # the learn_sigma variance prediction.
+        eps, rest = model_out[:, :self.pred_channels], model_out[:, self.pred_channels:]
         cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
@@ -283,16 +293,20 @@ class DiT(nn.Module):
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False, extra_tokens=0):
     """
-    grid_size: int of the grid height and width
+    grid_size: int for square grids, or (grid_h, grid_w) tuple for rectangular grids.
     return:
-    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
+    pos_embed: [grid_h*grid_w, embed_dim] or [1+grid_h*grid_w, embed_dim] (w/ or w/o cls_token)
     """
-    grid_h = np.arange(grid_size, dtype=np.float32)
-    grid_w = np.arange(grid_size, dtype=np.float32)
+    if isinstance(grid_size, int):
+        grid_h_size = grid_w_size = grid_size
+    else:
+        grid_h_size, grid_w_size = grid_size
+    grid_h = np.arange(grid_h_size, dtype=np.float32)
+    grid_w = np.arange(grid_w_size, dtype=np.float32)
     grid = np.meshgrid(grid_w, grid_h)  # here w goes first
     grid = np.stack(grid, axis=0)
 
-    grid = grid.reshape([2, 1, grid_size, grid_size])
+    grid = grid.reshape([2, 1, grid_h_size, grid_w_size])
     pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
     if cls_token and extra_tokens > 0:
         pos_embed = np.concatenate([np.zeros([extra_tokens, embed_dim]), pos_embed], axis=0)

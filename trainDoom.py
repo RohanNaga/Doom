@@ -11,6 +11,7 @@ import torch
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
+import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset, DataLoader
@@ -31,6 +32,7 @@ from accelerate import Accelerator
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
+from download import find_model
 import torch.nn.functional as F
 
 
@@ -131,8 +133,8 @@ def main(args):
     """
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
 
-    # Setup accelerator:
-    accelerator = Accelerator()
+    # Setup accelerator. bf16 is native on Ampere (A4000 etc.) — no loss-scale overhead, ~1.7x speedup.
+    accelerator = Accelerator(mixed_precision=args.mixed_precision)
     device = accelerator.device
 
     # Setup an experiment folder:
@@ -150,12 +152,35 @@ def main(args):
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
-        input_size=(16, 20),   # instead of 32
+        input_size=(16, 20),    # rectangular DOOM latent grid
         in_channels=20,         # 16 context + 4 target after channel concat
+        pred_channels=4,        # model predicts the 4-channel target only
         num_classes=args.num_classes,
     )
+    model.use_grad_ckpt = args.grad_ckpt  # disabled by default; 80-token DiT doesn't need it
     # Note that parameter initialization is done within the DiT constructor
     model = model.to(device)
+
+    # Optional pretrained warm-start. Copies DiT-XL/2 ImageNet weights for shared params;
+    # inflates x_embedder from 4→20 input channels (first 4 get pretrained, rest stay random);
+    # skips pos_embed (grid mismatch) and y_embedder (class-count mismatch).
+    if args.ckpt:
+        state_dict = find_model(args.ckpt)
+        if "model" in state_dict:
+            state_dict = state_dict["model"]
+        pretrained_proj = state_dict.pop("x_embedder.proj.weight")  # (D, 4, p, p)
+        pretrained_bias = state_dict.pop("x_embedder.proj.bias", None)
+        with torch.no_grad():
+            model.x_embedder.proj.weight[:, :4].copy_(pretrained_proj.to(device))
+            if pretrained_bias is not None:
+                model.x_embedder.proj.bias.copy_(pretrained_bias.to(device))
+        for k in list(state_dict.keys()):
+            if k.startswith("pos_embed") or k.startswith("y_embedder"):
+                state_dict.pop(k)
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        if accelerator.is_main_process:
+            logger.info(f"Warm-start from {args.ckpt}: {len(missing)} missing, {len(unexpected)} unexpected keys")
+
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
@@ -163,7 +188,14 @@ def main(args):
         logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0)
+    # Linear warmup from 0 → args.lr over the first args.warmup_steps. Critical for
+    # warm-started models: constant LR into a mismatched prior can explode early grads.
+    def _lr_lambda(step):
+        if args.warmup_steps <= 0:
+            return 1.0
+        return min(1.0, step / args.warmup_steps)
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(opt, _lr_lambda)
 
     # Setup data:
     context = f"{args.feature_path}/context_latents_debug.npy"
@@ -177,7 +209,8 @@ def main(args):
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=True
+        drop_last=True,
+        persistent_workers=args.num_workers > 0,
     )
     if accelerator.is_main_process:
         logger.info(f"Dataset contains {len(dataset):,} images ({args.feature_path})")
@@ -186,7 +219,7 @@ def main(args):
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
-    model, opt, loader = accelerator.prepare(model, opt, loader)
+    model, opt, loader, lr_scheduler = accelerator.prepare(model, opt, loader, lr_scheduler)
 
     # Variables for monitoring/logging purposes:
     train_steps = 0
@@ -209,7 +242,10 @@ def main(args):
             loss = loss_dict["loss"].mean()
             opt.zero_grad()
             accelerator.backward(loss)
+            if args.grad_clip > 0:
+                accelerator.clip_grad_norm_(model.parameters(), args.grad_clip)
             opt.step()
+            lr_scheduler.step()
             update_ema(ema, model)
 
             # Log loss values:
@@ -222,10 +258,7 @@ def main(args):
                 end_time = time()
                 steps_per_sec = log_steps / (end_time - start_time)
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
-                avg_loss = avg_loss.item() / accelerator.num_processes
-
-                avg_loss = torch.tensor(avg_loss, device=accelerator.device)
-                avg_loss = accelerator.reduce(avg_loss, reduction="sum")
+                avg_loss = accelerator.reduce(avg_loss, reduction="mean")
 
                 if accelerator.is_main_process:
                     logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
@@ -238,7 +271,7 @@ def main(args):
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 if accelerator.is_main_process:
                     checkpoint = {
-                        "model": model.module.state_dict(),
+                        "model": accelerator.unwrap_model(model).state_dict(),
                         "ema": ema.state_dict(),
                         "opt": opt.state_dict(),
                         "args": args
@@ -261,7 +294,9 @@ if __name__ == "__main__":
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=1000)
+    parser.add_argument("--num-classes", type=int, default=7)  # DOOM action-space size
+    parser.add_argument("--ckpt", type=str, default="DiT-XL-2-256x256.pt",
+                        help="Pretrained checkpoint for warm-start (empty string to disable)")
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
@@ -269,5 +304,15 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--mixed-precision", type=str, default="bf16",
+                        choices=["no", "fp16", "bf16"],
+                        help="bf16 is native on Ampere (A4000, A100) with no loss-scale overhead")
+    parser.add_argument("--grad-ckpt", action="store_true",
+                        help="Enable gradient checkpointing. Off by default; at 80 tokens it's overhead.")
+    parser.add_argument("--grad-clip", type=float, default=1.0,
+                        help="Max gradient norm. 0 to disable.")
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--warmup-steps", type=int, default=500,
+                        help="Linear warmup steps. Important for warm-started models.")
     args = parser.parse_args()
     main(args)
