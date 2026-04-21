@@ -33,7 +33,7 @@ from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 from download import find_model
-import torch.nn.functional as F
+from torchvision.utils import save_image
 
 
 #################################################################################
@@ -215,6 +215,52 @@ def main(args):
     if accelerator.is_main_process:
         logger.info(f"Dataset contains {len(dataset):,} images ({args.feature_path})")
 
+    # Setup in-training sampling (main process only). Loads SD-VAE for decoding,
+    # pins a fixed eval batch so we see the same frames evolve over training,
+    # and builds a faster DDIM diffusion (~50 steps instead of 1000).
+    vae = None
+    sample_diffusion = None
+    eval_ctx = eval_tgt = eval_act = None
+    samples_dir = None
+    if accelerator.is_main_process and args.sample_every > 0:
+        samples_dir = f"{experiment_dir}/samples"
+        os.makedirs(samples_dir, exist_ok=True)
+        vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+        vae.eval()
+        requires_grad(vae, False)
+        sample_diffusion = create_diffusion(timestep_respacing=str(args.num_sample_steps))
+        # Pin a fixed eval batch for visual tracking.
+        _eval_loader = DataLoader(dataset, batch_size=args.num_eval_samples, shuffle=False)
+        _ectx, _etgt, _eact = next(iter(_eval_loader))
+        eval_ctx = _ectx.to(device)
+        eval_tgt = _etgt.to(device)
+        eval_act = _eact.to(device)
+        # Save ground truth once: drop the padded bottom row, unscale, decode, save.
+        with torch.no_grad():
+            gt_latent = eval_tgt[:, :, :15, :] / 0.18215
+            gt_img = vae.decode(gt_latent).sample
+        gt_img = (gt_img * 0.5 + 0.5).clamp(0, 1)
+        save_image(gt_img, f"{samples_dir}/ground_truth.png", nrow=args.num_eval_samples)
+        logger.info(f"Saved ground truth to {samples_dir}/ground_truth.png")
+
+    def save_samples(step):
+        """Decode EMA-sampled next-frames for the fixed eval batch and save as a PNG grid."""
+        if vae is None:
+            return
+        ema.eval()
+        shape = eval_tgt.shape
+        noise = torch.randn(shape, device=device)
+        model_kwargs = dict(context=eval_ctx, action=eval_act)
+        with torch.no_grad():
+            samples = sample_diffusion.p_sample_loop(
+                ema, shape, noise, clip_denoised=False,
+                model_kwargs=model_kwargs, progress=False, device=device,
+            )
+            samples = samples[:, :, :15, :] / 0.18215
+            imgs = vae.decode(samples).sample
+        imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
+        save_image(imgs, f"{samples_dir}/{step:07d}.png", nrow=args.num_eval_samples)
+
     # Prepare models for training:
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
@@ -280,6 +326,12 @@ def main(args):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
 
+            # Decode + save PNG grid from the fixed eval batch.
+            if args.sample_every > 0 and train_steps % args.sample_every == 0 and train_steps > 0:
+                if accelerator.is_main_process:
+                    save_samples(train_steps)
+                    logger.info(f"Saved samples to {samples_dir}/{train_steps:07d}.png")
+
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     
@@ -314,5 +366,11 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--warmup-steps", type=int, default=500,
                         help="Linear warmup steps. Important for warm-started models.")
+    parser.add_argument("--sample-every", type=int, default=500,
+                        help="Decode + save a PNG grid from EMA every N steps. 0 to disable.")
+    parser.add_argument("--num-sample-steps", type=int, default=50,
+                        help="DDIM/DDPM sampling steps for in-training visualization.")
+    parser.add_argument("--num-eval-samples", type=int, default=4,
+                        help="How many fixed context frames to track across training.")
     args = parser.parse_args()
     main(args)
