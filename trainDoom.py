@@ -171,10 +171,21 @@ def main(args):
     # Note that parameter initialization is done within the DiT constructor
     model = model.to(device)
 
-    # Optional pretrained warm-start. Copies DiT-XL/2 ImageNet weights for shared params;
-    # inflates x_embedder from 4→20 input channels (first 4 get pretrained, rest stay random);
-    # skips pos_embed (grid mismatch) and y_embedder (class-count mismatch).
-    if args.ckpt:
+    # Resume from a previous DoomDiT checkpoint takes precedence over the DiT-XL/2 warm-start.
+    # Uses the saved model state_dict verbatim (already 20-channel, already DOOM-shaped).
+    if args.resume_from:
+        ck = torch.load(args.resume_from, map_location="cpu", weights_only=False)
+        state_dict = ck["model"] if "model" in ck else ck["ema"] if "ema" in ck else ck
+        # Cast bf16 saved state_dict back to fp32 for training
+        state_dict = {k: v.float() if v.is_floating_point() else v for k, v in state_dict.items()}
+        missing, unexpected = model.load_state_dict(state_dict, strict=True)
+        if accelerator.is_main_process:
+            resumed_step = ck.get("step", "?")
+            logger.info(f"Resumed live model from {args.resume_from} (step {resumed_step})")
+    elif args.ckpt:
+        # Pretrained DiT-XL/2 warm-start. Copies ImageNet weights for shared params;
+        # inflates x_embedder from 4→20 input channels (first 4 get pretrained, rest stay random);
+        # skips pos_embed (grid mismatch) and y_embedder (class-count mismatch).
         state_dict = find_model(args.ckpt)
         if "model" in state_dict:
             state_dict = state_dict["model"]
@@ -453,6 +464,9 @@ if __name__ == "__main__":
     parser.add_argument("--num-classes", type=int, default=18)  # Vizdoom full action set (0-17)
     parser.add_argument("--ckpt", type=str, default="DiT-XL-2-256x256.pt",
                         help="Pretrained checkpoint for warm-start (empty string to disable)")
+    parser.add_argument("--resume-from", type=str, default="",
+                        help="Resume from a DoomDiT checkpoint (takes precedence over --ckpt). "
+                             "Loads saved 'model' state_dict verbatim (already 20-channel).")
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
