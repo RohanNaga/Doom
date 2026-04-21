@@ -332,18 +332,36 @@ def main(args):
                 log_steps = 0
                 start_time = time()
 
-            # Save DiT checkpoint:
+            # Save DiT checkpoint.
+            # Default: save only EMA + args (~1.35GB bf16). The EMA is what you use for
+            # inference. Optimizer state (5.4GB fp32) is only needed for mid-training resume;
+            # the live model copy (2.7GB fp32) duplicates what's in EMA. Full checkpoints
+            # only every --full-ckpt-every steps.
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 if accelerator.is_main_process:
-                    checkpoint = {
-                        "model": accelerator.unwrap_model(model).state_dict(),
-                        "ema": ema.state_dict(),
-                        "opt": opt.state_dict(),
-                        "args": args
-                    }
-                    checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
+                    is_full = args.full_ckpt_every > 0 and train_steps % args.full_ckpt_every == 0
+                    checkpoint = {"ema": ema.state_dict(), "args": args, "step": train_steps}
+                    if is_full:
+                        checkpoint["model"] = accelerator.unwrap_model(model).state_dict()
+                        checkpoint["opt"] = opt.state_dict()
+                    suffix = "_full" if is_full else ""
+                    checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}{suffix}.pt"
                     torch.save(checkpoint, checkpoint_path)
-                    logger.info(f"Saved checkpoint to {checkpoint_path}")
+                    logger.info(f"Saved {'full' if is_full else 'ema-only'} checkpoint to {checkpoint_path}")
+
+                    # Rotate: keep only the last --keep-last checkpoints of each kind to bound disk.
+                    if args.keep_last > 0:
+                        for kind_suffix in ("", "_full"):
+                            existing = sorted(glob(f"{checkpoint_dir}/*{kind_suffix}.pt"))
+                            # filter out the "opposite kind" matches
+                            existing = [p for p in existing
+                                        if p.endswith("_full.pt") == (kind_suffix == "_full")]
+                            for stale in existing[:-args.keep_last]:
+                                try:
+                                    os.remove(stale)
+                                    logger.info(f"Pruned old checkpoint {stale}")
+                                except OSError:
+                                    pass
 
             # Decode + save PNG grid from the fixed eval batch.
             if args.sample_every > 0 and train_steps % args.sample_every == 0 and train_steps > 0:
@@ -374,7 +392,14 @@ if __name__ == "__main__":
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--ckpt-every", type=int, default=50_000,
+                        help="How often to save an EMA-only checkpoint (~1.35GB each).")
+    parser.add_argument("--full-ckpt-every", type=int, default=0,
+                        help="How often to save a FULL checkpoint with model+opt state "
+                             "(~9.5GB each). Set to 0 to disable full checkpoints entirely.")
+    parser.add_argument("--keep-last", type=int, default=3,
+                        help="Keep only the N most recent checkpoints of each kind. "
+                             "Set to 0 to keep all.")
     parser.add_argument("--mixed-precision", type=str, default="bf16",
                         choices=["no", "fp16", "bf16"],
                         help="bf16 is native on Ampere (A4000, A100) with no loss-scale overhead")
