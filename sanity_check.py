@@ -78,7 +78,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--num-classes", type=int, default=7)
+    parser.add_argument("--num-classes", type=int, default=18)
     parser.add_argument("--ckpt", type=str, default="DiT-XL-2-256x256.pt",
                         help="Pretrained checkpoint; pass empty string to skip warm-start")
     args = parser.parse_args()

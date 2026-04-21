@@ -348,7 +348,7 @@ if __name__ == "__main__":
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=7)  # DOOM action-space size
+    parser.add_argument("--num-classes", type=int, default=18)  # Vizdoom full action set (0-17)
     parser.add_argument("--ckpt", type=str, default="DiT-XL-2-256x256.pt",
                         help="Pretrained checkpoint for warm-start (empty string to disable)")
     parser.add_argument("--epochs", type=int, default=1400)
