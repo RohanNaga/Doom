@@ -111,7 +111,9 @@ class CustomDataset(Dataset):
     def __getitem__(self, idx):
         context = torch.from_numpy(self.context[idx]).float()   # (4, 4, 15, 20)
         target = torch.from_numpy(self.target[idx]).float()     # (4, 15, 20)
-        action = torch.tensor(self.actions[idx], dtype=torch.long)
+        # actions file is (N, 4) or (N, 5) — a sequence of past (and maybe target) actions.
+        # Design A: condition on the single most-recent action only. Grab the last element.
+        action = torch.tensor(self.actions[idx][-1], dtype=torch.long)
         
         # Pad H from 15 to 16 on the bottom. F.pad format: (W_left, W_right, H_top, H_bottom)
         target = F.pad(target, (0, 0, 0, 1))                    # (4, 16, 20)
