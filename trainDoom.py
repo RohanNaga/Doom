@@ -307,6 +307,10 @@ def main(args):
         for seg_idx in range(N):
             seg_imgs = imgs[seg_idx * S:(seg_idx + 1) * S]
             save_image(seg_imgs, f"{step_dir}/segment_{seg_idx:02d}.png", nrow=S)
+        # Defrag GPU memory. Repeated sampling leaves fragmented allocations that
+        # eventually cause OOM on tight 16GB cards even with expandable_segments.
+        del samples, imgs, noise, model_kwargs
+        torch.cuda.empty_cache()
 
     # Prepare models for training:
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
