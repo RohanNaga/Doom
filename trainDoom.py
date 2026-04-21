@@ -296,42 +296,43 @@ def main(args):
         logger.info(f"Saved {N} ground-truth segments (each {S} frames) to {gt_dir}/")
 
     def save_samples(step):
-        """DDIM-sample next-frames using the LIVE model in fp32 (not bf16 EMA).
-        The live-model weights are the ground truth of training; EMA is kept for export
-        but not used for in-training samples (it's bf16-stored and lags the live model).
-        Decode through CPU VAE, save one PNG per segment.
+        """DDIM-sample next-frames using the LIVE model under bf16 autocast.
+        Process segments one at a time to fit inside the tight 16GB budget on rank 0
+        (training state already consumes ~15GB; adding one batch-80 sampling forward
+        blows it out even with autocast). Decode through CPU VAE, save per-segment PNGs.
         """
         if vae is None:
             return
+        # Free any cached training memory before sampling; training loop holds fragments.
+        torch.cuda.empty_cache()
         sampling_model = accelerator.unwrap_model(model)
         was_training = sampling_model.training
         sampling_model.eval()
-        shape = eval_tgt.shape
-        # Autocast to bf16 during sampling to halve activation memory. Weights stay fp32
-        # in storage; ops run in bf16. Now that the model is actually trained, bf16 sampling
-        # is stable (diagnosed the previous "noise" samples to untrained EMA, not precision).
-        noise = torch.randn(shape, device=device, dtype=torch.bfloat16)
-        model_kwargs = dict(context=eval_ctx.to(torch.bfloat16), action=eval_act)
-        with torch.no_grad():
-            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
-                samples = sample_diffusion.p_sample_loop(
-                    sampling_model, shape, noise, clip_denoised=False,
-                    model_kwargs=model_kwargs, progress=False, device=device,
-                )
-            samples = (samples[:, :, :15, :].float() / 0.18215).cpu()
-            imgs = vae.decode(samples).sample
-        imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
-        step_dir = f"{samples_dir}/step_{step:07d}"
-        os.makedirs(step_dir, exist_ok=True)
         N = args.num_eval_segments
         S = args.eval_segment_size
+        step_dir = f"{samples_dir}/step_{step:07d}"
+        os.makedirs(step_dir, exist_ok=True)
         for seg_idx in range(N):
-            seg_imgs = imgs[seg_idx * S:(seg_idx + 1) * S]
-            save_image(seg_imgs, f"{step_dir}/segment_{seg_idx:02d}.png", nrow=S)
+            seg_slice = slice(seg_idx * S, (seg_idx + 1) * S)
+            seg_ctx = eval_ctx[seg_slice].to(torch.bfloat16)
+            seg_act = eval_act[seg_slice]
+            seg_tgt_shape = (S, 4, 16, 20)
+            noise = torch.randn(seg_tgt_shape, device=device, dtype=torch.bfloat16)
+            model_kwargs = dict(context=seg_ctx, action=seg_act)
+            with torch.no_grad():
+                with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                    samples = sample_diffusion.p_sample_loop(
+                        sampling_model, seg_tgt_shape, noise, clip_denoised=False,
+                        model_kwargs=model_kwargs, progress=False, device=device,
+                    )
+                samples = (samples[:, :, :15, :].float() / 0.18215).cpu()
+                imgs = vae.decode(samples).sample
+            imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
+            save_image(imgs, f"{step_dir}/segment_{seg_idx:02d}.png", nrow=S)
+            del samples, imgs, noise, model_kwargs, seg_ctx
+            torch.cuda.empty_cache()
         if was_training:
             sampling_model.train()
-        del samples, imgs, noise, model_kwargs
-        torch.cuda.empty_cache()
 
     # Prepare models for training:
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
