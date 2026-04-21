@@ -99,8 +99,11 @@ def center_crop_arr(pil_image, image_size):
 
 class CustomDataset(Dataset):
     def __init__(self, context_dir, target_dir, actions_dir):
-        self.context = np.load(context_dir)
-        self.target = np.load(target_dir)
+        # Memory-map the two big latent arrays so all DataLoader worker processes
+        # share one page-cached copy rather than loading 23GB+5.9GB into each RSS.
+        # Actions (99MB) is small enough to load fully.
+        self.context = np.load(context_dir, mmap_mode="r")
+        self.target = np.load(target_dir, mmap_mode="r")
         self.actions = np.load(actions_dir)
 
 
@@ -390,7 +393,7 @@ if __name__ == "__main__":
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
-    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000,
                         help="How often to save an EMA-only checkpoint (~1.35GB each).")
