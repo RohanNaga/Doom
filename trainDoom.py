@@ -261,11 +261,13 @@ def main(args):
             context=eval_ctx.to(ema_dtype),
             action=eval_act,
         )
-        with torch.no_grad(), torch.amp.autocast("cuda", dtype=ema_dtype, enabled=ema_dtype != torch.float32):
-            samples = sample_diffusion.p_sample_loop(
-                ema, shape, noise, clip_denoised=False,
-                model_kwargs=model_kwargs, progress=False, device=device,
-            )
+        with torch.no_grad():
+            with torch.amp.autocast("cuda", dtype=ema_dtype, enabled=ema_dtype != torch.float32):
+                samples = sample_diffusion.p_sample_loop(
+                    ema, shape, noise, clip_denoised=False,
+                    model_kwargs=model_kwargs, progress=False, device=device,
+                )
+            # VAE decode in fp32 outside the autocast context (VAE is native fp32).
             samples = samples[:, :, :15, :].float() / 0.18215
             imgs = vae.decode(samples).sample
         imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
