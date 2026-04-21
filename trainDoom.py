@@ -242,28 +242,45 @@ def main(args):
         samples_dir = f"{experiment_dir}/samples"
         os.makedirs(samples_dir, exist_ok=True)
         # VAE lives on CPU to save ~335MB of GPU memory on rank 0 (we're tight at 16GB/GPU
-        # with batch 16 + grad_ckpt + DDP). Decoding ~8 frames takes a few seconds — fine
-        # because we only sample every --sample-every steps.
+        # with batch 16 + grad_ckpt + DDP). Decoding takes a few seconds per event — fine
+        # because sampling only runs every --sample-every steps.
         vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to("cpu")
         vae.eval()
         requires_grad(vae, False)
         sample_diffusion = create_diffusion(timestep_respacing=str(args.num_sample_steps))
-        # Pin a fixed eval batch for visual tracking.
-        _eval_loader = DataLoader(dataset, batch_size=args.num_eval_samples, shuffle=False)
-        _ectx, _etgt, _eact = next(iter(_eval_loader))
-        eval_ctx = _ectx.to(device)
-        eval_tgt = _etgt.to(device)
-        eval_act = _eact.to(device)
-        # Save ground truth once: drop the padded bottom row, unscale, decode on CPU, save.
+        # Comprehensive eval: N segments evenly spaced across the dataset, each S consecutive
+        # samples. Stack into one big batch for a single DDIM pass; save each segment as its
+        # own PNG so we can visually track different parts of the game simultaneously.
+        N = args.num_eval_segments
+        S = args.eval_segment_size
+        total_samples = len(dataset)
+        # linspace start indices so segments don't overlap and cover the full range.
+        starts = np.linspace(0, max(total_samples - S, 0), N, dtype=int)
+        eval_batches = []
+        for start in starts:
+            ctxs, tgts, acts = [], [], []
+            for i in range(S):
+                c, t, a = dataset[int(start) + i]
+                ctxs.append(c); tgts.append(t); acts.append(a)
+            eval_batches.append((torch.stack(ctxs), torch.stack(tgts), torch.stack(acts)))
+        # Concat into one (N*S, ...) batch for a single DDIM pass.
+        eval_ctx = torch.cat([b[0] for b in eval_batches], dim=0).to(device)
+        eval_tgt = torch.cat([b[1] for b in eval_batches], dim=0).to(device)
+        eval_act = torch.cat([b[2] for b in eval_batches], dim=0).to(device)
+        # Save ground truth: one PNG per segment so the layout matches sample outputs.
         with torch.no_grad():
             gt_latent = (eval_tgt[:, :, :15, :].float() / 0.18215).cpu()
             gt_img = vae.decode(gt_latent).sample
         gt_img = (gt_img * 0.5 + 0.5).clamp(0, 1)
-        save_image(gt_img, f"{samples_dir}/ground_truth.png", nrow=args.num_eval_samples)
-        logger.info(f"Saved ground truth to {samples_dir}/ground_truth.png")
+        gt_dir = f"{samples_dir}/ground_truth"
+        os.makedirs(gt_dir, exist_ok=True)
+        for seg_idx in range(N):
+            seg_imgs = gt_img[seg_idx * S:(seg_idx + 1) * S]
+            save_image(seg_imgs, f"{gt_dir}/segment_{seg_idx:02d}_start{starts[seg_idx]}.png", nrow=S)
+        logger.info(f"Saved {N} ground-truth segments (each {S} frames) to {gt_dir}/")
 
     def save_samples(step):
-        """Decode EMA-sampled next-frames for the fixed eval batch and save as a PNG grid."""
+        """DDIM-sample next-frames for all N×S eval samples, decode, save one PNG per segment."""
         if vae is None:
             return
         ema.eval()
@@ -280,11 +297,16 @@ def main(args):
                     ema, shape, noise, clip_denoised=False,
                     model_kwargs=model_kwargs, progress=False, device=device,
                 )
-            # Move latents to CPU for VAE decode (VAE is on CPU to save GPU memory).
             samples = (samples[:, :, :15, :].float() / 0.18215).cpu()
             imgs = vae.decode(samples).sample
         imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
-        save_image(imgs, f"{samples_dir}/{step:07d}.png", nrow=args.num_eval_samples)
+        step_dir = f"{samples_dir}/step_{step:07d}"
+        os.makedirs(step_dir, exist_ok=True)
+        N = args.num_eval_segments
+        S = args.eval_segment_size
+        for seg_idx in range(N):
+            seg_imgs = imgs[seg_idx * S:(seg_idx + 1) * S]
+            save_image(seg_imgs, f"{step_dir}/segment_{seg_idx:02d}.png", nrow=S)
 
     # Prepare models for training:
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
@@ -424,7 +446,9 @@ if __name__ == "__main__":
                         help="Decode + save a PNG grid from EMA every N steps. 0 to disable.")
     parser.add_argument("--num-sample-steps", type=int, default=50,
                         help="DDIM/DDPM sampling steps for in-training visualization.")
-    parser.add_argument("--num-eval-samples", type=int, default=8,
-                        help="How many fixed context frames to track across training.")
+    parser.add_argument("--num-eval-segments", type=int, default=10,
+                        help="Number of evenly-spaced segments across the dataset to track.")
+    parser.add_argument("--eval-segment-size", type=int, default=8,
+                        help="Consecutive frames per eval segment.")
     args = parser.parse_args()
     main(args)
