@@ -24,7 +24,17 @@ def main(args):
 
     print(f"Loading checkpoint {args.ckpt}")
     ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-    ema_state = ckpt["ema"] if "ema" in ckpt else ckpt
+    # Prefer live model over EMA when both present. The bf16-EMA bug from earlier
+    # taught us that EMA can silently freeze; model weights are ground truth.
+    if args.use_ema and "ema" in ckpt:
+        state = ckpt["ema"]
+        print(f"  using EMA weights")
+    elif "model" in ckpt:
+        state = ckpt["model"]
+        print(f"  using live model weights")
+    else:
+        state = ckpt
+        print(f"  using raw state_dict")
     step = ckpt.get("step", "?")
     loss = ckpt.get("loss", "?")
     print(f"  step={step}  loss={loss}")

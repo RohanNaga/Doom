@@ -50,8 +50,13 @@ def update_ema(ema_model, model, decay=0.9999):
 
     for name, param in model_params.items():
         name = name.replace("module.", "")
-        # Cast incoming param to match EMA dtype (EMA may be bf16 while model is fp32).
-        ema_params[name].mul_(decay).add_(param.data.to(ema_params[name].dtype), alpha=1 - decay)
+        # Do EMA math in fp32 even if EMA is stored in bf16. bf16 has only 7-bit mantissa:
+        # `ema.add_(param, alpha=1e-4)` underflows 1e-4 * param (~1e-4 magnitude) to zero,
+        # freezing the EMA at its initial weights. Verified bug. Always compute in fp32.
+        ema_p = ema_params[name]
+        buf = ema_p.detach().float()
+        buf.mul_(decay).add_(param.data.float(), alpha=1 - decay)
+        ema_p.copy_(buf.to(ema_p.dtype))
 
 
 def requires_grad(model, flag=True):
@@ -280,23 +285,24 @@ def main(args):
         logger.info(f"Saved {N} ground-truth segments (each {S} frames) to {gt_dir}/")
 
     def save_samples(step):
-        """DDIM-sample next-frames for all N×S eval samples, decode, save one PNG per segment."""
+        """DDIM-sample next-frames using the LIVE model in fp32 (not bf16 EMA).
+        The live-model weights are the ground truth of training; EMA is kept for export
+        but not used for in-training samples (it's bf16-stored and lags the live model).
+        Decode through CPU VAE, save one PNG per segment.
+        """
         if vae is None:
             return
-        ema.eval()
+        sampling_model = accelerator.unwrap_model(model)
+        was_training = sampling_model.training
+        sampling_model.eval()
         shape = eval_tgt.shape
-        ema_dtype = next(ema.parameters()).dtype
-        noise = torch.randn(shape, device=device, dtype=ema_dtype)
-        model_kwargs = dict(
-            context=eval_ctx.to(ema_dtype),
-            action=eval_act,
-        )
+        noise = torch.randn(shape, device=device, dtype=torch.float32)
+        model_kwargs = dict(context=eval_ctx.float(), action=eval_act)
         with torch.no_grad():
-            with torch.amp.autocast("cuda", dtype=ema_dtype, enabled=ema_dtype != torch.float32):
-                samples = sample_diffusion.p_sample_loop(
-                    ema, shape, noise, clip_denoised=False,
-                    model_kwargs=model_kwargs, progress=False, device=device,
-                )
+            samples = sample_diffusion.p_sample_loop(
+                sampling_model, shape, noise, clip_denoised=False,
+                model_kwargs=model_kwargs, progress=False, device=device,
+            )
             samples = (samples[:, :, :15, :].float() / 0.18215).cpu()
             imgs = vae.decode(samples).sample
         imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
@@ -307,8 +313,8 @@ def main(args):
         for seg_idx in range(N):
             seg_imgs = imgs[seg_idx * S:(seg_idx + 1) * S]
             save_image(seg_imgs, f"{step_dir}/segment_{seg_idx:02d}.png", nrow=S)
-        # Defrag GPU memory. Repeated sampling leaves fragmented allocations that
-        # eventually cause OOM on tight 16GB cards even with expandable_segments.
+        if was_training:
+            sampling_model.train()
         del samples, imgs, noise, model_kwargs
         torch.cuda.empty_cache()
 
@@ -366,8 +372,13 @@ def main(args):
                     if train_steps >= args.warmup_steps and float(avg_loss) < best_loss:
                         best_loss = float(avg_loss)
                         best_path = f"{checkpoint_dir}/best.pt"
-                        torch.save({"ema": ema.state_dict(), "args": args, "step": train_steps,
-                                    "loss": best_loss}, best_path)
+                        torch.save({
+                            "ema": ema.state_dict(),
+                            "model": accelerator.unwrap_model(model).state_dict(),
+                            "args": args,
+                            "step": train_steps,
+                            "loss": best_loss,
+                        }, best_path)
                         logger.info(f"New best loss {best_loss:.4f} at step {train_steps} -> {best_path}")
                 # Reset monitoring variables:
                 running_loss = 0
@@ -382,9 +393,16 @@ def main(args):
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 if accelerator.is_main_process:
                     is_full = args.full_ckpt_every > 0 and train_steps % args.full_ckpt_every == 0
-                    checkpoint = {"ema": ema.state_dict(), "args": args, "step": train_steps}
+                    # Always save the live model too — bf16 EMA underflow bug taught us that
+                    # "ema-only" checkpoints can leave you holding untrained weights if EMA
+                    # ever fails silently. Model weights are the ground truth of learning.
+                    checkpoint = {
+                        "ema": ema.state_dict(),
+                        "model": accelerator.unwrap_model(model).state_dict(),
+                        "args": args,
+                        "step": train_steps,
+                    }
                     if is_full:
-                        checkpoint["model"] = accelerator.unwrap_model(model).state_dict()
                         checkpoint["opt"] = opt.state_dict()
                     suffix = "_full" if is_full else ""
                     checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}{suffix}.pt"
