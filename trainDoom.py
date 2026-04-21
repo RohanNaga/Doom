@@ -319,6 +319,7 @@ def main(args):
     log_steps = 0
     running_loss = 0
     start_time = time()
+    best_loss = float("inf")  # track best smoothed training loss for best.pt
     
     if accelerator.is_main_process:
         logger.info(f"Training for {args.epochs} epochs...")
@@ -355,6 +356,15 @@ def main(args):
 
                 if accelerator.is_main_process:
                     logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                    # Save best EMA checkpoint by smoothed training loss. Persists through rotation.
+                    # Skip until after warmup (first ~args.warmup_steps steps) so the initial
+                    # loss-plummet doesn't mark a premature "best".
+                    if train_steps >= args.warmup_steps and float(avg_loss) < best_loss:
+                        best_loss = float(avg_loss)
+                        best_path = f"{checkpoint_dir}/best.pt"
+                        torch.save({"ema": ema.state_dict(), "args": args, "step": train_steps,
+                                    "loss": best_loss}, best_path)
+                        logger.info(f"New best loss {best_loss:.4f} at step {train_steps} -> {best_path}")
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -378,12 +388,13 @@ def main(args):
                     logger.info(f"Saved {'full' if is_full else 'ema-only'} checkpoint to {checkpoint_path}")
 
                     # Rotate: keep only the last --keep-last checkpoints of each kind to bound disk.
+                    # Never prune best.pt — it's the best-by-loss anchor.
                     if args.keep_last > 0:
                         for kind_suffix in ("", "_full"):
                             existing = sorted(glob(f"{checkpoint_dir}/*{kind_suffix}.pt"))
-                            # filter out the "opposite kind" matches
                             existing = [p for p in existing
-                                        if p.endswith("_full.pt") == (kind_suffix == "_full")]
+                                        if p.endswith("_full.pt") == (kind_suffix == "_full")
+                                        and os.path.basename(p) != "best.pt"]
                             for stale in existing[:-args.keep_last]:
                                 try:
                                     os.remove(stale)
@@ -395,7 +406,7 @@ def main(args):
             if args.sample_every > 0 and train_steps % args.sample_every == 0 and train_steps > 0:
                 if accelerator.is_main_process:
                     save_samples(train_steps)
-                    logger.info(f"Saved samples to {samples_dir}/{train_steps:07d}.png")
+                    logger.info(f"Saved samples to {samples_dir}/step_{train_steps:07d}/")
 
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
