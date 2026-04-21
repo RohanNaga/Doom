@@ -50,8 +50,8 @@ def update_ema(ema_model, model, decay=0.9999):
 
     for name, param in model_params.items():
         name = name.replace("module.", "")
-        # TODO: Consider applying only to params that require_grad to avoid small numerical changes of pos_embed
-        ema_params[name].mul_(decay).add_(param.data, alpha=1 - decay)
+        # Cast incoming param to match EMA dtype (EMA may be bf16 while model is fp32).
+        ema_params[name].mul_(decay).add_(param.data.to(ema_params[name].dtype), alpha=1 - decay)
 
 
 def requires_grad(model, flag=True):
@@ -191,8 +191,10 @@ def main(args):
     if accelerator.is_main_process:
         logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0)
+    # Setup optimizer. fused=True uses a single CUDA kernel that updates params, moments, and
+    # sqrt in-place, avoiding the ~2.7GB intermediate sqrt buffer that unfused multi_tensor_adam
+    # allocates during step. Critical on 16GB A4000s running DiT-XL/2.
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0, fused=True)
     # Linear warmup from 0 → args.lr over the first args.warmup_steps. Critical for
     # warm-started models: constant LR into a mismatched prior can explode early grads.
     def _lr_lambda(step):
@@ -253,14 +255,18 @@ def main(args):
             return
         ema.eval()
         shape = eval_tgt.shape
-        noise = torch.randn(shape, device=device)
-        model_kwargs = dict(context=eval_ctx, action=eval_act)
-        with torch.no_grad():
+        ema_dtype = next(ema.parameters()).dtype
+        noise = torch.randn(shape, device=device, dtype=ema_dtype)
+        model_kwargs = dict(
+            context=eval_ctx.to(ema_dtype),
+            action=eval_act,
+        )
+        with torch.no_grad(), torch.amp.autocast("cuda", dtype=ema_dtype, enabled=ema_dtype != torch.float32):
             samples = sample_diffusion.p_sample_loop(
                 ema, shape, noise, clip_denoised=False,
                 model_kwargs=model_kwargs, progress=False, device=device,
             )
-            samples = samples[:, :, :15, :] / 0.18215
+            samples = samples[:, :, :15, :].float() / 0.18215
             imgs = vae.decode(samples).sample
         imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
         save_image(imgs, f"{samples_dir}/{step:07d}.png", nrow=args.num_eval_samples)
