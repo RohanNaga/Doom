@@ -296,13 +296,17 @@ def main(args):
         was_training = sampling_model.training
         sampling_model.eval()
         shape = eval_tgt.shape
-        noise = torch.randn(shape, device=device, dtype=torch.float32)
-        model_kwargs = dict(context=eval_ctx.float(), action=eval_act)
+        # Autocast to bf16 during sampling to halve activation memory. Weights stay fp32
+        # in storage; ops run in bf16. Now that the model is actually trained, bf16 sampling
+        # is stable (diagnosed the previous "noise" samples to untrained EMA, not precision).
+        noise = torch.randn(shape, device=device, dtype=torch.bfloat16)
+        model_kwargs = dict(context=eval_ctx.to(torch.bfloat16), action=eval_act)
         with torch.no_grad():
-            samples = sample_diffusion.p_sample_loop(
-                sampling_model, shape, noise, clip_denoised=False,
-                model_kwargs=model_kwargs, progress=False, device=device,
-            )
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                samples = sample_diffusion.p_sample_loop(
+                    sampling_model, shape, noise, clip_denoised=False,
+                    model_kwargs=model_kwargs, progress=False, device=device,
+                )
             samples = (samples[:, :, :15, :].float() / 0.18215).cpu()
             imgs = vae.decode(samples).sample
         imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
