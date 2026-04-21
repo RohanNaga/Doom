@@ -374,7 +374,8 @@ def main(args):
                         best_path = f"{checkpoint_dir}/best.pt"
                         torch.save({
                             "ema": ema.state_dict(),
-                            "model": accelerator.unwrap_model(model).state_dict(),
+                            "model": {k: v.to(torch.bfloat16) if v.is_floating_point() else v
+                                  for k, v in accelerator.unwrap_model(model).state_dict().items()},
                             "args": args,
                             "step": train_steps,
                             "loss": best_loss,
@@ -398,7 +399,8 @@ def main(args):
                     # ever fails silently. Model weights are the ground truth of learning.
                     checkpoint = {
                         "ema": ema.state_dict(),
-                        "model": accelerator.unwrap_model(model).state_dict(),
+                        "model": {k: v.to(torch.bfloat16) if v.is_floating_point() else v
+                                  for k, v in accelerator.unwrap_model(model).state_dict().items()},
                         "args": args,
                         "step": train_steps,
                     }
