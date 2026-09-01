@@ -213,3 +213,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 results
+
+# Claude Code local state
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.DS_Store
