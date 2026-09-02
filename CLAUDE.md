@@ -11,7 +11,7 @@ Discussion first for anything beyond a small fix: state the research question, p
 
 ## Server
 
-Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A4000 16 GB, shared). Rules: leave at least 2 GPUs free, pick the highest-numbered free GPUs first, keep 250 GB disk free, check `nvidia-smi` before launching. Project path `/home/rohan/Doom/Doom/`. Requires CMU VPN. Auth via `sshpass -p "$PERSEVE_SERVER_PASSWORD"`.
+Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A4000 16 GB, shared). Rules: leave at least 2 GPUs free, pick the highest-numbered free GPUs first, keep 250 GB disk free, check `nvidia-smi` before launching. The April project directory `/home/rohan/Doom/Doom/` was deleted before Sep 2026 (disk cleanup); recreate under `/home/rohan/Doom/` by cloning the repo. The `Doom` conda env survives. Disk was at 98 GB free on Sep 1, 2026, below the 250 GB rule, so every byte written there needs a stated budget. Requires CMU VPN. Auth via `sshpass -p "$PERSEVE_SERVER_PASSWORD"`.
 
 **Always invoke the `/run-server` skill before any SSH, SCP, or remote command.** The skill in `.claude/skills/run-server/` was copied from the Lego repo; for this project only the Superman section applies.
 
@@ -21,8 +21,9 @@ Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A400
 - EMA math must be fp32 (bf16 `add_` with alpha 1e-4 underflows and freezes the EMA). Reported samples use the live model, not EMA.
 - Latents are (4, 15, 20); height is padded to 16 for patch-2 and stripped with `[:, :, :15, :]` before every decode.
 - Only the most recent action conditions the model ("Design A"); the stored 5-action window is otherwise unused.
-- `eval_checkpoint.py` reads an undefined `ema_state` and crashes on load. Fix before use.
-- The U-Net baseline code, the PSNR/LPIPS harness, and the frame-to-latent encoding script are **not in this repo**. Check Superman and Keerthana's code before rebuilding.
+- The U-Net baseline code and checkpoints are **not in this repo** and were wiped from Superman. `encode_episodes.py` (frame-to-latent) and `eval_metrics.py` (PSNR/LPIPS) are the Sep 2026 rebuilds; `doom_data.py` replaces the consolidated arrays with per-episode indexing and holds the episode split.
+- Sampling everywhere in this repo is *respaced ancestral DDPM* via `p_sample_loop` (learned sigma), not DDIM, even where comments say DDIM. `ddim_sample_loop` exists and is exposed as `--sampler ddim` in the new harness.
+- The 26.04 dB / 0.153 headline was measured on training data (the 10x8 in-training segments); the released checkpoint saw all 500 episodes, so it has no honest held-out number.
 - `train.py`, `extract_features.py`, `sample.py`, `sample_ddp.py`, `train_options/`, `run_DiT.ipynb`, `visuals/` are unmodified upstream fast-DiT. `README.md` is still upstream's.
 
 ## Experiment tracking

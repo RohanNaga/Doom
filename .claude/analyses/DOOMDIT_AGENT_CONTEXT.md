@@ -2,6 +2,8 @@
 
 Machine-oriented project brief. Dense facts only. For the narrative version see `doomdit-full-recap-2026-07.md`. Compiled 2026-07-15; all repo facts verified against code/log on that date.
 
+> Superseded on 2026-09-01 (see `RESEARCH_CONTEXT.md` sections 0, 6, 7, 8): Superman no longer holds any Doom artifact; `eval_checkpoint.py` is fixed; sampling is respaced ancestral DDPM not DDIM; the headline was scored on training data; new modules `doom_data.py`, `doomdit_utils.py`, `encode_episodes.py`, `eval_metrics.py`.
+
 ## Identity
 
 - Project: **DoomDiT** — action-conditioned latent diffusion (DiT-XL/2) world model that predicts the next VizDoom frame from 4 past frames + 1 discrete action.

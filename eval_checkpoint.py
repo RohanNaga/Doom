@@ -11,11 +11,10 @@ import os
 
 import numpy as np
 import torch
-from diffusers.models import AutoencoderKL
 from torchvision.utils import save_image
 
-from models import DiT_models
 from diffusion import create_diffusion
+from doomdit_utils import VAE_NAME, load_doomdit, load_vae
 
 
 def main(args):
@@ -23,37 +22,12 @@ def main(args):
     os.makedirs(args.out_dir, exist_ok=True)
 
     print(f"Loading checkpoint {args.ckpt}")
-    ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
-    # Prefer live model over EMA when both present. The bf16-EMA bug from earlier
-    # taught us that EMA can silently freeze; model weights are ground truth.
-    if args.use_ema and "ema" in ckpt:
-        state = ckpt["ema"]
-        print(f"  using EMA weights")
-    elif "model" in ckpt:
-        state = ckpt["model"]
-        print(f"  using live model weights")
-    else:
-        state = ckpt
-        print(f"  using raw state_dict")
-    step = ckpt.get("step", "?")
-    loss = ckpt.get("loss", "?")
-    print(f"  step={step}  loss={loss}")
+    model, info = load_doomdit(args.ckpt, use_ema=args.use_ema, device=device)
+    dtype = info["dtype"]
+    print(f"  using {info['weights']} weights, dtype={dtype}, step={info['step']}, loss={info['loss']}")
 
-    # Build model matching training config
-    model = DiT_models["DiT-XL/2"](
-        input_size=(16, 20),
-        in_channels=20,
-        pred_channels=4,
-        num_classes=18,
-    )
-    ema_dtype = next(iter(ema_state.values())).dtype
-    print(f"  EMA dtype: {ema_dtype}")
-    model.load_state_dict(ema_state, strict=False)
-    model = model.to(device).to(ema_dtype).eval()
-
-    # Load the CORRECT VAE (sd-vae-ft-mse, matching Keerthana's encoding pipeline).
-    print("Loading VAE stabilityai/sd-vae-ft-mse...")
-    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse").to("cpu").eval()
+    print(f"Loading VAE {VAE_NAME}...")
+    vae = load_vae("cpu")
 
     # Build eval segments matching what trainDoom does: 10 evenly-spaced starting indices,
     # 8 consecutive frames each. Load via the consolidated data file.
@@ -80,7 +54,7 @@ def main(args):
             c = c.reshape(-1, 16, 20)
             ctxs.append(c); tgts.append(t); acts.append(a)
 
-    eval_ctx = torch.stack(ctxs).to(device).to(ema_dtype)
+    eval_ctx = torch.stack(ctxs).to(device).to(dtype)
     eval_tgt = torch.stack(tgts).to(device)
     eval_act = torch.stack(acts).to(device)
     print(f"  eval batch: {eval_ctx.shape[0]} samples ({N} segments x {S} frames)")
@@ -103,11 +77,11 @@ def main(args):
     sample_diffusion = create_diffusion(timestep_respacing=str(args.num_sample_steps))
 
     shape = (eval_ctx.shape[0], 4, 16, 20)
-    noise = torch.randn(shape, device=device, dtype=ema_dtype)
+    noise = torch.randn(shape, device=device, dtype=dtype)
     model_kwargs = dict(context=eval_ctx, action=eval_act)
 
     with torch.no_grad():
-        with torch.amp.autocast("cuda", dtype=ema_dtype, enabled=ema_dtype != torch.float32):
+        with torch.amp.autocast("cuda", dtype=dtype, enabled=dtype != torch.float32):
             samples = sample_diffusion.p_sample_loop(
                 model, shape, noise, clip_denoised=False,
                 model_kwargs=model_kwargs, progress=True, device=device,
