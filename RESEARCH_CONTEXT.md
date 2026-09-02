@@ -3,7 +3,17 @@
 > Updated 2026-09-01. Entry point for every new chat in this repo.
 > Read order: this file → `.claude/analyses/DOOMDIT_AGENT_CONTEXT.md` (dense technical brief, verified against code July 15) → `.claude/analyses/doomdit-full-recap-2026-07.md` (full recap: literature through July 2026, venues, robotics extension) → `IDEAS.md` (scenario-latent skill files).
 
-## 0. One-paragraph state
+## 0. Where we are going now (as of Sep 1, 2026)
+
+**The objective:** get the DoomDiT workshop paper together in the next three to four weeks. The paper is the controlled U-Net vs DiT world-model comparison under matched data and compute, plus the small-compute recipe. The stated fall target is mid October; the deadline that actually fits is the **CoRL 2026 PhysWM workshop, Sep 30 (4 pages)**, with the NeurIPS "World Models in Physical AI" workshop (Sep 5, 8 pages) only reachable as a sprint on existing numbers. Decide this first.
+
+**What has to happen, in order:** recover or re-train the U-Net baseline and rebuild the PSNR/LPIPS harness so the headline reproduces → define a held-out episode split → add autoregressive metrics (FVD vs rollout length, drift curves, IDM action accuracy) → size the final larger run from the gap analysis and launch it only if it finishes before the deadline → write the 4-page version. Multi-game conditioning stays a stretch or future work.
+
+**Why it matters beyond the paper:** the same action-conditioned latent DiT is the starting point for fall goal 3, a world model for LEGO trajectory decisions, and Changliu's May 4 suggestion of action rollouts for long-horizon planning plus sim-switching at contact-rich points using the perseve Isaac Sim pipeline. Keep the code reusable for that.
+
+**Standing rhythm:** weekly 1-on-1 with Changliu every Wednesday 1:00 to 1:30 PM from Sep 2 to Dec 9; Friday Slack update tagged by goal.
+
+## 0b. How we got here (condensed)
 
 DoomDiT is an action-conditioned latent diffusion world model: DiT-XL/2 (673M params) predicts the next VizDoom frame from 4 past frame latents plus one discrete action, trained on Superman (4× A4000 16 GB, about 72 GPU-hours) as the CMU 18-789 final project with Keerthana Chirumamilla. Best checkpoint is step 87,200, loss 0.0481, released as GitHub tag `002-DiT-XL-2-best-90k`. Headline teacher-forced numbers: DiT 26.04 dB PSNR / 0.153 LPIPS vs a matched U-Net baseline 24.60 / 0.198 (GameNGen reports 29.43 / 0.249, but that is a cross-paper comparison). The defensible contribution is the **controlled U-Net vs DiT comparison under matched data and compute plus the small-compute recipe**, not "first DiT world model" (Oasis, Matrix-Game, NFD, SANA-WM already exist). Nothing has been trained or evaluated since April 22. The fall goal is a workshop paper by mid October.
 
