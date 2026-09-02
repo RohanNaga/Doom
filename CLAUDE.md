@@ -28,3 +28,11 @@ Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A400
 ## Experiment tracking
 
 Every run records git hash, full args, seed, environment, loss curve, eval metrics, and sample artifacts under `results/<run>/`. Weights go to a GitHub release with md5s in `WEIGHTS.md`.
+
+## Session hygiene (how this stays current for the whole semester)
+
+- One long-lived working chat per repo. Spin off a separate chat (task chip) for any experiment or build that will run for hours, and have it report back.
+- **Before a session ends, or whenever a decision, result, or direction change happens, update `RESEARCH_CONTEXT.md`**: section 0 (where we are going now), the "what changed" log with the date, and open decisions. Commit it. Memory gets a one-line pointer only.
+- When a chat gets long or stale, start a new one from `RESEARCH_CONTEXT.md`; do not carry context by re-reading old chats.
+- The Friday update to Changliu is generated from the "what changed" entries of that week, tagged by fall goal.
+
