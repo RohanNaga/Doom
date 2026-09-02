@@ -5,7 +5,7 @@
 
 ## 0. Where we are going now (as of Sep 1, 2026)
 
-**The objective:** get the DoomDiT workshop paper together in the next three to four weeks. The paper is the controlled U-Net vs DiT world-model comparison under matched data and compute, plus the small-compute recipe. The stated fall target is mid October; the deadline that actually fits is the **CoRL 2026 PhysWM workshop, Sep 30 (4 pages)**, with the NeurIPS "World Models in Physical AI" workshop (Sep 5, 8 pages) only reachable as a sprint on existing numbers. Decide this first.
+**The objective:** get the DoomDiT workshop paper together in the next three to four weeks. The paper is the controlled U-Net vs DiT world-model comparison under matched data and compute, plus the small-compute recipe. The stated fall target is mid October; the deadline that actually fits is the **CoRL 2026 PhysWM workshop, Sep 30 (4 pages)**, with the NeurIPS "World Models in Physical AI" workshop (Sep 5, 8 pages) only reachable as a sprint on existing numbers. Rohan is leaning toward Sep 30 CoRL as of Sep 1; confirm in the Sep 2 1-on-1.
 
 **What has to happen, in order:** recover or re-train the U-Net baseline and rebuild the PSNR/LPIPS harness so the headline reproduces → define a held-out episode split → add autoregressive metrics (FVD vs rollout length, drift curves, IDM action accuracy) → size the final larger run from the gap analysis and launch it only if it finishes before the deadline → write the 4-page version. Multi-game conditioning stays a stretch or future work.
 
