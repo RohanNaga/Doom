@@ -1,7 +1,7 @@
 # DoomDiT — Research Context
 
 > Updated 2026-09-01 (evening, after the kickoff session). Entry point for every new chat in this repo.
-> Read order: this file → `.claude/analyses/DOOMDIT_AGENT_CONTEXT.md` (dense technical brief, verified against code July 15) → `.claude/analyses/doomdit-full-recap-2026-07.md` (full recap: literature through July 2026, venues, robotics extension) → `IDEAS.md` (scenario-latent skill files).
+> Read order: this file → `REQUIREMENTS.md` (what done means for the CoRL paper) → `.claude/analyses/DOOMDIT_AGENT_CONTEXT.md` (dense technical brief, verified against code July 15) → `.claude/analyses/doomdit-full-recap-2026-07.md` (full recap: literature through July 2026, venues, robotics extension) → `IDEAS.md` (scenario-latent skill files).
 
 ## 0. Where we are going now (as of Sep 1, 2026)
 
@@ -108,6 +108,7 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 
 ## 7. What changed (log; newest first)
 
+- **2026-09-02** Wrote `REQUIREMENTS.md` (requirement sheet for the CoRL submission: data regeneration at 320x240 lossless with at least three maps and stride 4, decoder fine-tuning for the HUD per GameNGen, matched U-Net vs DiT with noise augmentation on both, evaluation protocol with copy-last and VAE ceiling, compute and go/no-go dates, recent-work list). Facts learned: the HF dataset is JPEG q85 from `deathmatch_simple.wad` with the PPO agent in arnaudstiegler/gameNgen-repro, every tic recorded with the action held 4 tics, 18 legal button combinations; GameNGen evaluates 2,048 trajectories over 5 levels at 320x240 with 64-frame context and fine-tunes the VAE decoder for the HUD. Venue slide and deadline slide made for the Sep 2 1-on-1. Tagged: goal 1.
 - **2026-09-01** Kickoff session. Superman inventory: April project directory deleted, only conda env and logs remain; disk 98 GB free. Google Drive latent links now require login. Fixed `eval_checkpoint.py` (`ema_state`) and moved checkpoint/VAE loading into `doomdit_utils.py`. Added `doom_data.py` (per-episode dataset, episode split, legacy-segment mapping; verified equal to `build_dataset.py` layout), `encode_episodes.py` (Hugging Face parquet to per-episode latents, restartable, unit-tested), `eval_metrics.py` (PSNR, LPIPS, latent MSE, copy-last baseline, VAE ceiling; CPU end-to-end test passed). Wrote the Keerthana ask and the autoregressive eval design. Findings that change the plan: headline was scored on training data and the checkpoint saw all episodes, so both backbones must be retrained on the split; sampling is respaced DDPM not DDIM. Deadline working assumption: CoRL PhysWM Sep 30. Tagged: goal 1.
 
 ## 8. Technical facts most likely to matter (full detail in the agent context brief)
