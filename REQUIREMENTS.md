@@ -1,8 +1,8 @@
 # DoomDiT requirement sheet: CoRL 2026 workshop paper
 
-> Draft 1, Sep 2, 2026. Owners: Rohan Nagabhirava, Keerthana Chirumamilla. Advisor: Changliu Liu.
+> Draft 1, Sep 2, 2026.
 > Primary deadline: CoRL 2026 PhysWM workshop, **Sep 30 AoE, 4 pages**. Secondary: "Do Robots Need World Models?" (date TBD), same material.
-> Each requirement has an id, a priority (P0 must ship, P1 should, P2 stretch), an owner, and a verification line. A requirement is done only when its verification line has been run.
+> Each requirement has an id, a priority (P0 must ship, P1 should, P2 stretch), and a verification line. A requirement is done only when its verification line has been run.
 
 ## 0. What the April report established, and what has to be redone
 
@@ -15,7 +15,7 @@ The April report (`doomdit.pdf`) compared DiT-XL/2 against an SD 1.4 U-Net on 50
 
 Also worth knowing for every decision below: the dataset stores every engine tic (35 per second) with the agent's action held for four tics. A 4-frame context is therefore 0.11 s of game time, and the next-frame target is 29 ms away from the last context frame. That makes a copy-last-frame baseline strong and inflates PSNR. Section 1 fixes this with a frame stride.
 
-## 1. Data (owner: Keerthana, reviewer: Rohan)
+## 1. Data
 
 | id | P | requirement | verification |
 |---|---|---|---|
@@ -27,7 +27,7 @@ Also worth knowing for every decision below: the dataset stores every engine tic
 | R1.6 | P1 | One **held-out map** (train on three, test on a fourth) to report generalization across levels. | Separate row in the results table, labeled unseen map. |
 | R1.7 | P1 | Data card: action histogram, health distribution, episode-length distribution, coverage maps, generation config, git hash. | `data/DATASET.md` committed with figures. |
 
-## 2. Latents and the VAE (owner: Keerthana, reviewer: Rohan)
+## 2. Latents and the VAE
 
 | id | P | requirement | verification |
 |---|---|---|---|
@@ -36,7 +36,7 @@ Also worth knowing for every decision below: the dataset stores every engine tic
 | R2.3 | P0 | **VAE ceiling in every table.** Reconstruction PSNR/LPIPS of ground-truth frames through the (fine-tuned) VAE is the upper bound any latent model can reach; print it as a row. | `eval_metrics.py` `vae_psnr` / `vae_lpips` columns. |
 | R2.4 | P1 | Storage plan: fp16 latents are 10 KB per frame at (4, 32, 40); 1.2M decision frames is 13 GB. Keep raw frames only for held-out episodes. | `du -sh data/` within the budget in section 5. |
 
-## 3. Models (owner: Rohan, reviewer: Keerthana)
+## 3. Models
 
 | id | P | requirement | verification |
 |---|---|---|---|
@@ -47,7 +47,7 @@ Also worth knowing for every decision below: the dataset stores every engine tic
 | R3.5 | P1 | Longer context (8 or 16 decision frames) for the DiT only, as an ablation toward GameNGen's 64. | One extra row, same steps. |
 | R3.6 | P0 | State the sampler honestly: respaced ancestral DDPM at N steps, or DDIM; report N and wall-clock per frame. | `eval_metrics.py --sampler`. |
 
-## 4. Evaluation (owner: shared; harness is Rohan's, protocol review is Keerthana's)
+## 4. Evaluation
 
 | id | P | requirement | verification |
 |---|---|---|---|
@@ -60,7 +60,7 @@ Also worth knowing for every decision below: the dataset stores every engine tic
 | R4.7 | P0 | Every reported number has a seed, git hash, config, and checkpoint md5; weights go to a GitHub release. | `results/<run>/` and `WEIGHTS.md`. |
 | R4.8 | P2 | Human study (GameNGen: 10 raters, 130 clips, 1.6 s and 3.2 s). Out of scope for 4 pages unless the numbers are close to GameNGen. | none |
 
-## 5. Compute, storage, schedule (owner: Rohan)
+## 5. Compute, storage, schedule
 
 Reference point: DiT-XL/2 at 80 tokens ran at 1.62 steps/s (global batch 32, 4 A4000). At 320 tokens the attention and MLP cost is about 4x and checkpointing adds about 30%, so expect **0.3 steps/s**, or roughly 3.5 days for 90k steps on four GPUs. That is the number R3.4 must confirm or replace.
 
@@ -71,7 +71,7 @@ Reference point: DiT-XL/2 at 80 tokens ran at 1.62 steps/s (global batch 32, 4 A
 | R5.3 | P0 | **Go/no-go dates** for Sep 30: data regenerated and encoded by **Sep 9**; decoder fine-tuned and fit check done by **Sep 11**; both final runs launched by **Sep 13**; runs finished and evaluated by **Sep 23**; numbers frozen **Sep 26**. If the fit check gives under 0.2 steps/s, cut steps to 50k for both models rather than slipping the launch. | Dates checked off in `RESEARCH_CONTEXT.md` section 7. |
 | R5.4 | P1 | If 320x240 cannot finish in time, the fallback is 256x192 (latent 32x24 padded to 32x24, 192 tokens), stated as such. 160x120 is not an option for a paper that cites GameNGen numbers. | Decision logged. |
 
-## 6. Paper deliverables (owner: Rohan, co-writer: Keerthana)
+## 6. Paper deliverables
 
 | id | P | requirement |
 |---|---|---|
@@ -101,7 +101,7 @@ Benchmarks and evaluation papers to borrow protocol from:
 
 What this means for us: per-frame PSNR/LPIPS alone will read as 2024. The paper needs drift curves, FVD, and an action-following number, plus a multi-map data story, to be taken seriously in 2026. Those are R4.3 and R1.2, and they are P0.
 
-## 8. Open decisions (owner: Rohan, with Changliu on Sep 2)
+## 8. Open decisions
 
 1. Confirm Sep 30 PhysWM as the primary target; "Do Robots Need World Models?" as the second.
 2. Resolution: 320x240 (R2.1) with the fit check deciding step count, or the 256x192 fallback (R5.4).
@@ -109,9 +109,3 @@ What this means for us: per-frame PSNR/LPIPS alone will read as 2024. The paper 
 4. Frame stride 4 (R1.3) versus keeping every tic.
 5. Maps: which two Freedoom2 maps, and whether a fourth is held out (R1.6).
 6. Disk: approve about 45 GB on Superman (R5.1).
-
-## 9. Suggested split of work
-
-- **Keerthana:** R1 (regeneration, maps, data card), R2 (encoding at 320x240, decoder fine-tuning), R4.1 protocol review and the HUD matcher (R4.4).
-- **Rohan:** R3 (both trainers matched, fit check, runs), R4.2 to R4.3 harness and rollout engine, R5, R6.
-- **Both:** R4.5 quality bar sign-off before the runs launch, and the paper.
