@@ -4,6 +4,8 @@
 > Primary deadline: CoRL 2026 PhysWM workshop, **Sep 30 AoE, 4 pages**. Secondary: "Do Robots Need World Models?" (date TBD), same material.
 > Each requirement has an id, a priority (P0 must ship, P1 should, P2 stretch), and a verification line. A requirement is done only when its verification line has been run.
 
+**Project goal (finalized Sep 8, 2026).** DoomDiT rebuilds a GameNGen-style Doom world model and asks one question: what changes when the U-Net backbone is replaced by a Diffusion Transformer. DiTs have become the default in industry video and world models, but no controlled comparison exists for action-conditioned game simulation. We train both backbones on the same data, latents, and conditioning under the same small compute budget (16 GB GPUs, tens of GPU-hours), so the backbone is the only variable between our two rows. We do not attempt GameNGen's scale; GameNGen enters as a reference point, not a matched baseline. We measure per-frame quality, autoregressive stability, action following, and training feasibility, release the lossless 320x240 Doom dataset we build, and target the CoRL 2026 PhysWM workshop on Sep 30. Multi-map generalization and memory (MultiGen) are the follow-up paper.
+
 ## 0. What the April report established, and what has to be redone
 
 The April report (`doomdit.pdf`) compared DiT-XL/2 against an SD 1.4 U-Net on 500 VizDoom episodes at 160x120 and reported 25.81 dB / 0.15 LPIPS (DiT) vs 24.90 / 0.19 (U-Net) vs GameNGen's 29.43 / 0.249. Four things about that setup must change before the numbers can go in a paper:
@@ -19,7 +21,7 @@ Also worth knowing for every decision below: the dataset stores every engine tic
 
 | id | P | requirement | verification |
 |---|---|---|---|
-| R1.1 | P0 | Regenerate the dataset ourselves with the `gameNgen-repro` ViZDoom pipeline (PPO agent `deathmatch_simple/best_model.zip` is in that repo). Record **lossless** frames (PNG or raw uint8), 320x240 RGB24, HUD on, crosshair off, weapon on, plus per-tic action id, health, ammo, player x/y/angle, map id, episode id, tic id. | `data/DATASET.md` lists counts per map; a 100-frame sample decodes bit-exact from storage. |
+| R1.1 | P0 | Regenerate the dataset ourselves with the `gameNgen-repro` ViZDoom pipeline (PPO agent, wad, and bots config are public in that repo). Render 320x240 RGB24, HUD on, crosshair off, weapon on. **Generate and encode in one pass**: each decision frame goes straight through the VAE to a 10 KB fp16 latent and the raw frame is dropped; lossless PNGs are kept only for held-out episodes and a decoder fine-tuning subset (about 8 GB). Storing every tic losslessly would be over a terabyte and is not required. Per decision frame record action id, health, ammo, player x/y/angle, map id, episode id, tic id. | `data/DATASET.md` lists counts; a held-out PNG sample decodes bit-exact; latent shape asserted (4, 32, 40). |
 | R1.2 | P1 | **Extra maps only if cheap.** Decided Sep 8: the paper targets GameNGen's protocol (per-frame quality on held-out trajectories), not MultiGen's multi-map generalization, so one arena (`deathmatch_simple`) is sufficient. If a ten-minute test shows the PPO agent traverses a Freedoom2 map, add one or two for diversity and log map id; otherwise ship one map and state it as a limitation. | Coverage heatmap per map in the data card; map id recorded per episode. |
 | R1.3 | P0 | **Frame stride.** Store every tic, but the training and evaluation unit is one frame per agent decision (stride 4, 8.75 frames per second). Context and target are consecutive decision frames. Rationale: matches how the agent acts and makes the prediction task non-trivial. | `doom_data.py` exposes `stride`; copy-last PSNR on the val split is reported next to every model number. |
 | R1.4 | P0 | **Size:** at least 5M raw tics (about 1.2M decision frames) across the three maps, so per-map data is not smaller than the April set. Generation is cheap (a 150 s episode is 5,250 tics). | Row counts in `DATASET.md`. |
@@ -34,7 +36,7 @@ Also worth knowing for every decision below: the dataset stores every engine tic
 | R2.1 | P0 | **Encode at 320x240, padded to 320x256**, with `stabilityai/sd-vae-ft-mse`, posterior mean, scale 0.18215. Latent is (4, 32, 40); at patch 2 that is 320 tokens (four times the April model). No resize step anywhere in the pipeline. | `encode_episodes.py --height 240 --width 320 --pad-to 256`; `encode_meta.json` records the settings; latent shape asserted. |
 | R2.2 | P0 | **Decoder fine-tuning for the HUD** (GameNGen section 3.2.2; `finetune_autoencoder.py` in gameNgen-repro): freeze the encoder, train only the decoder with MSE against lossless target frames on the training split. The encoder stays frozen so latents and the world model are unaffected. | Report VAE reconstruction PSNR/LPIPS before and after on the val split, full frame and HUD crop (bottom 32 rows). Acceptance: HUD-crop PSNR up by at least 2 dB, full-frame not worse. |
 | R2.3 | P0 | **VAE ceiling in every table.** Reconstruction PSNR/LPIPS of ground-truth frames through the (fine-tuned) VAE is the upper bound any latent model can reach; print it as a row. | `eval_metrics.py` `vae_psnr` / `vae_lpips` columns. |
-| R2.4 | P1 | Storage plan: fp16 latents are 10 KB per frame at (4, 32, 40); 1.2M decision frames is 13 GB. Keep raw frames only for held-out episodes. | `du -sh data/` within the budget in section 5. |
+| R2.4 | P1 | Storage plan: fp16 latents are 10 KB per frame at (4, 32, 40); 1.2M decision frames is 13 GB, plus about 8 GB of PNG for held-out episodes and the decoder subset. | `du -sh data/` within the budget in section 5. |
 
 ## 3. Models
 
@@ -66,9 +68,9 @@ Reference point: DiT-XL/2 at 80 tokens ran at 1.62 steps/s (global batch 32, 4 A
 
 | id | P | requirement | verification |
 |---|---|---|---|
-| R5.1 | P0 | Superman budget: latents 13 GB, raw val frames 4 GB, two runs with three rolling checkpoints plus best 21 GB, decoder fine-tune 2 GB, eval outputs 2 GB: **about 45 GB**. Superman had 98 GB free on Sep 1. Needs the go-ahead from Rohan and, if others' usage grows, a move of the raw data to Spiderman. | `df -h` before and after; recorded in the run log. |
+| R5.1 | P0 | Footprint: latents 13 GB, PNG subset 8 GB, two runs with three rolling checkpoints plus best 21 GB, decoder fine-tune 2 GB, eval outputs 2 GB: **about 46 GB**. Superman had 98 GB free on Sep 1 and **37 GB on Sep 8**, so it no longer fits there. Options: Spiderman (4x A6000 49 GB, 3 TB free, shared with perseve), or clear space on Superman. Decision pending. | `df -h` before and after; recorded in the run log. |
 | R5.2 | P0 | GPU plan: at most 6 of 8 A4000s. DiT on four, U-Net on two, or sequential. | `nvidia-smi` snapshot at launch in the run log. |
-| R5.3 | P0 | **Go/no-go dates** for Sep 30: data regenerated and encoded by **Sep 9**; decoder fine-tuned and fit check done by **Sep 11**; both final runs launched by **Sep 13**; runs finished and evaluated by **Sep 23**; numbers frozen **Sep 26**. If the fit check gives under 0.2 steps/s, cut steps to 50k for both models rather than slipping the launch. | Dates checked off in `RESEARCH_CONTEXT.md` section 7. |
+| R5.3 | P0 | **Go/no-go dates** for Sep 30, reset on Sep 8: fit check at 320 tokens by **Sep 9**; data generated and encoded by **Sep 11**; decoder fine-tuned by **Sep 12**; both final runs launched by **Sep 14**; runs finished and evaluated by **Sep 24**; numbers frozen **Sep 26**. If the fit check gives under 0.2 steps/s, cut steps to 50k for both models rather than slipping the launch. | Dates checked off in `RESEARCH_CONTEXT.md` section 7. |
 | R5.4 | P1 | If 320x240 cannot finish in time, the fallback is 256x192 (latent 32x24 padded to 32x24, 192 tokens), stated as such. 160x120 is not an option for a paper that cites GameNGen numbers. | Decision logged. |
 
 ## 6. Paper deliverables
@@ -109,3 +111,17 @@ What this means for us: per-frame PSNR/LPIPS alone will read as 2024. The paper 
 4. Frame stride 4 (R1.3) versus keeping every tic.
 5. Maps: which two Freedoom2 maps, and whether a fourth is held out (R1.6).
 6. Disk: approve about 45 GB on Superman (R5.1).
+
+## 9. Next milestone: M1, data and fit check (Sep 9 to 11)
+
+Everything after M1 depends on its two outputs: a latent dataset and a measured steps/s. Order of work:
+
+1. **Server choice** (R5.1): Spiderman or Superman. Blocks steps 2 and 5.
+2. **Environment**: `pip install vizdoom stable-baselines3` into the `Doom` env; clone `arnaudstiegler/gameNgen-repro` for the agent, wad, and bots config. Verify the agent runs one episode and the frame is 320x240x3.
+3. **Agent map test** (R1.2, ten minutes): five episodes on a Freedoom2 map, plot player x/y. Decides whether extra maps are in.
+4. **`generate_episodes.py`**: N worker processes render `deathmatch_simple` with the PPO agent at action-repeat 4, keep one frame per decision, encode through the VAE on one GPU, write `ep_XXXX_latents.npy` (4, 32, 40) fp16 plus `ep_XXXX_meta.npz` (action, health, ammo, x, y, angle, tic). Held-out episodes and a 50k-frame decoder subset also write PNGs. Split by episode with `doom_data.make_split`.
+5. **Fit check** (R3.4): DiT-XL/2 at input (32, 40), gradient checkpointing on, batch 4 per GPU, 200 steps on synthetic latents. Record steps/s and peak memory. Same for the SD 1.4 U-Net with the 20-channel input conv.
+6. **Decoder fine-tune** (R2.2): adapt `finetune_autoencoder.py` from gameNgen-repro to our PNG subset; report full-frame and HUD-crop PSNR before and after.
+
+M1 is done when `data/DATASET.md`, `data/split.json`, the fit-check log, and the decoder before/after numbers are committed.
+
