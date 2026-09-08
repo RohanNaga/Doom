@@ -10,7 +10,7 @@ The April report (`doomdit.pdf`) compared DiT-XL/2 against an SD 1.4 U-Net on 50
 
 1. **Source frames are lossy.** The Hugging Face dataset was written with JPEG quality 85 (`compress_image` in arnaudstiegler/gameNgen-repro). Every PSNR we report is against a compressed target.
 2. **Resolution is a quarter of GameNGen's.** GameNGen trains and evaluates at 320x240 (padded to 320x256). PSNR at 160x120 is not comparable to PSNR at 320x240, so the 29.43 row in Table 1 was never a like-for-like number.
-3. **One map.** The dataset is one custom deathmatch scenario (`deathmatch_simple.wad`, six buttons, 18 legal button combinations) with a PPO agent. GameNGen evaluates on five levels; MultiGen (Mar 2026) trains on 100 generated maps.
+3. **One map.** The dataset is one custom deathmatch scenario (`deathmatch_simple.wad`, six buttons, 18 legal button combinations) with a PPO agent. GameNGen's agent played real Doom levels and it evaluates on five; MultiGen (Mar 2026) trains on 100 generated maps. Decided Sep 8: single-map is acceptable for this paper (limitation stated); multi-map is future work.
 4. **The evaluation set was training data**, and the two baselines were not matched: the U-Net used GameNGen-style noise augmentation and 20k steps, the DiT used no augmentation and 87k steps on all 500 episodes. See `RESEARCH_CONTEXT.md` section 0.
 
 Also worth knowing for every decision below: the dataset stores every engine tic (35 per second) with the agent's action held for four tics. A 4-frame context is therefore 0.11 s of game time, and the next-frame target is 29 ms away from the last context frame. That makes a copy-last-frame baseline strong and inflates PSNR. Section 1 fixes this with a frame stride.
@@ -20,11 +20,11 @@ Also worth knowing for every decision below: the dataset stores every engine tic
 | id | P | requirement | verification |
 |---|---|---|---|
 | R1.1 | P0 | Regenerate the dataset ourselves with the `gameNgen-repro` ViZDoom pipeline (PPO agent `deathmatch_simple/best_model.zip` is in that repo). Record **lossless** frames (PNG or raw uint8), 320x240 RGB24, HUD on, crosshair off, weapon on, plus per-tic action id, health, ammo, player x/y/angle, map id, episode id, tic id. | `data/DATASET.md` lists counts per map; a 100-frame sample decodes bit-exact from storage. |
-| R1.2 | P0 | **At least three maps.** `deathmatch_simple` plus two Freedoom2 maps loaded through `doom_map` (MAP01, MAP02 or similar), same button set. If the PPO agent does not traverse a new map, fall back to a scripted explorer (forward with random turns, attack on sight) and say so in the data card. | Coverage heatmap of player x/y per map covers at least 50% of walkable cells; each map has equal episode counts. |
+| R1.2 | P1 | **Extra maps only if cheap.** Decided Sep 8: the paper targets GameNGen's protocol (per-frame quality on held-out trajectories), not MultiGen's multi-map generalization, so one arena (`deathmatch_simple`) is sufficient. If a ten-minute test shows the PPO agent traverses a Freedoom2 map, add one or two for diversity and log map id; otherwise ship one map and state it as a limitation. | Coverage heatmap per map in the data card; map id recorded per episode. |
 | R1.3 | P0 | **Frame stride.** Store every tic, but the training and evaluation unit is one frame per agent decision (stride 4, 8.75 frames per second). Context and target are consecutive decision frames. Rationale: matches how the agent acts and makes the prediction task non-trivial. | `doom_data.py` exposes `stride`; copy-last PSNR on the val split is reported next to every model number. |
 | R1.4 | P0 | **Size:** at least 5M raw tics (about 1.2M decision frames) across the three maps, so per-map data is not smaller than the April set. Generation is cheap (a 150 s episode is 5,250 tics). | Row counts in `DATASET.md`. |
 | R1.5 | P0 | **Splits by episode**, 10% held out on every map, fixed seed, committed as `data/split.json`. No window from a held-out episode ever appears in training. | `doom_data.make_split` output committed; the training log prints the split hash. |
-| R1.6 | P1 | One **held-out map** (train on three, test on a fourth) to report generalization across levels. | Separate row in the results table, labeled unseen map. |
+| R1.6 | dropped | Held-out map generalization row. Belongs to a later MultiGen-style paper. | none |
 | R1.7 | P1 | Data card: action histogram, health distribution, episode-length distribution, coverage maps, generation config, git hash. | `data/DATASET.md` committed with figures. |
 
 ## 2. Latents and the VAE
@@ -79,7 +79,7 @@ Reference point: DiT-XL/2 at 80 tokens ran at 1.62 steps/s (global batch 32, 4 A
 | R6.2 | P0 | Table 1: copy-last, VAE ceiling, U-Net, DiT; PSNR, LPIPS, PSNR at horizon 16 and 32, FVD16/32, IDM accuracy; per-map rows in the appendix if the venue allows one. |
 | R6.3 | P0 | Figure 1: drift curves. Figure 2: rollout strips with HUD visible, before and after decoder fine-tuning. |
 | R6.4 | P0 | Related work must cite and position against GameNGen, DIAMOND, Oasis, MultiGen, Vid2World, Matrix-Game 2.0/3.0, Hunyuan-GameCraft-2, Genie 3, and the 2026 benchmarks (MIND, WBench, PlayWorld) as the reason autoregressive and action-following metrics are in the paper. |
-| R6.5 | P0 | Limitations: not real time, fixed short context, single-action conditioning, three maps, no memory. |
+| R6.5 | P0 | Limitations: not real time, fixed short context, single-action conditioning, one arena (multi-map and memory left to a MultiGen-style follow-up), no memory. |
 
 ## 7. Recent work that sets the bar (checked Sep 2, 2026)
 
