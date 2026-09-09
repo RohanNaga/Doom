@@ -37,6 +37,28 @@ def decode(b):
     return np.asarray(Image.open(io.BytesIO(b)).convert("RGB"), dtype=np.uint8)
 
 
+def decision_starts(action, buttons, deaths, repeat=4):
+    """Reconstruct the agent's decision boundaries from a per-tic recording.
+
+    The agent decides every `repeat` tics; a death cuts the current decision short and the next one
+    starts at the respawn tic, which shifts the phase for the rest of the episode (62% of decisions in
+    the Arnold set start off the tic%4 grid). A boundary is placed at every change of (action, buttons),
+    at every death, and every `repeat` tics within an unchanged run (back-to-back identical decisions).
+    Returns the sorted array of boundary tic indices (row positions).
+    """
+    n = len(action)
+    change = np.zeros(n, dtype=bool); change[0] = True
+    change[1:] = (action[1:] != action[:-1]) | (buttons[1:] != buttons[:-1]) | (deaths[1:] != deaths[:-1])
+    starts = []
+    last = 0
+    for i in range(n):
+        if change[i]:
+            starts.append(i); last = i
+        elif i - last >= repeat:
+            starts.append(i); last = i
+    return np.array(starts, dtype=np.int64)
+
+
 @torch.no_grad()
 def encode_batch(vae, frames_u8, device, dtype, legacy=False):
     x = torch.from_numpy(frames_u8).to(device).permute(0, 3, 1, 2).float() / 127.5 - 1.0
@@ -49,7 +71,7 @@ def encode_batch(vae, frames_u8, device, dtype, legacy=False):
     return (z.float() * LATENT_SCALE).cpu().numpy().astype(np.float16)
 
 
-def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, legacy=False):
+def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, legacy=False, align_decisions=False):
     import pyarrow.parquet as pq
     ep = os.path.basename(path).replace(".parquet", "")
     if legacy:
@@ -59,7 +81,11 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
         return None
     t = pq.read_table(path)
     tic = np.array(t["tic"])
-    keep = np.flatnonzero(tic % stride == 0)
+    if align_decisions and "buttons" in t.schema.names:
+        keep = decision_starts(t["action"].to_numpy(zero_copy_only=False), np.array(t["buttons"].to_pylist()),
+                               t["deaths"].to_numpy(zero_copy_only=False), repeat=stride)
+    else:
+        keep = np.flatnonzero(tic % stride == 0)
     cols = {}
     for c in META_COLS:
         if c in t.schema.names:
@@ -100,7 +126,7 @@ def main(args):
     t0 = time.time(); n_frames = 0
     with ThreadPoolExecutor(args.decode_threads) as pool:
         for k, p in enumerate(paths):
-            r = encode_episode(p, args.out_dir, vae, device, dtype, args.stride, args.batch_size, pool, args.legacy)
+            r = encode_episode(p, args.out_dir, vae, device, dtype, args.stride, args.batch_size, pool, args.legacy, args.align_decisions)
             if r is None:
                 continue
             n_frames += r["frames"]
@@ -124,4 +150,5 @@ if __name__ == "__main__":
     p.add_argument("--num-shards", type=int, default=1)
     p.add_argument("--max-episodes", type=int, default=0)
     p.add_argument("--legacy", action="store_true", help="April layout: resize to 160x120, latents (4,15,20), ep_XXXX_actions.npy")
+    p.add_argument("--align-decisions", action="store_true", help="one frame per reconstructed agent decision instead of every `stride` tics")
     main(p.parse_args())
