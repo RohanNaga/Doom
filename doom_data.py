@@ -175,3 +175,84 @@ def sample_eval_windows(dataset, num_windows, seed=0, stride=1):
     n = len(dataset)
     idx = rng.choice(n, size=min(num_windows * stride, n), replace=False)
     return np.sort(idx[::stride])[:num_windows]
+
+
+# ---------------------------------------------------------------------------------------
+# Stride-4 latent episodes written by encode_parquet.py (Arnold / Stiegler recordings)
+# ---------------------------------------------------------------------------------------
+
+LATENT_SHAPE_V2 = (4, 32, 40)
+
+
+def list_latent_episodes(latents_dir):
+    """Sorted [(episode_id:int, latents_path, meta_path)] for encode_parquet.py outputs."""
+    out = []
+    for lat in sorted(glob.glob(os.path.join(latents_dir, "ep_*_latents.npy"))):
+        ep = int(os.path.basename(lat).split("_")[1])
+        meta = lat.replace("_latents.npy", "_meta.npz")
+        if os.path.isfile(meta):
+            out.append((ep, lat, meta))
+    if not out:
+        raise FileNotFoundError(f"no ep_*_latents.npy under {latents_dir}")
+    return out
+
+
+def make_split_by_map(latents_dir, holdout_maps=(16, 17), holdout_frac=0.1, seed=0):
+    """Episode-level split that also holds out whole maps for the unseen-map row."""
+    eps = list_latent_episodes(latents_dir)
+    by_map = {}
+    for ep, _, meta in eps:
+        m = int(np.load(meta)["map_id"][0])
+        by_map.setdefault(m, []).append(ep)
+    rng = np.random.RandomState(seed)
+    train, val, unseen = [], [], []
+    for m, ids in sorted(by_map.items()):
+        ids = sorted(ids)
+        if m in holdout_maps:
+            unseen += ids; continue
+        perm = rng.permutation(len(ids)); n_val = max(1, int(round(holdout_frac * len(ids))))
+        val += [ids[i] for i in perm[:n_val]]; train += [ids[i] for i in perm[n_val:]]
+    return {"train": sorted(train), "val": sorted(val), "unseen_map": sorted(unseen),
+            "meta": {"holdout_maps": list(holdout_maps), "holdout_frac": holdout_frac, "seed": seed,
+                     "episodes_per_map": {str(m): len(v) for m, v in sorted(by_map.items())}}}
+
+
+class LatentWindowDataset(Dataset):
+    """L context decision frames -> next decision frame, over encode_parquet.py outputs.
+
+    context: (4L, 32, 40) float32, target: (4, 32, 40) float32, action: int64 recorded at the
+    last context frame (the action applied from it to the target).
+    """
+
+    def __init__(self, latents_dir, episode_ids=None, context_frames=32):
+        self.L = context_frames
+        keep = None if episode_ids is None else set(int(e) for e in episode_ids)
+        self.episodes, counts = [], []
+        for ep, lat_path, meta_path in list_latent_episodes(latents_dir):
+            if keep is not None and ep not in keep:
+                continue
+            lat = np.load(lat_path, mmap_mode="r")
+            meta = np.load(meta_path)
+            n = lat.shape[0] - context_frames
+            if n <= 0:
+                continue
+            self.episodes.append((ep, lat, meta["action"].astype(np.int64), int(meta["map_id"][0])))
+            counts.append(n)
+        if not self.episodes:
+            raise ValueError("no usable episodes")
+        self.offsets = np.concatenate([[0], np.cumsum(counts)])
+
+    def __len__(self):
+        return int(self.offsets[-1])
+
+    def locate(self, idx):
+        slot = int(np.searchsorted(self.offsets, idx, side="right") - 1)
+        return slot, int(idx - self.offsets[slot])
+
+    def __getitem__(self, idx):
+        slot, start = self.locate(idx)
+        ep, lat, act, _ = self.episodes[slot]
+        L = self.L
+        ctx = torch.from_numpy(np.asarray(lat[start:start + L], dtype=np.float32)).reshape(-1, 32, 40)
+        tgt = torch.from_numpy(np.asarray(lat[start + L], dtype=np.float32))
+        return ctx, tgt, torch.tensor(int(act[start + L - 1]), dtype=torch.long)
