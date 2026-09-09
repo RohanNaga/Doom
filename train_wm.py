@@ -81,6 +81,12 @@ def main(args):
 
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=not args.no_grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache)
+    start_step = 0
+    if args.resume:
+        ck = torch.load(args.resume, map_location="cpu", weights_only=False)
+        model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
+        start_step = int(ck.get("step", 0))
+        print(f"resumed weights from {args.resume} at step {start_step} (optimizer state reset, warmup restarts)")
     n_params = sum(p.numel() for p in model.parameters())
     if args.optim == "adamw8bit":
         import bitsandbytes as bnb
@@ -96,6 +102,10 @@ def main(args):
     diffusion = VDiffusion(device=device)
     raw = acc.unwrap_model(model)
     ema = [p.detach().float().cpu().clone() for p in raw.parameters()] if args.ema_every > 0 else None
+    if args.resume and ema is not None and "ema" in ck:
+        for e, (k, _) in zip(ema, raw.state_dict().items()):
+            if k in ck["ema"] and ck["ema"][k].shape == e.shape:
+                e.copy_(ck["ema"][k].float())
 
     if is_main:
         try:
@@ -129,7 +139,7 @@ def main(args):
         return (tot / n).item()
 
     model.train()
-    step, t0, tokens = 0, time.time(), 0
+    step, t0, tokens = start_step, time.time(), 0
     running = []
     torch.cuda.reset_peak_memory_stats(device) if device.type == "cuda" else None
     done = False
@@ -155,23 +165,24 @@ def main(args):
                 dt = time.time() - t0
                 mem = torch.cuda.max_memory_allocated(device) / 2**30 if device.type == "cuda" else 0
                 log(event="train", step=step, loss=float(np.mean(running)), lr=sched.get_last_lr()[0],
-                    steps_per_s=step / dt, peak_mem_gb=round(mem, 2))
+                    steps_per_s=(step - start_step) / dt, peak_mem_gb=round(mem, 2))
                 running = []
             if not args.fit_check and step % args.val_every == 0 and val_ds is not None:
                 v = evaluate()
                 log(event="val", step=step, val_loss=v)
                 if is_main and v < best_val:
                     best_val = v
-                    torch.save({"model": {k: t.to(torch.bfloat16) for k, t in raw.state_dict().items()},
+                    torch.save({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
                                 "step": step, "val_loss": v, "args": vars(args)}, os.path.join(args.results_dir, "best.pt"))
             if not args.fit_check and is_main and step % args.ckpt_every == 0:
-                ck = {"model": {k: t.to(torch.bfloat16) for k, t in raw.state_dict().items()}, "step": step, "args": vars(args)}
+                # prune before writing so the disk never holds keep_last + 1 rolling checkpoints
+                olds = sorted(p for p in os.listdir(args.results_dir) if p.endswith(".pt") and p[0].isdigit())
+                for p in olds[:-max(0, args.keep_last - 1)] if args.keep_last > 0 else olds:
+                    os.remove(os.path.join(args.results_dir, p))
+                ck = {"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()}, "step": step, "args": vars(args)}
                 if ema is not None:
                     ck["ema"] = {k: t.to(torch.bfloat16) for k, t in zip(raw.state_dict().keys(), ema)}
                 torch.save(ck, os.path.join(args.results_dir, f"{step:07d}.pt"))
-                olds = sorted(p for p in os.listdir(args.results_dir) if p.endswith(".pt") and p[0].isdigit())
-                for p in olds[:-args.keep_last]:
-                    os.remove(os.path.join(args.results_dir, p))
             if step >= max_steps:
                 done = True; break
     if args.fit_check:
@@ -213,5 +224,6 @@ if __name__ == "__main__":
     p.add_argument("--ckpt-every", type=int, default=5000)
     p.add_argument("--keep-last", type=int, default=2)
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
+    p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")
     p.add_argument("--seed", type=int, default=0)
     main(p.parse_args())
