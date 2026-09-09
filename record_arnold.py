@@ -103,7 +103,13 @@ def record_episode(game, network, params, map_id, episode_id):
     last_states, tic, t0 = [], 0, time.time()
     while not game.is_episode_finished():
         if game.is_player_dead():
-            game.respawn_player()
+            # a death on the tic the episode clock expires leaves no state to respawn into
+            if game.is_episode_finished() or dg.get_state() is None:
+                break
+            try:
+                game.respawn_player()
+            except AttributeError:
+                break
             network.reset()
             if game.is_player_dead() or game.is_episode_finished():
                 continue
@@ -177,7 +183,15 @@ def record_all(game, network, params):
         out = os.path.join(REC.out_dir, f"ep_{e:05d}.parquet")
         if os.path.exists(out):
             continue
-        table, stats = record_episode(game, network, params, map_id, e)
+        try:
+            table, stats = record_episode(game, network, params, map_id, e)
+        except Exception as ex:  # one bad episode must not kill the worker
+            print(f"ep {e} map {map_id}: FAILED {type(ex).__name__}: {ex}", flush=True)
+            try:
+                game.close()
+            except Exception:
+                pass
+            continue
         if buttons is None:
             buttons = [str(b).split(".")[-1] for b in game.game.get_available_buttons()]
         tmp = out + ".tmp"
