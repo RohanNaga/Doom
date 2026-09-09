@@ -102,6 +102,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 
 ## 6. Open decisions (owner: Rohan)
 
+- **Sep 9 independent pairing recommendation (not adopted):** frame the workshop as a budget-constrained comparison of two pretrained backbone packages, with outcome-independent acceptance criteria. Prioritize paired final evaluation, action interventions, episode-level uncertainty, and measured compute accounting; demote extra training ablations and FVD if its implementation cannot be validated. Existing winner-required requirements R4.5/R6.1 need discussion, not silent enforcement.
+
 1. **Deadline**: Sep 30 CoRL PhysWM (assumed) vs ICLR 2027 Sep 24 vs slipping to a later workshop. Decides everything in section 0c.
 2. **Disk go-ahead**: about 37 GB on a Superman disk that is already at 98 GB free. The 250 GB rule is unmeetable by us; proceed or find another machine (Spiderman has 3 TB free but 4 A6000s shared with perseve).
 3. **Data path**: re-encode from Hugging Face with `encode_episodes.py` (48 GB streamed, 3 to 5 GPU-hours, exact match to Keerthana's latents not guaranteed) vs waiting for the Drive zip. Recommendation: start the re-encode now, swap in the zip if it arrives, because the final runs need latents either way and the re-encode makes the repo self-contained.
@@ -110,6 +112,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 6. Whether the multi-game stretch belongs in this paper at all (recommendation: future work).
 
 ## 7. What changed (log; newest first)
+
+- **2026-09-09 (independent paper-framing review).** Read current plans, paper skeleton, and local evaluation/training code; no remote jobs changed. Recommendation pending Rohan: retain the comparison under either outcome, narrow architecture-only/matched-compute claims because pretraining, parameter counts, native conditioning and execution differ, and spend remaining compute primarily on evaluation and action interventions. Static review found rollout clip export stacks decode chunks as independent clips (default 16 frames, so FVD32 is not actually 32-frame FVD), decoded rather than raw rollout references, and missing episode-level uncertainty. Local results contain April artifacts; current-run numbers were read from this log, not independently remeasured. No experiment or framing decision adopted. Tagged: goal 1.
 
 - **2026-09-09 10:20 EDT (resumed after the break).** All jobs alive; Spiderman's sshd is back (uptime 9 days, no reboot). DiT `010-dit-l32` held-out v-loss: 0.2341 at 20k, **0.2299 at 25k**; teacher-forced at 25k with the fine-tuned decoder, 256 held-out windows: **PSNR 20.38 dB, LPIPS 0.341, latent MSE 0.390, HUD PSNR 31.7** (copy-last 19.73). U-Net at 6,700 (0.23 steps/s after resume). Sweep: L=2 0.2603, L=4 0.2583 at 5k; L=8 running. LPIPS decoder variant at 4.2k of 6.25k on Spiderman. Archiver has 0005000 to 0020000 plus best on Spiderman. **MSE + 0.1 LPIPS decoder after epoch 1:** PSNR 28.18 dB, HUD 31.09 dB, LPIPS 0.052 (frozen 0.095, MSE-only 0.276), HUD LPIPS 0.002. Recommendation for D1: use this decoder for all reported numbers; it trades 0.9 dB PSNR for a 5x better perceptual score. Tagged: goal 1.
 

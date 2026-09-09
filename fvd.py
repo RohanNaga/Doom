@@ -44,7 +44,9 @@ def fvd_from_features(a, b):
     from scipy import linalg
     mu_a, mu_b = a.mean(0), b.mean(0)
     ca, cb = np.cov(a, rowvar=False), np.cov(b, rowvar=False)
-    covmean, _ = linalg.sqrtm(ca @ cb, disp=False)
+    covmean = linalg.sqrtm(ca @ cb)          # scipy >= 1.18 returns the array only
+    if isinstance(covmean, tuple):
+        covmean = covmean[0]
     if np.iscomplexobj(covmean):
         covmean = covmean.real
     return float(((mu_a - mu_b) ** 2).sum() + np.trace(ca + cb - 2 * covmean))
