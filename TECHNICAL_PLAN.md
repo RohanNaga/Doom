@@ -121,7 +121,7 @@ Quality bar, fixed before the runs. Must: DiT beats U-Net on LPIPS and drift at 
 | DiT-XL/2 | 8 | 4 (torchrun) | 0.93 incl. startup | 12.8 GB | about 24 h, likely less |
 | SD 1.4 U-Net (860M) | 4 | 1 | 0.30 | 14.8 GB | 83 h; about 45 h on 2 GPUs |
 
-Both fit without 8-bit optimizers. Launch plan within the six-GPU cap: DiT on four GPUs (batch 8, no accumulation), U-Net on two (batch 4, accumulation 4). Note: `accelerate launch` fails on Superman (libstdc++ / optree); use `torchrun --nproc_per_node N`.
+Both fit without 8-bit optimizers on one GPU. Under DDP the U-Net's gradient buckets overflow 16 GB, so the launched configuration is: DiT on four GPUs (batch 8, no accumulation, 0.9 steps/s measured in the run), U-Net on one GPU (batch 4, accumulation 8, 0.25 steps/s), same fp32 AdamW for both. The DiT context sweep runs on a fifth GPU. Note: `accelerate launch` fails on Superman (libstdc++ / optree); use `torchrun --nproc_per_node N`.
 
 Spiderman: 64 cores and 503 GB RAM for generation (about 1 h for 5M tics on 16 processes), `/sata2/data` 7.3 TB free for the PNG store, a 3 GB A6000 slice for the encoder (about 2 h) and decoder fine-tune (about 2 h), HF upload, checkpoint archive. All four A6000s are busy with other users' training, so no long runs there.
 
