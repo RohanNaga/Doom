@@ -1,139 +1,33 @@
-## Scalable Diffusion Models with Transformers (DiT)<br><sub>Improved PyTorch Implementation</sub>
+# DoomDiT
 
-### [Paper](http://arxiv.org/abs/2212.09748) | [Project Page](https://www.wpeebles.com/DiT) | Run DiT-XL/2 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/wpeebles/DiT) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](http://colab.research.google.com/github/facebookresearch/DiT/blob/main/run_DiT.ipynb) <a href="https://replicate.com/arielreplicate/scalable_diffusion_with_transformers"><img src="https://replicate.com/arielreplicate/scalable_diffusion_with_transformers/badge"></a>
+A controlled comparison of a Diffusion Transformer (DiT-XL/2) against the Stable Diffusion 1.4 U-Net as the backbone of a GameNGen-style Doom world model, with data, latents, conditioning, objective, and compute held identical between the two. Companion release: a lossless, per-tic, 320x240 ViZDoom deathmatch dataset with pose and HUD state, recorded with the Arnold agent on 17 maps.
 
-![DiT samples](visuals/sample_grid_0.png)
+Start with `RESEARCH_CONTEXT.md` (where the project is), `REQUIREMENTS.md` (what the paper needs), and `TECHNICAL_PLAN.md` (every design decision and why).
 
-This repo features an improved PyTorch implementation for the paper [**Scalable Diffusion Models with Transformers**](https://www.wpeebles.com/DiT).
+## Pipeline
 
-It contains:
+| stage | script | notes |
+|---|---|---|
+| record | `record_arnold.py` (Arnold agent, 17 maps), `record_episodes.py` (gameNgen-repro agent, one arena) | every engine tic, PNG bytes in per-episode parquet, action, buttons, health, ammo, kills, deaths, frags, x, y, angle |
+| data card | `dataset_stats.py` | counts per map, action histogram, coverage heatmaps |
+| encode | `encode_parquet.py` | one frame per agent decision (stride 4), pad 320x240 to 320x256, `sd-vae-ft-mse` encoder, latents (4, 32, 40) fp16 |
+| split | `make_split.py` | episode-level, 10% held out per map, maps 16 and 17 held out entirely |
+| decoder | `finetune_decoder.py` | GameNGen decoder fine-tune, MSE on lossless frames, HUD-crop metrics before and after |
+| train | `train_wm.py --backbone dit|unet` | one recipe: L = 32 stacked context, velocity target, context noise augmentation, AdamW, bf16 autocast, fp32 EMA, held-out v-loss selection; `--fit-check N` measures steps/s and memory on synthetic data |
+| evaluate | `eval_tf.py` | teacher-forced PSNR, LPIPS, HUD PSNR, copy-last baseline, VAE ceiling against lossless frames |
+| rollouts | `rollout_eval.py --rollout`, `--score` | autoregressive rollouts, drift curves, IDM action agreement, clips for FVD |
+| IDM | `train_idm.py` | inverse dynamics model on real latent pairs with its accuracy ceiling |
+| figures | `plot_results.py` | drift, IDM-vs-horizon, loss curves |
+| release | `release/hf_upload.py`, `release/DATASET_CARD.md` | parquet shards with an image column, Hugging Face upload |
 
-* 🪐 An improved PyTorch [implementation](models.py) and the original [implementation](train_options/models_original.py) of DiT
-* ⚡️ Pre-trained class-conditional DiT models trained on ImageNet (512x512 and 256x256)
-* 💥 A self-contained [Hugging Face Space](https://huggingface.co/spaces/wpeebles/DiT) and [Colab notebook](http://colab.research.google.com/github/facebookresearch/DiT/blob/main/run_DiT.ipynb) for running pre-trained DiT-XL/2 models
-* 🛸 An improved DiT [training script](train.py) and several [training options](train_options)
+Model code: `backbones.py` (both backbones behind one interface, warm-start inflation), `diffusion_v.py` (velocity DDPM, DDIM, noise augmentation), `models.py` (DiT, from fast-DiT), `doom_data.py` (datasets and splits), `doomdit_utils.py` (checkpoint and VAE loading).
 
-## Setup
+Legacy April 2026 code, kept for the continuity numbers: `trainDoom.py`, `build_dataset.py`, `eval_checkpoint.py`, `eval_metrics.py`, `rollout_video.py`, `encode_episodes.py`; weights on the GitHub release `002-DiT-XL-2-best-90k` (`bash download_weights.sh`).
 
-First, download and set up the repo:
+## Servers
 
-```bash
-git clone https://github.com/chuanyangjin/fast-DiT.git
-cd DiT
-```
+Data is generated, stored, and encoded on Spiderman (`/sata2/data/rnagabhi/doom/`); training and evaluation run on Superman (`/home/rohan/Doom/`). See `CLAUDE.md` and the `/run-server` skill. Launch multi-GPU training with `torchrun --nproc_per_node N train_wm.py ...`.
 
-We provide an [`environment.yml`](environment.yml) file that can be used to create a Conda environment. If you only want 
-to run pre-trained models locally on CPU, you can remove the `cudatoolkit` and `pytorch-cuda` requirements from the file.
+## Credits
 
-```bash
-conda env create -f environment.yml
-conda activate DiT
-```
-
-
-## Sampling [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/wpeebles/DiT) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](http://colab.research.google.com/github/facebookresearch/DiT/blob/main/run_DiT.ipynb)
-![More DiT samples](visuals/sample_grid_1.png)
-
-**Pre-trained DiT checkpoints.** You can sample from our pre-trained DiT models with [`sample.py`](sample.py). Weights for our pre-trained DiT model will be
-automatically downloaded depending on the model you use. The script has various arguments to switch between the 256x256
-and 512x512 models, adjust sampling steps, change the classifier-free guidance scale, etc. For example, to sample from
-our 512x512 DiT-XL/2 model, you can use:
-
-```bash
-python sample.py --image-size 512 --seed 1
-```
-
-For convenience, our pre-trained DiT models can be downloaded directly here as well:
-
-| DiT Model     | Image Resolution | FID-50K | Inception Score | Gflops | 
-|---------------|------------------|---------|-----------------|--------|
-| [XL/2](https://dl.fbaipublicfiles.com/DiT/models/DiT-XL-2-256x256.pt) | 256x256          | 2.27    | 278.24          | 119    |
-| [XL/2](https://dl.fbaipublicfiles.com/DiT/models/DiT-XL-2-512x512.pt) | 512x512          | 3.04    | 240.82          | 525    |
-
-
-**Custom DiT checkpoints.** If you've trained a new DiT model with [`train.py`](train.py) (see [below](#training-dit)), you can add the `--ckpt`
-argument to use your own checkpoint instead. For example, to sample from the EMA weights of a custom 
-256x256 DiT-L/4 model, run:
-
-```bash
-python sample.py --model DiT-L/4 --image-size 256 --ckpt /path/to/model.pt
-```
-
-
-## Training
-### Preparation Before Training
-To extract ImageNet features with `N` GPUs on one node:
-
-```bash
-torchrun --nnodes=1 --nproc_per_node=N extract_features.py --model DiT-XL/2 --data-path /path/to/imagenet/train --features-path /path/to/store/features --global-batch-size=256
-```
-
-### Training DiT
-We provide a training script for DiT in [`train.py`](train.py). This script can be used to train class-conditional 
-DiT models, but it can be easily modified to support other types of conditioning. 
-
-To launch DiT-XL/2 (256x256) training with `1` GPUs on one node:
-
-```bash
-accelerate launch --mixed_precision fp16 train.py --model DiT-XL/2 --feature-path /path/to/store/features
-```
-
-To launch DiT-XL/2 (256x256) training with `N` GPUs on one node:
-```bash
-accelerate launch --multi_gpu --num_processes N --mixed_precision fp16 train.py --model DiT-XL/2 --feature-path /path/to/store/features
-```
-
-Alternatively, you have the option to extract and train the scripts located in the folder [training options](train_options).
-
-
-### PyTorch Training Results
-
-We've trained DiT-XL/2 and DiT-B/4 models from scratch with the PyTorch training script
-to verify that it reproduces the original JAX results up to several hundred thousand training iterations. Across our experiments, the PyTorch-trained models give 
-similar (and sometimes slightly better) results compared to the JAX-trained models up to reasonable random variation. Some data points:
-
-| DiT Model  | Train Steps | FID-50K<br> (JAX Training) | FID-50K<br> (PyTorch Training) | PyTorch Global Training Seed |
-|------------|-------------|----------------------------|--------------------------------|------------------------------|
-| XL/2       | 400K        | 19.5                       | **18.1**                       | 42                           |
-| B/4        | 400K        | **68.4**                   | 68.9                           | 42                           |
-| B/4        | 400K        | 68.4                       | **68.3**                       | 100                          |
-
-These models were trained at 256x256 resolution; we used 8x A100s to train XL/2 and 4x A100s to train B/4. Note that FID 
-here is computed with 250 DDPM sampling steps, with the `mse` VAE decoder and without guidance (`cfg-scale=1`). 
-
-
-### Improved Training Performance
-In comparison to the original implementation, we implement a selection of training speed acceleration and memory saving features including gradient checkpointing, mixed precision training, and pre-extracted VAE features, resulting in a 95% speed increase and 60% memory reduction on DiT-XL/2. Some data points using a global batch size of 128 with an A100:
- 
-| gradient checkpointing | mixed precision training | feature pre-extraction | training speed | memory       |
-|:----------------------:|:------------------------:|:----------------------:|:--------------:|:------------:|
-| ❌                    | ❌                       | ❌                    | -              | out of memory|
-| ✔                     | ❌                       | ❌                    | 0.43 steps/sec | 44045 MB     |
-| ✔                     | ✔                        | ❌                    | 0.56 steps/sec | 40461 MB     |
-| ✔                     | ✔                        | ✔                     | 0.84 steps/sec | 27485 MB     |
-
-
-## Evaluation (FID, Inception Score, etc.)
-
-We include a [`sample_ddp.py`](sample_ddp.py) script which samples a large number of images from a DiT model in parallel. This script 
-generates a folder of samples as well as a `.npz` file which can be directly used with [ADM's TensorFlow
-evaluation suite](https://github.com/openai/guided-diffusion/tree/main/evaluations) to compute FID, Inception Score and
-other metrics. For example, to sample 50K images from our pre-trained DiT-XL/2 model over `N` GPUs, run:
-
-```bash
-torchrun --nnodes=1 --nproc_per_node=N sample_ddp.py --model DiT-XL/2 --num-fid-samples 50000
-```
-
-There are several additional options; see [`sample_ddp.py`](sample_ddp.py) for details.
-
-
-## Citation
-
-```bibtex
-@misc{jin2024fast,
-    title={Fast-DiT: Fast Diffusion Models with Transformers},
-    author={Jin, Chuanyang and Xie, Saining},
-    howpublished = {\url{https://github.com/chuanyangjin/fast-DiT}},
-    year={2024}
-}
-```
+Arnold agent: Lample and Chaplot, "Playing FPS Games with Deep Reinforcement Learning" (AAAI 2017), `github.com/glample/Arnold`, ported to torch 2 with `third_party/arnold-torch2.patch`. Single-arena agent and scenario: `github.com/arnaudstiegler/gameNgen-repro` (Apache-2.0). ViZDoom: Kempka et al., 2016. DiT: Peebles and Xie, 2023 (code from `chuanyangjin/fast-DiT`). GameNGen: Valevski et al., 2024. MultiGen: Po et al., 2026.
