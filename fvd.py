@@ -55,7 +55,8 @@ def fvd_from_features(a, b):
 def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     d = np.load(args.clips)
-    pred, gt = d["pred"], d["gt"]                       # (N, H, 3, 240, 320) uint8 as saved by rollout_eval
+    pred, gt = d["pred"], d["gt"]                       # (N, H, 3, 240, 320) uint8, one clip per rollout
+    assert pred.shape[1] >= args.frames, f"rollouts have {pred.shape[1]} frames, need {args.frames}"
     pred = pred[:, :args.frames].transpose(0, 1, 3, 4, 2); gt = gt[:, :args.frames].transpose(0, 1, 3, 4, 2)
     i3d = get_i3d(args.i3d, device)
     fa, fb = features(i3d, pred, device), features(i3d, gt, device)

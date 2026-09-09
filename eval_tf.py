@@ -87,12 +87,14 @@ def main(args):
     for b, (ctx, tgt, act) in enumerate(loader):
         ctx, tgt, act = ctx.to(device), tgt.to(device), act.to(device)
         bucket = torch.zeros(ctx.shape[0], dtype=torch.long, device=device)
+        ctx_in = ctx
         if args.infer_noise > 0:
-            ctx, bucket = noise_augment(ctx, args.infer_noise, args.noise_buckets)
-            bucket[:] = bucket.max()
+            lvl = args.infer_noise
+            bucket = torch.full_like(bucket, min(int(lvl / args.train_noise_max * args.noise_buckets), args.noise_buckets - 1))
+            ctx_in = (1.0 - lvl) ** 0.5 * ctx + lvl ** 0.5 * torch.randn_like(ctx)
         t0 = time.time()
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            pred = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx, bucket), tgt.shape, steps=args.steps, eta=args.eta, device=device)
+            pred = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket), tgt.shape, steps=args.steps, eta=args.eta, device=device)
         torch.cuda.synchronize() if device == "cuda" else None
         t_sample += time.time() - t0; n += ctx.shape[0]
         pred_img, gt_img, last_img = decode(vae, pred), decode(vae, tgt), decode(vae, ctx[:, -4:])
@@ -143,6 +145,7 @@ if __name__ == "__main__":
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
     p.add_argument("--infer-noise", type=float, default=0.0, help="context noise level at inference (0 = clean)")
+    p.add_argument("--train-noise-max", type=float, default=0.7)
     p.add_argument("--latents-dir", required=True)
     p.add_argument("--parquet-dir", default="", help="raw recordings for lossless-frame scoring")
     p.add_argument("--stride", type=int, default=4)

@@ -76,15 +76,19 @@ def movement_class(buttons_str, names):
 def build_action_to_movement(buttons_json, latents_dir, episode_ids, num_actions):
     """Map each action id to its movement class using observed (action, buttons) pairs."""
     names = json.load(open(buttons_json))["available_buttons"]
-    mapping = {}
+    from collections import Counter
+    counts = {a: Counter() for a in range(num_actions)}
+    keep = set(int(e) for e in episode_ids)
     for ep, _, meta_path in list_latent_episodes(latents_dir):
-        if ep not in set(int(e) for e in episode_ids):
+        if ep not in keep:
             continue
         m = np.load(meta_path)
-        for a, b in zip(m["action"], m["buttons"]):
-            mapping.setdefault(int(a), movement_class(str(b), names))
-        if len(mapping) >= num_actions:
-            break
+        for a, b in zip(m["action"].tolist(), m["buttons"].tolist()):
+            counts[int(a)][str(b)] += 1
+    # the modal button string per action id is the nominal one; the anti-stuck override is a minority
+    mapping = {a: movement_class(c.most_common(1)[0][0], names) for a, c in counts.items() if c}
+    missing = [a for a in range(num_actions) if a not in mapping]
+    assert not missing, f"actions never observed in the training split: {missing}"
     classes = sorted(set(mapping.values()))
     return {a: classes.index(c) for a, c in mapping.items()}, classes
 

@@ -67,7 +67,7 @@ def do_rollout(args):
             act = torch.from_numpy(acts[:, h]).to(device)
             ctx_in, bucket = (ctx, torch.zeros(len(chunk), dtype=torch.long, device=device))
             if args.infer_noise > 0:
-                ctx_in, bucket = noise_augment(ctx, args.infer_noise, args.noise_buckets); bucket[:] = bucket.max()
+                ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max, args.noise_buckets)
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket), (len(chunk), 4, 32, 40), steps=args.steps, eta=args.eta, device=device)
             preds.append(x.half().cpu().numpy())
@@ -80,6 +80,13 @@ def do_rollout(args):
              episode=np.array([m[0] for m in meta]), map=np.array([m[1] for m in meta]), start=np.array([m[2] for m in meta]),
              config=json.dumps({**vars(args), "step": ck.get("step", "?")}))
     print("DONE", args.out)
+
+
+def fixed_noise(ctx, level, train_max, buckets):
+    """Corrupt context at one fixed level, with the bucket id defined on the training scale."""
+    b = ctx.shape[0]
+    bucket = torch.full((b,), min(int(level / train_max * buckets), buckets - 1), dtype=torch.long, device=ctx.device)
+    return (1.0 - level) ** 0.5 * ctx + level ** 0.5 * torch.randn_like(ctx), bucket
 
 
 def psnr(a, b):
@@ -105,6 +112,7 @@ def do_score(args):
     clips_pred, clips_gt = [], []
     for n in range(N):
         last = dec(seed[n, -1:])
+        rp, rg = [], []
         for h0 in range(0, H, args.decode_batch):
             p = dec(pred[n, h0:h0 + args.decode_batch]); g = dec(gt[n, h0:h0 + args.decode_batch])
             k = p.shape[0]
@@ -113,7 +121,9 @@ def do_score(args):
             copy_h[h0:h0 + k] += psnr(last.expand_as(g), g).cpu().numpy()
             lat_h[h0:h0 + k] += ((pred[n, h0:h0 + k].astype(np.float32) - gt[n, h0:h0 + k].astype(np.float32)) ** 2).reshape(k, -1).mean(1)
             if n < args.save_clips:
-                clips_pred.append((p * 255).byte().cpu().numpy()); clips_gt.append((g * 255).byte().cpu().numpy())
+                rp.append((p * 255).byte().cpu().numpy()); rg.append((g * 255).byte().cpu().numpy())
+        if rp:   # one clip per rollout, all H frames, (H, 3, 240, 320)
+            clips_pred.append(np.concatenate(rp)); clips_gt.append(np.concatenate(rg))
         if (n + 1) % 32 == 0:
             print(f"  scored {n + 1}/{N}", flush=True)
     out = {"horizon": list(range(1, H + 1)), "psnr": (psnr_h / N).tolist(), "lpips": (lpips_h / N).tolist(),
@@ -148,7 +158,7 @@ if __name__ == "__main__":
     p.add_argument("--rollout", action="store_true"); p.add_argument("--score", action="store_true")
     p.add_argument("--ckpt"); p.add_argument("--backbone", choices=["dit", "unet"]); p.add_argument("--use-ema", action="store_true")
     p.add_argument("--context-frames", type=int, default=32); p.add_argument("--num-actions", type=int, default=29)
-    p.add_argument("--noise-buckets", type=int, default=10); p.add_argument("--infer-noise", type=float, default=0.0)
+    p.add_argument("--noise-buckets", type=int, default=10); p.add_argument("--infer-noise", type=float, default=0.0); p.add_argument("--train-noise-max", type=float, default=0.7)
     p.add_argument("--latents-dir"); p.add_argument("--split"); p.add_argument("--subset", default="val")
     p.add_argument("--num-rollouts", type=int, default=256); p.add_argument("--horizon", type=int, default=64)
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--steps", type=int, default=50); p.add_argument("--eta", type=float, default=0.0)

@@ -112,8 +112,11 @@ def main(args):
             git = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
         except Exception:
             git = "?"
+        import hashlib
+        split_hash = hashlib.md5(open(args.split, "rb").read()).hexdigest() if (not args.fit_check and os.path.exists(args.split)) else None
         with open(os.path.join(args.results_dir, "config.json"), "w") as f:
-            json.dump({**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum}, f, indent=1)
+            json.dump({**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum,
+                       "split_md5": split_hash, "torch": torch.__version__}, f, indent=1)
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum,
         per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum)
 
@@ -125,14 +128,17 @@ def main(args):
         if val_ds is None:
             return None
         model.eval()
+        # fixed corruption per window: the same timesteps, context noise, and target noise for every
+        # checkpoint and both backbones, independent of batch size and world size
         vl = DataLoader(val_ds, batch_size=args.per_gpu_batch, shuffle=False, num_workers=2)
-        g = torch.Generator(device=device).manual_seed(1234)
         tot, n = torch.zeros((), device=device), 0
-        for ctx, tgt, act in vl:
+        for bi, (ctx, tgt, act) in enumerate(vl):
             ctx, tgt, act = ctx.to(device), tgt.to(device), act.to(device)
+            g = torch.Generator(device=device).manual_seed(1234 + bi)
+            t = torch.randint(0, diffusion.num_steps, (ctx.shape[0],), device=device, generator=g)
             ctx_n, bucket = noise_augment(ctx, args.noise_aug_max, args.noise_buckets, generator=g)
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket), tgt, noise=torch.randn(tgt.shape, device=device, generator=g))
+                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket), tgt, noise=torch.randn(tgt.shape, device=device, generator=g), t=t)
             tot += loss.detach() * ctx.shape[0]; n += ctx.shape[0]
         tot = acc.reduce(tot, reduction="sum"); n = acc.reduce(torch.tensor(n, device=device), reduction="sum")
         model.train()
@@ -145,15 +151,17 @@ def main(args):
     done = False
     max_steps = args.fit_check if args.fit_check else args.steps
     best_val = float("inf")
+    micro = 0
     while not done:
-        for micro, (ctx, tgt, act) in enumerate(loader):
+        for ctx, tgt, act in loader:
+            micro += 1
             ctx, tgt, act = ctx.to(device, non_blocking=True), tgt.to(device, non_blocking=True), act.to(device)
             ctx_n, bucket = noise_augment(ctx, args.noise_aug_max, args.noise_buckets)
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 loss = diffusion.training_loss(model_fn(ctx_n, act, bucket), tgt) / accum
             acc.backward(loss)
             running.append(loss.item() * accum)
-            if (micro + 1) % accum != 0:
+            if micro % accum != 0:
                 continue
             if args.clip > 0:
                 acc.clip_grad_norm_(model.parameters(), args.clip)

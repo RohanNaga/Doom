@@ -46,10 +46,11 @@ class VDiffusion:
         a, s = self._coef(t, xt.ndim)
         return s * xt + a * v
 
-    def training_loss(self, model_fn, x0, noise=None):
+    def training_loss(self, model_fn, x0, noise=None, t=None):
         """MSE on v. `model_fn(x_t, t)` returns the v prediction with x0's shape."""
         b = x0.shape[0]
-        t = torch.randint(0, self.num_steps, (b,), device=x0.device)
+        if t is None:
+            t = torch.randint(0, self.num_steps, (b,), device=x0.device)
         noise = torch.randn_like(x0) if noise is None else noise
         xt = self.q_sample(x0, t, noise)
         v_pred = model_fn(xt, t)
@@ -93,4 +94,5 @@ def noise_augment(context, max_level=0.7, buckets=10, generator=None):
     bucket = torch.where(level > 0, bucket, torch.zeros_like(bucket))
     a = torch.sqrt(1.0 - level).view(b, 1, 1, 1)
     s = torch.sqrt(level).view(b, 1, 1, 1)
-    return a * context + s * torch.randn_like(context), bucket
+    eps = torch.randn(context.shape, device=context.device, generator=generator, dtype=context.dtype)
+    return a * context + s * eps, bucket
