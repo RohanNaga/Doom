@@ -123,5 +123,21 @@ Everything after M1 depends on its two outputs: a latent dataset and a measured 
 5. **Fit check** (R3.4): DiT-XL/2 at input (32, 40), gradient checkpointing on, batch 4 per GPU, 200 steps on synthetic latents. Record steps/s and peak memory. Same for the SD 1.4 U-Net with the 20-channel input conv.
 6. **Decoder fine-tune** (R2.2): adapt `finetune_autoencoder.py` from gameNgen-repro to our PNG subset; report full-frame and HUD-crop PSNR before and after.
 
-M1 is done when `data/DATASET.md`, `data/split.json`, the fit-check log, and the decoder before/after numbers are committed.
+**M1 status, Sep 9 04:30:** done except the decoder after-numbers (fine-tune running on Spiderman, `vae_decoder_arnold/`). Data cards in `docs/cards/`, split in `data/split_arnold.json` (Superman) and `split_arnold.json` (Spiderman), fit check in `TECHNICAL_PLAN.md` section 8.
+
+## 10. M2, main runs (in flight since Sep 9 02:30) and M3, evaluation
+
+M2 checklist:
+1. `010-dit-l32` (Superman, GPUs 4 to 7): 90k steps, expected done about Sep 10 08:00. Watch `~/logs/train_dit.log`; val v-loss every 5k steps; `best.pt` by val loss.
+2. `011-unet-l32` (GPU 2, single GPU): 90k steps at 0.25 steps/s, expected done about Sep 13 06:00.
+3. `020-dit-ctx{2,4,8,16,32}` sweep (GPU 3): 5k steps each, about 3 h each, sequential; val at every 1k.
+4. Decoder fine-tune (Spiderman) -> `pull-vae` job copies it to `/home/rohan/Doom/weights/vae_decoder_arnold/`.
+5. Checkpoints archive every 20 min to Spiderman `results_superman/`; sweep checkpoints are pruned locally after archiving.
+
+M3 checklist (per final checkpoint, DiT and U-Net; plus the unseen-map subset):
+1. `eval_tf.py --subset val --num-windows 2048 --vae-path weights/vae_decoder_arnold/vae` (and once with the frozen VAE, and once `--subset unseen_map`). Raw-frame scoring needs the parquet, so run that pass on Spiderman with the archived checkpoint.
+2. `rollout_eval.py --rollout` (256 x 64, DDIM 50) then `--score --idm results/idm/idm.pt --vae-path ...`.
+3. `fvd.py --clips .../clips_u8.npz --frames 16` and `--frames 32` (I3D weights download on first use).
+4. `plot_results.py --runs results/010-dit-l32:DiT-XL/2 results/011-unet-l32:U-Net --out paper/figures`.
+5. Fill `paper/main.tex` tables; freeze numbers Sep 26.
 
