@@ -54,7 +54,7 @@ DiT-XL/2 & & & & & & & & \\\bottomrule
 \end{tabular}\end{table}
 \begin{table}[h]\centering\small
 \caption{VAE reconstruction before and after decoder fine-tuning. \textbf{[fill]}}\label{tab:vae}
-\begin{tabular}{lcccc}\toprule & PSNR & LPIPS & HUD PSNR & HUD LPIPS\\\midrule frozen decoder & 23.69 & 0.095 & 17.93 & 0.060 \\ fine-tuned decoder (MSE) & 29.11 & 0.276 & 34.68 & 0.002 \\ fine-tuned decoder (MSE + LPIPS, epoch 1) & 28.18 & 0.052 & 31.09 & 0.002 \\\bottomrule\end{tabular}\end{table}
+\begin{tabular}{lcccc}\toprule & PSNR & LPIPS & HUD PSNR & HUD LPIPS\\\midrule frozen decoder & 23.69 & 0.095 & 17.93 & 0.060 \\ fine-tuned decoder (MSE) & 29.11 & 0.276 & 34.68 & 0.002 \\ fine-tuned decoder (MSE + 0.1 LPIPS) & 28.34 & 0.051 & 32.09 & 0.002 \\\bottomrule\end{tabular}\end{table}
 \textbf{Drift.} Figure~\ref{fig:drift}. \textbf{Unseen maps.} \textbf{[row]}. \textbf{Context length.} DiT sweep over $L\in\{2,4,8,16,32\}$ at 5k steps. \textbf{Noise augmentation off.} \textbf{[row]}.
 \begin{figure}[h]\centering\includegraphics[width=0.32\linewidth]{figures/drift_psnr.pdf}\includegraphics[width=0.32\linewidth]{figures/drift_lpips.pdf}\includegraphics[width=0.32\linewidth]{figures/idm_horizon.pdf}\caption{Rollout quality and action agreement versus horizon. \textbf{[fill]}}\label{fig:drift}\end{figure}
 
