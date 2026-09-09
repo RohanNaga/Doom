@@ -1,0 +1,56 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{booktabs,graphicx,amsmath,hyperref,microtype}
+\usepackage[numbers,sort&compress]{natbib}
+\title{DoomDiT: Does a Diffusion Transformer Beat the U-Net in a GameNGen-Style World Model at Small Compute?}
+\author{Rohan Nagabhirava \and Keerthana Chirumamilla \and Changliu Liu\\ Carnegie Mellon University}
+\date{}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Neural game engines such as GameNGen and MultiGen simulate Doom with a Stable Diffusion U-Net, while the wider video and world-model literature has moved to Diffusion Transformers (DiTs). No controlled comparison of the two backbones exists for action-conditioned game simulation. We train a DiT-XL/2 and the Stable Diffusion 1.4 U-Net on the same lossless 320$\times$240 Doom recordings, the same latents, the same 32-frame context, action conditioning, noise augmentation, velocity objective, optimizer, and step budget, on 16\,GB GPUs, and compare them teacher-forced and autoregressively: per-frame PSNR and LPIPS against lossless frames, drift over 64-step rollouts, FVD, and action-following accuracy measured by an inverse dynamics model. We also release the recordings: every engine tic of 850 deathmatch episodes on 17 maps played by the Arnold agent, with actions, button states, HUD state, and player pose. \textbf{[Result sentence.]}
+\end{abstract}
+
+\section{Introduction}
+GameNGen \citep{valevski2024gamengen} showed that a diffusion model can act as a playable Doom engine, and MultiGen \citep{po2026multigen} extended the idea to editable multi-map, multiplayer worlds. Both use a convolutional U-Net denoiser inherited from Stable Diffusion. Meanwhile, Diffusion Transformers \citep{peebles2023dit} have become the default backbone in video generation and in the newest interactive world models \citep{oasis2024,he2025matrixgame,nfd2025}. Whether that transfer holds for an action-conditioned game simulator under a fixed small budget has not been tested: existing comparisons are cross-paper, with different data, resolutions, context lengths, and compute. We ask one question and hold everything else fixed. \textbf{Contributions:} (1) the first matched-data, matched-compute comparison of a DiT and a U-Net as world-model backbones, evaluated teacher-forced and autoregressively; (2) a small-compute recipe (16\,GB cards, tens of GPU-hours) with released weights; (3) a lossless per-tic Doom dataset with pose and HUD state, the first public one at GameNGen's resolution.
+
+\section{Related work}
+\textbf{Diffusion game engines.} GameNGen \citep{valevski2024gamengen}, DIAMOND \citep{alonso2024diamond}, Oasis \citep{oasis2024}, MultiGen \citep{po2026multigen}, PlayGen \citep{playgen2024}. \textbf{DiT world models at scale.} Matrix-Game \citep{he2025matrixgame}, Hunyuan-GameCraft, Genie~3, Next-Frame Diffusion \citep{nfd2025}. \textbf{Controlled single-variable studies.} Echo-Memory \citep{echomemory2026} varies memory with the backbone fixed; Nano World Models \citep{nanowm2026} ablates scale and action injection; Po et al.\ \citep{po2025ssm} compare sequence mixers at matched parameters. None varies the backbone. \textbf{Evaluation.} MineWorld's IDM metric \citep{mineworld2025}, GameWorld Score \citep{he2025matrixgame}, iWorld-Bench \citep{iworldbench2026}, and long-horizon stability benchmarks \citep{worldroam2026} motivate our autoregressive protocol.
+
+\section{Data}
+\label{sec:data}
+\textbf{Recording.} ViZDoom \citep{kempka2016vizdoom} deathmatch on the 17 maps of the Arnold WAD, 8 built-in bots, 150 game-seconds per episode, 320$\times$240 RGB with HUD, weapon, and crosshair. The player is the Arnold agent \citep{lample2017arnold}, the track-2 competition checkpoint used unmodified, as in MultiGen. Every engine tic (35\,s$^{-1}$) is stored losslessly with the action applied from that tic, the button state, health, ammo, kills, deaths, frags, and player position and angle. \textbf{[N episodes, M tics, hours, size.]} \textbf{Why lossless.} The public Doom sets are JPEG quality 85; re-encoding our frames at that setting gives 31.4\,dB PSNR against the original and 26.2\,dB on the HUD rows, so PSNR computed against them is bounded by the compression, not the model. \textbf{Training view.} One frame per agent decision (stride 4). Episode-level split: 10\% of episodes on maps 1--15 held out; maps 16 and 17 held out entirely.
+
+\section{Method}
+\textbf{Latents.} Frames are padded to 320$\times$256 and encoded with the frozen \texttt{sd-vae-ft-mse} encoder to $4\times32\times40$ latents (scale 0.18215), the latent family both warm starts were trained on. The decoder is fine-tuned on training frames with an MSE loss, following GameNGen, which raises HUD-crop PSNR by \textbf{[x]}\,dB (Table~\ref{tab:vae}). \textbf{Input.} $L=32$ context latents channel-stacked with the noisy target (132 channels); the conditioning action is the one recorded at the last context frame. \textbf{Augmentation.} Context latents are corrupted with Gaussian noise at a random level up to 0.7, discretized into 10 buckets and fed as a conditioning id \citep{valevski2024gamengen}. \textbf{Objective.} Velocity prediction \citep{salimans2022progressive} with a 1,000-step linear schedule; DDIM sampling with 50 steps.
+
+\textbf{Backbones.} DiT-XL/2 (28 blocks, width 1152, patch 2, 320 tokens; 675M parameters) warm-started from ImageNet DiT-XL/2-256 with the patch projection inflated (pretrained weights on the target channels, zeros on the context), a 2D sin-cos positional embedding for the $16\times20$ grid, and an 18-way action table plus noise-bucket table summed into the adaLN vector. Stable Diffusion 1.4 U-Net (860M) with the input convolution inflated the same way, the action embedded as a single cross-attention token, and the noise bucket through a class embedding added to the timestep embedding. These are each backbone's native conditioning pathways; forcing one onto the other would test a modification rather than the backbone. Both predict the 4-channel velocity with fixed variance.
+
+\textbf{Recipe.} Global batch 32, AdamW (DiT $10^{-4}$, U-Net $5\times10^{-5}$), 500 warmup steps, gradient clipping 1.0, bf16 autocast with fp32 master weights and EMA, gradient checkpointing, \textbf{[N]}k steps for both, checkpoint selection by held-out velocity loss. On one 16\,GB A4000 the DiT runs at 0.50 steps/s (11.8\,GB) and the U-Net at 0.30 steps/s (14.8\,GB) at this batch size.
+
+\section{Evaluation}
+\textbf{Teacher-forced.} 2,048 held-out windows; one sampled frame per window scored against the lossless frame: PSNR, LPIPS (AlexNet), HUD-crop PSNR; a copy-last-frame baseline and the VAE reconstruction ceiling in the same table. \textbf{Autoregressive.} 256 rollouts of 64 decision frames from 32 real seed frames under the ground-truth action sequence; PSNR and LPIPS per horizon, FVD at 16 and 32 frames, and action agreement: an inverse dynamics model trained on real latent pairs (accuracy on real held-out pairs is the ceiling) reads the action back from consecutive generated frames.
+
+\section{Results}
+\begin{table}[h]\centering\small
+\caption{Held-out results. \textbf{[fill]}}\label{tab:main}
+\begin{tabular}{lcccccccc}\toprule
+ & PSNR$\uparrow$ & LPIPS$\downarrow$ & HUD PSNR$\uparrow$ & PSNR@16 & PSNR@32 & FVD16$\downarrow$ & FVD32$\downarrow$ & IDM acc.$\uparrow$\\\midrule
+copy last frame & & & & & & & & \\
+VAE ceiling & & & & & & & & \\
+SD 1.4 U-Net & & & & & & & & \\
+DiT-XL/2 & & & & & & & & \\\bottomrule
+\end{tabular}\end{table}
+\begin{table}[h]\centering\small
+\caption{VAE reconstruction before and after decoder fine-tuning. \textbf{[fill]}}\label{tab:vae}
+\begin{tabular}{lcccc}\toprule & PSNR & LPIPS & HUD PSNR & HUD LPIPS\\\midrule frozen decoder & & & & \\ fine-tuned decoder & & & & \\\bottomrule\end{tabular}\end{table}
+\textbf{Drift.} Figure~\ref{fig:drift}. \textbf{Unseen maps.} \textbf{[row]}. \textbf{Context length.} DiT sweep over $L\in\{2,4,8,16,32\}$ at 5k steps. \textbf{Noise augmentation off.} \textbf{[row]}.
+\begin{figure}[h]\centering\includegraphics[width=0.32\linewidth]{figures/drift_psnr.pdf}\includegraphics[width=0.32\linewidth]{figures/drift_lpips.pdf}\includegraphics[width=0.32\linewidth]{figures/idm_horizon.pdf}\caption{Rollout quality and action agreement versus horizon. \textbf{[fill]}}\label{fig:drift}\end{figure}
+
+\section{Limitations}
+Not real time (50 DDIM steps); a fixed 32-frame context with no memory; a single scripted agent's behavior distribution rather than human play; one scenario type. Multi-map generalization is reported but not modeled with memory; MultiGen's map-conditioned memory is the natural follow-up with a DiT observation model.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+\end{document}
