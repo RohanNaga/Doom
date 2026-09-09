@@ -26,6 +26,9 @@ Legacy April 2026 code, kept for the continuity numbers: `trainDoom.py`, `build_
 
 ## Servers
 
+Morning check on Superman: `bash /home/rohan/Doom/status.sh` prints every job's latest step, loss, held-out loss, sweep progress, disk, and GPUs. Jobs live in tmux sessions `train-dit`, `train-unet`, `sweep`, `archive`, `pull-vae`; logs under `/home/rohan/logs/`. On Spiderman: `tmux ls` and `/sata2/data/rnagabhi/doom/logs/`.
+
+
 Data is generated, stored, and encoded on Spiderman (`/sata2/data/rnagabhi/doom/`); training and evaluation run on Superman (`/home/rohan/Doom/`). See `CLAUDE.md` and the `/run-server` skill. Launch multi-GPU training with `torchrun --nproc_per_node N train_wm.py ...`.
 
 ## Credits
