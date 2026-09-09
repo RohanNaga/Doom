@@ -86,7 +86,7 @@ def main(args):
         ck = torch.load(args.resume, map_location="cpu", weights_only=False)
         model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
         start_step = int(ck.get("step", 0))
-        print(f"resumed weights from {args.resume} at step {start_step} (optimizer state reset, warmup restarts)")
+        print(f"resumed weights from {args.resume} at step {start_step}" + (" with optimizer and scheduler state" if "optimizer" in ck else " (optimizer state reset, warmup restarts)"))
     n_params = sum(p.numel() for p in model.parameters())
     if args.optim == "adamw8bit":
         import bitsandbytes as bnb
@@ -98,9 +98,11 @@ def main(args):
     train_ds, val_ds = build_loaders(args)
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
                         pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0)
-    model, opt, loader, sched = acc.prepare(model, opt, loader, sched)
+    model, opt, loader = acc.prepare(model, opt, loader)   # scheduler stays unwrapped: one step per optimizer update
     diffusion = VDiffusion(device=device)
     raw = acc.unwrap_model(model)
+    if args.resume and "optimizer" in ck:
+        opt.load_state_dict(ck["optimizer"]); sched.load_state_dict(ck["scheduler"])
     ema = [p.detach().float().cpu().clone() for p in raw.parameters()] if args.ema_every > 0 else None
     if args.resume and ema is not None and "ema" in ck:
         for e, (k, _) in zip(ema, raw.state_dict().items()):
@@ -187,7 +189,8 @@ def main(args):
                 olds = sorted(p for p in os.listdir(args.results_dir) if p.endswith(".pt") and p[0].isdigit())
                 for p in olds[:-max(0, args.keep_last - 1)] if args.keep_last > 0 else olds:
                     os.remove(os.path.join(args.results_dir, p))
-                ck = {"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()}, "step": step, "args": vars(args)}
+                ck = {"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()}, "step": step, "args": vars(args),
+                      "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val}
                 if ema is not None:
                     ck["ema"] = {k: t.to(torch.bfloat16) for k, t in zip(raw.state_dict().keys(), ema)}
                 torch.save(ck, os.path.join(args.results_dir, f"{step:07d}.pt"))

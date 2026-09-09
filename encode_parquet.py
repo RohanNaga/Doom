@@ -37,28 +37,6 @@ def decode(b):
     return np.asarray(Image.open(io.BytesIO(b)).convert("RGB"), dtype=np.uint8)
 
 
-def decision_starts(action, buttons, deaths, repeat=4):
-    """Reconstruct the agent's decision boundaries from a per-tic recording.
-
-    The agent decides every `repeat` tics; a death cuts the current decision short and the next one
-    starts at the respawn tic, which shifts the phase for the rest of the episode (62% of decisions in
-    the Arnold set start off the tic%4 grid). A boundary is placed at every change of (action, buttons),
-    at every death, and every `repeat` tics within an unchanged run (back-to-back identical decisions).
-    Returns the sorted array of boundary tic indices (row positions).
-    """
-    n = len(action)
-    change = np.zeros(n, dtype=bool); change[0] = True
-    change[1:] = (action[1:] != action[:-1]) | (buttons[1:] != buttons[:-1]) | (deaths[1:] != deaths[:-1])
-    starts = []
-    last = 0
-    for i in range(n):
-        if change[i]:
-            starts.append(i); last = i
-        elif i - last >= repeat:
-            starts.append(i); last = i
-    return np.array(starts, dtype=np.int64)
-
-
 @torch.no_grad()
 def encode_batch(vae, frames_u8, device, dtype, legacy=False):
     x = torch.from_numpy(frames_u8).to(device).permute(0, 3, 1, 2).float() / 127.5 - 1.0
@@ -81,9 +59,14 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
         return None
     t = pq.read_table(path)
     tic = np.array(t["tic"])
+    chain_id = None
     if align_decisions and "buttons" in t.schema.names:
-        keep = decision_starts(t["action"].to_numpy(zero_copy_only=False), np.array(t["buttons"].to_pylist()),
-                               t["deaths"].to_numpy(zero_copy_only=False), repeat=stride)
+        from transitions import valid_transitions, chain_frames
+        src, ch = valid_transitions(t["action"].to_numpy(zero_copy_only=False), np.array(t["buttons"].to_pylist()),
+                                    t["deaths"].to_numpy(zero_copy_only=False), repeat=stride, canonical=CANONICAL)
+        keep, chain_id = chain_frames(src, ch, stride)
+        if len(keep) == 0:
+            return dict(episode=ep, frames=0, map_id=-1)
     else:
         keep = np.flatnonzero(tic % stride == 0)
     cols = {}
@@ -91,6 +74,8 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
         if c in t.schema.names:
             arr = t[c].to_numpy(zero_copy_only=False) if c != "buttons" else np.array(t["buttons"].to_pylist())
             cols[c] = arr[keep]
+    if chain_id is not None:
+        cols["chain_id"] = chain_id
     frames_col = t["frame"]
     lat = []
     for i in range(0, len(keep), batch_size):
@@ -111,9 +96,22 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
     return dict(episode=ep, frames=int(len(keep)), map_id=int(cols["map_id"][0]) if "map_id" in cols else -1)
 
 
+CANONICAL = None
+
+
 def main(args):
+    global CANONICAL
     os.makedirs(args.out_dir, exist_ok=True)
     device = args.device if torch.cuda.is_available() else "cpu"
+    if args.align_decisions:
+        # canonical control bits per action id over the whole recording, so every shard filters identically
+        import pyarrow.parquet as pq
+        from transitions import canonical_table
+        acts, btns = [], []
+        for p in sorted(glob.glob(os.path.join(args.in_dir, "ep_*.parquet"))):
+            t = pq.read_table(p, columns=["action", "buttons"]); acts.append(t["action"].to_numpy(zero_copy_only=False)); btns.append(np.array(t["buttons"].to_pylist()))
+        CANONICAL = canonical_table(np.concatenate(acts), np.concatenate(btns))
+        json.dump(CANONICAL, open(os.path.join(args.out_dir, "canonical_controls.json"), "w"), indent=1)
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
     vae = load_vae(device)
     paths = sorted(glob.glob(os.path.join(args.in_dir, "ep_*.parquet")))

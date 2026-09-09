@@ -101,13 +101,15 @@ def main(args):
         lat_mse = ((pred.float() - tgt.float()) ** 2).flatten(1).mean(1)
         for i in range(ctx.shape[0]):
             gi = int(idx[b * args.batch_size + i]); slot, start = ds.locate(gi)
-            ep_id, _, _, map_id = ds.episodes[slot]
+            ep_id, map_id = ds.episodes[slot][0], ds.episodes[slot][3]
             r = dict(index=gi, episode=ep_id, map=map_id, start=start, action=int(act[i]),
                      psnr_dec=float(psnr(pred_img[i:i+1], gt_img[i:i+1])), lpips_dec=float(lp(pred_img[i:i+1] * 2 - 1, gt_img[i:i+1] * 2 - 1).flatten()),
                      copy_psnr_dec=float(psnr(last_img[i:i+1], gt_img[i:i+1])), latent_mse=float(lat_mse[i]),
                      hud_psnr_dec=float(psnr(pred_img[i:i+1, :, -HUD_ROWS:], gt_img[i:i+1, :, -HUD_ROWS:])))
             if raw is not None:
-                tic = int(ds.episodes[slot][1].shape[0] and (start + args.context_frames) * args.stride)
+                tic = ds.target_tic(gi)
+                if tic is None:
+                    tic = (start + args.context_frames) * args.stride
                 rf = torch.from_numpy(raw.get(ep_id, tic)).permute(2, 0, 1).float().div(255).unsqueeze(0).to(device)
                 r.update(psnr_raw=float(psnr(pred_img[i:i+1], rf)), lpips_raw=float(lp(pred_img[i:i+1] * 2 - 1, rf * 2 - 1).flatten()),
                          copy_psnr_raw=float(psnr(last_img[i:i+1], rf)), vae_psnr=float(psnr(gt_img[i:i+1], rf)),

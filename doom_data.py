@@ -233,11 +233,19 @@ class LatentWindowDataset(Dataset):
                 continue
             lat = np.load(lat_path, mmap_mode="r")
             meta = np.load(meta_path)
-            n = lat.shape[0] - context_frames
-            if n <= 0:
+            T = lat.shape[0]
+            if "chain_id" in meta.files:
+                # a window of L+1 frames must lie inside one chain of verified transitions
+                cid = meta["chain_id"]
+                ok = np.array([cid[s] == cid[s + context_frames] for s in range(T - context_frames)], dtype=bool) if T > context_frames else np.zeros(0, bool)
+                starts = np.flatnonzero(ok)
+            else:
+                starts = np.arange(max(0, T - context_frames))
+            if len(starts) == 0:
                 continue
-            self.episodes.append((ep, lat, meta["action"].astype(np.int64), int(meta["map_id"][0])))
-            counts.append(n)
+            tics = meta["tic"] if "tic" in meta.files else None
+            self.episodes.append((ep, lat, meta["action"].astype(np.int64), int(meta["map_id"][0]), starts, tics))
+            counts.append(len(starts))
         if not self.episodes:
             raise ValueError("no usable episodes")
         self.offsets = np.concatenate([[0], np.cumsum(counts)])
@@ -246,12 +254,19 @@ class LatentWindowDataset(Dataset):
         return int(self.offsets[-1])
 
     def locate(self, idx):
+        """Global index -> (episode slot, start frame index within the episode's latent array)."""
         slot = int(np.searchsorted(self.offsets, idx, side="right") - 1)
-        return slot, int(idx - self.offsets[slot])
+        return slot, int(self.episodes[slot][4][idx - self.offsets[slot]])
+
+    def target_tic(self, idx):
+        """Recorded tic of the target frame, from the encoder metadata (None for old layouts)."""
+        slot, start = self.locate(idx)
+        tics = self.episodes[slot][5]
+        return None if tics is None else int(tics[start + self.L])
 
     def __getitem__(self, idx):
         slot, start = self.locate(idx)
-        ep, lat, act, _ = self.episodes[slot]
+        ep, lat, act = self.episodes[slot][:3]
         L = self.L
         ctx = torch.from_numpy(np.asarray(lat[start:start + L], dtype=np.float32)).reshape(-1, 32, 40)
         tgt = torch.from_numpy(np.asarray(lat[start + L], dtype=np.float32))

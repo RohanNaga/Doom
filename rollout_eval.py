@@ -27,14 +27,24 @@ from doomdit_utils import LATENT_SCALE, load_vae
 
 
 def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed):
-    """Windows with L seed frames and H future frames, spread over episodes."""
-    eps = [(ep, np.load(lp, mmap_mode="r"), np.load(mp)) for ep, lp, mp in list_latent_episodes(latents_dir) if ep in set(int(e) for e in episode_ids)]
-    eps = [(ep, lat, m) for ep, lat, m in eps if lat.shape[0] >= L + H]
+    """Windows with L seed frames and H future frames, spread over episodes; never across a chain boundary."""
+    eps = []
+    for ep, lp, mp in list_latent_episodes(latents_dir):
+        if ep not in set(int(e) for e in episode_ids):
+            continue
+        lat, m = np.load(lp, mmap_mode="r"), np.load(mp)
+        T = lat.shape[0]
+        if "chain_id" in m.files:
+            cid = m["chain_id"]; starts = [s for s in range(T - L - H + 1) if cid[s] == cid[s + L + H - 1]]
+        else:
+            starts = list(range(max(0, T - L - H + 1)))
+        if starts:
+            eps.append((ep, lat, m, starts))
     rng = np.random.RandomState(seed)
     picks = []
     for _ in range(n):
-        ep, lat, m = eps[rng.randint(len(eps))]
-        s = rng.randint(0, lat.shape[0] - L - H + 1)
+        ep, lat, m, starts = eps[rng.randint(len(eps))]
+        s = int(starts[rng.randint(len(starts))])
         picks.append((ep, int(m["map_id"][0]), s, lat, m))
     return picks
 

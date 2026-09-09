@@ -32,10 +32,16 @@ class PairDataset(Dataset):
             if ep not in keep:
                 continue
             lat = np.load(lat_path, mmap_mode="r")
-            act = np.load(meta_path)["action"].astype(np.int64)
+            meta = np.load(meta_path); act = meta["action"].astype(np.int64)
             if lat.shape[0] < 2:
                 continue
-            self.eps.append((lat, act)); counts.append(lat.shape[0] - 1)
+            if "chain_id" in meta.files:
+                cid = meta["chain_id"]; starts = np.flatnonzero(cid[1:] == cid[:-1])
+            else:
+                starts = np.arange(lat.shape[0] - 1)
+            if len(starts) == 0:
+                continue
+            self.eps.append((lat, act, starts)); counts.append(len(starts))
         self.offsets = np.concatenate([[0], np.cumsum(counts)])
 
     def __len__(self):
@@ -43,7 +49,7 @@ class PairDataset(Dataset):
 
     def __getitem__(self, i):
         slot = int(np.searchsorted(self.offsets, i, side="right") - 1)
-        lat, act = self.eps[slot]; s = int(i - self.offsets[slot])
+        lat, act, starts = self.eps[slot]; s = int(starts[i - self.offsets[slot]])
         x = torch.from_numpy(np.asarray(lat[s:s + 2], dtype=np.float32)).reshape(8, 32, 40)
         return x, torch.tensor(int(act[s]), dtype=torch.long)
 
