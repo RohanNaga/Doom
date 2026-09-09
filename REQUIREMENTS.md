@@ -103,14 +103,17 @@ Benchmarks and evaluation papers to borrow protocol from:
 
 What this means for us: per-frame PSNR/LPIPS alone will read as 2024. The paper needs drift curves, FVD, and an action-following number, plus a multi-map data story, to be taken seriously in 2026. Those are R4.3 and R1.2, and they are P0.
 
-## 8. Open decisions
+## 8. Open decisions (as of Sep 9, 12:30 EDT)
 
-1. Confirm Sep 30 PhysWM as the primary target; "Do Robots Need World Models?" as the second.
-2. Resolution: 320x240 (R2.1) with the fit check deciding step count, or the 256x192 fallback (R5.4).
-3. Baseline pair: warm-started SD 1.4 U-Net vs warm-started DiT-XL/2 as the main row (R3.2), or parameter-matched from scratch.
-4. Frame stride 4 (R1.3) versus keeping every tic.
-5. Maps: which two Freedoom2 maps, and whether a fourth is held out (R1.6).
-6. Disk: approve about 45 GB on Superman (R5.1).
+Settled since the sheet was written: PhysWM Sep 30 is primary; 320x240 stands (fit check passed); warm-started SD 1.4 U-Net vs warm-started DiT-XL/2 is the main row; stride 4 with every tic stored; 17 Arnold maps with 16 and 17 held out; Superman disk approved (latents 11 GB, checkpoints archived to Spiderman).
+
+1. **Restart both runs on verified transitions, or keep them.** 39% of current training windows straddle an action boundary; the corrected encoding keeps 99.4% of frames. Restarting costs about one day of DiT and 10 h of U-Net progress and also picks up the scheduler fix (the DiT warmed up 4x faster than the U-Net). Keeping them preserves a valid paired comparison but weakens the action-following claim.
+2. Hugging Face account for the 202 GB release (shards are written on Spiderman).
+3. Decoder for the paper: MSE+LPIPS recommended (28.3 dB, HUD 32.1, LPIPS 0.051).
+4. What runs on the four GPUs the DiT frees: second DiT seed, four-GPU U-Net, or nothing.
+5. Inference noise level for rollouts.
+6. Claim wording once both backbones pass 30k.
+7. Keerthana's role; Friday update text; the SAM tree on Superman's disk.
 
 ## 9. Next milestone: M1, data and fit check (Sep 9 to 11)
 
