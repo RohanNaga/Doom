@@ -21,6 +21,10 @@ Every engine tic of ViZDoom deathmatch play at 320x240 RGB with the HUD, weapon 
 
 The public Doom world-model datasets are JPEG-compressed (quality 85 caps ground truth at about 31 dB PSNR, and the HUD rows at 26 dB), downscaled to 60x80, or single-arena. GameNGen's data was never released. This set is lossless at GameNGen's resolution, spans 17 deathmatch maps, and carries player pose for memory-conditioned models.
 
+## Size
+
+850 episodes, 4,212,561 tics (33.4 hours of play), 50 episodes on each of 17 maps, 51 KB per frame, about 202 GB. Episode length 4,272 to 5,247 tics (150 game-seconds minus the engine's start-up tics). Per-map coverage and action histograms are in the DoomDiT repository under `docs/cards/arnold/`.
+
 ## Recording
 
 - Engine: ViZDoom 1.2.4, Freedoom2 assets (shipped with the Arnold repo), `full_deathmatch.wad` maps 1 to 17, 8 built-in bots, deathmatch with respawn, 150 game-seconds per episode.
