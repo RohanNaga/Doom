@@ -112,6 +112,17 @@ Quality bar, fixed before the runs. Must: DiT beats U-Net on LPIPS and drift at 
 
 ## 8. Compute and servers
 
+**Fit check, measured Sep 9 (Superman A4000 16 GB, L = 32, global batch 32, fp32 AdamW, gradient checkpointing, velocity objective):**
+
+| backbone | per-GPU batch | GPUs | steps/s | peak memory | 90k steps |
+|---|---|---|---|---|---|
+| DiT-XL/2 (675M with new heads) | 4 | 1 | 0.39 | 11.6 GB | 64 h |
+| DiT-XL/2 | 8 | 1 | 0.50 | 11.8 GB | 50 h |
+| DiT-XL/2 | 8 | 4 (torchrun) | 0.93 incl. startup | 12.8 GB | about 24 h, likely less |
+| SD 1.4 U-Net (860M) | 4 | 1 | 0.30 | 14.8 GB | 83 h; about 45 h on 2 GPUs |
+
+Both fit without 8-bit optimizers. Launch plan within the six-GPU cap: DiT on four GPUs (batch 8, no accumulation), U-Net on two (batch 4, accumulation 4). Note: `accelerate launch` fails on Superman (libstdc++ / optree); use `torchrun --nproc_per_node N`.
+
 Spiderman: 64 cores and 503 GB RAM for generation (about 1 h for 5M tics on 16 processes), `/sata2/data` 7.3 TB free for the PNG store, a 3 GB A6000 slice for the encoder (about 2 h) and decoder fine-tune (about 2 h), HF upload, checkpoint archive. All four A6000s are busy with other users' training, so no long runs there.
 
 Superman: six idle A4000 16 GB. Fit check (30 min), DiT on 4 GPUs (about 3.5 days at the expected 0.3 steps/s for 90k), U-Net on 2 or sequential, evaluation on 1 GPU (about 3 h per checkpoint). Disk 37 GB: latents 13, warm-start weights 3, one rolling checkpoint per run, older checkpoints rsynced to Spiderman. Moving the 22 GB SAM render tree off Superman gives headroom.
