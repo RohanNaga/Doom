@@ -23,3 +23,10 @@ Thread id (codex-reply): 01a086c2-3770-78b2-ae33-492ca5d174bb. Brief: `astra-bri
 ## Disagreements or nuance
 - Astra: "not a literal architecture-only causal claim." Agreed in wording: the paper claims a controlled comparison of two pretrained backbones under one recipe and nominal budget, and lists the residual asymmetries (pretraining corpus and conditioning history, warmup length, U-Net resume, single-token cross-attention).
 - Bucket 0 covers noise fractions [0, 0.07), not clean only; inference with clean context is a shared boundary mismatch, not a bug.
+
+## Round 2 (Sep 9, 12:00): the action audit
+Audit of the 850-episode recording (`audit_actions.py`): 663,533 change-point decisions; 9.0% of tics carry a non-modal button vector for their action id (override or weapon switch); 62.2% of decisions start off the tic%4 grid (deaths shift the phase); **39.1% of stride-4 windows contain more than one (action, buttons) pair**; 0.6% contain a death.
+
+Astra's position: restart both runs on verified fixed-duration transitions (source s, target s+4 inside one continuous life, constant executed controls over s..s+3 matching the requested action's canonical vector), chained so no window or rollout crosses a gap; keep the episode split; store real tics; retrain the IDM on the same definition; fix the scheduler coupling and save optimizer state on the restart. Its strongest argument for keeping the runs: they remain a legitimate paired comparison on identical observed data, and any reconstruction can introduce selection bias. Its qualifications: the 39% is a mixed-control rate, not a wrong-effective-control rate; the 9% conflates overrides and weapon switches; IDM accuracy on real pairs is a reference, not a ceiling.
+
+My position: agree on the construction (implemented as `transitions.py`, unit-tested on the five failure cases it listed) and on measuring survival before deciding. The restart is Rohan's call; the trade is about a day of DiT progress and 10 hours of U-Net progress against removing label noise from two fifths of the training windows.
