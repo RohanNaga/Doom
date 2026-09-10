@@ -5,6 +5,8 @@
 
 ## 0. Where we are going now (as of Sep 1, 2026)
 
+- Sep 10 launch recommendation: retain shared lr 5e-5 / warmup 2000 / batch 32; early adaLN relative-update probes alone do not justify a DiT-only LR multiplier.
+
 **Sep 10 launch-gate follow-up:** review of 1106c97 accepts the accumulation skip/continue logic for the adopted positive clipping threshold. Remaining narrow fixes: compute a real norm when clipping is disabled; preserve skip count across recovery. New-corpus reproducibility requires seeding the newly constructed ViZDoom instance before init and resetting episode-local anti-stuck state, as well as Python/NumPy/Torch RNGs. Recommendations below; no training/recorder code edited in this review.
 
 **Sep 10 follow-up:** Rohan's requested headline evaluation is PSNR, LPIPS, FVD16/32 and a small human study; IDM is exploratory. Round-4 pairing recommends 24 raters x 60 balanced real-versus-generated trials (14/28 decision frames), fresh test-only episodes because the old held-out set informed development, and one additional full DiT seed if only one A6000-day is available. These protocol recommendations await comparison and agreement.
@@ -108,6 +110,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 
 ## 6. Open decisions (owner: Rohan)
 
+- Sep 10 early probe interpretation: option (a) recommended; no adaLN LR multiplier before launch. Verify loaded step-zero modulation norms and log absolute update/weight RMS plus functional gate/residual scales; owner launch decision remains pending.
+
 - **Sep 10 seeding/skip review:** use a versioned stable hash of (corpus ID, episode ID, RNG stream), independent of worker count/order; seed ViZDoom during its construction before `init`, reset cross-episode anti-stuck counters, and verify reordered/retried episode replay under a pinned environment. Current committed anti-stuck preamble is deterministic and upstream DQN next_action is greedy; do not introduce exploration when adding seeds. Adoption of exact recorder integration awaits owner implementation and real-server replay checks.
 
 - **Sep 10 follow-up, pending agreement:** human-study assignment and episode/rater-clustered analysis; fresh test-only collection versus transparently quarantined historical holdouts; one full DiT seed as the single-run robustness check. Accept 5000-step recovery cadence given measured 2–3 minute upload cost; reshuffled data order is acceptable for crash recovery if disclosed, but DDP must not restore rank 0's RNG on every rank. No claim of exact trajectory replay without sampler position and independent rank RNG.
@@ -124,6 +128,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 6. Whether the multi-game stretch belongs in this paper at all (recommendation: future work).
 
 ## 7. What changed (log; newest first)
+
+- 2026-09-10: reviewed single-update probe in 8f8546c against reported A6000 step-100 data (global batch 4, warmup 500). Probe calculation is single-update as intended. About 3% relative adaLN motion increases interest in conditioning-path adaptation but does not establish instability or predict sustained 14% motion at peak LR: Adam moments and weight norms evolve, and launch global batch is 32. Warm start loads pretrained modulation tensors despite zero initialization before loading. Recommend unchanged shared lr 5e-5 / warmup 2000, no 0.1x group multiplier; log step-zero weight/load checks and absolute/functional scales. No training code changed.
 
 - **2026-09-10: Astra narrow launch-gate review of 1106c97 (goal 1).** Pulled (already current). Local CPU AdamW accumulation fault injection (accum=3, NaN in a group spanning epochs) passed: skip at micro=3 leaves step/optimizer/scheduler unchanged and clears grads, valid update at micro=6 advances once. Confirmed `--clip 0` bypasses nonfinite detection because gn is set to zero; skipped counter resets on resume. Probe ratios currently describe displacement over 100 updates, not a single update. Inspected public glample/Arnold master `src/doom/game.py` and `src/model/dqn/base.py`: Game.start constructs a fresh DoomGame and calls init; anti-stuck counters initialize in Game.__init__ but do not reset in start. Therefore seed the fresh engine before init, reset the two counters per episode, and preserve within-episode randomness through deaths. No server commands executed, no full ViZDoom replay verification, no trainer/recorder implementation edits.
 
