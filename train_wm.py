@@ -137,8 +137,9 @@ REMOTE_SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"] + (["-i",
 
 def main(args):
     from accelerate import Accelerator
-    from accelerate.utils import set_seed
-    acc = Accelerator(mixed_precision="bf16", gradient_accumulation_steps=1)
+    from accelerate.utils import set_seed, InitProcessGroupKwargs
+    from datetime import timedelta
+    acc = Accelerator(kwargs_handlers=[InitProcessGroupKwargs(timeout=timedelta(hours=1))], mixed_precision="bf16", gradient_accumulation_steps=1)
     set_seed(args.seed + acc.process_index)
     device = acc.device
     world = acc.num_processes
@@ -167,11 +168,9 @@ def main(args):
         model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
         start_step = int(ck.get("step", 0))
         print(f"resumed weights from {args.resume} at step {start_step}" + (" with optimizer, scheduler, EMA, and RNG state" if "optimizer" in ck else " (optimizer state reset, warmup restarts)"))
-        if "rng" in ck:
-            torch.set_rng_state(ck["rng"]["cpu"])
-            if device.type == "cuda" and ck["rng"].get("cuda") is not None:
-                torch.cuda.set_rng_state(ck["rng"]["cuda"], device)
-            np.random.set_state(ck["rng"]["numpy"])
+        # every rank reseeds from (seed, rank, step): distinct per rank, reproducible, and independent of which rank
+        # wrote the checkpoint. Data order after a resume is a fresh shuffle from this seed (state-exact, order reshuffled).
+        set_seed(args.seed + acc.process_index + 7919 * start_step)
     n_params = sum(p.numel() for p in model.parameters())
     if args.optim == "adamw8bit":
         import bitsandbytes as bnb
@@ -235,11 +234,18 @@ def main(args):
 
     model.train()
     step, t0, tokens = start_step, time.time(), 0
-    running, grad_norms = [], []
+    running, grad_norms, skipped = [], [], 0
+    # probe tensors: input projection, output layer, and adaLN modulation of the first, middle, and last DiT blocks (or U-Net analogues)
+    want = ["x_embedder.proj.weight", "final_layer.linear.weight", "blocks.0.adaLN_modulation.1.weight", "blocks.14.adaLN_modulation.1.weight",
+            "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight"]
+    probe_params = [(n, p) for n, p in raw.named_parameters() if any(n.endswith(w) for w in want)]
+    probe_names = [n for n, _ in probe_params]
+    probe_prev = {n: p.detach().clone() for n, p in probe_params}
     torch.cuda.reset_peak_memory_stats(device) if device.type == "cuda" else None
     done = False
     max_steps = args.fit_check if args.fit_check else args.steps
     best_val = float(ck.get("best_val", float("inf"))) if args.resume else float("inf")
+    val_hist = []
     micro = int(ck.get("micro", 0)) if args.resume else 0
     while not done:
         for ctx, tgt, act in loader:
@@ -254,8 +260,21 @@ def main(args):
                 continue
             gn = acc.clip_grad_norm_(model.parameters(), args.clip) if args.clip > 0 else torch.zeros(())
             grad_norms.append(float(gn))   # pre-clip norm: the instability diagnostic that the loss alone hides
+            if not math.isfinite(float(gn)):
+                # gradients are DDP-averaged before clipping, so all ranks agree; skip the update without advancing the schedule
+                opt.zero_grad(set_to_none=True); skipped += 1
+                if skipped > 20:
+                    raise RuntimeError(f"{skipped} non-finite gradient updates; stopping before Adam state is corrupted")
+                continue
             opt.step(); sched.step(); opt.zero_grad(set_to_none=True)
             step += 1
+            if probe_names and step % 100 == 0:
+                # actual parameter change over this update relative to weight norm, for a few tensors adaLN and I/O depend on
+                with torch.no_grad():
+                    ratios = {n: float((p.detach() - probe_prev[n]).norm() / (probe_prev[n].norm() + 1e-12)) for n, p in probe_params}
+                    for n, p in probe_params:
+                        probe_prev[n].copy_(p.detach())
+                log(event="update_ratio", step=step, **ratios)
             if ema is not None and step % args.ema_every == 0:
                 ema_update(ema, raw.parameters(), args.ema_decay ** args.ema_every)
             if step % args.log_every == 0 or step == max_steps:
@@ -265,11 +284,19 @@ def main(args):
                     steps_per_s=(step - start_step) / dt, peak_mem_gb=round(mem, 2),
                     grad_norm=float(np.mean(grad_norms)), grad_norm_max=float(np.max(grad_norms)),
                     clip_frac=float(np.mean([g > args.clip for g in grad_norms])) if args.clip > 0 else 0.0,
-                    nonfinite=int(sum(not np.isfinite(x) for x in running)))
+                    nonfinite_loss=int(sum(not np.isfinite(x) for x in running)), skipped_updates=skipped)
                 running, grad_norms = [], []
             if not args.fit_check and step % args.val_every == 0 and val_ds is not None:
                 v, vbins = evaluate()
-                log(event="val", step=step, val_loss=v, val_loss_by_t_quartile=vbins)
+                val_hist.append(v)
+                excursion = len(val_hist) > 3 and v > 1.15 * float(np.median(val_hist[-4:-1]))
+                log(event="val", step=step, val_loss=v, val_loss_by_t_quartile=vbins, excursion=bool(excursion))
+                if is_main and args.remote_results and step % args.snapshot_every == 0:
+                    # compact bf16 weights at every validation so an excursion can be located afterwards; never pruned
+                    save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
+                                     "ema": {k: t.to(torch.bfloat16) for k, t in zip(raw.state_dict().keys(), ema)} if ema is not None else None,
+                                     "step": step, "val_loss": v, "args": vars(args)},
+                                    os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=False)
                 if is_main and v < best_val:
                     best_val = v
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
@@ -289,11 +316,15 @@ def main(args):
                     ck["ema"] = {k: t.clone() for k, t in zip(raw.state_dict().keys(), ema)}
                 # rolling checkpoints live on the remote copy of record; the local copy is kept only when --keep-last > 0
                 written = save_checkpoint(ck, os.path.join(args.results_dir, f"{step:07d}.pt"), args.remote_results, keep_local=args.keep_last > 0)
-                if args.remote_results and any(w.startswith(args.remote_results.split(":", 1)[1]) for w in written):
-                    prune_remote(args.remote_results, os.path.basename(args.results_dir.rstrip("/")), args.keep_remote)
                 if args.remote_results and is_main:
-                    subprocess.run(["rsync", "-a", "-e", " ".join(REMOTE_SSH), "--include=*.json", "--include=*.jsonl", "--exclude=*",
-                                    args.results_dir + "/", args.remote_results.rstrip("/") + "/" + os.path.basename(args.results_dir.rstrip("/")) + "/"], capture_output=True)
+                    try:
+                        if any(w.startswith(args.remote_results.split(":", 1)[1]) for w in written):
+                            prune_remote(args.remote_results, os.path.basename(args.results_dir.rstrip("/")), args.keep_remote)
+                        subprocess.run(["rsync", "-a", "-e", " ".join(REMOTE_SSH), "--include=*.json", "--include=*.jsonl", "--exclude=*",
+                                        args.results_dir + "/", args.remote_results.rstrip("/") + "/" + os.path.basename(args.results_dir.rstrip("/")) + "/"],
+                                       capture_output=True, timeout=600)
+                    except (subprocess.TimeoutExpired, OSError) as e:
+                        print(f"remote housekeeping failed: {e}", flush=True)
             if not args.fit_check and step % args.ckpt_every == 0:
                 acc.wait_for_everyone()   # other ranks wait here instead of inside a collective while rank 0 serializes and uploads
             if step >= max_steps:
@@ -337,6 +368,7 @@ if __name__ == "__main__":
     p.add_argument("--ckpt-every", type=int, default=5000)
     p.add_argument("--keep-last", type=int, default=2, help="rolling checkpoints kept locally; 0 keeps none when --remote-results is set")
     p.add_argument("--keep-remote", type=int, default=2, help="rolling recovery checkpoints kept on --remote-results")
+    p.add_argument("--snapshot-every", type=int, default=5000, help="compact bf16 weight snapshot to --remote-results at these validation steps (never pruned)")
     p.add_argument("--action-dropout", type=float, default=0.1, help="fraction of actions replaced by the null id during training (0 disables CFG training)")
     p.add_argument("--require-verified-transitions", action="store_true", help="refuse latents without chain ids and 4-tic spacing")
     p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
