@@ -59,6 +59,43 @@ def ema_update(ema_params, params, decay):
         e.mul_(decay).add_(p.detach().float().cpu(), alpha=1.0 - decay)
 
 
+
+def save_checkpoint(obj, path, remote=None, keep_local=True):
+    """Serialize once, then write to the remote copy of record and, space permitting, to the local path.
+
+    `remote` is "user@host:/dir" reached with the key in REMOTE_SSH; the file lands as <dir>/<run>/<name>
+    through an atomic rename. The local write is skipped when the disk has less than 1.5x the file free,
+    so a full shared disk degrades to remote-only instead of killing the run. Raises only if no copy was written.
+    """
+    import io, shutil, subprocess
+    buf = io.BytesIO(); torch.save(obj, buf); data = buf.getvalue()
+    written = []
+    if remote:
+        host, rdir = remote.split(":", 1)
+        rel = os.path.join(os.path.basename(os.path.dirname(path)), os.path.basename(path))
+        rpath = os.path.join(rdir, rel)
+        cmd = REMOTE_SSH + [host, f"mkdir -p {os.path.dirname(rpath)} && cat > {rpath}.tmp && mv {rpath}.tmp {rpath}"]
+        r = subprocess.run(cmd, input=data, capture_output=True)
+        if r.returncode == 0:
+            written.append(rpath)
+        else:
+            print(f"remote checkpoint write failed: {r.stderr.decode()[-300:]}", flush=True)
+    if keep_local or not written:
+        free = shutil.disk_usage(os.path.dirname(path)).free
+        if free > 1.5 * len(data) or not written:
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path); written.append(path)
+        else:
+            print(f"skipped local checkpoint {path}: {free/2**30:.1f} GB free", flush=True)
+    if not written:
+        raise RuntimeError(f"could not write checkpoint {path} anywhere")
+    return written
+
+
+REMOTE_SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"] + (["-i", os.environ["DOOM_SSH_KEY"]] if os.environ.get("DOOM_SSH_KEY") else [])
+
 def main(args):
     from accelerate import Accelerator
     from accelerate.utils import set_seed
@@ -182,8 +219,9 @@ def main(args):
                 log(event="val", step=step, val_loss=v)
                 if is_main and v < best_val:
                     best_val = v
-                    torch.save({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
-                                "step": step, "val_loss": v, "args": vars(args)}, os.path.join(args.results_dir, "best.pt"))
+                    save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
+                                     "step": step, "val_loss": v, "args": vars(args)},
+                                    os.path.join(args.results_dir, "best.pt"), args.remote_results, keep_local=True)
             if not args.fit_check and is_main and step % args.ckpt_every == 0:
                 # prune before writing so the disk never holds keep_last + 1 rolling checkpoints
                 olds = sorted(p for p in os.listdir(args.results_dir) if p.endswith(".pt") and p[0].isdigit())
@@ -193,7 +231,11 @@ def main(args):
                       "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val}
                 if ema is not None:
                     ck["ema"] = {k: t.to(torch.bfloat16) for k, t in zip(raw.state_dict().keys(), ema)}
-                torch.save(ck, os.path.join(args.results_dir, f"{step:07d}.pt"))
+                # rolling checkpoints live on the remote copy of record; the local copy is kept only when --keep-last > 0
+                save_checkpoint(ck, os.path.join(args.results_dir, f"{step:07d}.pt"), args.remote_results, keep_local=args.keep_last > 0)
+                if args.remote_results and is_main:
+                    subprocess.run(["rsync", "-a", "-e", " ".join(REMOTE_SSH), "--include=*.json", "--include=*.jsonl", "--exclude=*",
+                                    args.results_dir + "/", args.remote_results.rstrip("/") + "/" + os.path.basename(args.results_dir.rstrip("/")) + "/"], capture_output=True)
             if step >= max_steps:
                 done = True; break
     if args.fit_check:
@@ -233,7 +275,8 @@ if __name__ == "__main__":
     p.add_argument("--val-every", type=int, default=5000)
     p.add_argument("--val-windows", type=int, default=1024)
     p.add_argument("--ckpt-every", type=int, default=5000)
-    p.add_argument("--keep-last", type=int, default=2)
+    p.add_argument("--keep-last", type=int, default=2, help="rolling checkpoints kept locally; 0 keeps none when --remote-results is set")
+    p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
     p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")
     p.add_argument("--seed", type=int, default=0)
