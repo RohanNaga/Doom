@@ -145,13 +145,14 @@ def do_score(args):
     if args.idm:
         from train_idm import IDM
         ck = torch.load(args.idm, map_location="cpu", weights_only=False)
-        idm = IDM(ck["num_actions"], ck["width"]).to(device).eval(); idm.load_state_dict(ck["model"])
+        idm = IDM(ck["num_actions"], ck["width"], ck.get("window", 8), ck.get("depth", 4)).to(device).eval(); idm.load_state_dict(ck["model"])
         act2mov = ck["act2mov"]; mov = torch.tensor([act2mov.get(a, -1) for a in range(ck["num_actions"])], device=device)
         top1_h, mov_h = np.zeros(H), np.zeros(H)
+        K = idm.window
         for n in range(N):
-            seq = np.concatenate([seed[n, -1:], pred[n]], axis=0).astype(np.float32)   # H+1 frames
-            x = torch.from_numpy(np.concatenate([seq[:-1], seq[1:]], axis=1)).to(device)  # (H, 8, 32, 40)
-            p = idm(x).argmax(1); y = torch.from_numpy(actions[n]).to(device)
+            # the windowed IDM sees K-1 real seed frames before the first prediction, so every transition has bidirectional context
+            seq = torch.from_numpy(np.concatenate([seed[n, -(K - 1):], pred[n]], axis=0).astype(np.float32)).to(device)
+            p = idm.predict_sequence(seq)[-H:].argmax(-1); y = torch.from_numpy(actions[n]).to(device)
             top1_h += (p == y).cpu().numpy(); mov_h += (mov[p] == mov[y]).cpu().numpy()
         out["idm_top1"] = (top1_h / N).tolist(); out["idm_movement"] = (mov_h / N).tolist()
         out["idm_top1_mean"] = float(top1_h.mean() / N); out["idm_movement_mean"] = float(mov_h.mean() / N)
