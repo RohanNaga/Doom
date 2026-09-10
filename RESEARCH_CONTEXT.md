@@ -143,6 +143,7 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 
 ## 8. Technical facts most likely to matter (full detail in the agent context brief)
 
+- Dataset scale for the paper's data section (checked against the papers Sep 10): GameNGen trains on a random subset of 70M examples from 50M environment steps of agent play at 320x240 padded to 320x256, context 64. MultiGen (arXiv 2603.06679) collects over 10M frames with the Lample and Chaplot agent on 100 Obsidian-generated maps for level design, and over 10M frames of 1-vs-4 deathmatch on a single map for multiplayer; it does not state resolution, frame skip, train/test map split, base model, steps, batch, or sampler. Its context ablation: L=2/4/8/16/32 gives PSNR 27.6/29.5/29.8/29.8/30.0 and LPIPS 0.121/0.097/0.094/0.093/0.089, diminishing above 8. Ours: 1.05M decision frames (4.2M tics) on 17 maps, so 10x smaller than MultiGen and 70x smaller than GameNGen in frames; the recorder is restartable if more is wanted.
 - Training windows in the current runs (010, 011, 020) sit on the tic%4 grid; 39% of them straddle a decision boundary. The corrected encoding (`--align-decisions`) keeps 99.4% of frames and gives every window a single verified 4-tic action; nothing has been re-encoded or relaunched yet.
 - Latents from `stabilityai/sd-vae-ft-mse`, frames 160×120 → (4, 15, 20), height padded to 16, 80 tokens at patch 2.
 - Context by channel concatenation: 4 past latents (16 ch) + noisy target (4 ch) → `in_channels=20`; `learn_sigma=True`.
