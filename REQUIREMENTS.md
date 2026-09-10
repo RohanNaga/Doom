@@ -103,11 +103,12 @@ Benchmarks and evaluation papers to borrow protocol from:
 
 What this means for us: per-frame PSNR/LPIPS alone will read as 2024. The paper needs drift curves, FVD, and an action-following number, plus a multi-map data story, to be taken seriously in 2026. Those are R4.3 and R1.2, and they are P0.
 
-## 8. Open decisions (as of Sep 9, 12:30 EDT)
+## 8. Open decisions (as of Sep 10, 10:45 EDT)
 
 Settled since the sheet was written: PhysWM Sep 30 is primary; 320x240 stands (fit check passed); warm-started SD 1.4 U-Net vs warm-started DiT-XL/2 is the main row; stride 4 with every tic stored; 17 Arnold maps with 16 and 17 held out; Superman disk approved (latents 11 GB, checkpoints archived to Spiderman).
 
-1. **Restart both runs on verified transitions, or keep them.** 39% of current training windows straddle an action boundary; the corrected encoding keeps 99.4% of frames. Restarting costs about one day of DiT and 10 h of U-Net progress and also picks up the scheduler fix (the DiT warmed up 4x faster than the U-Net). Keeping them preserves a valid paired comparison but weakens the action-following claim.
+0. **Free Superman's root disk.** It hit zero at 00:10 Sep 10 and killed both runs; delete the truncated 75k DiT checkpoint and the archived U-Net 10k/15k checkpoints, and move the 46 GB `lego_project` tree to Spiderman for headroom.
+1. **Resume the dead runs (DiT from 75k, U-Net from 20k) on grid-aligned labels, or restart both on verified transitions.** Both are also "keep vs restart" below. 39% of current training windows straddle an action boundary; the corrected encoding keeps 99.4% of frames. Restarting costs about one day of DiT and 10 h of U-Net progress and also picks up the scheduler fix (the DiT warmed up 4x faster than the U-Net). Keeping them preserves a valid paired comparison but weakens the action-following claim.
 2. Hugging Face account for the 202 GB release (shards are written on Spiderman).
 3. Decoder for the paper: MSE+LPIPS recommended (28.3 dB, HUD 32.1, LPIPS 0.051).
 4. What runs on the four GPUs the DiT frees: second DiT seed, four-GPU U-Net, or nothing.
