@@ -102,14 +102,14 @@ class UNetWorldModel(nn.Module):
                          class_labels=noise_bucket).sample
 
 
-def build_model(backbone, num_actions, context_frames, noise_buckets=10, grad_ckpt=True, warm_start=None, cache_dir=None):
+def build_model(backbone, num_actions, context_frames, noise_buckets=10, grad_ckpt=True, warm_start=None, cache_dir=None, action_dropout=0.1):
     if backbone == "dit":
-        m = DiTWorldModel(num_actions, context_frames, noise_buckets, grad_ckpt=grad_ckpt)
+        m = DiTWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt)
         if warm_start:
             n, skipped = m.load_imagenet_warm_start(warm_start)
             print(f"DiT warm start: {n} tensors loaded, skipped {skipped}")
     elif backbone == "unet":
-        m = UNetWorldModel(num_actions, context_frames, noise_buckets, grad_ckpt=grad_ckpt,
+        m = UNetWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
                            sd_path=warm_start or "CompVis/stable-diffusion-v1-4", cache_dir=cache_dir)
     else:
         raise ValueError(backbone)

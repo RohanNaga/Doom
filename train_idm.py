@@ -135,21 +135,38 @@ def build_action_to_movement(buttons_json, latents_dir, episode_ids, num_actions
     return {a: classes.index(c) for a, c in mapping.items()}, classes
 
 
+def movement_probs(logits, mov_t, num_classes):
+    """Sum action probabilities inside each movement class, so the movement prediction is the most likely
+    movement rather than the movement of the most likely action."""
+    p = logits.softmax(-1)
+    out = p.new_zeros(*p.shape[:-1], num_classes)
+    out.index_add_(-1, mov_t, p)
+    return out
+
+
 @torch.no_grad()
-def accuracy(model, loader, device, act2mov):
-    model.eval(); top1 = n = mov = 0
-    mov_t = torch.tensor([act2mov.get(a, -1) for a in range(model.num_actions)], device=device)
+def accuracy(model, loader, device, act2mov, num_mov):
+    """Exact-action micro accuracy, macro recall over actions, movement accuracy (probability-summed), and the
+    majority-class baseline, all on the loader's real transitions."""
+    model.eval(); A = model.num_actions
+    mov_t = torch.tensor([act2mov.get(a, 0) for a in range(A)], device=device)
+    hit = torch.zeros(A, device=device); cnt = torch.zeros(A, device=device); mov_hit = n = 0
     for x, y in loader:
         x, y = x.to(device), y.to(device)
-        p = model(x).argmax(-1)
-        top1 += (p == y).sum().item(); n += y.numel()
-        mov += (mov_t[p] == mov_t[y]).sum().item()
+        logits = model(x); p = logits.argmax(-1)
+        y_f, p_f = y.flatten(), p.flatten()
+        cnt.index_add_(0, y_f, torch.ones_like(y_f, dtype=torch.float)); hit.index_add_(0, y_f, (p_f == y_f).float())
+        mov_pred = movement_probs(logits, mov_t, num_mov).argmax(-1)
+        mov_hit += (mov_pred == mov_t[y]).sum().item(); n += y.numel()
     model.train()
-    return top1 / n, mov / n
+    present = cnt > 0
+    return {"top1": (hit.sum() / cnt.sum()).item(), "macro_recall": (hit[present] / cnt[present]).mean().item(),
+            "movement": mov_hit / n, "majority_baseline": (cnt.max() / cnt.sum()).item(), "support": cnt.long().tolist()}
 
 
 def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch.manual_seed(args.seed); np.random.seed(args.seed)
     os.makedirs(args.out, exist_ok=True)
     split = load_split(args.split)
     train = WindowDataset(args.latents_dir, split["train"], args.window); val = WindowDataset(args.latents_dir, split["val"], args.window)
@@ -171,16 +188,17 @@ def main(args):
             if step % 200 == 0:
                 print(f"step {step} loss {loss.item():.3f} ({step / (time.time() - t0):.1f} steps/s)", flush=True)
             if step % 1000 == 0 or step == args.steps:
-                top1, mov = accuracy(model, vl, device, act2mov)
-                print(f"  val top1 {top1:.4f} movement {mov:.4f}", flush=True)
+                m = accuracy(model, vl, device, act2mov, len(classes))
+                print(f"  val top1 {m['top1']:.4f} macro_recall {m['macro_recall']:.4f} movement {m['movement']:.4f} majority {m['majority_baseline']:.4f}", flush=True)
             if step >= args.steps:
                 break
-    top1, mov = accuracy(model, vl, device, act2mov)
+    m = accuracy(model, vl, device, act2mov, len(classes))
     torch.save({"model": model.state_dict(), "num_actions": args.num_actions, "width": args.width, "window": args.window, "depth": args.depth,
-                "act2mov": act2mov, "classes": classes, "val_top1": top1, "val_movement": mov}, os.path.join(args.out, "idm.pt"))
-    json.dump({"val_top1": top1, "val_movement": mov, "train_pairs": len(train), "val_pairs": len(val), "classes": classes},
+                "act2mov": act2mov, "classes": classes, "val_top1": m["top1"], "val_movement": m["movement"], "val_metrics": m,
+                "args": vars(args)}, os.path.join(args.out, "idm.pt"))
+    json.dump({**m, "train_windows": len(train), "val_windows": len(val), "classes": classes, "args": vars(args)},
               open(os.path.join(args.out, "metrics.json"), "w"), indent=1)
-    print("DONE", json.dumps({"val_top1": top1, "val_movement": mov}))
+    print("DONE", json.dumps({k: v for k, v in m.items() if k != "support"}))
 
 
 if __name__ == "__main__":
@@ -196,4 +214,5 @@ if __name__ == "__main__":
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--steps", type=int, default=6000)
+    p.add_argument("--seed", type=int, default=0)
     main(p.parse_args())

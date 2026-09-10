@@ -143,20 +143,26 @@ def do_score(args):
             out[f"psnr@{hh}"] = float(psnr_h[hh - 1] / N); out[f"lpips@{hh}"] = float(lpips_h[hh - 1] / N)
 
     if args.idm:
-        from train_idm import IDM
+        from train_idm import IDM, movement_probs
         ck = torch.load(args.idm, map_location="cpu", weights_only=False)
         idm = IDM(ck["num_actions"], ck["width"], ck.get("window", 8), ck.get("depth", 4)).to(device).eval(); idm.load_state_dict(ck["model"])
-        act2mov = ck["act2mov"]; mov = torch.tensor([act2mov.get(a, -1) for a in range(ck["num_actions"])], device=device)
-        top1_h, mov_h = np.zeros(H), np.zeros(H)
+        act2mov = ck["act2mov"]; num_mov = len(ck["classes"])
+        mov = torch.tensor([act2mov.get(a, 0) for a in range(ck["num_actions"])], device=device)
         K = idm.window
+        acc_h = {k: np.zeros(H) for k in ("top1", "movement", "real_top1", "real_movement")}
         for n in range(N):
-            # the windowed IDM sees K-1 real seed frames before the first prediction, so every transition has bidirectional context
-            seq = torch.from_numpy(np.concatenate([seed[n, -(K - 1):], pred[n]], axis=0).astype(np.float32)).to(device)
-            p = idm.predict_sequence(seq)[-H:].argmax(-1); y = torch.from_numpy(actions[n]).to(device)
-            top1_h += (p == y).cpu().numpy(); mov_h += (mov[p] == mov[y]).cpu().numpy()
-        out["idm_top1"] = (top1_h / N).tolist(); out["idm_movement"] = (mov_h / N).tolist()
-        out["idm_top1_mean"] = float(top1_h.mean() / N); out["idm_movement_mean"] = float(mov_h.mean() / N)
-        out["idm_ceiling_top1"] = ck.get("val_top1"); out["idm_ceiling_movement"] = ck.get("val_movement")
+            # the windowed IDM sees K-1 real seed frames before the first frame it judges, so every transition has
+            # bidirectional context; the real reference runs the identical procedure on the ground-truth continuation
+            y = torch.from_numpy(actions[n]).to(device)
+            for tag, frames in (("", pred[n]), ("real_", gt[n])):
+                seq = torch.from_numpy(np.concatenate([seed[n, -(K - 1):], frames], axis=0).astype(np.float32)).to(device)
+                logits = idm.predict_sequence(seq)[-H:]
+                acc_h[tag + "top1"] += (logits.argmax(-1) == y).cpu().numpy()
+                acc_h[tag + "movement"] += (movement_probs(logits, mov, num_mov).argmax(-1) == mov[y]).cpu().numpy()
+        for k, v in acc_h.items():
+            out[f"idm_{k}"] = (v / N).tolist(); out[f"idm_{k}_mean"] = float(v.mean() / N)
+        out["idm_val_top1"] = ck.get("val_top1"); out["idm_val_movement"] = ck.get("val_movement")
+        out["idm_majority_baseline"] = ck.get("val_metrics", {}).get("majority_baseline")
     os.makedirs(args.out_dir, exist_ok=True)
     json.dump(out, open(os.path.join(args.out_dir, "drift.json"), "w"), indent=1)
     if clips_pred:

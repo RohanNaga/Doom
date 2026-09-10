@@ -27,7 +27,8 @@ def main(a):
         tot["frames_to_encode"] += len(rows)
         if len(ch):
             _, counts = np.unique(ch, return_counts=True); chain_lens += counts.tolist(); tot["chains"] += len(counts)
-            tot["windows_L32"] += int(np.sum(np.maximum(0, counts + 1 - 33))); tot["windows_L4"] += int(np.sum(np.maximum(0, counts + 1 - 5)))
+            # a chain of n transitions has n+1 frames and yields n-L+1 windows of L context frames plus one target
+            tot["windows_L32"] += int(np.sum(np.maximum(0, counts - 32 + 1))); tot["windows_L4"] += int(np.sum(np.maximum(0, counts - 4 + 1)))
         pm = per_map.setdefault(m, dict(tics=0, transitions=0)); pm["tics"] += n; pm["transitions"] += len(src)
     cl = np.array(chain_lens) if chain_lens else np.zeros(1)
     out = {**tot, "transition_fraction_of_stride4": tot["transitions"] / tot["stride4_frames"],

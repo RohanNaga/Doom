@@ -46,15 +46,17 @@ class VDiffusion:
         a, s = self._coef(t, xt.ndim)
         return s * xt + a * v
 
-    def training_loss(self, model_fn, x0, noise=None, t=None):
-        """MSE on v. `model_fn(x_t, t)` returns the v prediction with x0's shape."""
+    def training_loss(self, model_fn, x0, noise=None, t=None, per_sample=False):
+        """MSE on v. `model_fn(x_t, t)` returns the v prediction with x0's shape.
+        `per_sample=True` returns one loss per batch element (for timestep-binned validation)."""
         b = x0.shape[0]
         if t is None:
             t = torch.randint(0, self.num_steps, (b,), device=x0.device)
         noise = torch.randn_like(x0) if noise is None else noise
         xt = self.q_sample(x0, t, noise)
         v_pred = model_fn(xt, t)
-        return torch.mean((v_pred.float() - self.v_target(x0, t, noise)) ** 2)
+        err = (v_pred.float() - self.v_target(x0, t, noise)) ** 2
+        return err.flatten(1).mean(1) if per_sample else err.mean()
 
     @torch.no_grad()
     def ddim_sample(self, model_fn, shape, steps=50, eta=0.0, noise=None, device=None, clip=None):
@@ -81,7 +83,7 @@ class VDiffusion:
         return x
 
 
-def noise_augment(context, max_level=0.7, buckets=10, generator=None):
+def noise_augment(context, max_level=0.7, buckets=10, generator=None, level=None, eps=None):
     """GameNGen-style context corruption.
 
     Draws one noise level per sample in [0, max_level] as a fraction of the variance-preserving
@@ -89,10 +91,12 @@ def noise_augment(context, max_level=0.7, buckets=10, generator=None):
     returns the discretized bucket id (0 = clean) for conditioning. `context` is (B, L*4, H, W).
     """
     b = context.shape[0]
-    level = torch.rand(b, device=context.device, generator=generator) * max_level
+    if level is None:
+        level = torch.rand(b, device=context.device, generator=generator) * max_level
     bucket = torch.clamp((level / max_level * buckets).long(), max=buckets - 1)
     bucket = torch.where(level > 0, bucket, torch.zeros_like(bucket))
     a = torch.sqrt(1.0 - level).view(b, 1, 1, 1)
     s = torch.sqrt(level).view(b, 1, 1, 1)
-    eps = torch.randn(context.shape, device=context.device, generator=generator, dtype=context.dtype)
+    if eps is None:
+        eps = torch.randn(context.shape, device=context.device, generator=generator, dtype=context.dtype)
     return a * context + s * eps, bucket

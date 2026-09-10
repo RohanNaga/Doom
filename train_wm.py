@@ -40,14 +40,35 @@ class SyntheticWindows(Dataset):
                 torch.randint(0, self.A, (1,), generator=g)[0])
 
 
+class SeededCorruption(Dataset):
+    """Wraps a validation dataset so each window's timestep, context noise level and noise, and target noise
+    are drawn from a generator seeded by the window's own index: identical across checkpoints, backbones,
+    batch sizes, and world sizes."""
+
+    def __init__(self, ds, max_level, num_steps):
+        self.ds, self.max_level, self.num_steps = ds, max_level, num_steps
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, i):
+        ctx, tgt, act = self.ds[i]
+        g = torch.Generator().manual_seed(1234 + int(i))
+        t = torch.randint(0, self.num_steps, (1,), generator=g)[0]
+        level = torch.rand((), generator=g) * self.max_level
+        ctx_eps = torch.randn(ctx.shape, generator=g, dtype=ctx.dtype)
+        tgt_noise = torch.randn(tgt.shape, generator=g, dtype=tgt.dtype)
+        return ctx, tgt, act, t, level, ctx_eps, tgt_noise
+
+
 def build_loaders(args):
     if args.fit_check:
         ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions)
         return ds, None
     from doom_data import LatentWindowDataset, load_split
     split = load_split(args.split)
-    train = LatentWindowDataset(args.latents_dir, split["train"], args.context_frames)
-    val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames)
+    train = LatentWindowDataset(args.latents_dir, split["train"], args.context_frames, require_chains=args.require_verified_transitions)
+    val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames, require_chains=args.require_verified_transitions)
     rng = np.random.RandomState(0)
     val_idx = np.sort(rng.choice(len(val), size=min(args.val_windows, len(val)), replace=False))
     return train, Subset(val, val_idx.tolist())
@@ -75,23 +96,41 @@ def save_checkpoint(obj, path, remote=None, keep_local=True):
         rel = os.path.join(os.path.basename(os.path.dirname(path)), os.path.basename(path))
         rpath = os.path.join(rdir, rel)
         cmd = REMOTE_SSH + [host, f"mkdir -p {os.path.dirname(rpath)} && cat > {rpath}.tmp && mv {rpath}.tmp {rpath}"]
-        r = subprocess.run(cmd, input=data, capture_output=True)
-        if r.returncode == 0:
-            written.append(rpath)
-        else:
-            print(f"remote checkpoint write failed: {r.stderr.decode()[-300:]}", flush=True)
+        try:
+            r = subprocess.run(cmd, input=data, capture_output=True, timeout=1800)
+            if r.returncode == 0:
+                written.append(rpath)
+            else:
+                print(f"remote checkpoint write failed: {r.stderr.decode()[-300:]}", flush=True)
+        except subprocess.TimeoutExpired:
+            print(f"remote checkpoint write timed out after 1800 s: {rpath}", flush=True)
     if keep_local or not written:
         free = shutil.disk_usage(os.path.dirname(path)).free
         if free > 1.5 * len(data) or not written:
             tmp = path + ".tmp"
-            with open(tmp, "wb") as f:
-                f.write(data)
-            os.replace(tmp, path); written.append(path)
+            try:
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, path); written.append(path)
+            except OSError as e:   # a full local disk is survivable once the remote copy exists
+                print(f"local checkpoint write failed ({e}); remote copy {'exists' if written else 'MISSING'}", flush=True)
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
         else:
             print(f"skipped local checkpoint {path}: {free/2**30:.1f} GB free", flush=True)
     if not written:
         raise RuntimeError(f"could not write checkpoint {path} anywhere")
     return written
+
+
+def prune_remote(remote, run_name, keep):
+    """Keep only the newest `keep` rolling checkpoints (NNNNNNN.pt) of one run on the remote copy of record."""
+    host, rdir = remote.split(":", 1)
+    d = os.path.join(rdir, run_name)
+    cmd = REMOTE_SSH + [host, f"cd {d} && ls [0-9]*.pt 2>/dev/null | sort | head -n -{keep} | xargs -r rm -f"]
+    subprocess.run(cmd, capture_output=True, timeout=120)
 
 
 REMOTE_SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"] + (["-i", os.environ["DOOM_SSH_KEY"]] if os.environ.get("DOOM_SSH_KEY") else [])
@@ -112,18 +151,27 @@ def main(args):
     def log(**kw):
         if is_main:
             kw["time"] = time.time()
-            with open(log_path, "a") as f:
-                f.write(json.dumps(kw) + "\n")
+            try:
+                with open(log_path, "a") as f:
+                    f.write(json.dumps(kw) + "\n")
+            except OSError as e:   # a full disk must not kill training; stdout and the remote copy still get the line
+                print(f"log write failed: {e}", flush=True)
             print(json.dumps(kw), flush=True)
 
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
-                        grad_ckpt=not args.no_grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache)
+                        grad_ckpt=not args.no_grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
+                        action_dropout=args.action_dropout)
     start_step = 0
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=False)
         model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
         start_step = int(ck.get("step", 0))
-        print(f"resumed weights from {args.resume} at step {start_step}" + (" with optimizer and scheduler state" if "optimizer" in ck else " (optimizer state reset, warmup restarts)"))
+        print(f"resumed weights from {args.resume} at step {start_step}" + (" with optimizer, scheduler, EMA, and RNG state" if "optimizer" in ck else " (optimizer state reset, warmup restarts)"))
+        if "rng" in ck:
+            torch.set_rng_state(ck["rng"]["cpu"])
+            if device.type == "cuda" and ck["rng"].get("cuda") is not None:
+                torch.cuda.set_rng_state(ck["rng"]["cuda"], device)
+            np.random.set_state(ck["rng"]["numpy"])
     n_params = sum(p.numel() for p in model.parameters())
     if args.optim == "adamw8bit":
         import bitsandbytes as bnb
@@ -169,28 +217,30 @@ def main(args):
         model.eval()
         # fixed corruption per window: the same timesteps, context noise, and target noise for every
         # checkpoint and both backbones, independent of batch size and world size
-        vl = DataLoader(val_ds, batch_size=args.per_gpu_batch, shuffle=False, num_workers=2)
-        tot, n = torch.zeros((), device=device), 0
-        for bi, (ctx, tgt, act) in enumerate(vl):
-            ctx, tgt, act = ctx.to(device), tgt.to(device), act.to(device)
-            g = torch.Generator(device=device).manual_seed(1234 + bi)
-            t = torch.randint(0, diffusion.num_steps, (ctx.shape[0],), device=device, generator=g)
-            ctx_n, bucket = noise_augment(ctx, args.noise_aug_max, args.noise_buckets, generator=g)
+        vl = DataLoader(SeededCorruption(val_ds, args.noise_aug_max, diffusion.num_steps), batch_size=args.per_gpu_batch, shuffle=False, num_workers=2)
+        tot = torch.zeros((), device=device); n = torch.zeros((), device=device)
+        bins = torch.zeros(4, device=device); bin_n = torch.zeros(4, device=device)
+        for ctx, tgt, act, t, level, ctx_eps, tgt_noise in vl:
+            ctx, tgt, act, t = ctx.to(device), tgt.to(device), act.to(device), t.to(device)
+            ctx_n, bucket = noise_augment(ctx, args.noise_aug_max, args.noise_buckets, level=level.to(device), eps=ctx_eps.to(device))
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket), tgt, noise=torch.randn(tgt.shape, device=device, generator=g), t=t)
-            tot += loss.detach() * ctx.shape[0]; n += ctx.shape[0]
-        tot = acc.reduce(tot, reduction="sum"); n = acc.reduce(torch.tensor(n, device=device), reduction="sum")
+                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket), tgt, noise=tgt_noise.to(device), t=t, per_sample=True)
+            tot += loss.detach().sum(); n += loss.numel()
+            q = (t * 4) // diffusion.num_steps
+            bins.index_add_(0, q, loss.detach()); bin_n.index_add_(0, q, torch.ones_like(loss))
+        tot, n = acc.reduce(tot, reduction="sum"), acc.reduce(n, reduction="sum")
+        bins, bin_n = acc.reduce(bins, reduction="sum"), acc.reduce(bin_n, reduction="sum")
         model.train()
-        return (tot / n).item()
+        return (tot / n).item(), (bins / bin_n.clamp(min=1)).tolist()
 
     model.train()
     step, t0, tokens = start_step, time.time(), 0
-    running = []
+    running, grad_norms = [], []
     torch.cuda.reset_peak_memory_stats(device) if device.type == "cuda" else None
     done = False
     max_steps = args.fit_check if args.fit_check else args.steps
-    best_val = float("inf")
-    micro = 0
+    best_val = float(ck.get("best_val", float("inf"))) if args.resume else float("inf")
+    micro = int(ck.get("micro", 0)) if args.resume else 0
     while not done:
         for ctx, tgt, act in loader:
             micro += 1
@@ -202,8 +252,8 @@ def main(args):
             running.append(loss.item() * accum)
             if micro % accum != 0:
                 continue
-            if args.clip > 0:
-                acc.clip_grad_norm_(model.parameters(), args.clip)
+            gn = acc.clip_grad_norm_(model.parameters(), args.clip) if args.clip > 0 else torch.zeros(())
+            grad_norms.append(float(gn))   # pre-clip norm: the instability diagnostic that the loss alone hides
             opt.step(); sched.step(); opt.zero_grad(set_to_none=True)
             step += 1
             if ema is not None and step % args.ema_every == 0:
@@ -212,11 +262,14 @@ def main(args):
                 dt = time.time() - t0
                 mem = torch.cuda.max_memory_allocated(device) / 2**30 if device.type == "cuda" else 0
                 log(event="train", step=step, loss=float(np.mean(running)), lr=sched.get_last_lr()[0],
-                    steps_per_s=(step - start_step) / dt, peak_mem_gb=round(mem, 2))
-                running = []
+                    steps_per_s=(step - start_step) / dt, peak_mem_gb=round(mem, 2),
+                    grad_norm=float(np.mean(grad_norms)), grad_norm_max=float(np.max(grad_norms)),
+                    clip_frac=float(np.mean([g > args.clip for g in grad_norms])) if args.clip > 0 else 0.0,
+                    nonfinite=int(sum(not np.isfinite(x) for x in running)))
+                running, grad_norms = [], []
             if not args.fit_check and step % args.val_every == 0 and val_ds is not None:
-                v = evaluate()
-                log(event="val", step=step, val_loss=v)
+                v, vbins = evaluate()
+                log(event="val", step=step, val_loss=v, val_loss_by_t_quartile=vbins)
                 if is_main and v < best_val:
                     best_val = v
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
@@ -227,15 +280,22 @@ def main(args):
                 olds = sorted(p for p in os.listdir(args.results_dir) if p.endswith(".pt") and p[0].isdigit())
                 for p in olds[:-max(0, args.keep_last - 1)] if args.keep_last > 0 else olds:
                     os.remove(os.path.join(args.results_dir, p))
-                ck = {"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()}, "step": step, "args": vars(args),
-                      "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val}
+                # recovery checkpoint: fp32 master weights and EMA, optimizer, scheduler, RNG, so --resume reproduces the run
+                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args),
+                      "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val, "micro": micro,
+                      "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
+                              "numpy": np.random.get_state()}}
                 if ema is not None:
-                    ck["ema"] = {k: t.to(torch.bfloat16) for k, t in zip(raw.state_dict().keys(), ema)}
+                    ck["ema"] = {k: t.clone() for k, t in zip(raw.state_dict().keys(), ema)}
                 # rolling checkpoints live on the remote copy of record; the local copy is kept only when --keep-last > 0
-                save_checkpoint(ck, os.path.join(args.results_dir, f"{step:07d}.pt"), args.remote_results, keep_local=args.keep_last > 0)
+                written = save_checkpoint(ck, os.path.join(args.results_dir, f"{step:07d}.pt"), args.remote_results, keep_local=args.keep_last > 0)
+                if args.remote_results and any(w.startswith(args.remote_results.split(":", 1)[1]) for w in written):
+                    prune_remote(args.remote_results, os.path.basename(args.results_dir.rstrip("/")), args.keep_remote)
                 if args.remote_results and is_main:
                     subprocess.run(["rsync", "-a", "-e", " ".join(REMOTE_SSH), "--include=*.json", "--include=*.jsonl", "--exclude=*",
                                     args.results_dir + "/", args.remote_results.rstrip("/") + "/" + os.path.basename(args.results_dir.rstrip("/")) + "/"], capture_output=True)
+            if not args.fit_check and step % args.ckpt_every == 0:
+                acc.wait_for_everyone()   # other ranks wait here instead of inside a collective while rank 0 serializes and uploads
             if step >= max_steps:
                 done = True; break
     if args.fit_check:
@@ -276,6 +336,9 @@ if __name__ == "__main__":
     p.add_argument("--val-windows", type=int, default=1024)
     p.add_argument("--ckpt-every", type=int, default=5000)
     p.add_argument("--keep-last", type=int, default=2, help="rolling checkpoints kept locally; 0 keeps none when --remote-results is set")
+    p.add_argument("--keep-remote", type=int, default=2, help="rolling recovery checkpoints kept on --remote-results")
+    p.add_argument("--action-dropout", type=float, default=0.1, help="fraction of actions replaced by the null id during training (0 disables CFG training)")
+    p.add_argument("--require-verified-transitions", action="store_true", help="refuse latents without chain ids and 4-tic spacing")
     p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
     p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")

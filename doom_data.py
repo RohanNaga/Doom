@@ -224,7 +224,7 @@ class LatentWindowDataset(Dataset):
     last context frame (the action applied from it to the target).
     """
 
-    def __init__(self, latents_dir, episode_ids=None, context_frames=32):
+    def __init__(self, latents_dir, episode_ids=None, context_frames=32, require_chains=False):
         self.L = context_frames
         keep = None if episode_ids is None else set(int(e) for e in episode_ids)
         self.episodes, counts = [], []
@@ -234,6 +234,12 @@ class LatentWindowDataset(Dataset):
             lat = np.load(lat_path, mmap_mode="r")
             meta = np.load(meta_path)
             T = lat.shape[0]
+            if require_chains:
+                # verified-transition contract: chain ids and real tics present, consecutive frames in a chain 4 tics apart
+                assert "chain_id" in meta.files and "tic" in meta.files, f"{ep}: no chain_id/tic; encode with --align-decisions"
+                assert len(meta["chain_id"]) == T == len(meta["action"]) == len(meta["tic"]), f"{ep}: metadata length mismatch"
+                same = meta["chain_id"][1:] == meta["chain_id"][:-1]
+                assert np.all(np.diff(meta["tic"])[same] == 4), f"{ep}: tic spacing inside a chain is not 4"
             if "chain_id" in meta.files:
                 # a window of L+1 frames must lie inside one chain of verified transitions
                 cid = meta["chain_id"]
