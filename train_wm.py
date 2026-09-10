@@ -143,7 +143,9 @@ def main(args):
     set_seed(args.seed + acc.process_index)
     device = acc.device
     world = acc.num_processes
-    accum = max(1, args.global_batch // (args.per_gpu_batch * world))
+    micro_batch = args.per_gpu_batch * world
+    assert args.global_batch % micro_batch == 0, f"global batch {args.global_batch} is not a multiple of per-gpu batch x world = {micro_batch}"
+    accum = args.global_batch // micro_batch
     is_main = acc.is_main_process
 
     os.makedirs(args.results_dir, exist_ok=True)
@@ -234,13 +236,14 @@ def main(args):
 
     model.train()
     step, t0, tokens = start_step, time.time(), 0
-    running, grad_norms, skipped = [], [], 0
+    running, grad_norms = [], []
+    skipped = int(ck.get("skipped", 0)) if args.resume else 0
     # probe tensors: input projection, output layer, and adaLN modulation of the first, middle, and last DiT blocks (or U-Net analogues)
     want = ["x_embedder.proj.weight", "final_layer.linear.weight", "blocks.0.adaLN_modulation.1.weight", "blocks.14.adaLN_modulation.1.weight",
             "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight"]
     probe_params = [(n, p) for n, p in raw.named_parameters() if any(n.endswith(w) for w in want)]
     probe_names = [n for n, _ in probe_params]
-    probe_prev = {n: p.detach().clone() for n, p in probe_params}
+    probe_prev = {n: torch.empty_like(p.detach()) for n, p in probe_params}
     torch.cuda.reset_peak_memory_stats(device) if device.type == "cuda" else None
     done = False
     max_steps = args.fit_check if args.fit_check else args.steps
@@ -258,22 +261,26 @@ def main(args):
             running.append(loss.item() * accum)
             if micro % accum != 0:
                 continue
-            gn = acc.clip_grad_norm_(model.parameters(), args.clip) if args.clip > 0 else torch.zeros(())
+            gn = acc.clip_grad_norm_(model.parameters(), args.clip if args.clip > 0 else float("inf"))
             grad_norms.append(float(gn))   # pre-clip norm: the instability diagnostic that the loss alone hides
             if not math.isfinite(float(gn)):
                 # gradients are DDP-averaged before clipping, so all ranks agree; skip the update without advancing the schedule
                 opt.zero_grad(set_to_none=True); skipped += 1
+                log(event="skipped_update", step=step, micro=micro, grad_norm=float(gn), skipped_total=skipped)
                 if skipped > 20:
                     raise RuntimeError(f"{skipped} non-finite gradient updates; stopping before Adam state is corrupted")
                 continue
-            opt.step(); sched.step(); opt.zero_grad(set_to_none=True)
-            step += 1
-            if probe_names and step % 100 == 0:
-                # actual parameter change over this update relative to weight norm, for a few tensors adaLN and I/O depend on
+            measure = bool(probe_names) and (step + 1) % 100 == 0
+            if measure:
                 with torch.no_grad():
-                    ratios = {n: float((p.detach() - probe_prev[n]).norm() / (probe_prev[n].norm() + 1e-12)) for n, p in probe_params}
                     for n, p in probe_params:
                         probe_prev[n].copy_(p.detach())
+            opt.step(); sched.step(); opt.zero_grad(set_to_none=True)
+            step += 1
+            if measure:
+                # actual single-update parameter change relative to weight norm, for tensors adaLN and I/O depend on
+                with torch.no_grad():
+                    ratios = {n: float((p.detach() - probe_prev[n]).norm() / (probe_prev[n].norm() + 1e-12)) for n, p in probe_params}
                 log(event="update_ratio", step=step, **ratios)
             if ema is not None and step % args.ema_every == 0:
                 ema_update(ema, raw.parameters(), args.ema_decay ** args.ema_every)
@@ -309,7 +316,7 @@ def main(args):
                     os.remove(os.path.join(args.results_dir, p))
                 # recovery checkpoint: fp32 master weights and EMA, optimizer, scheduler, RNG, so --resume reproduces the run
                 ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args),
-                      "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val, "micro": micro,
+                      "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val, "micro": micro, "skipped": skipped,
                       "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
                               "numpy": np.random.get_state()}}
                 if ema is not None:

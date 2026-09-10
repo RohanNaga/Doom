@@ -21,9 +21,11 @@ Usage (run with Arnold's usual flags after the script's own):
 """
 import argparse
 import functools
+import hashlib
 import io
 import json
 import os
+import random
 import sys
 import time
 
@@ -85,13 +87,48 @@ class Rec:
 
 
 REC = Rec()
+SEED_SCHEME = "doomdit-episode-v1"
+
+
+def episode_seeds(corpus_id, episode_id):
+    """Independent 32-bit seeds per RNG stream, a pure function of (corpus, episode); no worker, pid, or time."""
+    def derive(stream):
+        payload = json.dumps([SEED_SCHEME, corpus_id, int(episode_id), stream], separators=(",", ":")).encode()
+        return int.from_bytes(hashlib.sha256(payload).digest()[:4], "little")
+    return {stream: derive(stream) for stream in ("python", "numpy", "torch", "vizdoom")}
+
+
+def start_seeded_episode(game, map_id, episode_id):
+    """Seed every RNG stream, then start the episode with the ViZDoom instance that Arnold's Game.start creates
+    seeded before init. Returns the seeds for the provenance record."""
+    import torch
+    import src.doom.game as arnold_game
+    seeds = episode_seeds(REC.corpus_id, episode_id)
+    random.seed(seeds["python"]); np.random.seed(seeds["numpy"]); torch.manual_seed(seeds["torch"])
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seeds["torch"])
+    # the anti-stuck counters otherwise carry over from the previous episode of the same worker
+    game.count_non_forward_actions = 0
+    game.count_non_turn_actions = 0
+    factory = arnold_game.DoomGame
+
+    def seeded_factory(*a, **k):
+        engine = factory(*a, **k)
+        engine.set_seed(seeds["vizdoom"])
+        return engine
+    arnold_game.DoomGame = seeded_factory   # one episode at a time per worker process, so this is safe
+    try:
+        game.start(map_id=map_id, episode_time=REC.episode_time, log_events=False, manual_control=True)
+    finally:
+        arnold_game.DoomGame = factory
+    return seeds
 
 
 def record_episode(game, network, params, map_id, episode_id):
     from vizdoom import GameVariable
     import pyarrow as pa
 
-    game.start(map_id=map_id, episode_time=REC.episode_time, log_events=False, manual_control=True)
+    seeds = start_seeded_episode(game, map_id, episode_id)
     game.randomize_textures(False)
     game.init_bots_health(100)
     network.reset()
@@ -165,8 +202,10 @@ def record_episode(game, network, params, map_id, episode_id):
         "angle": pa.array(cols["angle"], pa.float32()),
         "frame": pa.array(cols["frame"], pa.binary()),
     })
+    provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id), "map_id": int(map_id), "seeds": seeds}
+    table = table.replace_schema_metadata({**(table.schema.metadata or {}), b"doomdit_episode": json.dumps(provenance, sort_keys=True).encode()})
     stats.update(episode_id=episode_id, map_id=map_id, tics=n, seconds=time.time() - t0,
-                 png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0)
+                 png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0, **provenance)
     return table, stats
 
 
@@ -221,12 +260,14 @@ def main():
     p.add_argument("--worker-id", type=int, default=0)
     p.add_argument("--num-workers", type=int, default=1)
     p.add_argument("--compress-level", type=int, default=6)
+    p.add_argument("--corpus-id", required=True, help="immutable corpus name; with the episode id it determines every seed")
     mine, arnold_args = p.parse_known_args()
     if arnold_args and arnold_args[0] == "--":
         arnold_args = arnold_args[1:]
     REC.out_dir, REC.map_ids, REC.episodes = mine.out_dir, parse_map_ids(mine.map_ids), mine.episodes
     REC.episode_time, REC.worker_id, REC.num_workers = mine.episode_time, mine.worker_id, mine.num_workers
     REC.compress_level = mine.compress_level
+    REC.corpus_id = mine.corpus_id
 
     os.chdir(mine.arnold_dir)
     sys.path.insert(0, mine.arnold_dir)
