@@ -162,7 +162,7 @@ def main(args):
             print(json.dumps(kw), flush=True)
 
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
-                        grad_ckpt=not args.no_grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
+                        grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
                         action_dropout=args.action_dropout)
     start_step = 0
     if args.resume:
@@ -367,7 +367,8 @@ if __name__ == "__main__":
     p.add_argument("--optim", choices=["adamw", "adamw8bit"], default="adamw")
     p.add_argument("--ema-every", type=int, default=8, help="0 disables the fp32 CPU EMA")
     p.add_argument("--ema-decay", type=float, default=0.9999)
-    p.add_argument("--no-grad-ckpt", action="store_true")
+    p.add_argument("--grad-ckpt", action="store_true", help="recompute activations in the backward pass (about 30%% slower); needed on 16 GB cards, off by default on the A6000s")
+    p.add_argument("--no-grad-ckpt", action="store_true", help=argparse.SUPPRESS)   # former default; kept so old launch lines still parse
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--log-every", type=int, default=50)
     p.add_argument("--val-every", type=int, default=5000)
