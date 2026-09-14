@@ -46,7 +46,9 @@ def load_model(args, device):
     dropout = ck.get("args", {}).get("action_dropout", 0.1)
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets, grad_ckpt=False,
                         warm_start=None if args.backbone == "dit" else args.sd_path, cache_dir=args.hf_cache, action_dropout=dropout)
-    state = ck["ema"] if (args.use_ema and "ema" in ck) else ck["model"]
+    if args.use_ema and not ck.get("ema"):
+        raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
+    state = ck["ema"] if args.use_ema else ck["model"]
     model.load_state_dict({k: v.float() for k, v in state.items()}, strict=True)
     return model.to(device).eval(), ck.get("step", "?")
 
