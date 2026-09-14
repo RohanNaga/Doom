@@ -23,7 +23,8 @@ SERVERS = {
                                    "/sata2/data/rnagabhi/doom/latents_arnold_aligned", "/sata2/data/rnagabhi/doom/raw_arnold_eval", "/home/rnagabhi/.cache", "/home/rnagabhi/miniconda3"],
                       logs={"030-dit-l32-aligned": "/sata2/data/rnagabhi/doom/results_spiderman/030-dit-l32-aligned/log.jsonl",
                             "031-unet-l32-aligned": "/sata2/data/rnagabhi/doom/results_spiderman/031-unet-l32-aligned/log.jsonl",
-                            "032-dit-l32-aligned-seed1": "/sata2/data/rnagabhi/doom/results_spiderman/032-dit-l32-aligned-seed1/log.jsonl"},
+                            "032-dit-l32-aligned-seed1": "/sata2/data/rnagabhi/doom/results_spiderman/032-dit-l32-aligned-seed1/log.jsonl",
+                            "033-pixart-l32-aligned": "/sata2/data/rnagabhi/doom/results_spiderman/033-pixart-l32-aligned/log.jsonl"},
                       rule="shared, no posted rule", gpu_note="4x RTX A6000 48 GB"),
 }
 OUR_USERS = {"rohan", "rnagabhi"}
