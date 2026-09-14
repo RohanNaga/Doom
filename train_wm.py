@@ -1,5 +1,5 @@
 """
-Train a DoomDiT world model, either backbone, under one recipe.
+Train a DoomDiT world model, any backbone, under one recipe.
 
 Shared between backbones: stride-4 latents, L context frames channel-stacked, single action at
 the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target,
@@ -347,7 +347,7 @@ def main(args):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--backbone", choices=["dit", "unet"], required=True)
+    p.add_argument("--backbone", choices=["dit", "unet", "pixart"], required=True)
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
@@ -355,7 +355,8 @@ if __name__ == "__main__":
     p.add_argument("--latents-dir", default="data/latents_arnold")
     p.add_argument("--split", default="data/split_arnold.json")
     p.add_argument("--results-dir", default="results/fit_check")
-    p.add_argument("--warm-start", default=None, help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path")
+    p.add_argument("--warm-start", default=None,
+                   help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--global-batch", type=int, default=32)
     p.add_argument("--per-gpu-batch", type=int, default=4)
