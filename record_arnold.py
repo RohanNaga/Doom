@@ -204,8 +204,8 @@ def record_episode(game, network, params, map_id, episode_id):
     })
     provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id), "map_id": int(map_id), "seeds": seeds}
     table = table.replace_schema_metadata({**(table.schema.metadata or {}), b"doomdit_episode": json.dumps(provenance, sort_keys=True).encode()})
-    stats.update(episode_id=episode_id, map_id=map_id, tics=n, seconds=time.time() - t0,
-                 png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0, **provenance)
+    stats.update(tics=n, seconds=time.time() - t0, png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0)
+    stats.update(provenance)   # carries episode_id and map_id
     return table, stats
 
 
