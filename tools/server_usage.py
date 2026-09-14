@@ -45,6 +45,7 @@ if [ "%DU%" = "1" ] && [ ! -f $C.lock ] ; then
 fi
 [ -f $C.txt ] && cat $C.txt
 %LOGS%
+true
 '''
 
 
@@ -146,7 +147,7 @@ def collect(name, cfg, du):
     sysinfo = dict(load1=float(la[0]) if la else None, load5=float(la[1]) if len(la) > 1 else None, cores=int(load[1]) if len(load) > 1 else None)
     if len(load) > 2:
         m = load[2].split(); sysinfo.update(mem_total_b=int(m[0]), mem_used_b=int(m[1]), mem_avail_b=int(m[2]))
-    return dict(name=name, host=cfg["host"], rule=cfg["rule"], gpu_note=cfg["gpu_note"], ok=rc == 0 and bool(gpus),
+    return dict(name=name, host=cfg["host"], rule=cfg["rule"], gpu_note=cfg["gpu_note"], ok=bool(gpus),
                 ts=int(s["date"][0]) if s.get("date") else int(time.time()),
                 gpus=gpus, disks=disks, system=sysinfo, tmux=[t for t in s.get("tmux", []) if t.strip()],
                 ours_b=du_map(s.get("ours", [])), ours_detail_b=du_map(s.get("detail", [])), homes_b=du_map(s.get("homes", [])) if name == "superman" else {},
