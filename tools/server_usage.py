@@ -37,9 +37,13 @@ echo "@@owners"; for p in $(nvidia-smi --query-compute-apps=pid --format=csv,noh
 echo "@@disks"; df -B1 --output=target,size,used,avail %DISKS% 2>/dev/null | tail -n +2
 echo "@@load"; cat /proc/loadavg; nproc; free -b | awk "NR==2{print \$2, \$3, \$7}"
 echo "@@tmux"; tmux ls 2>/dev/null | cut -d: -f1
-echo "@@ours"; %OURS%
-echo "@@detail"; %DETAIL%
-echo "@@homes"; %HOMES%
+# directory sizes come from a cached background scan so a tick never waits on du over terabytes
+C=$HOME/.usage_scan
+if [ "%DU%" = "1" ] && [ ! -f $C.lock ] ; then
+  touch $C.lock
+  nohup bash -c '( echo "@@ours"; %OURS% echo "@@detail"; %DETAIL% echo "@@homes"; %HOMES% ) > '$C'.tmp 2>/dev/null; mv '$C'.tmp '$C'.txt; rm -f '$C'.lock' >/dev/null 2>&1 &
+fi
+[ -f $C.txt ] && cat $C.txt
 %LOGS%
 '''
 
@@ -97,9 +101,10 @@ def du_map(lines):
 
 def collect(name, cfg, du):
     script = REMOTE.replace("%DISKS%", " ".join(cfg["disks"]))
-    script = script.replace("%OURS%", " ".join(f'du -xsb {p} 2>/dev/null;' for p in cfg["ours"]) if du else "true")
-    script = script.replace("%DETAIL%", " ".join(f'du -xsb {p} 2>/dev/null;' for p in cfg["ours_detail"]) if du else "true")
-    script = script.replace("%HOMES%", "du -xsb /home/* 2>/dev/null | sort -n" if (du and name == "superman") else "true")
+    script = script.replace("%DU%", "1" if du else "0")
+    script = script.replace("%OURS%", " ".join(f'du -xsb {p} 2>/dev/null;' for p in cfg["ours"]))
+    script = script.replace("%DETAIL%", " ".join(f'du -xsb {p} 2>/dev/null;' for p in cfg["ours_detail"]))
+    script = script.replace("%HOMES%", "du -xsb /home/* 2>/dev/null | sort -n;" if name == "superman" else "true;")
     script = script.replace("%LOGS%", "\n".join(f'echo "@@log:{k}"; tail -n 400 {v} 2>/dev/null' for k, v in cfg["logs"].items()))
     text, rc = ssh(cfg["host"], script)
     s = sections(text)
@@ -165,5 +170,5 @@ def main(a):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--out", required=True)
-    p.add_argument("--du", action="store_true", help="also measure directory sizes (slow)")
+    p.add_argument("--du", action="store_true", help="start a background directory-size scan on each server; results are read on later ticks")
     main(p.parse_args())
