@@ -5,6 +5,8 @@
 
 ## 0. Where we are going now (as of Sep 1, 2026)
 
+- **Sep 14 literature follow-up (recommendation, awaiting agreement):** to address Rohan's explicit pretraining objection, Astra now favors one full PixArt-alpha512 third-backbone run over seed1, subject to a one-hour wrapper/fit gate. Open-Sora1.1 is the strongest verified SD-latent video candidate, but preserving temporal tokens makes it a different and much costlier recipe. Compatible larger image transformers do exist: Large-DiT3B/7B, FiTv2-3B, DiT-MoE as well as UniDiffuser. Primary-source recipe matrix, corrected checkpoint inventory and gates: `.claude/analyses/astra-world-model-literature-2026-09-14.md`. Current paired runs and queued seed unchanged; no remote execution.
+
 - **Sep 14 Astra round 4 (recommendation, awaiting comparison):** finish the corrected pair unchanged; audit EMA versus live and report matched exposure separately from measured compute; retain the queued full DiT seed for the narrow shared-recipe result. PixArt-alpha 512 is the strongest alternate pretraining-package experiment, but Sigma 512 uses SDXL latents and is not compatible with the fixed SD1.x corpus. Detailed ranking, pilot gates and sources: `.claude/analyses/astra-review-2026-09-14-dit-gap.md`. No training changes or remote execution in this review.
 
 - Sep 10 launch recommendation: retain shared lr 5e-5 / warmup 2000 / batch 32; early adaLN relative-update probes alone do not justify a DiT-only LR multiplier.
@@ -112,6 +114,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 
 ## 6. Open decisions (owner: Rohan)
 
+- **Sep 14 literature follow-up:** choose the claim before the extra run: repeatability of the existing two packages (seed1), sensitivity to broader transformer pretraining (recommended Alpha512 third row), or native video modeling (Open-Sora1.1, separate temporal-context and compute design). No single run isolates architecture/pretraining/context simultaneously. New larger-model inventory supersedes the earlier incomplete survey; do not claim no larger transformer exists in SD1.x latent space.
+
 - **Sep 14 gap review:** keep seed1 (Astra recommendation) versus replace it with a fully budgeted PixArt-alpha third-backbone experiment; agree on live/EMA reporting and compute accounting before final evaluation. Any DiT-only LR branch requires a tested post-resume LR override (current optimizer/scheduler restore overrides `--lr`), its own result row and tuning-compute accounting. Recommendations remain unadopted.
 
 - Sep 10 early probe interpretation: option (a) recommended; no adaLN LR multiplier before launch. Verify loaded step-zero modulation norms and log absolute update/weight RMS plus functional gate/residual scales; owner launch decision remains pending.
@@ -132,6 +136,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 6. Whether the multi-game stretch belongs in this paper at all (recommendation: future work).
 
 ## 7. What changed (log; newest first)
+
+- **2026-09-14: Astra verified world-model training literature and expanded the compatible-checkpoint inventory (goal 1; recommendations not adopted).** Read official Matrix-Game 2, GameGen-X, Hunyuan-GameCraft, The Matrix, Yume 1/1.5, Cosmos 1 diffusion papers, Oasis release/code and Genie 3 announcement. Video initialization and temporal token conditioning are prominent but not universal/disclosed for all; Genie 3's technical recipe is not verified. Added compatible Open-Sora 1.1, Latte variants, Large-DiT 3B/7B, FiT/FiTv2, MDT, SiT/REPA, U-ViT and DiT-MoE; Sigma/Lumina/Hunyuan image models use SDXL, modern video VAEs differ. Local meta counts: PixArt-alpha 512 has 610,856,096 parameters; Latte-1 has 1,057,246,880. For the explicit pretraining objection, now recommends a full Alpha512 third row instead of the second ImageNet DiT seed, subject to pilot/agreement; seed still best for narrow repeatability. Full sources, disclosed/undisclosed quantities and one-hour gates in `.claude/analyses/astra-world-model-literature-2026-09-14.md`. No server execution, queue edits or training changes.
 
 - **2026-09-14: Astra round 4 reviewed the persistent corrected-run DiT gap (goal 1; recommendations, not adopted).** Recommends unchanged paired endpoints, paired EMA/live diagnostics, separate equal-exposure/equal-compute reporting and the queued full DiT seed as the single added run for the narrow claim. Public configs establish PixArt-alpha SD1.x compatibility but PixArt-Sigma 512 uses SDXL VAE / scale 0.13025; checked larger Hunyuan-DiT and Lumina-Next releases also use SDXL. UniDiffuser's released 1B U-ViT does use the SD autoencoder / 0.18215, but needs a joint-modality adaptation rather than a drop-in size change. Code and local meta-device checks confirm context projection is trainable and EMA parameter/key ordering aligns in current architectures. `best.pt` lacks EMA and evaluation silently falls back to live; use EMA-bearing snapshots/recovery checkpoints. Local optimizer test confirms resumed optimizer/scheduler override a new CLI LR. Full ranking and one-hour gates in `.claude/analyses/astra-review-2026-09-14-dit-gap.md`. No server commands, queue changes or training-code edits.
 

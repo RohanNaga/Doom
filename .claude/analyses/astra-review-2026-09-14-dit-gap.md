@@ -1,5 +1,7 @@
 # Astra round 4: the DiT gap (Sep 14, 2026)
 
+**Follow-up:** the expanded literature pass in `astra-world-model-literature-2026-09-14.md` supersedes this memo's incomplete checkpoint inventory and recommends Alpha512 instead of seed1 when the extra run is specifically intended to address the pretraining objection. It verifies additional compatible Large-DiT3B/7B, FiTv2-3B, DiT-MoE and native-video checkpoints. The original narrow replication recommendation below is preserved as review history.
+
 Independent recommendation for discussion; no training changes or server commands executed. Read rounds 1–3, the Sep 10 brief, current context including section 8's as-built block and section 7's top six entries, and the Sep 14 brief. Reviewed backbones.py, train_wm.py and evaluation loaders. Primary-source URLs below were fetched during this review.
 
 ## Position
