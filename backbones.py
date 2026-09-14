@@ -181,8 +181,10 @@ class PixArtWorldModel(nn.Module):
             drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
             action = torch.where(drop, torch.full_like(action, self.num_actions), action)
         tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
+        # older diffusers unpack added_cond_kwargs unconditionally; both keys are ignored with use_additional_conditions=False
         out = self.transformer(torch.cat([context, x], dim=1), encoder_hidden_states=tokens, timestep=t,
-                               encoder_attention_mask=None).sample
+                               encoder_attention_mask=None,
+                               added_cond_kwargs={"resolution": None, "aspect_ratio": None}).sample
         return out[:, :4]   # epsilon half of the learn-sigma head, retrained as velocity
 
 
