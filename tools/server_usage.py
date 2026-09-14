@@ -105,7 +105,16 @@ def du_map(lines):
     return out
 
 
-def collect(name, cfg, du):
+def collect(name, cfg, du, retries=1):
+    """One snapshot of a server; retries once after a pause because the lab hosts occasionally reject a password."""
+    for attempt in range(retries + 1):
+        snap = _collect_once(name, cfg, du)
+        if snap["ok"] or attempt == retries:
+            return snap
+        time.sleep(30)
+
+
+def _collect_once(name, cfg, du):
     script = REMOTE.replace("%DISKS%", " ".join(cfg["disks"]))
     script = script.replace("%DU%", "1" if du else "0")
     script = script.replace("%OURS%", " ".join(f'du -xsb {p} 2>/dev/null;' for p in cfg["ours"]))
