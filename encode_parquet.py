@@ -110,7 +110,11 @@ def main(args):
         acts, btns = [], []
         for p in sorted(glob.glob(os.path.join(args.in_dir, "ep_*.parquet"))):
             t = pq.read_table(p, columns=["action", "buttons"]); acts.append(t["action"].to_numpy(zero_copy_only=False)); btns.append(np.array(t["buttons"].to_pylist()))
-        CANONICAL = canonical_table(np.concatenate(acts), np.concatenate(btns))
+        if args.canonical:
+            # a small corpus (evaluation set) reuses the main corpus's table so the transition filter is identical
+            CANONICAL = {int(k): v for k, v in json.load(open(args.canonical)).items()}
+        else:
+            CANONICAL = canonical_table(np.concatenate(acts), np.concatenate(btns))
         json.dump(CANONICAL, open(os.path.join(args.out_dir, "canonical_controls.json"), "w"), indent=1)
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
     vae = load_vae(device)
@@ -146,6 +150,7 @@ if __name__ == "__main__":
     p.add_argument("--dtype", choices=["bf16", "fp32"], default="bf16")
     p.add_argument("--shard", type=int, default=None)
     p.add_argument("--num-shards", type=int, default=1)
+    p.add_argument("--canonical", default=None, help="canonical_controls.json from the main corpus, used instead of recomputing")
     p.add_argument("--max-episodes", type=int, default=0)
     p.add_argument("--legacy", action="store_true", help="April layout: resize to 160x120, latents (4,15,20), ep_XXXX_actions.npy")
     p.add_argument("--align-decisions", action="store_true", help="one frame per reconstructed agent decision instead of every `stride` tics")
