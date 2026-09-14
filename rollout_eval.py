@@ -53,9 +53,11 @@ def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed):
 def do_rollout(args):
     from backbones import build_model
     device = "cuda"
-    model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets, grad_ckpt=False,
-                        warm_start=None if args.backbone == "dit" else args.sd_path, cache_dir=args.hf_cache)
     ck = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+    # the action table's size depends on the training-time dropout (fast-DiT adds the null row only when it is > 0)
+    dropout = ck.get("args", {}).get("action_dropout", 0.1)
+    model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets, grad_ckpt=False,
+                        warm_start=None if args.backbone == "dit" else args.sd_path, cache_dir=args.hf_cache, action_dropout=dropout)
     state = ck["ema"] if (args.use_ema and "ema" in ck) else ck["model"]
     model.load_state_dict({k: v.float() for k, v in state.items()}, strict=True)
     model = model.to(device).eval()
