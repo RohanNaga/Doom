@@ -53,8 +53,12 @@ def ssh(host, script):
     pw = os.environ.get("PERSEVE_SERVER_PASSWORD")
     if not pw:
         raise SystemExit("PERSEVE_SERVER_PASSWORD not set (source ~/.zshrc)")
-    r = subprocess.run(["sshpass", "-p", pw, "ssh", "-o", "ConnectTimeout=20", "-o", "StrictHostKeyChecking=no", host, "bash -s"],
-                       input=script, capture_output=True, text=True, timeout=900)
+    try:
+        r = subprocess.run(["sshpass", "-p", pw, "ssh", "-o", "ConnectTimeout=20", "-o", "StrictHostKeyChecking=no", host, "bash -s"],
+                           input=script, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        # never let the exception text (which repeats the command line and the password) reach a log
+        raise RuntimeError(f"ssh to {host} timed out after 300 s") from None
     return r.stdout, r.returncode
 
 
