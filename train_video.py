@@ -203,6 +203,9 @@ def main(args):
     n_params = sum(p.numel() for p in model.parameters())
     new_params = model.action_embedder.weight.numel()
 
+    # move explicitly before the optimizer is built: accelerate's prepare did not place the diffusers-loaded
+    # model on the fit check of Sep 15 (it trained on the CPU), and a fused AdamW must see CUDA parameters
+    model = model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd,
                             fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
@@ -235,7 +238,7 @@ def main(args):
                        "tokens_per_window": raw.tokens_per_window(args.context_frames),
                        "optimizer_state_bytes": full_finetune_bytes(n_params),
                        "torch": torch.__version__}, f, indent=1)
-    log(event="start", backbone="skyreels-df-1.3b", objective=args.objective, params=n_params,
+    log(event="start", backbone="skyreels-df-1.3b", objective=args.objective, params=n_params, device=str(next(raw.parameters()).device),
         new_params=new_params, world=world, accum=accum, per_gpu_batch=args.per_gpu_batch,
         global_batch=args.per_gpu_batch * world * accum, context_frames=args.context_frames,
         tokens_per_window=raw.tokens_per_window(args.context_frames))
