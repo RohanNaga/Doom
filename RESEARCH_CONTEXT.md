@@ -5,6 +5,8 @@
 
 ## 0. Where we are going now (as of Sep 1, 2026)
 
+- **Sep14 round5b video-row revision (proposal):** Open-Sora1.1 remains first, SkyReels-V2 DF1.3B becomes runner-up; adopt shared VP-v/no variance and try L16 only if full throughput/evaluation gate fits (else L8). Gate-passed video now outranks unstarted seed1 for the expanded research goal: proposed GPU3 after U-Net, seed behind PixArt GPU2; no gate means existing seed starts, no idle reservation. No queue changes made. Native Matrix-Game2 tree has inference but no verified world-model training path. Updated `.claude/analyses/astra-video-row-2026-09-14.md` records forecasts as subjective, token-cost arithmetic, objective correction and conditional priority.
+
 - **Sep 14 night video-row review (proposal, awaiting comparison):** preserve PixArt and seed1; prototype Open-Sora 1.1 stage3 as a separate video-pretrained system row (8 decision-frame context, one target, native epsilon DDPM, same SD VAE), then use a released card only after fit and full-evaluation timing gates. Up to 36 training + 36 evaluation card-hours proposed, not allocated. Wan1.3B is runner-up; Cosmos2.5 is the Cosmos-specific alternative. The observed gap does not establish pretraining causality. Correct Cosmos1 CV8x8x8 temporal factor to 8; Cosmos2 video tokenizer and Cosmos2.5 Wan-family setup use factor4. Detailed verified sources, estimates, action-alignment and Sep22 stop gate: `.claude/analyses/astra-video-row-2026-09-14.md`. No remote/queue/code changes.
 
 - **Sep 14 agreed follow-up:** run both PixArt-alpha 512 on GPU 2 after the current DiT and its evaluation, and ImageNet DiT seed 1 on GPU 3 after the U-Net and its evaluation. Rohan delegates implementation separately; this review does not alter queues. Target completion Sep 17–18, subject to measured throughput and shared-card headroom. PixArt uses two learned 4096-dimensional action/bucket tokens through the existing caption projection, unchanged timestep conditioning, zero-inflated context channels, native regenerated positions and the first four unpatchified output channels trained as velocity.
@@ -118,6 +120,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 
 ## 6. Open decisions (owner: Rohan)
 
+- Round5b: approve/reject conditional GPU3 video priority over an unstarted second seed; shared-v/L16 Open-Sora proposal supersedes native-epsilon/L8 default in the first-pass review. No queue edit authorized or executed by this review.
+
 - Sep14 night: adopt or reject gated Open-Sora1.1 exploratory video row and its additional card-hour budget; current queue remains authoritative. Stop new video-model engineering after Sep22 if trainer/evaluator is not operational.
 
 - **Sep 14 literature follow-up:** choose the claim before the extra run: repeatability of the existing two packages (seed1), sensitivity to broader transformer pretraining (recommended Alpha512 third row), or native video modeling (Open-Sora1.1, separate temporal-context and compute design). No single run isolates architecture/pretraining/context simultaneously. New larger-model inventory supersedes the earlier incomplete survey; do not claim no larger transformer exists in SD1.x latent space.
@@ -142,6 +146,8 @@ The mid-October target in the semester plan does not match any of the NeurIPS wo
 6. Whether the multi-game stretch belongs in this paper at all (recommendation: future work).
 
 ## 7. What changed (log; newest first)
+
+- **2026-09-14 round5b: revised video-row proposal (goal1):** Open-Sora1.1 remains first, SkyReels-V2 DF1.3B becomes runner-up; adopt shared VP-v/no variance and try L16 only if full throughput/evaluation gate fits (else L8). Gate-passed video now outranks unstarted seed1 for the expanded research goal: proposed GPU3 after U-Net, seed behind PixArt GPU2; no gate means existing seed starts, no idle reservation. No queue changes made. Native Matrix-Game2 tree has inference but no verified world-model training path. Updated `.claude/analyses/astra-video-row-2026-09-14.md` records forecasts as subjective, token-cost arithmetic, objective correction and conditional priority.
 
 - **2026-09-14 night: Astra reviewed a video-pretrained row (goal1; proposal):** preserve PixArt and seed1; prototype Open-Sora 1.1 stage3 as a separate video-pretrained system row (8 decision-frame context, one target, native epsilon DDPM, same SD VAE), then use a released card only after fit and full-evaluation timing gates. Up to 36 training + 36 evaluation card-hours proposed, not allocated. Wan1.3B is runner-up; Cosmos2.5 is the Cosmos-specific alternative. The observed gap does not establish pretraining causality. Correct Cosmos1 CV8x8x8 temporal factor to 8; Cosmos2 video tokenizer and Cosmos2.5 Wan-family setup use factor4. Detailed verified sources, estimates, action-alignment and Sep22 stop gate: `.claude/analyses/astra-video-row-2026-09-14.md`. No remote/queue/code changes.
 
