@@ -217,3 +217,120 @@ CogVideoXPipeline: OK (diffusers.pipelines.cogvideo.pipeline_cogvideox)
 - Wan2.1-T2V-1.3B actual training speed under our recipe.
 - That any of the diffusers imports correspond to working *training* pipelines ("Successful imports are not verified training pipelines").
 - The premise that pretraining exposure causes the 030/031 gap — Astra explicitly retracts this as unestablished, and denies that video initialization is documented for *every* strong transformer world model.
+
+## Turn 3 — round 5b
+
+### Reply 3a — the five points
+
+**You changed my mind on the objective and conditional queue priority. I still pick Open-Sora, with SkyReels DF now the runner-up.** My reason is the probability of obtaining an interpretable, fully evaluated result before the deadline—not a belief that Open-Sora has the strongest prior.
+
+**1. Prior strength versus control**
+
+If forced to forecast, conditional on successful adaptation:
+
+| Model | Subjective central guess: PSNR / LPIPS |
+|---|---:|
+| Open-Sora 1.1 | **20.3 dB / 0.33** |
+| SkyReels DF 1.3B | **20.7 dB / 0.30** |
+
+These are **judgment calls, not literature-derived predictions**; uncertainty is at least ±1 dB and ±0.05 LPIPS. I expect the Wan lineage to have a better chance of clearing the cited **20.5 / 0.324** reference, especially on LPIPS, but that reference is an intermediate U-Net checkpoint. Stronger perceptual priors do not reliably translate into higher paired PSNR.
+
+The shared PixArt lineage is substantive, but it does **not isolate video pretraining exactly**: our PixArt is 512, Open-Sora's ancestor is PixArt-alpha-1024, and temporal blocks, masking and conditioning differ. It makes the experiment easier to interpret; it does not settle the scientific question.
+
+I also disagree that an intermediate result says little: "this accessible video-pretrained package did not overcome the U-Net under this adaptation budget" is useful, provided we establish adequate adaptation. An obviously undertrained row would say little.
+
+For your stronger-prior option, I verified the [SkyReels DF 1.3B diffusers config](https://huggingface.co/Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers/blob/main/transformer/config.json): **30 layers, 16 input/output channels, `(1,2,2)` patches**, `inject_sample_info=true`, `num_frame_per_block=1`. It uses **`SkyReelsV2Transformer3DModel`**, so preserve its sample-information and per-frame timestep interface.
+
+In the current [Matrix-Game-2 release](https://github.com/SkyworkAI/Matrix-Game/tree/main/Matrix-Game-2), I found inference pipelines and model modules, **no world-model training entry point or training configuration**. That removes it from my ready-to-run ranking.
+
+**2. Objective: you are right**
+
+Use our **shared VP v-loss**, retain the first four channels **after unpatchification**, and disable variance loss.
+
+There is no structural entanglement with learned variance that requires retaining native epsilon training. My earlier recommendation overvalued native-objective fidelity while unnecessarily weakening this comparison. I have **no defensible numerical estimate** of a penalty from epsilon-to-v adaptation.
+
+The PixArt overfit result establishes that this conversion can learn; it does not establish held-out performance. Nevertheless, it is sufficient evidence to choose the already-tested shared objective.
+
+**3. Context: eight was a budget choice**
+
+For one target following \(L\) context frames:
+
+| Context | Video tokens | Approximate projection/MLP cost relative to L8 |
+|---|---:|---:|
+| L8 | `9 × 16 × 20 = 2,880` | 1× |
+| L16 | `17 × 16 × 20 = 5,440` | 1.89× |
+| L32 | `33 × 16 × 20 = 10,560` | 3.67× |
+
+**Yes, I would run L16 if timing permits.** Choose L16 versus L8 from resource measurements before training, not test performance.
+
+My unverified L8 throughput estimate scales to approximately **0.042–0.106 updates/s at L16**, implying **26–66 hours for 10k updates**. Therefore L16 is conditional, not a free improvement.
+
+Your Wan L16 has the same **5,440 tokens** when raw-tic compression yields one latent per decision. Temporal compression gives no token-count discount relative to SD decision-frame latents. Additionally, full attention forms **29.6M scores/head**, versus approximately **1.83M** for Open-Sora's factorized spatial-plus-temporal attention at this shape—a **16.1× score-count difference**, not a 16.1× runtime prediction.
+
+**4. Scheduling: a gate-passed video row now outranks the unstarted seed**
+
+Given the expanded question, my priority is:
+
+**Original-pair evaluation → PixArt → gate-passed video row → second seed.**
+
+The video row tests a substantially different explanation; the second seed measures repeatability of an already persistent gap. I would therefore recommend **GPU 3 for video after the U-Net**, and **seed 1 behind PixArt on GPU 2**, provided the prototype is ready for its one-hour GPU gate when GPU 3 releases.
+
+If it is not ready, let seed 1 start. Do not hold the card idle, and do not interrupt an underway seed merely because the prototype becomes ready later. This is a revised recommendation; I have not changed the queue.
+
+**5. Cosmos, in three sentences**
+
+Cosmos-Predict2's verified **32.54 GB** figure is inference memory; conventional full fine-tuning needs roughly **32 GB of parameter/gradient/Adam state before activations**, so one-A6000 training remains unverified. Its published Bridge recipe uses **two processes** and embeds a flattened action trajectory through timestep/adaLN MLPs, so neither changing `nproc_per_node` nor replacing action dimensions demonstrates a working Doom adaptation. It becomes my pick if the intended resolution/context passes a **single-A6000 optimizer-step and rollout benchmark**, its action interface passes the Doom timing/control checks, and measured completion prospects beat the alternatives.
+
+**Cheap causal test**
+
+No cheap test fully identifies the cause of the original U-Net/DiT gap. A **1k-update PixArt pretrained-versus-random-initialization comparison**, holding architecture, batches, noise and optimizer fixed, would isolate the short-budget benefit of its initialization package; reuse the scheduled pretrained run's 1k checkpoint and spend roughly **21 minutes at 0.8 updates/s**, plus overhead, on the random branch. It would not isolate pretraining *quantity* from content/objective or establish the 90k ranking.
+
+My revised design is:
+
+| Item | Revised proposal |
+|---|---|
+| Checkpoint | Open-Sora 1.1 STDiT-v2-stage3 |
+| Data / VAE | Existing decision-frame SD latents and decoder |
+| Context | **L16 if timed gate passes; otherwise L8**; one target |
+| Conditioning | Latest action only; zero-initialized `30×1152` table on target tokens; native null caption and clean-prefix mask |
+| Objective | **Shared VP v-MSE; no variance loss** |
+| Optimization | Full fine-tune; lr `2e-5`, warmup `500`, wd `0`, clip `1`; microbatch `1`, accumulation `8`; bf16 autocast/fp32 master; checkpointing |
+| Budget | 10k updates or 36 training hours; reserve 36 evaluation hours |
+| L16 resource estimate | **24–40 GiB; 0.042–0.106 updates/s—unverified** |
+| Evaluation | Shared DDIM50, eta0, no CFG; same raw targets and rollout protocol |
+| Placement | GPU3 before unstarted seed **only after gates**; seed behind PixArt |
+| Stop | No operational trainer/evaluator by Sep22: omit video row |
+
+**Video candidates:** Open-Sora 1.1 > SkyReels DF 1.3B > Wan2.1-T2V-1.3B > Cosmos-Predict2.5-2B > Cosmos-Predict2-2B; Matrix-Game2 pending a verified training path.
+**Video versus seed:** gate-passed video > unstarted second seed; second seed > an ungated video reservation.
+
+### Reply 3b — push on point 1 (expected-value decomposition)
+
+**(a)** My subjective estimates—not calibrated probabilities—are **P(complete | Open-Sora) = 0.80** and **P(complete | SkyReels DF) = 0.60**, including full evaluation by Sep 22.
+
+**(b)** Against the cited U-Net LPIPS **0.324**, conditional on completion: **P(beat | Open-Sora) = 0.40** and **P(beat | SkyReels DF) = 0.60**. These concern that reference, not the unknown final U-Net result.
+
+**(c)** Open-Sora: **0.80 × 0.40 = 0.32**. SkyReels: **0.60 × 0.60 = 0.36**. **SkyReels wins narrowly; I change my pick to SkyReels DF 1.3B.** My previous ranking implicitly required its completion probability to be below **53.3%**; I cannot currently justify that. A failed one-A6000 full-update gate at the intended shape would reverse this preference.
+
+**Lineage:** It is a secondary interpretability benefit, **not load-bearing**; my previous preference rested on a completion advantage that these explicit estimates do not justify.
+
+### Reply 3c — revised design under the new pick
+
+| Item | Revised primary: SkyReels-V2 DF 1.3B |
+|---|---|
+| Checkpoint | `Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers`; retain its native temporal attention and per-frame timestep/sample-information interface. |
+| **VAE decision** | **Re-encode raw tics through the checkpoint's Wan VAE. Do not reuse SD latents.** Encode verified action-aligned chains: one initial frame, then four-tic groups; each subsequent latent step corresponds to one held-action interval. Verify causal encoding, decoder endpoint alignment and reset behavior. |
+| Encoding cost before Wednesday | Read **202 GB** of raw data; approximately **43 GB** of fp16 latent payload, excluding metadata/overlap. Stream shards through A4000 workers. Encoding **4.21M frames in 24–48 hours requires 49–25 raw frames/s aggregate**; actual throughput is **unverified**. Encoding and alignment checks must finish before launch. |
+| Comparability cost | Different VAE, temporal representation and additional intermediate training frames. This is an **exploratory system comparison**, not a controlled backbone row. Report raw-pixel metrics, per-row reconstruction references and encoding/training costs separately. |
+| Context and tokens | **L16 if timed gate passes, otherwise L8**; one target latent. At padded 256×320 resolution: `B×16×17×32×40`, **5,440 tokens**; L8 gives **2,880 tokens**. |
+| Action conditioning | **Latest-only for this row:** zero-initialized `Embedding(30,1536)` added to target-frame tokens; zero action injection on history. The latest action controls all four target tics. Per-frame historical-action injection remains a separate information-changing ablation. |
+| Objective | **Shared VP v-MSE**, uniform 1,000 timesteps, linear betas `1e-4→0.02`; target-only loss, **no variance loss**. Retain all **16 output channels**. This deliberately converts the native flow predictor to VP-v; convergence is unverified. |
+| Context conditioning | Clean prefix at the native zero-noise conditioning setting; target at the VP timestep. Clamp prefix throughout sampling and verify timestep mapping. Cache native null-text conditioning. |
+| Optimization | Full fine-tune; AdamW **lr `2e-5`, warmup `500`, wd `0`, clip `1`**; bf16 autocast/fp32 master and optimizer; checkpointing; microbatch **1**, accumulation **8**. |
+| Training / evaluation budget | **10k updates, maximum 36 training card-hours**; reserve **36 evaluation card-hours**. Shared DDIM50, eta0, no CFG; decode and score decision endpoints using the existing raw-pixel evaluation protocol. |
+| **One-A6000 gate / reversion** | Require finite real-data loss/gradients, action-dependent updates, checkpoint roundtrip, and **no OOM after Adam-state allocation within actual free VRAM**. Require **≥0.0772 optimizer updates/s** and timed-rollout extrapolation placing full evaluation within **36 hours**. Test L16, then L8; **failure at both reverts the recommendation to Open-Sora, subject to its own gate**. Memory and throughput remain unmeasured. |
+| Placement | **GPU 3 after U-Net evaluation and successful gates**; move the unstarted seed behind PixArt on GPU 2. If the prototype is not ready when GPU 3 releases, retain the seed schedule rather than reserve an idle card. |
+| Stop rule | **Sep 22:** without an operational, validated trainer and evaluator, omit the video row; do not begin another checkpoint migration. |
+
+**Video candidates:** SkyReels DF 1.3B > Open-Sora 1.1 > Wan2.1-T2V-1.3B > Cosmos-Predict2.5-2B > Cosmos-Predict2-2B; Matrix-Game2 pending a verified training path.
+**Video versus seed:** gate-passed video > unstarted second seed; second seed > an ungated video reservation.
