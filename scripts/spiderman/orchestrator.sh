@@ -4,7 +4,7 @@
 #  2. keep the post-run waiters alive (after_run2.sh) and start waiters for pixart and seed 1 once their logs exist;
 #  3. keep the Wan-VAE encode chain alive; start a second encoder on GPU 2 for the reversed pilot list once the fit checks are done;
 #  4. launch the SkyReels row when its gates pass: encode chain done, a fit check that finished with peak_mem_gb <= 40 (throughput is
-#     logged, not gated, because the fit checks share GPU 2 with the DiT; Claude judges the 36-hour budget on Wednesday) (L16 preferred, else L8), the null prompt present, and a GPU (3 preferred, then 2) with at least 30 GB free.
+#     logged, not gated, because the fit checks share GPU 2 with the DiT; Claude judges the 36-hour budget on Wednesday) (L8 preferred, else L16), the null prompt present, and a GPU (3 preferred, then 2) with at least 30 GB free.
 # Everything it does is appended to logs/orchestrator.log. State lives in state/.
 D=/sata2/data/rnagabhi/doom; LOG=$D/logs/orchestrator.log; mkdir -p $D/state
 say() { echo "$(date -Iseconds) $*" >> $LOG; }
@@ -14,7 +14,7 @@ started() { [ -f $D/results_spiderman/$1/log.jsonl ]; }
 evaldone() { grep -q AFTER_RUN_DONE $D/logs/$1_rollout.log 2>/dev/null; }
 free_mb() { nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits -i $1 | awk -F, '{print $2-$1}'; }
 fit_ok() { # prints "L OBJ" of the best passing fit check, or nothing
-  for cfg in "16 flow" "8 flow"; do set -- $cfg
+  for cfg in "8 flow" "16 flow"; do set -- $cfg   # L8 first: the L16 check ran at 0.032 updates/s next to the DiT, over the 36 h budget
     f=$D/logs/fit_video_$1_$2.log; [ -f $f ] || continue
     line=$(grep '"event": "fit_check"' $f | tail -1); [ -n "$line" ] || continue
     ok=$(echo "$line" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(int(d['peak_mem_gb']<=40 and d['steps_per_s']>0))")
