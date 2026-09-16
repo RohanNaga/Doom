@@ -218,3 +218,5 @@ results
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .DS_Store
+paper/results_mirror/
+paper/figures/*.png
