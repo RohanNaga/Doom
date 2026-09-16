@@ -1,6 +1,7 @@
 #!/bin/bash
 # PixArt-alpha 512 third row on the corrected data, identical recipe to 030/031/032. Runs once; safe to call repeatedly. Usage: launch_pixart.sh <gpu>
 GPU=${1:?gpu}; D=/sata2/data/rnagabhi/doom; R=$D/results_spiderman/033-pixart-l32-aligned
+export TMPDIR=/sata2/data/rnagabhi/doom/tmp/tmpdir; mkdir -p $TMPDIR
 tmux has-session -t train-pixart 2>/dev/null && { echo "pixart alive"; exit 0; }
 [ -f $R/log.jsonl ] && grep -q "\"event\": \"end\"" $R/log.jsonl && { echo "pixart finished"; exit 0; }
 [ -f $R/log.jsonl ] && { CK=$(ls $R/[0-9]*.pt 2>/dev/null | sort | tail -1); RES=${CK:+--resume $CK}; } || RES=""

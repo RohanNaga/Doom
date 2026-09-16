@@ -2,6 +2,7 @@
 # SkyReels-V2 DF 1.3B video-prior row (050), agreed design of Sep 14 night. Runs once; safe to call repeatedly; resumes from the last recovery checkpoint.
 # Usage: launch_video.sh <gpu> <context_frames> <objective>
 GPU=${1:?gpu}; L=${2:?context}; OBJ=${3:-flow}; D=/sata2/data/rnagabhi/doom; R=$D/results_spiderman/050-skyreels-l${L}-${OBJ}
+export TMPDIR=/sata2/data/rnagabhi/doom/tmp/tmpdir; mkdir -p $TMPDIR
 tmux has-session -t train-video 2>/dev/null && { echo "video alive"; exit 0; }
 [ -f $R/log.jsonl ] && grep -q "\"event\": \"end\"" $R/log.jsonl && { echo "video finished"; exit 0; }
 [ -f $R/log.jsonl ] && { CK=$(ls $R/[0-9]*.pt 2>/dev/null | sort | tail -1); RES=${CK:+--resume $CK}; } || RES=""

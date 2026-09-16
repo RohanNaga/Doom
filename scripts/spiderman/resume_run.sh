@@ -2,6 +2,7 @@
 # Resume a corrected run from its newest recovery checkpoint if its tmux session died before the end event.
 # Usage: resume_run.sh <run> <backbone> <gpu>. Safe to call repeatedly: does nothing while the run is alive or finished.
 RUN=$1; BB=$2; GPU=$3; D=/sata2/data/rnagabhi/doom; R=$D/results_spiderman/$RUN
+export TMPDIR=/sata2/data/rnagabhi/doom/tmp/tmpdir; mkdir -p $TMPDIR
 SESSION=$([ "$BB" = dit ] && echo train-dit || echo train-unet)
 tmux has-session -t $SESSION 2>/dev/null && { echo "$RUN alive"; exit 0; }
 grep -q "\"event\": \"end\"" $R/log.jsonl 2>/dev/null && { echo "$RUN finished"; exit 0; }
