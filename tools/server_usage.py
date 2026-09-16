@@ -25,7 +25,8 @@ SERVERS = {
                             "031-unet-l32-aligned": "/sata2/data/rnagabhi/doom/results_spiderman/031-unet-l32-aligned/log.jsonl",
                             "032-dit-l32-aligned-seed1": "/sata2/data/rnagabhi/doom/results_spiderman/032-dit-l32-aligned-seed1/log.jsonl",
                             "033-pixart-l32-aligned": "/sata2/data/rnagabhi/doom/results_spiderman/033-pixart-l32-aligned/log.jsonl",
-                            "050-skyreels-l8-flow": "/sata2/data/rnagabhi/doom/results_spiderman/050-skyreels-l8-flow/log.jsonl"},
+                            "050-skyreels-l8-flow": "/sata2/data/rnagabhi/doom/results_spiderman/050-skyreels-l8-flow/log.jsonl",
+                            "034-unidiffuser-l32-aligned": "/sata2/data/rnagabhi/doom/results_spiderman/034-unidiffuser-l32-aligned/log.jsonl"},
                       rule="shared, no posted rule", gpu_note="4x RTX A6000 48 GB"),
 }
 OUR_USERS = {"rohan", "rnagabhi"}
