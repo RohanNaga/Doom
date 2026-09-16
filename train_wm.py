@@ -238,9 +238,10 @@ def main(args):
     step, t0, tokens = start_step, time.time(), 0
     running, grad_norms = [], []
     skipped = int(ck.get("skipped", 0)) if args.resume else 0
-    # probe tensors: input projection, output layer, and adaLN modulation of the first, middle, and last DiT blocks (or U-Net analogues)
+    # probe tensors: input projection, output layer, and adaLN modulation of the first, middle, and last DiT blocks (or U-Net / U-ViT analogues)
     want = ["x_embedder.proj.weight", "final_layer.linear.weight", "blocks.0.adaLN_modulation.1.weight", "blocks.14.adaLN_modulation.1.weight",
-            "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight"]
+            "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight",
+            "vae_img_in.proj.weight", "vae_img_out.weight", "transformer_mid_block.attn1.to_q.weight"]
     probe_params = [(n, p) for n, p in raw.named_parameters() if any(n.endswith(w) for w in want)]
     probe_names = [n for n, _ in probe_params]
     probe_prev = {n: torch.empty_like(p.detach()) for n, p in probe_params}
@@ -347,7 +348,7 @@ def main(args):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--backbone", choices=["dit", "unet", "pixart"], required=True)
+    p.add_argument("--backbone", choices=["dit", "unet", "pixart", "unidiffuser"], required=True)
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
@@ -356,7 +357,7 @@ if __name__ == "__main__":
     p.add_argument("--split", default="data/split_arnold.json")
     p.add_argument("--results-dir", default="results/fit_check")
     p.add_argument("--warm-start", default=None,
-                   help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path")
+                   help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path; UniDiffuser: thu-ml/unidiffuser-v1 repo or path")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--global-batch", type=int, default=32)
     p.add_argument("--per-gpu-batch", type=int, default=4)

@@ -55,7 +55,7 @@ def backbone_source(args):
     The DiT is built from local code, so it needs nothing; the diffusers backbones must be
     instantiated from the same repo they were trained from before the checkpoint is loaded.
     """
-    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path}[args.backbone]
+    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path, "unidiffuser": args.unidiffuser_path}[args.backbone]
 
 
 @torch.no_grad()
@@ -186,13 +186,14 @@ def do_score(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--rollout", action="store_true"); p.add_argument("--score", action="store_true")
-    p.add_argument("--ckpt"); p.add_argument("--backbone", choices=["dit", "unet", "pixart"]); p.add_argument("--use-ema", action="store_true")
+    p.add_argument("--ckpt"); p.add_argument("--backbone", choices=["dit", "unet", "pixart", "unidiffuser"]); p.add_argument("--use-ema", action="store_true")
     p.add_argument("--context-frames", type=int, default=32); p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10); p.add_argument("--infer-noise", type=float, default=0.0); p.add_argument("--train-noise-max", type=float, default=0.7)
     p.add_argument("--latents-dir"); p.add_argument("--split"); p.add_argument("--subset", default="val")
     p.add_argument("--num-rollouts", type=int, default=256); p.add_argument("--horizon", type=int, default=64)
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--steps", type=int, default=50); p.add_argument("--eta", type=float, default=0.0)
     p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4"); p.add_argument("--pixart-path", default="PixArt-alpha/PixArt-XL-2-512x512")
+    p.add_argument("--unidiffuser-path", default="thu-ml/unidiffuser-v1")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out")
     p.add_argument("--rollouts"); p.add_argument("--idm", default=""); p.add_argument("--vae-path", default="")

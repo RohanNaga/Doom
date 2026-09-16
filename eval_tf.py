@@ -46,7 +46,7 @@ def backbone_source(args):
     The DiT is built from local code, so it needs nothing; the diffusers backbones must be
     instantiated from the same repo they were trained from before the checkpoint is loaded.
     """
-    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path}[args.backbone]
+    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path, "unidiffuser": args.unidiffuser_path}[args.backbone]
 
 
 def load_model(args, device):
@@ -154,7 +154,7 @@ def main(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True)
-    p.add_argument("--backbone", choices=["dit", "unet", "pixart"], required=True)
+    p.add_argument("--backbone", choices=["dit", "unet", "pixart", "unidiffuser"], required=True)
     p.add_argument("--use-ema", action="store_true")
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
@@ -174,6 +174,7 @@ if __name__ == "__main__":
     p.add_argument("--vae-path", default="", help="fine-tuned VAE directory; default sd-vae-ft-mse")
     p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4")
     p.add_argument("--pixart-path", default="PixArt-alpha/PixArt-XL-2-512x512")
+    p.add_argument("--unidiffuser-path", default="thu-ml/unidiffuser-v1")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--save-images", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)
