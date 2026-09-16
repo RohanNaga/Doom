@@ -3,7 +3,17 @@
 > Updated 2026-09-01 (evening, after the kickoff session). Entry point for every new chat in this repo.
 > Read order: this file → `REQUIREMENTS.md` (what done means for the CoRL paper) → `.claude/analyses/DOOMDIT_AGENT_CONTEXT.md` (dense technical brief, verified against code July 15) → `.claude/analyses/doomdit-full-recap-2026-07.md` (full recap: literature through July 2026, venues, robotics extension) → `IDEAS.md` (scenario-latent skill files).
 
-## 0. Where we are going now (as of Sep 1, 2026)
+## 0. Where we are going now (as of Sep 16, 2026; older bullets below are history)
+
+**Framing (decided with Rohan, Sep 16).** The paper is a warm-start study for small-budget world models, with Doom as the testbed, delivered on the first open reproducible Doom benchmark. Headline: pretraining exposure in the target latent space, not architecture, predicts small-budget Doom world-model quality. Supporting findings: (a) map transfer, where the U-Net's advantage concentrates on the maps it trained on and the transformer gives back less on unseen maps (two maps today, 17 once the new corpus is scored); (b) evaluation, where every model falls to or below the frozen-seed persistence reference perceptually by horizon 64, so long-horizon metrics need persistence references. Explicitly not claimed: first DiT for Doom (PlayGen 2024), LPIPS parity with GameNGen, "stable dynamics", "superior generalization", pretraining as the proven cause. General lessons for small-budget single-environment world models go in the conclusion: pick the warm start by exposure to your latent space; architecture is second-order at this budget; report rollouts against persistence; measure transfer to unseen scenes.
+
+**Rows under one recipe** (90k updates, batch 32, lr 5e-5, warmup 2000, context 32, v-prediction, SD KL-f8 latents): DiT-XL/2 ImageNet (two seeds, done), SD 1.4 U-Net (done), PixArt-alpha 512 (done, evaluating Sep 16), UniDiffuser v1 (LAION-2B transformer in our latent space; build started Sep 16, train Sep 17 on GPU 2, the fourth exposure point), video-pretrained SkyReels-V2 DF 1.3B in its own autoencoder (exploratory, 10k updates of batch 8, running on GPU 3, due Sep 17 morning). Compute-matched 2.5k-update runs of the image rows (80k samples) queue behind PixArt's evaluation on GPU 2.
+
+**Audits in flight (Sep 16):** motion-magnitude test of the rollouts (stable vs static); 15-map unseen corpus (Freedoom maps 18 to 32, 10 seeded episodes each) for zero-shot transfer scoring of every finished row; compute-matched short runs. Done: blur control, late-drop audit, episode-level bootstrap CIs, trajectory identity check.
+
+**Timeline:** PixArt numbers Sep 16 night; video row and 17-map scores Sep 17; UniDiffuser trained by Sep 19 and evaluated Sep 20; draft Sep 20 (skeleton being written under paper/); final Sep 28; deadline Sep 30 AoE. Release: dataset shards and weights under Rohan's Hugging Face account before the final.
+
+**Open for Rohan:** Hugging Face account for the release; whether to commit Superman cards; human study (deferred; likely skipped).
 
 - **Sep 16 Astra round 7 (independent proposal):** lead with a reproducible multi-map Freedoom benchmark and persistence/motion diagnosis; prioritize one bounded audit of existing paired rollouts over another model or map-training pair. Higher h64 PSNR does not establish better dynamics: both DiT seeds are near copy-seed and all completed models have worse h64 LPIPS. PlayGen already uses a DiT for Doom and action-aware evaluation, so retire older first-Doom-DiT language. Details and source checks: `.claude/analyses/astra-contribution-2026-09-16.md`. No experiment or queue change adopted here.
 
