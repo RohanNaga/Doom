@@ -334,3 +334,72 @@ My revised design is:
 
 **Video candidates:** SkyReels DF 1.3B > Open-Sora 1.1 > Wan2.1-T2V-1.3B > Cosmos-Predict2.5-2B > Cosmos-Predict2-2B; Matrix-Game2 pending a verified training path.
 **Video versus seed:** gate-passed video > unstarted second seed; second seed > an ungated video reservation.
+
+## Round 6 — paired results, first read
+
+**The blanket headline "no DiT advantage" no longer survives. The narrower claim does: no consistent advantage from replacing the U-Net under this adaptation recipe.** The DiT has a repeatable long-horizon PSNR advantage that belongs in the main result.
+
+**1. Claim wording and the stability question**
+
+I would write:
+
+> **Under a shared adaptation recipe, the SD-initialized U-Net achieves lower validation loss, lower seen-map perceptual error, and better rollout FVD than the ImageNet-initialized DiT. Across two DiT seeds, however, the transformer retains higher long-horizon PSNR and achieves higher unseen-map PSNR, revealing a metric-dependent tradeoff rather than a consistent backbone advantage.**
+
+The numerical support is specific:
+
+- **Seen teacher forcing:** U-Net LPIPS **0.270**, versus DiT **0.307–0.311**: an advantage of **0.037–0.041**. Its PSNR advantage is only **0.15–0.30 dB**.
+- **At horizon 64:** DiT PSNR **17.68–18.30**, versus **16.03**: an advantage of **1.65–2.27 dB**. DiT also has slightly lower LPIPS: **0.550–0.553 versus 0.566**.
+- **Unseen maps:** DiT PSNR exceeds U-Net by **0.38–0.45 dB**, while LPIPS differences straddle zero: **0.442–0.450 versus 0.446**.
+- **Distributional rollout quality:** U-Net wins **both** FVD16 and FVD32. Its advantage is not confined to short horizons.
+
+Use this wording for the two qualifications:
+
+> **DiT predictions retain greater pixel fidelity over long rollouts; this does not establish more accurate dynamics or greater perceptual realism.**
+
+> **DiT improves unseen-map PSNR without a consistent improvement in unseen-map LPIPS.**
+
+Do **not** call the horizon-64 difference "stability" yet. A blurry prediction can outperform a sharper but spatially displaced prediction on both PSNR and LPIPS.
+
+My single additional experiment is a **paired horizon-64 blur-control comparison**: apply Gaussian blur with σ **0, 0.5, 1, 2, 4 pixels** to each model's outputs, then recompute PSNR and LPIPS against the same targets; include **copy-seed** as the persistence reference.
+
+- If blurring U-Net closes the **1.65–2.27 dB** gap without worse LPIPS than DiT, the claimed PSNR advantage is reproducible through smoothing.
+- If DiT remains better across that comparison and beats copy-seed, simple smoothing/persistence does not explain the advantage.
+
+That tests the blur explanation within hours. It still does not certify physically correct dynamics.
+
+**2. Main table versus appendix**
+
+Keep both DiT seeds visible; do not summarize two seeds as a reliable estimate of training variance. This is the compact main table I would use, with PixArt added tonight:
+
+| Model | Seen TF PSNR↑ / LPIPS↓ | Unseen TF PSNR↑ / LPIPS↓ | Rollout PSNR@64↑ / LPIPS@64↓ | FVD16 / 32↓ | IDM↑ |
+|---|---:|---:|---:|---:|---:|
+| DiT seed 0 | 21.06 / .311 | 19.52 / .450 | 18.30 / .553 | 232 / 481 | .492 |
+| DiT seed 1 | 21.21 / .307 | 19.59 / .442 | 17.68 / .550 | 198 / 407 | .476 |
+| U-Net | 21.36 / .270 | 19.14 / .446 | 16.03 / .566 | 184 / 356 | .509 |
+
+Put the **PSNR and LPIPS horizon curves in one main-paper figure**. They reveal the tradeoff better than four PSNR columns.
+
+Put these in the appendix:
+
+- Full live/EMA teacher-forced results.
+- Per-horizon values, uncertainty estimates and action-group IDM results.
+- Reconstruction and persistence references; mention their headline values in the main caption/text.
+- Old grid-label checkpoints, explicitly labeled **historical, unmatched-step references**.
+
+State final validation losses **0.2139 / 0.2139 versus 0.2043** in the results paragraph. Give adaptation compute in the setup table.
+
+**3. Checks before printing**
+
+1. **Correct the seed-agreement statement.** "Within 0.15 dB and 0.004 LPIPS everywhere" is false. It holds for **seen live teacher forcing only**. At horizon 64 the seeds differ by **0.62 dB**; at horizon 8 by **0.20 dB and 0.017 LPIPS**; unseen LPIPS differs by **0.008**. FVD32 differs by **74**.
+
+2. **Audit the late seed-1 PSNR drop.** From horizon 32→64, DiT seed 0 drops **0.21 dB**, seed 1 drops **0.97 dB**, and U-Net drops **1.70 dB**. Inspect paired trajectory-level errors and the worst clips: determine whether a few failures drive the averages. This is the clearest unusual feature.
+
+3. **Compare EMA symmetrically.** U-Net EMA improves seen PSNR by **0.31 dB** and LPIPS by **0.020**; DiT EMA changes are much smaller. EMA-to-EMA LPIPS gaps are **0.054–0.056**. Keep the main table consistently live or consistently EMA—never select whichever favors each row—and label rollout weight selection explicitly.
+
+4. **Verify the identical losses.** Confirm both DiT evaluations loaded distinct checkpoint hashes and inspect unrounded losses. Equality at **0.2139** is plausible; it warrants a cheap provenance check.
+
+5. **Use paired episode-level uncertainty.** Windows within episodes are correlated. Bootstrap episodes for teacher forcing and respect episode grouping for rollouts. Until then, call unseen LPIPS **mixed**, not statistically equivalent, and report the small IDM advantage descriptively.
+
+6. **Check identical rollout sets, initialization and terminal handling.** Same trajectory IDs, context endpoints, actions, valid horizons and FVD preprocessing/sample counts across rows. Compute copy-seed on those exact rollouts.
+
+Nothing here supports "DiT loses at every metric." The defensible result is stronger and more interesting: **U-Net wins perceptual and distributional quality; DiT retains long-horizon pixel fidelity, with the mechanism still to be tested.**
