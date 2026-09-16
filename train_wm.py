@@ -189,6 +189,14 @@ def main(args):
     raw = acc.unwrap_model(model)
     if args.resume and "optimizer" in ck:
         opt.load_state_dict(ck["optimizer"]); sched.load_state_dict(ck["scheduler"])
+        # a resume may deliberately change the learning rate (a diagnosed excursion, logged as a recipe deviation); the restored
+        # optimizer state carries the old lr and initial_lr, and LambdaLR scales initial_lr, so both must be overridden
+        old_lr = ck["optimizer"]["param_groups"][0].get("initial_lr", ck["optimizer"]["param_groups"][0]["lr"])
+        if abs(old_lr - args.lr) > 1e-12:
+            for g in opt.param_groups:
+                g["initial_lr"] = args.lr; g["lr"] = args.lr * sched.lr_lambdas[0](sched.last_epoch)
+            sched.base_lrs = [args.lr for _ in sched.base_lrs]
+            print(f"resume overrides learning rate {old_lr:g} -> {args.lr:g} (recipe deviation)")
     ema = [p.detach().float().cpu().clone() for p in raw.parameters()] if args.ema_every > 0 else None
     if args.resume and ema is not None and "ema" in ck:
         for e, (k, _) in zip(ema, raw.state_dict().items()):
