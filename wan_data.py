@@ -70,6 +70,12 @@ def list_episodes(latents_dir):
     return out
 
 
+def episode_name(e):
+    """Canonical episode name for an id from a split file: 7 -> "ep_00007", "7" -> "ep_00007", "ep_00007" unchanged."""
+    s = str(e)
+    return f"ep_{int(s):05d}" if s.isdigit() else s
+
+
 def make_split(episode_names, holdout_frac=0.1, seed=0):
     """Episode-level split. Splitting by window would leak: neighbouring windows in one chain
     share all but one context frame."""
@@ -126,7 +132,9 @@ class WanWindowDataset(Dataset):
         self.context_frames = context_frames
         self.normalize = normalize
         self.allow_lone_context = allow_lone_context
-        keep = None if episode_ids is None else {str(e) for e in episode_ids}
+        # split files carry integer episode ids (split_arnold.json) while encode_wan.py names files by
+        # parquet basename (ep_00000); accept both spellings
+        keep = None if episode_ids is None else {episode_name(e) for e in episode_ids}
 
         self.episodes = []          # (name, mmap latents, action array, is_lone array)
         starts, mean, std = [], None, None
