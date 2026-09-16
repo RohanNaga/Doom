@@ -9,5 +9,5 @@ tmux has-session -t train-pixart 2>/dev/null && { echo "pixart alive"; exit 0; }
 cd $D/repo && git pull -q
 COMMON="--context-frames 32 --num-actions 29 --global-batch 32 --lr 5e-5 --warmup 2000 --clip 1.0 --steps 90000 --seed 0 --action-dropout 0.0 --require-verified-transitions --latents-dir $D/latents_arnold_aligned --split $D/split_arnold.json --val-every 1000 --val-windows 1024 --ckpt-every 5000 --snapshot-every 5000 --keep-last 2 --num-workers 4"
 echo "$(date -Iseconds) launching pixart on gpu $GPU $RES" >> $D/logs/resumes.log
-tmux new-session -d -s train-pixart "cd $D/repo && HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES=$GPU ~/miniconda3/envs/doom/bin/python train_wm.py --backbone pixart --per-gpu-batch 32 --warm-start PixArt-alpha/PixArt-XL-2-512x512 --hf-cache $D/hf/hub --results-dir $R $COMMON $RES >> $D/logs/train_pixart.log 2>&1"
+tmux new-session -d -s train-pixart "cd $D/repo && TMPDIR=/sata2/data/rnagabhi/doom/tmp/tmpdir HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES=$GPU ~/miniconda3/envs/doom/bin/python train_wm.py --backbone pixart --per-gpu-batch 32 --warm-start PixArt-alpha/PixArt-XL-2-512x512 --hf-cache $D/hf/hub --results-dir $R $COMMON $RES >> $D/logs/train_pixart.log 2>&1"
 echo "pixart launched on gpu $GPU"

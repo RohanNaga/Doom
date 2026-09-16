@@ -8,5 +8,5 @@ tmux has-session -t train-dit-seed1 2>/dev/null && { echo "seed1 alive"; exit 0;
 cd $D/repo && git pull -q
 COMMON="--context-frames 32 --num-actions 29 --global-batch 32 --lr 5e-5 --warmup 2000 --clip 1.0 --steps 90000 --seed 1 --action-dropout 0.0 --require-verified-transitions --latents-dir $D/latents_arnold_aligned --split $D/split_arnold.json --val-every 1000 --val-windows 1024 --ckpt-every 5000 --snapshot-every 5000 --keep-last 2 --num-workers 4 --grad-ckpt"
 echo "$(date -Iseconds) launching seed1 on gpu $GPU $RES" >> $D/logs/resumes.log
-tmux new-session -d -s train-dit-seed1 "cd $D/repo && CUDA_VISIBLE_DEVICES=$GPU ~/miniconda3/envs/doom/bin/python train_wm.py --backbone dit --per-gpu-batch 32 --warm-start $D/weights/DiT-XL-2-256x256.pt --results-dir $R $COMMON $RES >> $D/logs/train_dit_seed1.log 2>&1"
+tmux new-session -d -s train-dit-seed1 "cd $D/repo && TMPDIR=/sata2/data/rnagabhi/doom/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU ~/miniconda3/envs/doom/bin/python train_wm.py --backbone dit --per-gpu-batch 32 --warm-start $D/weights/DiT-XL-2-256x256.pt --results-dir $R $COMMON $RES >> $D/logs/train_dit_seed1.log 2>&1"
 echo "seed1 launched on gpu $GPU"

@@ -11,5 +11,5 @@ CK=$(ls $R/[0-9]*.pt 2>/dev/null | sort | tail -1)
 COMMON="--context-frames 32 --num-actions 29 --global-batch 32 --lr 5e-5 --warmup 2000 --clip 1.0 --steps 90000 --seed 0 --action-dropout 0.0 --require-verified-transitions --latents-dir $D/latents_arnold_aligned --split $D/split_arnold.json --val-every 1000 --val-windows 1024 --ckpt-every 5000 --snapshot-every 5000 --keep-last 2 --num-workers 4 --grad-ckpt --resume $CK"
 if [ "$BB" = dit ]; then ARGS="--backbone dit --per-gpu-batch 32 --warm-start $D/weights/DiT-XL-2-256x256.pt --results-dir $R"; else ARGS="--backbone unet --per-gpu-batch 16 --hf-cache $D/hf/hub --results-dir $R"; fi
 echo "$(date -Iseconds) resuming $RUN from $CK on gpu $GPU" >> $D/logs/resumes.log
-tmux new-session -d -s $SESSION "cd $D/repo && HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES=$GPU ~/miniconda3/envs/doom/bin/python train_wm.py $ARGS $COMMON >> $D/logs/train_${BB}_aligned.log 2>&1"
+tmux new-session -d -s $SESSION "cd $D/repo && TMPDIR=/sata2/data/rnagabhi/doom/tmp/tmpdir HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES=$GPU ~/miniconda3/envs/doom/bin/python train_wm.py $ARGS $COMMON >> $D/logs/train_${BB}_aligned.log 2>&1"
 echo "$RUN resumed from $CK"
