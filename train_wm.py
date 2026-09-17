@@ -272,10 +272,13 @@ def main(args):
                 continue
             gn = acc.clip_grad_norm_(model.parameters(), args.clip if args.clip > 0 else float("inf"))
             grad_norms.append(float(gn))   # pre-clip norm: the instability diagnostic that the loss alone hides
-            if not math.isfinite(float(gn)):
-                # gradients are DDP-averaged before clipping, so all ranks agree; skip the update without advancing the schedule
+            spike = args.skip_grad_norm > 0 and float(gn) > args.skip_grad_norm
+            if not math.isfinite(float(gn)) or spike:
+                # gradients are DDP-averaged before clipping, so all ranks agree; skip the update without advancing the schedule.
+                # A finite spike is skipped too when --skip-grad-norm is set: clipping bounds the gradient but not Adam's
+                # preconditioned step, and one such step froze the UniDiffuser mid-block attention twice (PaLM-style skip).
                 opt.zero_grad(set_to_none=True); skipped += 1
-                log(event="skipped_update", step=step, micro=micro, grad_norm=float(gn), skipped_total=skipped)
+                log(event="skipped_update", step=step, micro=micro, grad_norm=float(gn), threshold=args.skip_grad_norm, skipped_total=skipped)
                 if skipped > 20:
                     raise RuntimeError(f"{skipped} non-finite gradient updates; stopping before Adam state is corrupted")
                 continue
@@ -373,6 +376,7 @@ if __name__ == "__main__":
     p.add_argument("--wd", type=float, default=0.0)
     p.add_argument("--warmup", type=int, default=500)
     p.add_argument("--clip", type=float, default=1.0)
+    p.add_argument("--skip-grad-norm", type=float, default=0.0, help="skip the optimizer step when the pre-clip gradient norm exceeds this (0 = off; recipe deviation)")
     p.add_argument("--steps", type=int, default=90000)
     p.add_argument("--optim", choices=["adamw", "adamw8bit"], default="adamw")
     p.add_argument("--ema-every", type=int, default=8, help="0 disables the fp32 CPU EMA")
