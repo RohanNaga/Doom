@@ -18,9 +18,9 @@ Read cold by the monitor agent. Main session is stopped; only the monitor's fina
 | run | tmux | log.jsonl | stdout | GPU | budget | relaunch if dead |
 |---|---|---|---|---|---|---|
 | 050-skyreels-l8-flow | train-video | $D/results_spiderman/050-skyreels-l8-flow/log.jsonl | $D/logs/train_video.log | 3 | 10k updates, ~0.12/s, ends ~10:15 EDT Thu | `cd $D && MB=8 CKPT=1 bash launch_video.sh 3 8 flow` |
-| 034-unidiffuser-l32-aligned | train-unidiffuser | $D/results_spiderman/034-unidiffuser-l32-aligned/log.jsonl | $D/logs/train_unidiffuser.log | 2 | 90k updates, ~0.8/s, ends Fri | `cd $D && MB=32 LR=2.5e-5 bash launch_unidiffuser.sh 2` (never at 5e-5) |
+| 034-unidiffuser-l32-aligned | train-unidiffuser | $D/results_spiderman/034-unidiffuser-l32-aligned/log.jsonl | $D/logs/train_unidiffuser.log | 2 | 90k updates, ~0.8/s, ends Fri | `cd $D && MB=32 LR=1e-5 EXTRA="--skip-grad-norm 5" bash launch_unidiffuser.sh 2` (restored from 30k at 06:14 EDT Thu; never at a higher lr) |
 
-034's log.jsonl still holds stale pre-restore val lines at steps 8000/9000 (0.2426, 0.3198 flagged) ahead of the post-restore lines; ignore val lines whose step is out of order with the file's tail.
+034's log.jsonl was truncated to step 30000 at the second restore; a `skipped_update` event is the spike guard working, not an incident (note it, no action). A third excursion is critical: end the night with the report.
 
 - Dead: no `"event": "end"` line and (tmux session gone or log.jsonl mtime older than 45 min). Read the last 30 lines of the stdout log, relaunch with the command above (launchers resume from the last recovery checkpoint), verify on the next tick that the session exists and the log grew; record the cause. Relaunch failure or no growth is critical.
 - Ended: end event present. Record final and best val loss, write `<S>/reported_<run>.txt`, start no evaluation, do not relaunch.
