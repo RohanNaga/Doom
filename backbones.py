@@ -168,9 +168,11 @@ class PixArtWorldModel(nn.Module):
 
         # fixed table for our 16x20 token grid, built the way PatchEmbed would build it at runtime
         grid = (LATENT_HW[0] // patch.patch_size, LATENT_HW[1] // patch.patch_size)
-        # diffusers < 0.32 returns numpy here and has no output_type argument; torch.as_tensor covers both
+        # diffusers < 0.32 returns numpy and has no output_type argument; >= 0.33 raises unless output_type="pt"
+        import inspect
+        extra = {"output_type": "pt"} if "output_type" in inspect.signature(diffusers_pos_embed).parameters else {}
         pe = torch.as_tensor(diffusers_pos_embed(patch.pos_embed.shape[-1], grid, base_size=patch.base_size,
-                                                 interpolation_scale=patch.interpolation_scale))
+                                                 interpolation_scale=patch.interpolation_scale, **extra))
         patch.register_buffer("pos_embed", pe.float().unsqueeze(0), persistent=False)
         patch.height, patch.width = grid
 
