@@ -1,6 +1,6 @@
 """CPU gates for `backbones.SD35WorldModel`, run before the row is given any GPU time.
 
-Six checks, all on the CPU and all reporting a number rather than a pass/fail word:
+Seven checks, all on the CPU and all reporting a number rather than a pass/fail word:
 
 1. `parity`    the wrapper with zero context channels against the pretrained transformer on the
                same 16-channel target and the same conditioning tensors. Max abs diff must be
@@ -17,7 +17,9 @@ Six checks, all on the CPU and all reporting a number rather than a pass/fail wo
                reload into a fresh wrapper with no missing or unexpected keys.
 5. `shapes`    rectangular-grid bookkeeping: 16x20 tokens in, (B, 16, 32, 40) out, the positional
                crop offsets, and the parameter count.
-6. `encode`    `encode_parquet.py`'s 16-channel path: the normalisation `(z - shift) * scale` and
+6. `ckpt`      the same window and noise with activation checkpointing on and off; the loss and
+               every gradient must be identical, because the row will train with it on.
+7. `encode`    `encode_parquet.py`'s 16-channel path: the normalisation `(z - shift) * scale` and
                its inverse, the (16, 32, 40) shape, and `doom_data.LatentWindowDataset` reading
                the per-episode files back. Uses a randomly initialised autoencoder, so its PSNR
                is meaningless on purpose; the real number comes from `--decode-check` on a real
@@ -54,13 +56,18 @@ TINY = dict(sample_size=128, patch_size=2, in_channels=16, out_channels=16, num_
 
 
 def build(args, num_actions, context_frames, noise_buckets, action_dropout=0.0):
-    """Return (wrapper, pristine pretrained transformer) sharing the same initial weights."""
+    """Return (wrapper, pristine pretrained transformer) sharing the same initial weights.
+
+    Seeded at the top, so two calls with the same arguments give the same wrapper down to the
+    conditioning tables the wrapper initialises from the global RNG. Gates that compare two builds
+    depend on that.
+    """
     from diffusers import SD3Transformer2DModel
+    torch.manual_seed(0)
     if args.real:
         pristine = SD3Transformer2DModel.from_pretrained(args.sd35_path, subfolder="transformer",
                                                          cache_dir=args.hf_cache, low_cpu_mem_usage=False)
     else:
-        torch.manual_seed(0)
         pristine = SD3Transformer2DModel(**TINY)
     wrapper = SD35WorldModel(num_actions=num_actions, context_frames=context_frames, noise_buckets=noise_buckets,
                              action_dropout=action_dropout, grad_ckpt=False, latent_channels=16,
@@ -200,6 +207,34 @@ def gate_shapes(args):
             "params_new": sum(p.numel() for n, p in wrapper.named_parameters() if n in new)}
 
 
+def gate_ckpt(args):
+    """Activation checkpointing must change memory and nothing else.
+
+    The row will very likely train with `--grad-ckpt` (a 2B model with fp32 master weights and
+    AdamW leaves little room for full activations at batch 32), so the recomputed-forward path is
+    the one the numbers come from. Both configurations get the same seeded build, the same window
+    and the same noise, so any difference is checkpointing's, and there should be none.
+    """
+    losses, grads = {}, {}
+    for ck in (False, True):
+        wrapper, _ = build(args, num_actions=4, context_frames=32, noise_buckets=3)
+        if ck:
+            wrapper.transformer.enable_gradient_checkpointing()
+        wrapper.train()
+        x, ctx, t, action, bucket = batch(wrapper, 2)
+        g = torch.Generator().manual_seed(7)
+        ctx_n, bucket = noise_augment(ctx, 0.7, wrapper.bucket_embedder.num_embeddings, generator=g)
+        noise = torch.randn(x.shape, generator=g)
+        loss = VDiffusion().training_loss(lambda xt, tt: wrapper(xt, tt, action, ctx_n, bucket), x, noise=noise, t=t)
+        loss.backward()
+        losses[ck] = float(loss.detach())
+        grads[ck] = {n: float(p.grad.abs().sum()) for n, p in wrapper.named_parameters()
+                     if n in set(new_parameter_names(wrapper)) | {"transformer.pos_embed.proj.weight", "transformer.proj_out.weight"}}
+    return {"loss_off": losses[False], "loss_on": losses[True], "loss_abs_diff": abs(losses[False] - losses[True]),
+            "grad_max_abs_diff": max(abs(grads[False][k] - grads[True][k]) for k in grads[False]),
+            "grad_sums_off": grads[False], "checkpointing_is_exact": losses[False] == losses[True] and grads[False] == grads[True]}
+
+
 SD35_VAE = dict(latent_channels=16, scaling_factor=1.5305, shift_factor=0.0609)
 
 
@@ -324,7 +359,7 @@ def gate_encode_parquet(vae, scale, shift):
 
 
 GATES = {"parity": gate_parity, "grads": gate_grads, "overfit": gate_overfit,
-         "roundtrip": gate_roundtrip, "shapes": gate_shapes, "encode": gate_encode}
+         "roundtrip": gate_roundtrip, "shapes": gate_shapes, "ckpt": gate_ckpt, "encode": gate_encode}
 
 
 def main(args):
@@ -346,6 +381,7 @@ def main(args):
                                 "ema_covers_every_parameter": not r["ema_unexpected"] and r["ema_missing_are_buffers_only"]},
         "shapes": lambda r: {"output_is_the_latent_shape": r["out_shape"][1:] == [16, 32, 40],
                              "in_channels_as_designed": r["expected_in_channels"] == 528},
+        "ckpt": lambda r: {"checkpointing_changes_nothing_but_memory": r["checkpointing_is_exact"]},
         "encode": lambda r: {"latent_shape_16x32x40": r["latent_shape"] == [16, 32, 40],
                              "normalisation_exact_to_fp16": r["denormalise_max_abs_err"] <= r["fp16_step_at_max_latent"],
                              "loader_agrees": r["loader"]["target"] == [16, 32, 40] and r["loader"]["rejects_wrong_channels"]},
