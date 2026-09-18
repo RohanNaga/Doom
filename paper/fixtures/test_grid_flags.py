@@ -305,3 +305,127 @@ def test_the_trainer_exposes_every_cell_knob():
                  "--context-frames", "--noise-aug-max", "--lr"):
         assert flag in train.stdout, flag
     assert "adaln" in train.stdout and "none" in train.stdout
+
+
+# ---- the tiny fixture path: five updates and a two-window evaluation per cell -----------------
+
+# one knob per cell, exactly as scripts/spiderman/launch_cell.sh sets them
+CELL_FLAGS = {
+    "base30k": [],
+    "data-1_8": ["--train-fraction", "0.125"],
+    "data-1_4": ["--train-fraction", "0.25"],
+    "data-1_2": ["--train-fraction", "0.5"],
+    "scratch": ["--warm-start", "none"],
+    "eps": ["--objective", "eps"],
+    "ctx8": ["--context-frames", "8"],
+    "ctx16": ["--context-frames", "16"],
+    "noaug": ["--noise-aug-max", "0.0"],
+    "adaln": ["--action-inject", "adaln"],
+    "lr1e-4": ["--lr", "1e-4"],
+    "lr2.5e-5": ["--lr", "2.5e-5"],
+}
+TINY_PIXART = dict(num_attention_heads=2, attention_head_dim=8, in_channels=4, out_channels=8, num_layers=2,
+                   caption_channels=32, sample_size=64, patch_size=2, cross_attention_dim=16,
+                   use_additional_conditions=False, norm_num_groups=2)
+FIXTURE_EPISODES, FIXTURE_FRAMES = 10, 40
+
+
+@pytest.fixture(scope="module")
+def tiny_corpus(tmp_path_factory):
+    """A latent corpus with the real on-disk layout: ep_*_latents.npy plus verified-transition metadata."""
+    import json
+
+    import numpy as np
+    d = tmp_path_factory.mktemp("latents")
+    rng = np.random.RandomState(0)
+    for ep in range(FIXTURE_EPISODES):
+        np.save(d / f"ep_{ep:05d}_latents.npy",
+                rng.randn(FIXTURE_FRAMES, 4, 32, 40).astype(np.float16))
+        np.savez(d / f"ep_{ep:05d}_meta.npz", action=rng.randint(0, 3, FIXTURE_FRAMES).astype(np.int64),
+                 tic=(np.arange(FIXTURE_FRAMES) * 4).astype(np.int64),
+                 map_id=np.full(FIXTURE_FRAMES, 1, np.int64), chain_id=np.zeros(FIXTURE_FRAMES, np.int64))
+    split = str(d / "split.json")
+    json.dump({"train": list(range(8)), "val": [8, 9]}, open(split, "w"))
+    return str(d), split
+
+
+@pytest.fixture
+def tiny_hub(monkeypatch):
+    """Serve a 16k-parameter transformer wherever PixArt would pull the 611M checkpoint, so the real
+    `build_model` -> `resolve_warm_start` -> `PixArtWorldModel` path runs on the CPU."""
+    from diffusers import PixArtTransformer2DModel as P
+    monkeypatch.setattr(P, "from_pretrained", classmethod(lambda cls, *a, **k: cls(**TINY_PIXART)))
+    monkeypatch.setattr(P, "load_config", classmethod(lambda cls, *a, **k: dict(TINY_PIXART)))
+    monkeypatch.setenv("ACCELERATE_USE_CPU", "1")
+
+
+def _train_cell(flags, corpus, out_dir):
+    import train_wm
+    latents, split = corpus
+    argv = ["--backbone", "pixart", "--warm-start", backbones.PIXART_DEFAULT,
+            "--latents-dir", latents, "--split", split, "--results-dir", out_dir,
+            "--num-actions", "3", "--noise-buckets", "4", "--context-frames", "32",
+            "--per-gpu-batch", "2", "--global-batch", "2", "--steps", "5", "--warmup", "2",
+            "--val-every", "5", "--val-windows", "2", "--ckpt-every", "5", "--ema-every", "1",
+            "--num-workers", "0", "--action-dropout", "0.0", "--require-verified-transitions",
+            "--seed", "0"] + flags
+    train_wm.main(train_wm.build_parser().parse_args(argv))
+
+
+@torch.no_grad()
+def _evaluate_two_windows(out_dir, corpus, cell):
+    """Teacher-forced sampling of two held-out windows, the way eval_tf.py does it minus the VAE:
+    rebuild the graph the checkpoint records, sample in the parameterization it records."""
+    from doom_data import LatentWindowDataset, load_split
+    latents, split_path = corpus
+    ck = torch.load(os.path.join(out_dir, "best.pt"), map_location="cpu", weights_only=False)
+    trained = ck["args"]
+    model = backbones.build_model("pixart", trained["num_actions"], trained["context_frames"],
+                                  trained["noise_buckets"], grad_ckpt=False,
+                                  warm_start=backbones.PIXART_DEFAULT, action_dropout=0.0,
+                                  action_inject=trained.get("action_inject", "token"))
+    model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
+    model.eval()
+    diffusion = VDiffusion(objective=checkpoint_objective(ck))
+    ds = LatentWindowDataset(latents, load_split(split_path)["val"], trained["context_frames"])
+    ctx = torch.stack([ds[i][0] for i in range(2)])
+    tgt = torch.stack([ds[i][1] for i in range(2)])
+    act = torch.stack([ds[i][2] for i in range(2)])
+    bucket = torch.zeros(2, dtype=torch.long)
+    pred = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx, bucket), tgt.shape, steps=2)
+    assert pred.shape == tgt.shape, cell
+    assert torch.isfinite(pred).all(), f"{cell}: non-finite sample"
+    return diffusion.objective, trained
+
+
+@pytest.mark.parametrize("cell", list(CELL_FLAGS))
+def test_every_cell_trains_five_updates_and_evaluates_two_windows(cell, tiny_corpus, tiny_hub, tmp_path):
+    import json
+    out = str(tmp_path / cell)
+    _train_cell(CELL_FLAGS[cell], tiny_corpus, out)
+
+    events = [json.loads(line) for line in open(os.path.join(out, "log.jsonl"))]
+    kinds = [e["event"] for e in events]
+    assert kinds[0] == "start" and kinds[-1] == "end", cell
+    assert [e for e in events if e["event"] == "val"], f"{cell}: no validation ran"
+    assert events[-1]["step"] == 5, cell
+    assert all(e["val_loss"] == e["val_loss"] for e in events if e["event"] == "val"), f"{cell}: NaN val loss"
+
+    cfg = json.load(open(os.path.join(out, "config.json")))
+    recorded = {"train_fraction": cfg["train_fraction"], "objective": cfg["objective"],
+                "context_frames": cfg["context_frames"], "noise_aug_max": cfg["noise_aug_max"],
+                "lr": cfg["lr"], "warm_start": cfg["warm_start"], "action_inject": cfg["action_inject"]}
+    expected = dict(zip(CELL_FLAGS[cell][::2], CELL_FLAGS[cell][1::2]))
+    for flag, value in expected.items():
+        key = flag.lstrip("-").replace("-", "_")
+        got = recorded[key]
+        same = float(got) == float(value) if isinstance(got, (int, float)) else str(got) == value
+        assert same, f"{cell}: config.json records {key}={got}, launched with {value}"
+
+    episodes = json.load(open(os.path.join(out, "train_episodes.json")))
+    assert episodes["num_episodes"] == max(1, round(cfg["train_fraction"] * 8)), cell
+    assert not set(episodes["episodes"]) & {8, 9}, f"{cell}: a validation episode leaked into training"
+
+    objective, trained = _evaluate_two_windows(out, tiny_corpus, cell)
+    assert objective == ("eps" if cell == "eps" else "v"), cell
+    assert trained["action_inject"] == ("adaln" if cell == "adaln" else "token"), cell

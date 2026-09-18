@@ -388,7 +388,8 @@ def main(args):
     log(event="end", step=step)
 
 
-if __name__ == "__main__":
+def build_parser():
+    """Every trainer flag in one place, so a test can construct args without a subprocess."""
     p = argparse.ArgumentParser()
     p.add_argument("--backbone", choices=list(BACKBONES), required=True)
     p.add_argument("--latent-channels", type=int, default=0,
@@ -440,4 +441,8 @@ if __name__ == "__main__":
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
     p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")
     p.add_argument("--seed", type=int, default=0)
-    main(p.parse_args())
+    return p
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())
