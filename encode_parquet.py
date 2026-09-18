@@ -3,22 +3,36 @@ Encode per-episode parquet recordings (from record_episodes.py or record_arnold.
 stride-4 latents for training.
 
 For every episode: take one frame per agent decision (tic % stride == 0), pad 320x240 to
-320x256 at the image level (GameNGen), encode with the frozen sd-vae-ft-mse encoder
-(posterior mean, scale 0.18215), and write
-    ep_XXXXX_latents.npy   (T, 4, 32, 40) float16
+320x256 at the image level (GameNGen), encode with a frozen `AutoencoderKL` encoder (posterior
+mean), normalise the latent the way that autoencoder's own pipeline does, and write
+    ep_XXXXX_latents.npy   (T, C, 32, 40) float16
     ep_XXXXX_meta.npz      action, buttons, health, ammo, kills, deaths, frags, pos_x, pos_y,
-                           angle, tic, map_id, episode_id   (all length T)
-plus `episodes.json` with per-episode counts and map ids. Restartable: existing outputs skip.
+                           angle, tic, map_id, episode_id[, chain_id]   (all length T)
+plus `episodes_NN.jsonl` with per-episode counts and map ids, `canonical_controls.json` under
+`--align-decisions`, and `encode_meta_NN.json` recording the latent contract the corpus was
+written under. Restartable: existing outputs skip.
+
+The default autoencoder is sd-vae-ft-mse, C = 4, `scaling_factor` 0.18215, no shift: the latent
+space every finished row trains in. `--vae-id` / `--vae-subfolder` point the identical pipeline
+at any other `AutoencoderKL`, which is how the 16-channel SD 3.5 corpus is built. Normalisation
+follows the pipelines exactly, `(z - shift_factor) * scaling_factor`, so a latent written here
+decodes with `doomdit_utils.denormalize_latents` and nothing else has to know the numbers.
 
 Usage:
     python encode_parquet.py --in-dir /sata2/.../raw_arnold --out-dir /sata2/.../latents_arnold \
         --stride 4 --batch-size 64 --device cuda:1
+
+    python encode_parquet.py --in-dir /sata2/.../raw_arnold --out-dir /sata2/.../latents_arnold_sd35 \
+        --vae-id stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae \
+        --latent-channels 16 --scaling-factor 1.5305 --shift-factor 0.0609 \
+        --align-decisions --decode-check 16 --stride 4 --batch-size 32 --device cuda:3
 """
 import argparse
 import glob
 import io
 import json
 import os
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -26,10 +40,11 @@ import numpy as np
 import torch
 from PIL import Image
 
-from doomdit_utils import LATENT_SCALE, load_vae
+from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, latent_contract, normalize_latents
 
 PAD_TO = 256
 LEGACY_HW = (120, 160)      # April pipeline: frames resized to 160x120, latents (4, 15, 20), no padding
+FRAME_ROWS = 240            # rows of real picture inside the 256-row padded frame
 META_COLS = ["action", "buttons", "health", "ammo", "kills", "deaths", "frags", "pos_x", "pos_y", "angle", "tic", "map_id", "episode_id"]
 
 
@@ -37,19 +52,46 @@ def decode(b):
     return np.asarray(Image.open(io.BytesIO(b)).convert("RGB"), dtype=np.uint8)
 
 
-@torch.no_grad()
-def encode_batch(vae, frames_u8, device, dtype, legacy=False):
+def to_input(frames_u8, device, legacy=False):
+    """(B, H, W, 3) uint8 -> (B, 3, 256, 320) in [-1, 1], the tensor the encoder sees."""
     x = torch.from_numpy(frames_u8).to(device).permute(0, 3, 1, 2).float() / 127.5 - 1.0
     if legacy:
-        x = torch.nn.functional.interpolate(x, size=LEGACY_HW, mode="bilinear", align_corners=False, antialias=True)
-    elif x.shape[2] < PAD_TO:
+        return torch.nn.functional.interpolate(x, size=LEGACY_HW, mode="bilinear", align_corners=False, antialias=True)
+    if x.shape[2] < PAD_TO:
         x = torch.nn.functional.pad(x, (0, 0, 0, PAD_TO - x.shape[2]))   # bottom rows, zeros (black)
+    return x
+
+
+@torch.no_grad()
+def encode_batch(vae, frames_u8, device, dtype, legacy=False, scale=LATENT_SCALE, shift=None):
+    x = to_input(frames_u8, device, legacy)
     with torch.autocast(device_type="cuda", dtype=dtype, enabled=(dtype != torch.float32 and x.is_cuda)):
         z = vae.encode(x).latent_dist.mean
-    return (z.float() * LATENT_SCALE).cpu().numpy().astype(np.float16)
+    return normalize_latents(z.float(), scale, shift).cpu().numpy().astype(np.float16)
 
 
-def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, legacy=False, align_decisions=False):
+@torch.no_grad()
+def decode_check(vae, frames_u8, device, dtype, legacy, scale, shift):
+    """Encode then decode a few frames and report reconstruction PSNR on the real 320x240 picture.
+
+    This is the cheap proof that the normalisation is the right way round: a wrong `shift_factor`
+    or a reciprocal `scaling_factor` still produces plausible-looking latents but destroys the
+    round trip, and the number here is the same quantity `eval_tf.py` calls the VAE ceiling.
+    """
+    lat = encode_batch(vae, frames_u8, device, dtype, legacy, scale, shift)
+    z = denormalize_latents(torch.from_numpy(lat).float().to(device), scale, shift)
+    rec = vae.decode(z).sample[:, :, :FRAME_ROWS]
+    ref = to_input(frames_u8, device, legacy)[:, :, :FRAME_ROWS]
+    mse = ((rec.float() - ref) ** 2).flatten(1).mean(1).clamp_min(1e-10)   # [-1, 1] scale, peak 2
+    psnr = 10 * torch.log10(4.0 / mse)
+    return {"frames": int(len(frames_u8)), "latent_shape": list(lat.shape[1:]),
+            "psnr_mean": float(psnr.mean()), "psnr_min": float(psnr.min()),
+            "latent_abs_mean": float(np.abs(lat.astype(np.float32)).mean()),
+            "latent_abs_max": float(np.abs(lat.astype(np.float32)).max())}
+
+
+def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, legacy=False, align_decisions=False,
+                   latent_channels=4, scale=LATENT_SCALE, shift=None):
     import pyarrow.parquet as pq
     ep = os.path.basename(path).replace(".parquet", "")
     if legacy:
@@ -82,9 +124,10 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
         idx = keep[i:i + batch_size]
         raw = [frames_col[int(j)].as_py() for j in idx]
         frames = np.stack(list(pool.map(decode, raw)))
-        lat.append(encode_batch(vae, frames, device, dtype, legacy))
+        lat.append(encode_batch(vae, frames, device, dtype, legacy, scale, shift))
     lat = np.concatenate(lat)
-    assert lat.shape[1:] == ((4, 15, 20) if legacy else (4, 32, 40)), lat.shape
+    want = (latent_channels, 15, 20) if legacy else (latent_channels, 32, 40)
+    assert lat.shape[1:] == want, (lat.shape, want)
     tmp = out_lat + ".tmp"
     with open(tmp, "wb") as f:
         np.save(f, lat)
@@ -97,6 +140,21 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
 
 
 CANONICAL = None
+
+
+def write_meta(args, contract, scale, shift, check):
+    """Record what a consumer of this directory has to know: the latent contract and the encoder."""
+    try:
+        git = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        git = "?"
+    meta = {"vae_id": args.vae_id or "stabilityai/sd-vae-ft-mse", "vae_subfolder": args.vae_subfolder,
+            "latent_contract": contract, "scaling_factor_applied": scale, "shift_factor_applied": shift,
+            "pad_to": PAD_TO, "legacy": bool(args.legacy), "stride": args.stride,
+            "align_decisions": bool(args.align_decisions), "decode_check": check,
+            "git": git, "torch": torch.__version__, "args": vars(args)}
+    with open(os.path.join(args.out_dir, f"encode_meta_{args.shard or 0:02d}.json"), "w") as f:
+        json.dump(meta, f, indent=1)
 
 
 def main(args):
@@ -117,18 +175,35 @@ def main(args):
             CANONICAL = canonical_table(np.concatenate(acts), np.concatenate(btns))
         json.dump(CANONICAL, open(os.path.join(args.out_dir, "canonical_controls.json"), "w"), indent=1)
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
-    vae = load_vae(device)
+    vae = build_vae(args.vae_id, args.vae_subfolder, device, args.cache_dir,
+                    latent_channels=args.latent_channels, scaling_factor=args.scaling_factor,
+                    shift_factor=args.shift_factor)
+    contract = latent_contract(vae)
+    scale = args.scaling_factor if args.scaling_factor is not None else contract["scaling_factor"]
+    shift = args.shift_factor if args.shift_factor is not None else contract["shift_factor"]
+    channels = contract["latent_channels"]
+    print(f"latent contract: {json.dumps(contract)}; writing (z - {shift or 0}) * {scale}", flush=True)
     paths = sorted(glob.glob(os.path.join(args.in_dir, "ep_*.parquet")))
     if args.max_episodes:
         paths = paths[:args.max_episodes]
     if args.shard is not None:
         paths = paths[args.shard::args.num_shards]
     print(f"{len(paths)} episodes on {device}", flush=True)
+    check = None
+    if args.decode_check and paths:
+        import pyarrow.parquet as pq
+        t = pq.read_table(paths[0], columns=["frame"])
+        with ThreadPoolExecutor(args.decode_threads) as pool:
+            frames = np.stack(list(pool.map(decode, [t["frame"][i].as_py() for i in range(min(args.decode_check, t.num_rows))])))
+        check = decode_check(vae, frames, device, dtype, args.legacy, scale, shift)
+        print(f"decode check on {os.path.basename(paths[0])}: {json.dumps(check)}", flush=True)
+    write_meta(args, contract, scale, shift, check)
     summary_path = os.path.join(args.out_dir, f"episodes_{args.shard or 0:02d}.jsonl")
     t0 = time.time(); n_frames = 0
     with ThreadPoolExecutor(args.decode_threads) as pool:
         for k, p in enumerate(paths):
-            r = encode_episode(p, args.out_dir, vae, device, dtype, args.stride, args.batch_size, pool, args.legacy, args.align_decisions)
+            r = encode_episode(p, args.out_dir, vae, device, dtype, args.stride, args.batch_size, pool, args.legacy,
+                               args.align_decisions, channels, scale, shift)
             if r is None:
                 continue
             n_frames += r["frames"]
@@ -152,6 +227,13 @@ if __name__ == "__main__":
     p.add_argument("--num-shards", type=int, default=1)
     p.add_argument("--canonical", default=None, help="canonical_controls.json from the main corpus, used instead of recomputing")
     p.add_argument("--max-episodes", type=int, default=0)
+    p.add_argument("--vae-id", default="", help="AutoencoderKL repo or path (default: sd-vae-ft-mse)")
+    p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-id (e.g. vae for a full pipeline repo)")
+    p.add_argument("--cache-dir", default=None, help="Hugging Face cache for --vae-id")
+    p.add_argument("--latent-channels", type=int, default=None, help="assert the autoencoder's channel count (16 for SD 3.5)")
+    p.add_argument("--scaling-factor", type=float, default=None, help="default: the autoencoder config's own")
+    p.add_argument("--shift-factor", type=float, default=None, help="default: the autoencoder config's own (SD 3.5: 0.0609)")
+    p.add_argument("--decode-check", type=int, default=0, help="round-trip this many frames of the first episode and print PSNR")
     p.add_argument("--legacy", action="store_true", help="April layout: resize to 160x120, latents (4,15,20), ep_XXXX_actions.npy")
     p.add_argument("--align-decisions", action="store_true", help="one frame per reconstructed agent decision instead of every `stride` tics")
     main(p.parse_args())

@@ -1,6 +1,6 @@
 """CPU gates for `backbones.SD35WorldModel`, run before the row is given any GPU time.
 
-Five checks, all on the CPU and all reporting a number rather than a pass/fail word:
+Six checks, all on the CPU and all reporting a number rather than a pass/fail word:
 
 1. `parity`    the wrapper with zero context channels against the pretrained transformer on the
                same 16-channel target and the same conditioning tensors. Max abs diff must be
@@ -17,6 +17,11 @@ Five checks, all on the CPU and all reporting a number rather than a pass/fail w
                reload into a fresh wrapper with no missing or unexpected keys.
 5. `shapes`    rectangular-grid bookkeeping: 16x20 tokens in, (B, 16, 32, 40) out, the positional
                crop offsets, and the parameter count.
+6. `encode`    `encode_parquet.py`'s 16-channel path: the normalisation `(z - shift) * scale` and
+               its inverse, the (16, 32, 40) shape, and `doom_data.LatentWindowDataset` reading
+               the per-episode files back. Uses a randomly initialised autoencoder, so its PSNR
+               is meaningless on purpose; the real number comes from `--decode-check` on a real
+               episode with the real autoencoder.
 
 By default the checks run on a small randomly initialised `SD3Transformer2DModel` of the same
 class and the same structural switches (patch 2, `pos_embed_max_size` 96, 16 in/out channels,
@@ -195,8 +200,131 @@ def gate_shapes(args):
             "params_new": sum(p.numel() for n, p in wrapper.named_parameters() if n in new)}
 
 
+SD35_VAE = dict(latent_channels=16, scaling_factor=1.5305, shift_factor=0.0609)
+
+
+def tiny_autoencoder():
+    """A small randomly initialised `AutoencoderKL` with SD 3.5's latent contract: 16 channels, f8
+    (three downsamples), no quant convs, and the real `scaling_factor` / `shift_factor`.
+
+    The weights are random, so the round-trip PSNR it produces is meaningless; the shapes, the
+    normalisation and every file the encoder writes are not, and those are what this gate is for.
+    The honest PSNR comes from the same `--decode-check` against the real autoencoder.
+    """
+    from diffusers import AutoencoderKL
+    torch.manual_seed(0)
+    return AutoencoderKL(in_channels=3, out_channels=3, down_block_types=("DownEncoderBlock2D",) * 4,
+                         up_block_types=("UpDecoderBlock2D",) * 4, block_out_channels=(8, 8, 8, 8),
+                         layers_per_block=1, norm_num_groups=4, sample_size=256,
+                         use_quant_conv=False, use_post_quant_conv=False, **SD35_VAE).eval()
+
+
+def synthetic_frames(n, h=240, w=320, seed=0):
+    """Moving shapes on a gradient: deterministic, smooth, and not degenerate for an autoencoder."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    bg = np.linspace(20, 200, w, dtype=np.float32)[None, :, None] * np.ones((h, 1, 3), np.float32)
+    bg[..., 1] = np.linspace(200, 20, h, dtype=np.float32)[:, None]
+    out, cx, cy = [], 40.0, 40.0
+    for _ in range(n):
+        img = Image.fromarray(bg.astype(np.uint8))
+        d = ImageDraw.Draw(img)
+        d.ellipse([cx - 28, cy - 28, cx + 28, cy + 28], fill=(240, 60, 40))
+        d.rectangle([w - cx - 40, h - cy - 40, w - cx + 40, h - cy + 40], fill=(30, 70, 230))
+        out.append(np.asarray(img, dtype=np.uint8))
+        cx, cy = (cx + 7.0) % w, (cy + 5.0) % h
+    return np.stack(out)
+
+
+def gate_encode(args):
+    """`encode_parquet.py`'s 16-channel path on synthetic frames, and the loader reading it back.
+
+    What this covers is exactly what the SD 3.5 corpus changes: the arbitrary-autoencoder encode,
+    the `(z - shift) * scale` normalisation and its inverse, the (16, 32, 40) shape assertion, the
+    320x240 to 320x256 padding, `--decode-check`, and `doom_data.LatentWindowDataset` reading the
+    per-episode files back at `latent_channels=16` with chains and 4-tic spacing intact. The
+    parquet and chain construction itself is untouched code with its own fixture in
+    `verify_wan.py`, and it runs here too when pyarrow is installed (`parquet` in the result).
+
+    The autoencoder is randomly initialised, so `decode_check` PSNR here is meaningless by
+    construction and is reported only to show the code path runs; the honest number comes from
+    `encode_parquet.py --decode-check` against the real autoencoder on a real episode.
+    """
+    import numpy as np
+    import encode_parquet
+    from doom_data import LatentWindowDataset
+    from doomdit_utils import denormalize_latents, latent_contract
+
+    vae = tiny_autoencoder()
+    scale, shift = SD35_VAE["scaling_factor"], SD35_VAE["shift_factor"]
+    frames = synthetic_frames(6)
+    lat = encode_parquet.encode_batch(vae, frames, "cpu", torch.float32, False, scale, shift)
+    with torch.no_grad():
+        mean = vae.encode(encode_parquet.to_input(frames, "cpu")).latent_dist.mean
+    stored = torch.from_numpy(lat.astype(np.float32))
+    out = {"latent_shape": list(lat.shape[1:]), "dtype": str(lat.dtype),
+           "padded_input_shape": list(encode_parquet.to_input(frames, "cpu").shape),
+           "denormalise_max_abs_err": float((denormalize_latents(stored, scale, shift) - mean).abs().max()),
+           "fp16_step_at_max_latent": float(np.spacing(np.float16(np.abs(lat).max()))),
+           "latent_contract": latent_contract(vae),
+           "decode_check_random_weights": encode_parquet.decode_check(vae, frames, "cpu", torch.float32, False, scale, shift)}
+
+    with tempfile.TemporaryDirectory() as d:
+        # the per-episode files exactly as encode_episode writes them, read back by the trainer's loader
+        T = len(frames)
+        np.save(os.path.join(d, "ep_00007_latents.npy"), lat)
+        np.savez(os.path.join(d, "ep_00007_meta.npz"), action=np.arange(T) % 3, tic=np.arange(T) * 4,
+                 map_id=np.full(T, 3), episode_id=np.full(T, 7), chain_id=np.zeros(T, np.int64))
+        ds = LatentWindowDataset(d, [7], context_frames=4, require_chains=True, latent_channels=16)
+        ctx, tgt, act = ds[0]
+        out["loader"] = {"windows": len(ds), "context": list(ctx.shape), "target": list(tgt.shape), "action": int(act)}
+        try:
+            ds4 = LatentWindowDataset(d, [7], context_frames=4, latent_channels=4)
+            out["loader"]["rejects_wrong_channels"] = False and ds4 is not None
+        except ValueError:
+            out["loader"]["rejects_wrong_channels"] = True
+
+    out["parquet"] = gate_encode_parquet(vae, scale, shift)
+    return out
+
+
+def gate_encode_parquet(vae, scale, shift):
+    """The full `encode_episode` on `verify_wan.py`'s two-chain fixture, when pyarrow is available."""
+    import importlib.util
+    if importlib.util.find_spec("pyarrow") is None:
+        return {"skipped": "no pyarrow here; run this gate where the corpus lives"}
+    import numpy as np
+    import pyarrow.parquet as pq
+    import encode_parquet
+    from concurrent.futures import ThreadPoolExecutor
+    from doom_data import LatentWindowDataset
+    from transitions import canonical_table
+    from verify_wan import fake_parquet
+
+    with tempfile.TemporaryDirectory() as d:
+        raw, out_dir = os.path.join(d, "raw"), os.path.join(d, "latents")
+        os.makedirs(raw); os.makedirs(out_dir)
+        path = os.path.join(raw, "ep_00007.parquet")
+        fake_parquet(path)
+        t = pq.read_table(path, columns=["action", "buttons"])
+        encode_parquet.CANONICAL = canonical_table(t["action"].to_numpy(zero_copy_only=False),
+                                                   np.array(t["buttons"].to_pylist()))
+        with ThreadPoolExecutor(4) as pool:
+            r = encode_parquet.encode_episode(path, out_dir, vae, "cpu", torch.float32, 4, 8, pool,
+                                              legacy=False, align_decisions=True, latent_channels=16,
+                                              scale=scale, shift=shift)
+        lat = np.load(os.path.join(out_dir, "ep_00007_latents.npy"))
+        meta = np.load(os.path.join(out_dir, "ep_00007_meta.npz"))
+        same = meta["chain_id"][1:] == meta["chain_id"][:-1]
+        ds = LatentWindowDataset(out_dir, [7], context_frames=4, require_chains=True, latent_channels=16)
+        return {"episode": r, "latent_shape": list(lat.shape[1:]), "meta_keys": sorted(meta.files),
+                "chains": int(len(np.unique(meta["chain_id"]))),
+                "tic_spacing_inside_chains": sorted(set(np.diff(meta["tic"])[same].tolist())),
+                "windows_L4": len(ds)}
+
+
 GATES = {"parity": gate_parity, "grads": gate_grads, "overfit": gate_overfit,
-         "roundtrip": gate_roundtrip, "shapes": gate_shapes}
+         "roundtrip": gate_roundtrip, "shapes": gate_shapes, "encode": gate_encode}
 
 
 def main(args):
@@ -205,17 +333,30 @@ def main(args):
     for name in (args.gates or list(GATES)):
         results[name] = GATES[name](args)
         print(f"=== {name}\n{json.dumps(results[name], indent=1)}", flush=True)
-    verdict = {
-        "parity_exact": results.get("parity", {}).get("max_abs_diff") == 0.0,
-        "all_new_parameters_move": results.get("grads", {}).get("all_new_parameters_moved"),
-        "all_conditioning_rows_have_grad": results.get("grads", {}).get("all_rows_have_grad"),
-        "overfit_monotone": results.get("overfit", {}).get("strictly_monotone"),
-        "roundtrip_strict": results.get("roundtrip", {}).get("missing") == [] and results.get("roundtrip", {}).get("unexpected") == [],
+    # one verdict line per gate that actually ran, so a subset run cannot read as a failure
+    checks = {
+        "parity": lambda r: {"parity_exact": r["max_abs_diff"] == 0.0,
+                             "pretrained_kernel_on_target": r["pretrained_kernel_on_target"],
+                             "context_kernel_zero": r["context_kernel_max_abs"] == 0.0},
+        "grads": lambda r: {"all_new_parameters_move": r["all_new_parameters_moved"],
+                            "all_conditioning_rows_have_grad": r["all_rows_have_grad"],
+                            "context_channels_trainable": r["context_channels"]["grad_abs_max"] > 0},
+        "overfit": lambda r: {"overfit_monotone": r["strictly_monotone"], "overfit_fell": r["last"] < r["first"]},
+        "roundtrip": lambda r: {"roundtrip_strict": not r["missing"] and not r["unexpected"],
+                                "ema_covers_every_parameter": not r["ema_unexpected"] and r["ema_missing_are_buffers_only"]},
+        "shapes": lambda r: {"output_is_the_latent_shape": r["out_shape"][1:] == [16, 32, 40],
+                             "in_channels_as_designed": r["expected_in_channels"] == 528},
+        "encode": lambda r: {"latent_shape_16x32x40": r["latent_shape"] == [16, 32, 40],
+                             "normalisation_exact_to_fp16": r["denormalise_max_abs_err"] <= r["fp16_step_at_max_latent"],
+                             "loader_agrees": r["loader"]["target"] == [16, 32, 40] and r["loader"]["rejects_wrong_channels"]},
     }
+    verdict = {}
+    for name, r in results.items():
+        verdict.update(checks[name](r))
     print("=== verdict\n" + json.dumps(verdict, indent=1), flush=True)
     if args.out:
         json.dump({"real": args.real, "results": results, "verdict": verdict}, open(args.out, "w"), indent=1)
-    return 0 if all(v in (True, None) for v in verdict.values()) else 1
+    return 0 if all(verdict.values()) else 1
 
 
 if __name__ == "__main__":
