@@ -2,12 +2,23 @@
 # SD 3.5 Medium row: which per-GPU configuration to train it in. Usage: fit_sd35.sh <gpu>
 #
 # Global batch stays 32, the shared recipe, so "fill the card" means no gradient accumulation and
-# no activation checkpointing whenever they fit. Three 200-update fit checks on synthetic windows
+# no activation checkpointing whenever they fit. Four 200-update fit checks on synthetic windows
 # (no corpus needed), in preference order:
 #
 #   b32_nockpt          per-GPU 32, accum 1, checkpointing off   <- fastest if it fits
 #   b32_ckpt            per-GPU 32, accum 1, checkpointing on    <- trades ~30% speed for activations
 #   b16_nockpt_accum2   per-GPU 16, accum 2, checkpointing off   <- fallback, two passes per update
+#   b16_ckpt_accum2     per-GPU 16, accum 2, checkpointing on    <- last resort, smallest footprint
+#
+# The fourth config is there because the arithmetic says the first three are not safe bets: fp32
+# master weights, fp32 grads and two fp32 Adam moments are 32 GB for a 2B model before a single
+# activation, and bf16 autocast weight copies add about 4 GB on top, so roughly 36 GB is spent
+# before the batch. Scaling the measured activation footprints (PixArt 611M at batch 32 without
+# checkpointing: 26.41 GB peak, so about 16.6 GB of activations; DiT-XL 675M at batch 16 with
+# checkpointing: 12.29 GB peak, so about 1.5 GB) by layers x hidden x tokens puts SD 3.5 Medium at
+# about 21 GB without checkpointing (total ~57 GB, over the card) and about 4 to 6 GB with it
+# (total ~40 to 42 GB allocated). So b32_ckpt is the expected winner and b32_nockpt is expected to
+# OOM; the sweep is here to replace that arithmetic with measurements.
 #
 # Every run logs updates/s and both peak memory numbers from the trainer's `fit_check` event into
 # $D/logs/fit_sd35.log, and the script ends by printing the fastest configuration whose *reserved*
@@ -33,8 +44,10 @@ cd $D/repo || exit 1
 
 $PY -c 'import diffusers; from diffusers import SD3Transformer2DModel; print("diffusers", diffusers.__version__)' \
   || { echo "no SD3Transformer2DModel in this interpreter ($PY); SD3 needs diffusers >= 0.29, try PY=~/wanenc/bin/python" | tee -a $LOG; exit 1; }
+# what is already resident on the target card: the budget below assumes an otherwise empty A6000
+nvidia-smi --query-gpu=index,memory.used,memory.total,utilization.gpu --format=csv,noheader -i "$GPU" | tee -a $LOG
 
-for cfg in "b32_nockpt 32 0" "b32_ckpt 32 1" "b16_nockpt_accum2 16 0"; do
+for cfg in "b32_nockpt 32 0" "b32_ckpt 32 1" "b16_nockpt_accum2 16 0" "b16_ckpt_accum2 16 1"; do
   set -- $cfg; NAME=$1; B=$2; CK=$3
   [ "$CK" = 1 ] && CKFLAG=--grad-ckpt || CKFLAG=""
   R=$D/tmp/fit_sd35_$NAME
@@ -54,7 +67,7 @@ done
 $PY - "$LOG" "$BUDGET" <<'PICK'
 import json, sys
 log, budget = sys.argv[1], float(sys.argv[2])
-order = ["b32_nockpt", "b32_ckpt", "b16_nockpt_accum2"]
+order = ["b32_nockpt", "b32_ckpt", "b16_nockpt_accum2", "b16_ckpt_accum2"]
 rows = {}
 for raw in open(log):
     for name in order:
