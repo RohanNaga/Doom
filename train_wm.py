@@ -239,7 +239,10 @@ def main(args):
                            "num_episodes": len(train_ids), "episodes": train_ids}, f, indent=1)
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
         per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum, objective=args.objective,
-        train_fraction=args.train_fraction, train_episodes=None if train_ids is None else len(train_ids))
+        train_fraction=args.train_fraction, train_episodes=None if train_ids is None else len(train_ids),
+        # state-dict entries the EMA does not cover, i.e. persistent buffers: 0 for every backbone
+        # in the SD KL-f8 latent space, 1 for sd35 (its sin-cos positional table)
+        buffers_outside_ema=len(raw.state_dict()) - len(ema_keys(raw)))
 
     def model_fn(ctx, act, bucket):
         return lambda xt, t: model(xt, t, act, ctx, bucket)
