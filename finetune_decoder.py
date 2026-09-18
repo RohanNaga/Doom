@@ -1,5 +1,5 @@
 """
-Fine-tune the sd-vae-ft-mse decoder on Doom frames (GameNGen section 3.2.2).
+Fine-tune a latent-diffusion VAE decoder on Doom frames (GameNGen section 3.2.2).
 
 The encoder stays frozen, so the latents both backbones train on are unchanged; only the
 decoder learns to render Doom's HUD digits and textures from them. Loss is MSE against the
@@ -7,14 +7,22 @@ lossless target frame (GameNGen's choice); `--lpips-weight` adds a perceptual te
 variant. Reports full-frame and HUD-crop (bottom 32 rows) PSNR and LPIPS on held-out frames
 before and after, which is the VAE-ceiling row of every results table.
 
+Defaults reproduce the sd-vae-ft-mse tune exactly. `--vae-id` / `--vae-subfolder` point the
+same recipe at any other `AutoencoderKL` (e.g. the 16-channel Flux/SD3 autoencoder) so the
+reconstruction ceiling of a candidate latent space is measured under an identical fine-tune.
+
 Usage:
     python finetune_decoder.py --in-dir raw_arnold --split split_arnold.json \
         --out-dir vae_decoder_arnold --train-frames 50000 --val-frames 2000 --epochs 2 --device cuda:3
+
+    python finetune_decoder.py --vae-id Alpha-VLLM/Lumina-Image-2.0 --vae-subfolder vae \
+        --latent-channels 16 --scaling-factor 0.3611 --shift-factor 0.1159 ...
 """
 import argparse
 import glob
 import io
 import json
+import math
 import os
 import random
 import time
@@ -27,6 +35,59 @@ from doomdit_utils import LATENT_SCALE, load_vae
 
 PAD_TO = 256
 HUD_ROWS = 32
+
+
+def build_vae(vae_id="", subfolder="", device="cpu", cache_dir=None,
+              latent_channels=None, scaling_factor=None, shift_factor=None):
+    """Load the decoder's autoencoder and assert it is the latent space the caller declared.
+
+    With no `vae_id` this is `doomdit_utils.load_vae`, i.e. sd-vae-ft-mse, unchanged.
+    `scaling_factor` and `shift_factor` never enter reconstruction (encode/decode round-trips
+    the raw latent mean), but a later corpus re-encode must apply them, so they are checked
+    against the config here and recorded in the run's metrics.
+    """
+    if not vae_id:
+        vae = load_vae(device)
+    else:
+        from diffusers import AutoencoderKL
+        kw = {"subfolder": subfolder} if subfolder else {}
+        vae = AutoencoderKL.from_pretrained(vae_id, cache_dir=cache_dir, **kw).to(device).eval()
+        vae.requires_grad_(False)
+    got = latent_contract(vae)
+    want = {"latent_channels": latent_channels, "scaling_factor": scaling_factor, "shift_factor": shift_factor}
+    bad = {k: (got[k], v) for k, v in want.items() if v is not None and not _same(got[k], v)}
+    if bad:
+        raise SystemExit(f"{vae_id or 'sd-vae-ft-mse'} latent contract mismatch (config, requested): {bad}")
+    return vae
+
+
+def _same(a, b):
+    return a is not None and math.isclose(float(a), float(b), rel_tol=1e-6, abs_tol=1e-9)
+
+
+def latent_contract(vae):
+    """The three numbers that define how latents of this autoencoder are normalised."""
+    cfg = vae.config
+    shift = getattr(cfg, "shift_factor", None)
+    return {"latent_channels": int(cfg.latent_channels), "scaling_factor": float(cfg.scaling_factor),
+            "shift_factor": None if shift is None else float(shift)}
+
+
+def trainable_decoder_params(vae):
+    """Freeze the encoder side, unfreeze the decoder side. Returns the decoder parameter list.
+
+    The 16-channel Flux/SD3 autoencoder sets `use_quant_conv=False`, so `quant_conv` and
+    `post_quant_conv` are None there and must be skipped rather than assumed.
+    """
+    frozen = [vae.encoder] + ([vae.quant_conv] if vae.quant_conv is not None else [])
+    train = [vae.decoder] + ([vae.post_quant_conv] if vae.post_quant_conv is not None else [])
+    for m in frozen:
+        for p in m.parameters():
+            p.requires_grad_(False)
+    params = [p for m in train for p in m.parameters()]
+    for p in params:
+        p.requires_grad_(True)
+    return params
 
 
 def sample_frames(parquet_dir, episode_ids, n, stride, seed):
@@ -56,6 +117,24 @@ def load_frames(items):
         for r in rows:
             frames[(p, r)] = np.asarray(Image.open(io.BytesIO(col[r].as_py())).convert("RGB"), dtype=np.uint8)
     return [frames[k] for k in items]
+
+
+def cached_frames(cache_dir, tag, build):
+    """Decode the parquet JPEGs once and reuse the uint8 array across runs.
+
+    Two decoder tunes on the same frames (one per candidate latent space) must see an
+    identical sample, and the JPEG decode costs about five minutes for 50k frames.
+    """
+    if not cache_dir:
+        return build()
+    os.makedirs(cache_dir, exist_ok=True)
+    path = os.path.join(cache_dir, tag + ".npy")
+    if os.path.exists(path):
+        print(f"  frame cache hit {path}", flush=True)
+        return np.load(path, mmap_mode="r")
+    frames = np.stack(build())
+    np.save(path, frames)
+    return frames
 
 
 def to_tensor(frames_u8, device):
@@ -89,14 +168,17 @@ def main(args):
     os.makedirs(args.out_dir, exist_ok=True)
     device = args.device if torch.cuda.is_available() else "cpu"
     split = json.load(open(args.split))
-    train_items = sample_frames(args.in_dir, split["train"], args.train_frames, args.stride, 0)
-    val_items = sample_frames(args.in_dir, split["val"], args.val_frames, args.stride, 1)
-    print(f"loading {len(train_items)} train and {len(val_items)} val frames", flush=True)
+    tag = f"{os.path.basename(args.in_dir.rstrip('/'))}_{os.path.basename(args.split)}"
     t0 = time.time()
-    train_frames, val_frames = load_frames(train_items), load_frames(val_items)
-    print(f"  loaded in {time.time() - t0:.0f}s", flush=True)
+    train_frames = cached_frames(args.frame_cache, f"{tag}_train_{args.train_frames}_s{args.stride}", lambda:
+                                 load_frames(sample_frames(args.in_dir, split["train"], args.train_frames, args.stride, 0)))
+    val_frames = cached_frames(args.frame_cache, f"{tag}_val_{args.val_frames}_s{args.stride}", lambda:
+                               load_frames(sample_frames(args.in_dir, split["val"], args.val_frames, args.stride, 1)))
+    print(f"loaded {len(train_frames)} train and {len(val_frames)} val frames in {time.time() - t0:.0f}s", flush=True)
 
-    vae = load_vae(device)
+    vae = build_vae(args.vae_id, args.vae_subfolder, device, args.cache_dir,
+                    args.latent_channels, args.scaling_factor, args.shift_factor)
+    print("latent contract:", json.dumps(latent_contract(vae)), flush=True)
     lpips_fn = None
     if args.lpips_weight > 0 or args.report_lpips:
         import lpips
@@ -106,45 +188,56 @@ def main(args):
     before = evaluate(vae, val_frames, device, lpips_fn)
     print("before:", json.dumps(before), flush=True)
 
-    for p in vae.encoder.parameters():
-        p.requires_grad_(False)
-    for p in vae.quant_conv.parameters():
-        p.requires_grad_(False)
-    params = list(vae.decoder.parameters()) + list(vae.post_quant_conv.parameters())
-    for p in params:
-        p.requires_grad_(True)
+    params = trainable_decoder_params(vae)
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.0)
-    steps_per_epoch = len(train_frames) // args.batch_size
+    micro, eff = args.batch_size, args.batch_size * args.accum
+    steps_per_epoch = len(train_frames) // eff
     total = steps_per_epoch * args.epochs
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / 200) * max(0.05, 1 - s / max(1, total)))
-    step = 0
+    print(f"{total} updates at effective batch {eff} (micro {micro} x accum {args.accum})", flush=True)
+    step, history, t_train = 0, [], time.time()
     for ep in range(args.epochs):
         order = np.random.RandomState(ep).permutation(len(train_frames))
         vae.decoder.train()
         for i in range(steps_per_epoch):
-            idx = order[i * args.batch_size:(i + 1) * args.batch_size]
-            x = to_tensor([train_frames[j] for j in idx], device)
-            with torch.no_grad():
-                z = vae.encode(x).latent_dist.mean
-            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device != "cpu"):
-                y = vae.decode(z).sample
-            loss = torch.mean((y.float() - x) ** 2)
-            if args.lpips_weight > 0:
-                loss = loss + args.lpips_weight * lpips_fn(y.float()[:, :, :240].clamp(-1, 1), x[:, :, :240]).mean()
             opt.zero_grad(set_to_none=True)
-            loss.backward()
+            loss_acc = 0.0
+            for a in range(args.accum):
+                lo = i * eff + a * micro
+                idx = order[lo:lo + micro]
+                x = to_tensor([train_frames[j] for j in idx], device)
+                with torch.no_grad():
+                    z = vae.encode(x).latent_dist.mean
+                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device != "cpu"):
+                    y = vae.decode(z).sample
+                loss = torch.mean((y.float() - x) ** 2)
+                if args.lpips_weight > 0:
+                    loss = loss + args.lpips_weight * lpips_fn(y.float()[:, :, :240].clamp(-1, 1), x[:, :, :240]).mean()
+                (loss / args.accum).backward()
+                loss_acc += loss.detach().item() / args.accum
             torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step(); sched.step(); step += 1
             if step % 100 == 0:
-                print(f"step {step}/{total} loss {loss.item():.5f} lr {sched.get_last_lr()[0]:.2e}", flush=True)
+                print(f"step {step}/{total} loss {loss_acc:.5f} lr {sched.get_last_lr()[0]:.2e} "
+                      f"{step / (time.time() - t_train):.3f} upd/s", flush=True)
+            if args.val_every and step % args.val_every == 0 and step < total:
+                m = evaluate(vae, val_frames, device, lpips_fn)
+                history.append({"step": step, **m})
+                print(f"val {step}:", json.dumps(m), flush=True)
+                vae.decoder.train()
         mid = evaluate(vae, val_frames, device, lpips_fn)
+        history.append({"step": step, **mid})
         print(f"epoch {ep + 1}:", json.dumps(mid), flush=True)
     after = evaluate(vae, val_frames, device, lpips_fn)
+    train_s = time.time() - t_train
     print("after:", json.dumps(after), flush=True)
     vae.save_pretrained(os.path.join(args.out_dir, "vae"))
     with open(os.path.join(args.out_dir, "metrics.json"), "w") as f:
-        json.dump({"before": before, "after": after, "args": vars(args), "train_frames": len(train_frames),
-                   "val_frames": len(val_frames), "steps": step}, f, indent=1)
+        json.dump({"before": before, "after": after, "history": history, "args": vars(args),
+                   "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
+                   "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
+                   "train_seconds": train_s,
+                   "peak_mem_gb": torch.cuda.max_memory_allocated() / 2**30 if device != "cpu" else None}, f, indent=1)
     print("DONE", flush=True)
 
 
@@ -157,9 +250,18 @@ if __name__ == "__main__":
     p.add_argument("--val-frames", type=int, default=2000)
     p.add_argument("--stride", type=int, default=4)
     p.add_argument("--epochs", type=int, default=2)
-    p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--batch-size", type=int, default=16, help="micro-batch; effective batch is this times --accum")
+    p.add_argument("--accum", type=int, default=1)
     p.add_argument("--lr", type=float, default=1e-5)
     p.add_argument("--lpips-weight", type=float, default=0.0)
     p.add_argument("--report-lpips", action="store_true")
+    p.add_argument("--val-every", type=int, default=0, help="validate every N updates (0 = epoch ends only)")
+    p.add_argument("--frame-cache", default="", help="directory for the decoded uint8 frame sample")
+    p.add_argument("--vae-id", default="", help="AutoencoderKL repo or path (default: sd-vae-ft-mse)")
+    p.add_argument("--vae-subfolder", default="")
+    p.add_argument("--cache-dir", default=None, help="Hugging Face cache for --vae-id")
+    p.add_argument("--latent-channels", type=int, default=None, help="asserted against the VAE config")
+    p.add_argument("--scaling-factor", type=float, default=None, help="asserted against the VAE config")
+    p.add_argument("--shift-factor", type=float, default=None, help="asserted against the VAE config")
     p.add_argument("--device", default="cuda:3")
     main(p.parse_args())
