@@ -25,7 +25,8 @@ from backbones import (BACKBONES, LATENT_HW, PIXART_DEFAULT, SD35_DEFAULT, UNIDI
                        resolve_latent_channels)
 from diffusion_v import VDiffusion, checkpoint_objective
 from doom_data import list_latent_episodes, load_split
-from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
+from doomdit_utils import (LATENT_SCALE, VAE_NAME, build_vae, denormalize_latents, encode_for_idm,
+                           load_world_model_state)
 
 
 def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_channels=None):
@@ -133,7 +134,7 @@ def psnr(a, b):
 @torch.no_grad()
 def do_score(args):
     import lpips
-    device = "cuda"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     d = np.load(args.rollouts)
     pred, gt, seed, actions = d["pred"], d["gt"], d["seed"], d["actions"]
     N, H = pred.shape[:2]
@@ -145,6 +146,10 @@ def do_score(args):
         z = denormalize_latents(torch.from_numpy(np.asarray(z, dtype=np.float32)).to(device), args.latent_scale, args.latent_shift)
         img = vae.decode(z).sample[:, :, :240]
         return (img * 0.5 + 0.5).clamp(0, 1)
+
+    def dec_all(z):
+        """`dec` over a whole rollout, in --decode-batch chunks so a 64-frame horizon fits."""
+        return torch.cat([dec(z[i:i + args.decode_batch]) for i in range(0, len(z), args.decode_batch)])
 
     psnr_h, lpips_h, copy_h, lat_h = np.zeros(H), np.zeros(H), np.zeros(H), np.zeros(H)
     clips_pred, clips_gt = [], []
@@ -177,13 +182,30 @@ def do_score(args):
         act2mov = ck["act2mov"]; num_mov = len(ck["classes"])
         mov = torch.tensor([act2mov.get(a, 0) for a in range(ck["num_actions"])], device=device)
         K = idm.window
+        # the IDM reads SD KL-f8 latents (its encoder opens with a 4-channel convolution), so a row in
+        # another latent space reaches the judge only by decoding with its own decoder and re-encoding here
+        sd = None
+        channels = int(pred.shape[2])
+        if args.idm_reencode_vae:
+            sd = build_vae(args.idm_reencode_vae, "", device, args.hf_cache, latent_channels=4)
+            print(f"NOTE: idm_* for this row round-trips through {args.vae_path or 'the stock'} decode -> "
+                  f"{args.idm_reencode_vae} encode on BOTH the rollout and its real counterpart. The IDM's own "
+                  "published accuracy was measured on native SD latents and is not comparable; idm_real_* is "
+                  "this row's reference and is the right thing to read idm_top1 against.", flush=True)
+        elif channels != 4:
+            raise SystemExit(f"the rollout carries {channels}-channel latents but the IDM reads 4-channel SD "
+                             "latents; pass --idm-reencode-vae to decode with --vae-path and re-encode first")
         acc_h = {k: np.zeros(H) for k in ("top1", "movement", "real_top1", "real_movement")}
         for n in range(N):
             # the windowed IDM sees K-1 real seed frames before the first frame it judges, so every transition has
             # bidirectional context; the real reference runs the identical procedure on the ground-truth continuation
             y = torch.from_numpy(actions[n]).to(device)
             for tag, frames in (("", pred[n]), ("real_", gt[n])):
-                seq = torch.from_numpy(np.concatenate([seed[n, -(K - 1):], frames], axis=0).astype(np.float32)).to(device)
+                if sd is None:
+                    seq = torch.from_numpy(np.concatenate([seed[n, -(K - 1):], frames], axis=0).astype(np.float32)).to(device)
+                else:
+                    seq = torch.cat([encode_for_idm(sd, dec_all(seed[n, -(K - 1):]), device, args.decode_batch),
+                                     encode_for_idm(sd, dec_all(frames), device, args.decode_batch)])
                 logits = idm.predict_sequence(seq)[-H:]
                 acc_h[tag + "top1"] += (logits.argmax(-1) == y).cpu().numpy()
                 acc_h[tag + "movement"] += (movement_probs(logits, mov, num_mov).argmax(-1) == mov[y]).cpu().numpy()
@@ -191,6 +213,7 @@ def do_score(args):
             out[f"idm_{k}"] = (v / N).tolist(); out[f"idm_{k}_mean"] = float(v.mean() / N)
         out["idm_val_top1"] = ck.get("val_top1"); out["idm_val_movement"] = ck.get("val_movement")
         out["idm_majority_baseline"] = ck.get("val_metrics", {}).get("majority_baseline")
+        out["idm_reencode_vae"] = args.idm_reencode_vae or None
     os.makedirs(args.out_dir, exist_ok=True)
     json.dump(out, open(os.path.join(args.out_dir, "drift.json"), "w"), indent=1)
     if clips_pred:
@@ -198,7 +221,7 @@ def do_score(args):
     print(json.dumps({k: v for k, v in out.items() if not isinstance(v, list)}, indent=1))
 
 
-if __name__ == "__main__":
+def build_parser():
     p = argparse.ArgumentParser()
     p.add_argument("--rollout", action="store_true"); p.add_argument("--score", action="store_true")
     p.add_argument("--ckpt"); p.add_argument("--backbone", choices=list(BACKBONES)); p.add_argument("--use-ema", action="store_true")
@@ -218,8 +241,16 @@ if __name__ == "__main__":
     p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-path (e.g. vae for a full pipeline repo)")
     p.add_argument("--latent-scale", type=float, default=LATENT_SCALE, help="scaling_factor the corpus was encoded with")
     p.add_argument("--latent-shift", type=float, default=None, help="shift_factor the corpus was encoded with (SD 3.5: 0.0609)")
+    p.add_argument("--idm-reencode-vae", nargs="?", const=VAE_NAME, default="",
+                   help="decode the rollout with --vae-path and re-encode with this SD 1.x encoder before the "
+                        f"IDM (bare flag = {VAE_NAME}); required when the rollout is not in the IDM's own "
+                        "4-channel latent space, as for the 16-channel sd35 row")
     p.add_argument("--decode-batch", type=int, default=16); p.add_argument("--save-clips", type=int, default=64); p.add_argument("--out-dir")
-    a = p.parse_args()
+    return p
+
+
+if __name__ == "__main__":
+    a = build_parser().parse_args()
     if a.rollout:
         do_rollout(a)
     if a.score:

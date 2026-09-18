@@ -133,6 +133,29 @@ def denormalize_latents(z, scale=LATENT_SCALE, shift=LATENT_SHIFT):
     return z if shift in (None, 0) else z + shift
 
 
+IDM_PAD_TO = 256               # encode_parquet.py pads the 240-row frame to 256 after the [-1, 1] shift
+
+
+@torch.no_grad()
+def encode_for_idm(vae, frames, device, batch=16, pad_to=IDM_PAD_TO, scale=LATENT_SCALE):
+    """Decoded frames (T, 3, 240, 320) in [0, 1] -> the SD 1.x latents `train_idm.IDM` reads.
+
+    The IDM's encoder opens with a 4-channel convolution, so any row whose latents are not the
+    SD KL-f8 space (the 16-channel SD 3.5 row, the Wan-VAE video row) has to decode to pixels and
+    re-encode here before it can be judged. This reproduces `encode_parquet.encode_batch`: to
+    [-1, 1] first, zero-pad the height 240 -> 256 AFTER that shift, posterior mean, scaled by
+    0.18215. The pad is zeros rather than the decoder's own reconstruction of those rows, because
+    zeros is what the IDM's training latents carry there.
+    """
+    out = []
+    for i in range(0, frames.shape[0], batch):
+        x = frames[i:i + batch].to(device) * 2 - 1
+        if x.shape[2] < pad_to:
+            x = torch.nn.functional.pad(x, (0, 0, 0, pad_to - x.shape[2]))
+        out.append((vae.encode(x).latent_dist.mean * scale).float())
+    return torch.cat(out)
+
+
 @torch.no_grad()
 def decode_latents(vae, latents):
     """(B, 4, 16|15, 20) scaled latents -> (B, 3, 120, 160) images in [0, 1]. Strips the pad row."""
