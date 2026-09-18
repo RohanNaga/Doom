@@ -31,11 +31,15 @@ What PixArt-alpha needed on top of that, and why:
   runtime branch would build; only the recomputation goes away. Being non-persistent, the buffer
   never enters the state dict, so save/load is unaffected.
 * Conditioning. PixArt has no class-label path; its only non-timestep conditioning is the T5
-  caption sequence. We feed two learned tokens through the pretrained caption projection: an
-  action embedding with a trailing null row for CFG dropout (same `action_dropout` semantics as
-  the U-Net) and a context-noise-bucket embedding, both of width `caption_channels` (4096). The
-  timestep keeps PixArt's own adaLN-single path untouched, and `use_additional_conditions` is
-  forced False so no resolution or aspect-ratio embeddings are required.
+  caption sequence. Under the default `action_inject="token"` we feed two learned tokens through the
+  pretrained caption projection: an action embedding with a trailing null row for CFG dropout (same
+  `action_dropout` semantics as the U-Net) and a context-noise-bucket embedding, both of width
+  `caption_channels` (4096). The timestep keeps PixArt's own adaLN-single path untouched, and
+  `use_additional_conditions` is forced False so no resolution or aspect-ratio embeddings are required.
+  `action_inject="adaln"` is the grid's injection cell: the two embeddings, now `inner_dim` wide and
+  zero-initialised, are *added* to the embedded timestep that feeds adaLN-single and the final
+  shift/scale (`AdaLNActionInjection`), and cross-attention sees one learned action-free caption token
+  instead. Nothing is added to the attention pathway, which is the point of the comparison.
 * Output head. PixArt is a learn-sigma model: 8 output channels, epsilon first and the learned
   variance second (`PixArtAlphaPipeline` takes `chunk(2, dim=1)[0]`). We return the first 4 after
   unpatchify. Those are the pretrained epsilon channels, retrained here toward velocity, exactly
@@ -65,9 +69,51 @@ BACKBONE_LATENT_CHANNELS = {"dit": 4, "unet": 4, "pixart": 4, "unidiffuser": 4, 
 BACKBONES = tuple(BACKBONE_LATENT_CHANNELS)
 
 
+WARM_START_NONE = "none"
+ACTION_INJECTIONS = ("token", "adaln")
+
+
 def resolve_latent_channels(backbone, latent_channels=None):
     """Latent channel count for a backbone: the caller's value, else the warm start's native one."""
     return BACKBONE_LATENT_CHANNELS[backbone] if latent_channels in (None, 0) else int(latent_channels)
+
+
+def resolve_warm_start(backbone, warm_start):
+    """(source, scratch) for `build_model`, resolving `--warm-start none`.
+
+    "none" means the same architecture with a random init, which is the grid's scratch cell. The
+    DiT is built from local code, so scratch is simply naming no checkpoint. PixArt still needs
+    its repo, but only for the config that fixes the shapes; no weights are read from it. The
+    other diffusers backbones have no scratch path here, so asking for one is an error rather
+    than a silent warm start.
+    """
+    if not (isinstance(warm_start, str) and warm_start.strip().lower() == WARM_START_NONE):
+        return warm_start, False
+    if backbone == "dit":
+        return None, True
+    if backbone == "pixart":
+        return PIXART_DEFAULT, True
+    raise NotImplementedError(f"--warm-start {WARM_START_NONE} is implemented for dit and pixart, not {backbone}")
+
+
+class AdaLNActionInjection(nn.Module):
+    """Adds a per-sample conditioning vector to PixArt's timestep embedding.
+
+    `AdaLayerNormSingle.emb` produces the embedded timestep that feeds both every block's
+    adaLN-single modulation and the final layer's shift and scale, so adding to its output is the
+    additive injection Nano World Models prices at zero new attention parameters. diffusers calls
+    `emb` itself and takes no extra argument, so the world model's forward stashes the vector here
+    and clears it again; the wrapper registers no parameter or buffer of its own.
+    """
+
+    def __init__(self, emb):
+        super().__init__()
+        self.emb = emb
+        self.extra = None
+
+    def forward(self, *args, **kwargs):
+        out = self.emb(*args, **kwargs)
+        return out if self.extra is None else out + self.extra.to(out.dtype)
 
 
 def stacked_in_channels(latent_channels, context_frames):
@@ -191,36 +237,70 @@ class PixArtWorldModel(nn.Module):
     """
 
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, pixart_path=PIXART_DEFAULT,
-                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=LATENT_CHANNELS):
+                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=LATENT_CHANNELS,
+                 scratch=False, action_inject="token", transformer=None):
         super().__init__()
         from diffusers import PixArtTransformer2DModel
         from diffusers.models.embeddings import get_2d_sincos_pos_embed as diffusers_pos_embed
+        if action_inject not in ACTION_INJECTIONS:
+            raise ValueError(f"action injection must be one of {ACTION_INJECTIONS}, got {action_inject}")
         self.context_frames = context_frames
         self.num_actions = num_actions
         self.action_dropout = action_dropout
         self.latent_channels = latent_channels
+        self.action_inject = action_inject
         in_channels = stacked_in_channels(latent_channels, context_frames)
-        self.transformer = PixArtTransformer2DModel.from_pretrained(
-            pixart_path, subfolder="transformer", cache_dir=cache_dir, low_cpu_mem_usage=False,
-            use_additional_conditions=False)
+        if transformer is not None:
+            # a pre-built transformer: how the CPU gate exercises this wrapper without the 611M checkpoint
+            self.transformer = transformer
+        elif scratch:
+            # same architecture, random init: the config fixes every shape, the checkpoint is never read
+            cfg = PixArtTransformer2DModel.load_config(pixart_path, subfolder="transformer", cache_dir=cache_dir)
+            self.transformer = PixArtTransformer2DModel.from_config({**cfg, "use_additional_conditions": False})
+        else:
+            self.transformer = PixArtTransformer2DModel.from_pretrained(
+                pixart_path, subfolder="transformer", cache_dir=cache_dir, low_cpu_mem_usage=False,
+                use_additional_conditions=False)
 
         patch = self.transformer.pos_embed
-        patch.proj = inflate_input_conv(patch.proj, in_channels, latent_channels)
+        if scratch:
+            # nothing pretrained to preserve, so a plain conv over all in_channels under the default
+            # init, rather than the pretrained kernel on the target slice and zeros on the context
+            old = patch.proj
+            patch.proj = nn.Conv2d(in_channels, old.out_channels, old.kernel_size, old.stride, old.padding,
+                                   bias=old.bias is not None)
+        else:
+            patch.proj = inflate_input_conv(patch.proj, in_channels, latent_channels)
         self.transformer.register_to_config(in_channels=in_channels)
 
         # fixed table for our 16x20 token grid, built the way PatchEmbed would build it at runtime
         grid = (LATENT_HW[0] // patch.patch_size, LATENT_HW[1] // patch.patch_size)
-        # diffusers < 0.32 returns numpy here and has no output_type argument; torch.as_tensor covers both
+        # diffusers < 0.32 returns numpy and has no output_type argument; >= 0.33 raises unless output_type="pt"
+        import inspect
+        extra = {"output_type": "pt"} if "output_type" in inspect.signature(diffusers_pos_embed).parameters else {}
         pe = torch.as_tensor(diffusers_pos_embed(patch.pos_embed.shape[-1], grid, base_size=patch.base_size,
-                                                 interpolation_scale=patch.interpolation_scale))
+                                                 interpolation_scale=patch.interpolation_scale, **extra))
         patch.register_buffer("pos_embed", pe.float().unsqueeze(0), persistent=False)
         patch.height, patch.width = grid
 
         caption_channels = self.transformer.config.caption_channels
-        self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
-        self.bucket_embedder = nn.Embedding(noise_buckets, caption_channels)
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
-        nn.init.normal_(self.bucket_embedder.weight, std=0.02)
+        if action_inject == "token":
+            self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
+            self.bucket_embedder = nn.Embedding(noise_buckets, caption_channels)
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
+            nn.init.normal_(self.bucket_embedder.weight, std=0.02)
+        else:
+            inner = self.transformer.config.num_attention_heads * self.transformer.config.attention_head_dim
+            self.action_embedder = nn.Embedding(num_actions + 1, inner)
+            self.bucket_embedder = nn.Embedding(noise_buckets, inner)
+            # zero init keeps step 0 equal to the pretrained model on the noisy target, the property the
+            # token path gets from the zeroed context channels. The gradient through adaLN-single's SiLU
+            # is nonzero at zero, so both tables still train from the first update.
+            nn.init.zeros_(self.action_embedder.weight)
+            nn.init.zeros_(self.bucket_embedder.weight)
+            # cross-attention stays alive but action-free: one learned caption token, zero at init
+            self.null_caption = nn.Parameter(torch.zeros(1, 1, caption_channels))
+            self.transformer.adaln_single.emb = AdaLNActionInjection(self.transformer.adaln_single.emb)
         if grad_ckpt:
             self.transformer.enable_gradient_checkpointing()
 
@@ -228,11 +308,20 @@ class PixArtWorldModel(nn.Module):
         if self.training and self.action_dropout > 0:
             drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
             action = torch.where(drop, torch.full_like(action, self.num_actions), action)
-        tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
-        # older diffusers unpack added_cond_kwargs unconditionally; both keys are ignored with use_additional_conditions=False
-        out = self.transformer(torch.cat([context, x], dim=1), encoder_hidden_states=tokens, timestep=t,
-                               encoder_attention_mask=None,
-                               added_cond_kwargs={"resolution": None, "aspect_ratio": None}).sample
+        if self.action_inject == "token":
+            tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
+        else:
+            # adaln_single runs once, before any checkpointed block, so the stash is read before a recompute
+            self.transformer.adaln_single.emb.extra = self.action_embedder(action) + self.bucket_embedder(noise_bucket)
+            tokens = self.null_caption.expand(x.shape[0], -1, -1)
+        try:
+            # older diffusers unpack added_cond_kwargs unconditionally; both keys are ignored with use_additional_conditions=False
+            out = self.transformer(torch.cat([context, x], dim=1), encoder_hidden_states=tokens, timestep=t,
+                                   encoder_attention_mask=None,
+                                   added_cond_kwargs={"resolution": None, "aspect_ratio": None}).sample
+        finally:
+            if self.action_inject == "adaln":
+                self.transformer.adaln_single.emb.extra = None
         return out[:, :self.latent_channels]   # epsilon half of the learn-sigma head, retrained as velocity
 
 
@@ -499,8 +588,11 @@ class SD35WorldModel(nn.Module):
 
 
 def build_model(backbone, num_actions, context_frames, noise_buckets=10, grad_ckpt=True, warm_start=None,
-                cache_dir=None, action_dropout=0.1, latent_channels=None):
+                cache_dir=None, action_dropout=0.1, latent_channels=None, action_inject="token"):
     latent_channels = resolve_latent_channels(backbone, latent_channels)
+    warm_start, scratch = resolve_warm_start(backbone, warm_start)
+    if action_inject != "token" and backbone != "pixart":
+        raise NotImplementedError(f"--action-inject {action_inject} is a PixArt knob, not a {backbone} one")
     if backbone == "dit":
         m = DiTWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
                           latent_channels=latent_channels)
@@ -514,7 +606,7 @@ def build_model(backbone, num_actions, context_frames, noise_buckets=10, grad_ck
     elif backbone == "pixart":
         m = PixArtWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout,
                              grad_ckpt=grad_ckpt, pixart_path=warm_start or PIXART_DEFAULT, cache_dir=cache_dir,
-                             latent_channels=latent_channels)
+                             latent_channels=latent_channels, scratch=scratch, action_inject=action_inject)
     elif backbone == "unidiffuser":
         m = UniDiffuserWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
                                   unidiffuser_path=warm_start or UNIDIFFUSER_DEFAULT, cache_dir=cache_dir,

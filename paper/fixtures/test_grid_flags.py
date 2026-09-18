@@ -27,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, REPO)
 
+import backbones  # noqa: E402
 from diffusion_v import VDiffusion, checkpoint_objective  # noqa: E402
 from doom_data import select_train_episodes  # noqa: E402
 
@@ -172,3 +173,135 @@ def test_the_evaluators_take_an_objective_flag_defaulting_to_auto(script):
     assert out.returncode == 0, out.stderr[-2000:]
     assert "--objective" in out.stdout
     assert "auto" in out.stdout
+
+
+# ---- --warm-start none -----------------------------------------------------------------------
+
+def test_scratch_keeps_the_pixart_repo_for_its_config_but_loads_no_weights():
+    source, scratch = backbones.resolve_warm_start("pixart", "none")
+    assert (source, scratch) == (backbones.PIXART_DEFAULT, True)
+
+
+def test_scratch_is_case_and_space_insensitive():
+    for spelling in ("none", "NONE", " None "):
+        assert backbones.resolve_warm_start("pixart", spelling)[1] is True
+
+
+def test_a_named_warm_start_is_left_alone():
+    assert backbones.resolve_warm_start("pixart", "/weights/pixart") == ("/weights/pixart", False)
+    assert backbones.resolve_warm_start("pixart", None) == (None, False)
+
+
+def test_the_dit_scratch_path_is_simply_no_checkpoint():
+    assert backbones.resolve_warm_start("dit", "none") == (None, True)
+
+
+def test_scratch_is_refused_where_it_is_not_implemented():
+    for backbone in ("unet", "unidiffuser", "sd35"):
+        with pytest.raises(NotImplementedError):
+            backbones.resolve_warm_start(backbone, "none")
+
+
+# ---- --action-inject {token,adaln} -----------------------------------------------------------
+
+def _tiny_pixart():
+    """A 16k-parameter PixArt transformer with PixArt's own module graph, built from a config so the
+    adaLN-single injection can be gated without the 611M checkpoint."""
+    from diffusers import PixArtTransformer2DModel
+    return PixArtTransformer2DModel(num_attention_heads=2, attention_head_dim=8, in_channels=4, out_channels=8,
+                                    num_layers=2, caption_channels=32, sample_size=64, patch_size=2,
+                                    cross_attention_dim=16, use_additional_conditions=False, norm_num_groups=2)
+
+
+def _tiny_world_model(inject):
+    return backbones.PixArtWorldModel(num_actions=3, context_frames=2, noise_buckets=4, action_dropout=0.0,
+                                      grad_ckpt=False, action_inject=inject, transformer=_tiny_pixart())
+
+
+def _batch(model, n=2, seed=0):
+    g = torch.Generator().manual_seed(seed)
+    c = model.latent_channels
+    return (torch.randn(n, c, 32, 40, generator=g), torch.full((n,), 300, dtype=torch.long),
+            torch.tensor([1, 2])[:n], torch.randn(n, c * model.context_frames, 32, 40, generator=g),
+            torch.tensor([0, 3])[:n])
+
+
+def test_the_adaln_injection_wrapper_is_transparent_until_something_is_stashed():
+    from diffusers.models.normalization import AdaLayerNormSingle
+    norm = AdaLayerNormSingle(16, use_additional_conditions=False)
+    plain = norm.emb
+    t = torch.tensor([13, 700])
+    before = plain(t, resolution=None, aspect_ratio=None, batch_size=2, hidden_dtype=torch.float32)
+    norm.emb = backbones.AdaLNActionInjection(plain)
+    after = norm.emb(t, resolution=None, aspect_ratio=None, batch_size=2, hidden_dtype=torch.float32)
+    assert torch.equal(before, after)
+    norm.emb.extra = torch.ones_like(after)
+    assert torch.allclose(norm.emb(t, resolution=None, aspect_ratio=None, batch_size=2, hidden_dtype=torch.float32),
+                          after + 1.0)
+
+
+def test_both_injection_modes_return_the_velocity_shape():
+    for inject in backbones.ACTION_INJECTIONS:
+        m = _tiny_world_model(inject)
+        out = m(*_batch(m))
+        assert out.shape == (2, m.latent_channels, 32, 40), inject
+
+
+def test_adaln_injection_is_zero_initialised_so_step_zero_is_still_the_pretrained_model():
+    m = _tiny_world_model("adaln")
+    assert float(m.action_embedder.weight.detach().abs().max()) == 0.0
+    assert float(m.bucket_embedder.weight.detach().abs().max()) == 0.0
+    assert float(m.null_caption.detach().abs().max()) == 0.0
+    x, t, act, ctx, bucket = _batch(m)
+    with torch.no_grad():
+        mixed = m(x, t, act, ctx, bucket)
+        other = m(x, t, act * 0, ctx, bucket * 0)
+    assert torch.equal(mixed, other), "a zero-initialised injection must not depend on the action yet"
+
+
+def test_adaln_injection_widths_follow_the_transformer():
+    m = _tiny_world_model("adaln")
+    inner = m.transformer.config.num_attention_heads * m.transformer.config.attention_head_dim
+    assert m.action_embedder.weight.shape == (3 + 1, inner)      # +1 null row for action dropout
+    assert m.bucket_embedder.weight.shape == (4, inner)
+    tok = _tiny_world_model("token")
+    assert tok.action_embedder.weight.shape[1] == tok.transformer.config.caption_channels
+
+
+def test_both_injection_embedders_receive_gradient():
+    for inject in backbones.ACTION_INJECTIONS:
+        m = _tiny_world_model(inject)
+        m.train()
+        m(*_batch(m)).square().mean().backward()
+        for name in ("action_embedder", "bucket_embedder"):
+            g = getattr(m, name).weight.grad
+            assert g is not None and float(g.abs().sum()) > 0, f"{inject}/{name} got no gradient"
+
+
+def test_the_adaln_stash_is_cleared_after_a_forward():
+    m = _tiny_world_model("adaln")
+    with torch.no_grad():
+        m(*_batch(m))
+    assert m.transformer.adaln_single.emb.extra is None
+
+
+def test_an_unknown_injection_is_refused():
+    with pytest.raises(ValueError):
+        _tiny_world_model("film")
+
+
+def test_the_injection_knob_is_refused_for_the_other_backbones():
+    for backbone in ("dit", "unet", "unidiffuser", "sd35"):
+        with pytest.raises(NotImplementedError):
+            backbones.build_model(backbone, 3, 2, action_inject="adaln")
+
+
+def test_the_trainer_exposes_every_cell_knob():
+    import subprocess
+    train = subprocess.run([sys.executable, os.path.join(REPO, "train_wm.py"), "--help"],
+                           capture_output=True, text=True, cwd=REPO)
+    assert train.returncode == 0, train.stderr[-2000:]
+    for flag in ("--train-fraction", "--objective", "--action-inject", "--warm-start",
+                 "--context-frames", "--noise-aug-max", "--lr"):
+        assert flag in train.stdout, flag
+    assert "adaln" in train.stdout and "none" in train.stdout

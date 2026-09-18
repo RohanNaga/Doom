@@ -71,9 +71,11 @@ def do_rollout(args):
     ck = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     # the action table's size depends on the training-time dropout (fast-DiT adds the null row only when it is > 0)
     dropout = ck.get("args", {}).get("action_dropout", 0.1)
+    # the adaLN injection cell renames the adaln_single subtree, so the graph has to be rebuilt the way it was trained
+    inject = (ck.get("args") or {}).get("action_inject") or "token"
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets, grad_ckpt=False,
                         warm_start=backbone_source(args), cache_dir=args.hf_cache, action_dropout=dropout,
-                        latent_channels=C)
+                        latent_channels=C, action_inject=inject)
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     load_world_model_state(model, ck, args.use_ema)

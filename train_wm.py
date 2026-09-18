@@ -26,7 +26,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
-from backbones import BACKBONES, LATENT_HW, build_model, resolve_latent_channels
+from backbones import ACTION_INJECTIONS, BACKBONES, LATENT_HW, build_model, resolve_latent_channels
 from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
 
 
@@ -187,7 +187,8 @@ def main(args):
     latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
-                        action_dropout=args.action_dropout, latent_channels=latent_channels)
+                        action_dropout=args.action_dropout, latent_channels=latent_channels,
+                        action_inject=args.action_inject)
     start_step = 0
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=False)
@@ -404,7 +405,8 @@ if __name__ == "__main__":
     p.add_argument("--results-dir", default="results/fit_check")
     p.add_argument("--warm-start", default=None,
                    help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path; "
-                        "UniDiffuser: thu-ml/unidiffuser-v1 repo or path; sd35: stabilityai/stable-diffusion-3.5-medium repo or path")
+                        "UniDiffuser: thu-ml/unidiffuser-v1 repo or path; sd35: stabilityai/stable-diffusion-3.5-medium repo or path; "
+                        "'none' (dit and pixart) builds the same architecture with a random init")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--global-batch", type=int, default=32)
     p.add_argument("--per-gpu-batch", type=int, default=4)
@@ -427,6 +429,9 @@ if __name__ == "__main__":
     p.add_argument("--keep-remote", type=int, default=2, help="rolling recovery checkpoints kept on --remote-results")
     p.add_argument("--snapshot-every", type=int, default=5000, help="compact bf16 weight snapshot to --remote-results at these validation steps (never pruned)")
     p.add_argument("--action-dropout", type=float, default=0.1, help="fraction of actions replaced by the null id during training (0 disables CFG training)")
+    p.add_argument("--action-inject", choices=list(ACTION_INJECTIONS), default="token",
+                   help="PixArt only: action and bucket as cross-attention caption tokens (every finished row) or "
+                        "added into the timestep/adaLN-single path; recorded in every checkpoint so the evaluators rebuild the right graph")
     p.add_argument("--require-verified-transitions", action="store_true", help="refuse latents without chain ids and 4-tic spacing")
     p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
