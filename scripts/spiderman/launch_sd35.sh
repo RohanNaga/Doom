@@ -13,7 +13,7 @@
 #   --grad-ckpt        the 2.246B transformer needs about 44 to 46 GB allocated at batch 32 with
 #                      activation checkpointing on (fit_sd35.sh measures it); without it the
 #                      arithmetic puts the row over the 48 GB card. The other rows train without.
-#   --skip-grad-norm 5 the PaLM-style spike guard that rescued the UniDiffuser row after its two
+#   --skip-grad-norm 5 --skip-grad-after 3000 the PaLM-style spike guard that rescued the UniDiffuser row after its two
 #                      gradient excursions. It skips the optimizer step, the schedule and the EMA
 #                      when the pre-clip gradient norm exceeds 5, about 20x a healthy norm.
 #
@@ -49,7 +49,7 @@ fi
 # resume from the newest recovery checkpoint; empty on a first launch (and on any machine without $R)
 [ -f $R/log.jsonl ] && { CK=$(ls $R/[0-9]*.pt 2>/dev/null | sort | tail -1); RES=${CK:+--resume $CK}; } || RES=""
 
-COMMON="--context-frames 32 --num-actions 29 --global-batch $GLOBAL --lr 5e-5 --warmup 2000 --clip 1.0 --steps 90000 --seed 0 --action-dropout 0.0 --require-verified-transitions --latents-dir $D/latents_arnold_sd35 --split $D/split_arnold.json --val-every 1000 --val-windows 1024 --ckpt-every 5000 --snapshot-every 5000 --keep-last 2 --num-workers 4 --grad-ckpt --skip-grad-norm 5 ${EXTRA:-}"
+COMMON="--context-frames 32 --num-actions 29 --global-batch $GLOBAL --lr 5e-5 --warmup 2000 --clip 1.0 --steps 90000 --seed 0 --action-dropout 0.0 --require-verified-transitions --latents-dir $D/latents_arnold_sd35 --split $D/split_arnold.json --val-every 1000 --val-windows 1024 --ckpt-every 5000 --snapshot-every 5000 --keep-last 2 --num-workers 4 --grad-ckpt --skip-grad-norm 5 --skip-grad-after 3000 ${EXTRA:-}"
 CMD="cd $D/repo && TMPDIR=$D/tmp/tmpdir HF_HUB_OFFLINE=0 CUDA_VISIBLE_DEVICES=$GPU $LAUNCHER train_wm.py --backbone sd35 --per-gpu-batch $MB --latent-channels 16 --warm-start stabilityai/stable-diffusion-3.5-medium --hf-cache $D/hf/hub --results-dir $R $COMMON $RES >> $D/logs/train_sd35.log 2>&1"
 
 # DRY prints what tmux would be given and stops before every side effect, so the command can be
@@ -70,7 +70,7 @@ the paper's description of this row.
 
 1. `--grad-ckpt` (activation checkpointing). The 2.246B-parameter MMDiT-X does not fit the 48 GB
    card at global batch 32 without it. Costs roughly 30% throughput; changes no gradient.
-2. `--skip-grad-norm 5` (spike guard). The optimizer step, the learning-rate schedule and the EMA
+2. `--skip-grad-norm 5 --skip-grad-after 3000` (spike guard). The optimizer step, the learning-rate schedule and the EMA
    are skipped on any update whose pre-clip gradient norm exceeds 5. This is the guard added for
    the UniDiffuser row after its excursions at updates 8,500 and 34,600; 5 is about 20x a healthy
    norm and above the benign 1.5 spikes. The trainer counts the skips in `skipped_updates`, and

@@ -309,7 +309,7 @@ def main(args):
                 continue
             gn = acc.clip_grad_norm_(model.parameters(), args.clip if args.clip > 0 else float("inf"))
             grad_norms.append(float(gn))   # pre-clip norm: the instability diagnostic that the loss alone hides
-            spike = args.skip_grad_norm > 0 and float(gn) > args.skip_grad_norm
+            spike = args.skip_grad_norm > 0 and step >= args.skip_grad_after and float(gn) > args.skip_grad_norm
             if not math.isfinite(float(gn)) or spike:
                 # gradients are DDP-averaged before clipping, so all ranks agree; skip the update without advancing the schedule.
                 # A finite spike is skipped too when --skip-grad-norm is set: clipping bounds the gradient but not Adam's
@@ -430,6 +430,7 @@ def build_parser():
     p.add_argument("--warmup", type=int, default=500)
     p.add_argument("--clip", type=float, default=1.0)
     p.add_argument("--skip-grad-norm", type=float, default=0.0, help="skip the optimizer step when the pre-clip gradient norm exceeds this (0 = off; recipe deviation)")
+    p.add_argument("--skip-grad-after", type=int, default=0, help="the spike guard is inactive before this many updates: gradient norms of 10 to 20 are normal right after the input layer is inflated, so a guard calibrated on a settled run would skip every early update")
     p.add_argument("--steps", type=int, default=90000)
     p.add_argument("--optim", choices=["adamw", "adamw8bit"], default="adamw")
     p.add_argument("--ema-every", type=int, default=8, help="0 disables the fp32 CPU EMA")
