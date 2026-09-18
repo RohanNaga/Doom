@@ -172,6 +172,8 @@ def main(args):
                 lo = i * eff + a * micro
                 idx = order[lo:lo + micro]
                 x = to_tensor([train_frames[j] for j in idx], device)
+                if args.channels_last:
+                    x = x.contiguous(memory_format=torch.channels_last)
                 with torch.no_grad():
                     z = vae.encode(x).latent_dist.mean
                 with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device != "cpu"):
@@ -222,6 +224,7 @@ if __name__ == "__main__":
     p.add_argument("--lpips-weight", type=float, default=0.0)
     p.add_argument("--report-lpips", action="store_true")
     p.add_argument("--val-every", type=int, default=0, help="validate every N updates (0 = epoch ends only)")
+    p.add_argument("--channels-last", action="store_true", help="NHWC decoder; throughput only")
     p.add_argument("--frame-cache", default="", help="directory for the decoded uint8 frame sample")
     p.add_argument("--vae-id", default="", help="AutoencoderKL repo or path (default: sd-vae-ft-mse)")
     p.add_argument("--vae-subfolder", default="")

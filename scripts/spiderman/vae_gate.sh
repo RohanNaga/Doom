@@ -12,12 +12,17 @@
 # HF_HOME is deliberately left alone: it relocates the token file, and the gated SD 3.5 repo
 # needs the token at its default path. Every download is pinned under $D with --cache-dir
 # because the root filesystem is full.
+#
+# A single-pass batch 32 measured 45.3 GB of this card's 47.4 GB and OOMed, so the effective
+# batch of 32 is reached as micro 16 x accum 2 with an NHWC decoder (about 28 GB). The recipe
+# numbers that matter, 100k presentations at effective batch 32 and lr 1e-5, are unchanged.
 set -u
 D=/sata2/data/rnagabhi/doom
 GPU=${1:?gpu}; NAME=${2:?name}; VAE=${3:?vae id}; SUB=${4:?subfolder}; CH=${5:?latent channels}; SCALE=${6:?scaling}; SHIFT=${7:?shift}
 PY=~/miniconda3/envs/doom/bin/python
-export CUDA_VISIBLE_DEVICES=$GPU HF_HUB_OFFLINE=0 TMPDIR=$D/tmp/tmpdir
-mkdir -p $TMPDIR $D/logs $D/frame_cache $D/results_spiderman/vae_gate_$NAME
+export CUDA_VISIBLE_DEVICES=$GPU HF_HUB_OFFLINE=0 TMPDIR=$D/tmp/tmpdir TORCH_HOME=$D/tmp/torch
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+mkdir -p $TMPDIR $TORCH_HOME $D/logs $D/frame_cache $D/results_spiderman/vae_gate_$NAME
 cd $D/repo
 
 echo "=== $(date -u) tune $NAME decoder ($VAE/$SUB, ${CH}ch)"
@@ -26,7 +31,7 @@ $PY finetune_decoder.py \
   --latent-channels $CH --scaling-factor $SCALE --shift-factor $SHIFT \
   --in-dir $D/raw_arnold --split $D/split_arnold.json --out-dir $D/vae_decoder_${NAME}_lpips \
   --frame-cache $D/frame_cache --train-frames 50000 --val-frames 2000 --stride 4 \
-  --epochs 2 --batch-size 16 --accum 2 --lr 1e-5 --lpips-weight 0.1 --val-every 500 --device cuda:0
+  --epochs 2 --batch-size 16 --accum 2 --channels-last --lr 1e-5 --lpips-weight 0.1 --val-every 500 --device cuda:0
 echo "=== tune exit $?"
 
 echo "=== $(date -u) score $NAME"
