@@ -15,6 +15,8 @@ Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A400
 
 **Always invoke the `/run-server` skill before any SSH, SCP, or remote command.** The skill in `.claude/skills/run-server/` was copied from the Lego repo; for this project only the Superman section applies.
 
+**SSH connection budget (Sep 18 2026).** CMU's network edge dropped all SSH from our public IP twice (Sep 17 23:11 for eight hours, Sep 18 08:15) after several agents opened connections in bursts and ran retry loops; it looks like a scanner to campus security. Rules: `~/.ssh/config` multiplexes both lab servers (one master connection per server, `ControlPersist 8h`, sockets in `~/.ssh/cm/`), so keep using the plain `sshpass ... ssh` pattern and it reuses the open connection; at most ONE server-touching agent at a time plus the main session; never run ssh retry loops; on a connect timeout stop, record it, and report instead of retrying (a timeout means the edge is dropping us, and retries extend the block); batch remote work into few commands. A different network (phone hotspot) or the CMU VPN restores access immediately.
+
 **Fill the card (Rohan, Sep 17 2026).** Every GPU job uses the whole card it holds: largest micro-batch that fits (about 40 to 44 GB on an A6000), no gradient accumulation, gradient checkpointing only when the batch does not fit otherwise, fused AdamW, bf16 autocast, and a short throughput sweep before any multi-hour run. Reports state peak memory and updates/s. The recipe's global batch stays fixed; the levers are micro-batch and memory settings.
 
 ## Standing facts that shape code changes
