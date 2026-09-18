@@ -429,3 +429,64 @@ def test_every_cell_trains_five_updates_and_evaluates_two_windows(cell, tiny_cor
     objective, trained = _evaluate_two_windows(out, tiny_corpus, cell)
     assert objective == ("eps" if cell == "eps" else "v"), cell
     assert trained["action_inject"] == ("adaln" if cell == "adaln" else "token"), cell
+
+
+# ---- the launchers ---------------------------------------------------------------------------
+
+LAUNCH_CELL = os.path.join(REPO, "scripts", "spiderman", "launch_cell.sh")
+GRID_QUEUE = os.path.join(REPO, "scripts", "spiderman", "grid_queue.sh")
+
+
+def _case_table():
+    """Parse launch_cell.sh's case table into {cell: flag list}, the way the launcher builds it."""
+    import re
+    out, body = {}, open(LAUNCH_CELL).read()
+    block = body[body.index("case $CELL in"):body.index("esac")]
+    for line in block.splitlines()[1:]:
+        m = re.match(r"\s{2}(\S+?)\)\s*(.*?);;", line)
+        if not m or m.group(1) == "*":
+            continue
+        cell, rhs = m.group(1), m.group(2).strip()
+        flags = []
+        knob = re.search(r'KNOB="([^"]*)"', rhs)
+        if knob:
+            flags = knob.group(1).split()
+        ctx = re.search(r"CTX=(\d+)", rhs)
+        if ctx:
+            flags = ["--context-frames", ctx.group(1)]
+        out[cell] = flags
+    return out
+
+
+@pytest.mark.parametrize("script", [LAUNCH_CELL, GRID_QUEUE])
+def test_the_launchers_are_valid_bash(script):
+    import subprocess
+    assert subprocess.run(["bash", "-n", script], capture_output=True, text=True).returncode == 0
+    assert os.access(script, os.X_OK), f"{script} is not executable"
+
+
+def test_the_case_table_is_the_twelve_cells_the_gate_exercises():
+    table = _case_table()
+    assert list(table) == list(CELL_FLAGS), "launch_cell.sh's cells and the gated cells disagree"
+    for cell, flags in CELL_FLAGS.items():
+        assert table[cell] == flags, f"{cell}: launcher sets {table[cell]}, the gate exercises {flags}"
+
+
+def test_the_launcher_pins_the_shared_recipe():
+    body = open(LAUNCH_CELL).read()
+    for flag in ("--steps 30000", "--per-gpu-batch 32", "--global-batch 32", "--lr 5e-5",
+                 "--warmup 2000", "--action-dropout 0.0", "--seed 0", "--val-every 1000",
+                 "--require-verified-transitions", "--num-windows 2048", "--num-rollouts 256",
+                 "--horizon 64"):
+        assert flag in body, flag
+    assert "--grad-ckpt" not in body, "the grid fills the card; gradient checkpointing is not part of the recipe"
+    assert "CELL_DONE $CELL" in body
+    # the knob is appended after the base flags, which is what makes an override work
+    assert body.index("BASE=") < body.index("$BASE $KNOB")
+
+
+def test_the_queue_skips_finished_cells_and_owns_one_tmux_session_per_gpu():
+    body = open(GRID_QUEUE).read()
+    assert 'CELL_DONE $CELL' in body and "continue" in body
+    assert 'tmux has-session -t "grid-$GPU"' in body
+    assert "TMPDIR=$D/tmp/tmpdir" in body and "GRID_IN_TMUX=1" in body
