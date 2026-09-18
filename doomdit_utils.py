@@ -1,5 +1,6 @@
 """Shared helpers for loading a DoomDiT checkpoint and its VAE."""
 import math
+import os
 
 import torch
 from diffusers.models import AutoencoderKL
@@ -63,6 +64,27 @@ def load_vae(device="cpu"):
     return vae
 
 
+WEIGHT_FILES = ("diffusion_pytorch_model.safetensors", "diffusion_pytorch_model.bin")
+
+
+def resolve_vae_dir(path):
+    """Point a local path at the directory that actually holds the weights.
+
+    A decoder tune writes `<out_dir>/vae`, so both `<out_dir>` and `<out_dir>/vae` name the
+    same checkpoint and both are accepted. Repo ids are returned untouched. A local directory
+    with no weight file raises here, naming itself, instead of surfacing as diffusers' report
+    that it could not find `diffusion_pytorch_model.bin` in it: that is what a half-written
+    save looks like, and the difference matters when a gate has to be rerun.
+    """
+    if not os.path.isdir(path):
+        return path
+    for cand in (path, os.path.join(path, "vae")):
+        if any(os.path.exists(os.path.join(cand, f)) for f in WEIGHT_FILES):
+            return cand
+    raise SystemExit(f"no autoencoder weights ({' or '.join(WEIGHT_FILES)}) in {path}; "
+                     "the fine-tune that was to write them did not finish saving")
+
+
 def build_vae(vae_id="", subfolder="", device="cpu", cache_dir=None,
               latent_channels=None, scaling_factor=None, shift_factor=None):
     """Load an autoencoder and assert it is the latent space the caller declared.
@@ -74,6 +96,9 @@ def build_vae(vae_id="", subfolder="", device="cpu", cache_dir=None,
     if not vae_id:
         vae = load_vae(device)
     else:
+        if subfolder and os.path.isdir(os.path.join(vae_id, subfolder)):
+            vae_id, subfolder = os.path.join(vae_id, subfolder), ""    # a local path, not a repo id
+        vae_id = resolve_vae_dir(vae_id)
         kw = {"subfolder": subfolder} if subfolder else {}
         vae = AutoencoderKL.from_pretrained(vae_id, cache_dir=cache_dir, **kw).to(device).eval()
         vae.requires_grad_(False)
@@ -106,6 +131,29 @@ def denormalize_latents(z, scale=LATENT_SCALE, shift=LATENT_SHIFT):
     """Stored latent -> the value `vae.decode` expects. Inverse of `normalize_latents`."""
     z = z / scale
     return z if shift in (None, 0) else z + shift
+
+
+IDM_PAD_TO = 256               # encode_parquet.py pads the 240-row frame to 256 after the [-1, 1] shift
+
+
+@torch.no_grad()
+def encode_for_idm(vae, frames, device, batch=16, pad_to=IDM_PAD_TO, scale=LATENT_SCALE):
+    """Decoded frames (T, 3, 240, 320) in [0, 1] -> the SD 1.x latents `train_idm.IDM` reads.
+
+    The IDM's encoder opens with a 4-channel convolution, so any row whose latents are not the
+    SD KL-f8 space (the 16-channel SD 3.5 row, the Wan-VAE video row) has to decode to pixels and
+    re-encode here before it can be judged. This reproduces `encode_parquet.encode_batch`: to
+    [-1, 1] first, zero-pad the height 240 -> 256 AFTER that shift, posterior mean, scaled by
+    0.18215. The pad is zeros rather than the decoder's own reconstruction of those rows, because
+    zeros is what the IDM's training latents carry there.
+    """
+    out = []
+    for i in range(0, frames.shape[0], batch):
+        x = frames[i:i + batch].to(device) * 2 - 1
+        if x.shape[2] < pad_to:
+            x = torch.nn.functional.pad(x, (0, 0, 0, pad_to - x.shape[2]))
+        out.append((vae.encode(x).latent_dist.mean * scale).float())
+    return torch.cat(out)
 
 
 @torch.no_grad()

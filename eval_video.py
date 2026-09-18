@@ -74,6 +74,7 @@ import numpy as np
 import torch
 
 from diffusion_v import VDiffusion
+from doomdit_utils import encode_for_idm
 from video_wm import SkyReelsWorldModel, tiny_config, window_timesteps
 from wan_data import LATENT_SHAPE, WanWindowDataset, load_split
 
@@ -755,22 +756,13 @@ def movement_of(logits, mov, num_mov):
     return movement_probs(logits, mov, num_mov).argmax(-1)
 
 
-@torch.no_grad()
 def sd_encode(sd, frames, device, batch):
     """Decoded frames (T, 3, 240, 320) in [0, 1] -> the SD latents the IDM was trained on.
 
-    Reproduces `encode_parquet.encode_batch`: [-1, 1], zero-pad the height 240 -> 256 AFTER the
-    normalisation, posterior mean, scaled by 0.18215. The pad is zeros rather than the Wan
-    decoder's own reconstruction of the padded rows, because zeros is what the IDM's training
-    latents carry there.
+    One line over `doomdit_utils.encode_for_idm`, which `rollout_eval.py --score` uses for the
+    same round trip on the 16-channel row; the pad-after-normalisation contract lives there.
     """
-    out = []
-    for i in range(0, frames.shape[0], batch):
-        x = frames[i:i + batch].to(device) * 2 - 1
-        if x.shape[2] < PAD_TO:
-            x = torch.nn.functional.pad(x, (0, 0, 0, PAD_TO - x.shape[2]))
-        out.append((sd.encode(x).latent_dist.mean * SD_LATENT_SCALE).float())
-    return torch.cat(out)
+    return encode_for_idm(sd, frames, device, batch, PAD_TO, SD_LATENT_SCALE)
 
 
 # --------------------------------------------------------------------------------------

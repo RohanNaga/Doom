@@ -218,5 +218,7 @@ results
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .DS_Store
+
+# local mirror of Spiderman result files (paper/sync_results.sh)
 paper/results_mirror/
 paper/figures/*.png

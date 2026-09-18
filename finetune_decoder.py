@@ -23,10 +23,12 @@ import io
 import json
 import os
 import random
+import shutil
 import time
 
 import numpy as np
 import torch
+from diffusers.models import AutoencoderKL
 from PIL import Image
 
 from doomdit_utils import build_vae, latent_contract
@@ -50,6 +52,42 @@ def trainable_decoder_params(vae):
     for p in params:
         p.requires_grad_(True)
     return params
+
+
+def save_vae(vae, out_dir, channels_last=False):
+    """Write the autoencoder to `<out_dir>/vae`, proving it reloads before it replaces the old one.
+
+    `--channels-last` calls `vae.to(memory_format=torch.channels_last)`, which leaves every 4-D
+    conv weight strided as NHWC, and `safetensors.torch.save_file` refuses a non-contiguous
+    tensor. On 2026-09-18 that raised after `config.json` was written and a finished two-epoch
+    Flux-VAE tune was lost, so the weights are packed back into NCHW here, written to a scratch
+    directory, reloaded from disk and compared tensor by tensor against the live model. Only
+    then does the scratch directory replace the previous checkpoint. The model is left exactly
+    as it was found, layout included, so an epoch checkpoint does not disturb the next epoch.
+
+    Returns the checkpoint directory.
+    """
+    final, scratch = os.path.join(out_dir, "vae"), os.path.join(out_dir, "vae.saving")
+    live = {k: v.detach().cpu().clone() for k, v in vae.state_dict().items()}
+    vae.to(memory_format=torch.contiguous_format)
+    for t in list(vae.parameters()) + list(vae.buffers()):
+        t.data = t.data.contiguous()
+    try:
+        shutil.rmtree(scratch, ignore_errors=True)
+        vae.save_pretrained(scratch)
+        reloaded = AutoencoderKL.from_pretrained(scratch).state_dict()
+        bad = [k for k in live if k not in reloaded or not torch.equal(reloaded[k], live[k])]
+        if bad or set(reloaded) != set(live):
+            raise SystemExit(f"saved decoder does not reload identically: {sorted(bad)[:5]} "
+                             f"(extra {sorted(set(reloaded) - set(live))[:5]})")
+        shutil.rmtree(final, ignore_errors=True)
+        os.rename(scratch, final)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+        if channels_last:
+            vae.to(memory_format=torch.channels_last)
+    print(f"  saved and reloaded {len(live)} tensors to {final}", flush=True)
+    return final
 
 
 def sample_frames(parquet_dir, episode_ids, n, stride, seed):
@@ -162,6 +200,17 @@ def main(args):
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / 200) * max(0.05, 1 - s / max(1, total)))
     print(f"{total} updates at effective batch {eff} (micro {micro} x accum {args.accum})", flush=True)
     step, history, t_train = 0, [], time.time()
+
+    def write_metrics(after):
+        """Record the run so far. Written next to every checkpoint, so a later crash keeps it."""
+        with open(os.path.join(args.out_dir, "metrics.json"), "w") as f:
+            json.dump({"before": before, "after": after, "history": history, "args": vars(args),
+                       "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
+                       "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
+                       "train_seconds": time.time() - t_train,
+                       "peak_mem_gb": torch.cuda.max_memory_allocated() / 2**30 if device != "cpu" else None},
+                      f, indent=1)
+
     for ep in range(args.epochs):
         order = np.random.RandomState(ep).permutation(len(train_frames))
         vae.decoder.train()
@@ -196,16 +245,14 @@ def main(args):
         mid = evaluate(vae, val_frames, device, lpips_fn)
         history.append({"step": step, **mid})
         print(f"epoch {ep + 1}:", json.dumps(mid), flush=True)
+        # Checkpoint every epoch: the tune costs about 2.5 card-hours and the only thing that
+        # makes those hours unrecoverable is having no weights on disk when something raises.
+        save_vae(vae, args.out_dir, args.channels_last)
+        write_metrics(mid)
     after = evaluate(vae, val_frames, device, lpips_fn)
-    train_s = time.time() - t_train
     print("after:", json.dumps(after), flush=True)
-    vae.save_pretrained(os.path.join(args.out_dir, "vae"))
-    with open(os.path.join(args.out_dir, "metrics.json"), "w") as f:
-        json.dump({"before": before, "after": after, "history": history, "args": vars(args),
-                   "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
-                   "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
-                   "train_seconds": train_s,
-                   "peak_mem_gb": torch.cuda.max_memory_allocated() / 2**30 if device != "cpu" else None}, f, indent=1)
+    save_vae(vae, args.out_dir, args.channels_last)
+    write_metrics(after)
     print("DONE", flush=True)
 
 
