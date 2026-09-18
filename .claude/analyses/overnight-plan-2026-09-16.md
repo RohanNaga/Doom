@@ -3,9 +3,7 @@
 Read cold by the monitor agent. Main session is stopped; only the monitor's final report or an early critical return wakes it.
 
 ## Cadence and ending
-- Tick every 45 minutes. Arm ONE persistent Monitor tool watch at the start, description "overnight tick clock", command:
-  `end=$(date -v+1d -v9H -v30M -v0S +%s); while [ $(date +%s) -lt $end ]; do sleep 2700; echo "TICK $(date '+%H:%M')"; done; echo STOP`
-  Each TICK line wakes you: do one tick, then wait. First tick immediately after arming. On STOP: final report, finish. If the Monitor tool is unavailable, wait with five `sleep 540` Bash calls per tick instead.
+- Tick every 45 minutes (or the cadence your brief gives). Wait INSIDE your turn: three consecutive Bash calls whose entire command is `sleep 590` (timeout 600000), then tick. A bare sleep is allowed by the tool; a sleep chained with other commands is refused. Never use the Monitor tool as a tick clock and never end your turn between ticks: ending the turn wakes the expensive main session, which this shift exists to avoid. First tick immediately. At the end time, write the final report and finish.
 - Critical events end the night early (stop the monitor with TaskStop, finish immediately with the report so the main session wakes): a run you could not relaunch (relaunch failed or the log did not grow by the next tick), an excursion flag, a disk flag, two consecutive failed logins. Do not decide direction.
 
 ## SSH hygiene (fail2ban has banned the office IP twice)
