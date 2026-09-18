@@ -21,18 +21,21 @@ import time
 import numpy as np
 import torch
 
-from diffusion_v import VDiffusion, noise_augment
+from backbones import BACKBONES, LATENT_HW, PIXART_DEFAULT, UNIDIFFUSER_DEFAULT, resolve_latent_channels
+from diffusion_v import VDiffusion
 from doom_data import list_latent_episodes, load_split
-from doomdit_utils import LATENT_SCALE, load_vae
+from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents
 
 
-def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed):
+def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_channels=None):
     """Windows with L seed frames and H future frames, spread over episodes; never across a chain boundary."""
     eps = []
     for ep, lp, mp in list_latent_episodes(latents_dir):
         if ep not in set(int(e) for e in episode_ids):
             continue
         lat, m = np.load(lp, mmap_mode="r"), np.load(mp)
+        if latent_channels is not None and lat.shape[1] != latent_channels:
+            raise ValueError(f"{lp}: {lat.shape[1]} latent channels, the model wants {latent_channels}")
         T = lat.shape[0]
         if "chain_id" in m.files:
             cid = m["chain_id"]; starts = [s for s in range(T - L - H + 1) if cid[s] == cid[s + L + H - 1]]
@@ -55,18 +58,20 @@ def backbone_source(args):
     The DiT is built from local code, so it needs nothing; the diffusers backbones must be
     instantiated from the same repo they were trained from before the checkpoint is loaded.
     """
-    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path}[args.backbone]
+    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path, "unidiffuser": args.unidiffuser_path}[args.backbone]
 
 
 @torch.no_grad()
 def do_rollout(args):
     from backbones import build_model
     device = "cuda"
+    C = resolve_latent_channels(args.backbone, args.latent_channels)
     ck = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     # the action table's size depends on the training-time dropout (fast-DiT adds the null row only when it is > 0)
     dropout = ck.get("args", {}).get("action_dropout", 0.1)
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets, grad_ckpt=False,
-                        warm_start=backbone_source(args), cache_dir=args.hf_cache, action_dropout=dropout)
+                        warm_start=backbone_source(args), cache_dir=args.hf_cache, action_dropout=dropout,
+                        latent_channels=C)
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     state = ck["ema"] if args.use_ema else ck["model"]
@@ -74,7 +79,8 @@ def do_rollout(args):
     model = model.to(device).eval()
     diffusion = VDiffusion(device=device)
     split = load_split(args.split)
-    picks = collect_rollout_windows(args.latents_dir, split[args.subset], args.context_frames, args.horizon, args.num_rollouts, args.seed)
+    picks = collect_rollout_windows(args.latents_dir, split[args.subset], args.context_frames, args.horizon,
+                                    args.num_rollouts, args.seed, latent_channels=C)
     L, H, B = args.context_frames, args.horizon, args.batch_size
     torch.manual_seed(args.seed)
     pred_all, gt_all, act_all, meta = [], [], [], []
@@ -84,7 +90,7 @@ def do_rollout(args):
         seed_lat = torch.stack([torch.from_numpy(np.asarray(lat[s:s + L], dtype=np.float32)) for _, _, s, lat, _ in chunk]).to(device)
         gt = np.stack([np.asarray(lat[s + L:s + L + H], dtype=np.float16) for _, _, s, lat, _ in chunk])
         acts = np.stack([m["action"][s + L - 1:s + L - 1 + H].astype(np.int64) for _, _, s, _, m in chunk])
-        ctx = seed_lat.reshape(len(chunk), -1, 32, 40)
+        ctx = seed_lat.reshape(len(chunk), -1, *LATENT_HW)
         preds = []
         for h in range(H):
             act = torch.from_numpy(acts[:, h]).to(device)
@@ -92,16 +98,16 @@ def do_rollout(args):
             if args.infer_noise > 0:
                 ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max, args.noise_buckets)
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket), (len(chunk), 4, 32, 40), steps=args.steps, eta=args.eta, device=device)
+                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket), (len(chunk), C, *LATENT_HW), steps=args.steps, eta=args.eta, device=device)
             preds.append(x.half().cpu().numpy())
-            ctx = torch.cat([ctx[:, 4:], x.float()], dim=1)
+            ctx = torch.cat([ctx[:, C:], x.float()], dim=1)   # drop the oldest latent, append the prediction
         pred_all.append(np.stack(preds, axis=1)); gt_all.append(gt); act_all.append(acts)
         meta += [(ep, mp, s) for ep, mp, s, _, _ in chunk]
         print(f"  {i + len(chunk)}/{len(picks)} rollouts, {(time.time() - t0) / (i + len(chunk)):.1f} s each", flush=True)
     np.savez(args.out, pred=np.concatenate(pred_all), gt=np.concatenate(gt_all), actions=np.concatenate(act_all),
              seed=np.stack([np.asarray(lat[s:s + L], dtype=np.float16) for _, _, s, lat, _ in picks]),
              episode=np.array([m[0] for m in meta]), map=np.array([m[1] for m in meta]), start=np.array([m[2] for m in meta]),
-             config=json.dumps({**vars(args), "step": ck.get("step", "?")}))
+             config=json.dumps({**vars(args), "step": ck.get("step", "?"), "resolved_latent_channels": C}))
     print("DONE", args.out)
 
 
@@ -124,11 +130,13 @@ def do_score(args):
     d = np.load(args.rollouts)
     pred, gt, seed, actions = d["pred"], d["gt"], d["seed"], d["actions"]
     N, H = pred.shape[:2]
-    vae = load_vae(device) if not args.vae_path else __import__("diffusers").models.AutoencoderKL.from_pretrained(args.vae_path).to(device).eval()
+    vae = build_vae(args.vae_path, args.vae_subfolder, device, args.hf_cache, latent_channels=int(pred.shape[2]),
+                    scaling_factor=args.latent_scale, shift_factor=args.latent_shift)
     lp = lpips.LPIPS(net="alex", verbose=False).to(device).eval()
 
     def dec(z):
-        img = vae.decode(torch.from_numpy(np.asarray(z, dtype=np.float32)).to(device) / LATENT_SCALE).sample[:, :, :240]
+        z = denormalize_latents(torch.from_numpy(np.asarray(z, dtype=np.float32)).to(device), args.latent_scale, args.latent_shift)
+        img = vae.decode(z).sample[:, :, :240]
         return (img * 0.5 + 0.5).clamp(0, 1)
 
     psnr_h, lpips_h, copy_h, lat_h = np.zeros(H), np.zeros(H), np.zeros(H), np.zeros(H)
@@ -186,16 +194,21 @@ def do_score(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--rollout", action="store_true"); p.add_argument("--score", action="store_true")
-    p.add_argument("--ckpt"); p.add_argument("--backbone", choices=["dit", "unet", "pixart"]); p.add_argument("--use-ema", action="store_true")
+    p.add_argument("--ckpt"); p.add_argument("--backbone", choices=list(BACKBONES)); p.add_argument("--use-ema", action="store_true")
+    p.add_argument("--latent-channels", type=int, default=0, help="0 takes the backbone's own (4 for every current row)")
     p.add_argument("--context-frames", type=int, default=32); p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10); p.add_argument("--infer-noise", type=float, default=0.0); p.add_argument("--train-noise-max", type=float, default=0.7)
     p.add_argument("--latents-dir"); p.add_argument("--split"); p.add_argument("--subset", default="val")
     p.add_argument("--num-rollouts", type=int, default=256); p.add_argument("--horizon", type=int, default=64)
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--steps", type=int, default=50); p.add_argument("--eta", type=float, default=0.0)
-    p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4"); p.add_argument("--pixart-path", default="PixArt-alpha/PixArt-XL-2-512x512")
+    p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4"); p.add_argument("--pixart-path", default=PIXART_DEFAULT)
+    p.add_argument("--unidiffuser-path", default=UNIDIFFUSER_DEFAULT)
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out")
     p.add_argument("--rollouts"); p.add_argument("--idm", default=""); p.add_argument("--vae-path", default="")
+    p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-path (e.g. vae for a full pipeline repo)")
+    p.add_argument("--latent-scale", type=float, default=LATENT_SCALE, help="scaling_factor the corpus was encoded with")
+    p.add_argument("--latent-shift", type=float, default=None, help="shift_factor the corpus was encoded with (a 16-channel autoencoder needs one)")
     p.add_argument("--decode-batch", type=int, default=16); p.add_argument("--save-clips", type=int, default=64); p.add_argument("--out-dir")
     a = p.parse_args()
     if a.rollout:

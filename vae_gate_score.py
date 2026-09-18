@@ -28,7 +28,8 @@ import torch
 from PIL import Image
 
 from doom_data import LatentWindowDataset, load_split
-from finetune_decoder import HUD_ROWS, build_vae, cached_frames, latent_contract, load_frames, psnr, sample_frames, to_tensor
+from doomdit_utils import build_vae, latent_contract
+from finetune_decoder import HUD_ROWS, cached_frames, load_frames, psnr, sample_frames, to_tensor
 
 
 def corpus_targets(latents_dir, parquet_dir, split_path, subset, num_windows, context_frames, seed, stride):

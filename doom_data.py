@@ -182,6 +182,12 @@ def sample_eval_windows(dataset, num_windows, seed=0, stride=1):
 # ---------------------------------------------------------------------------------------
 
 LATENT_SHAPE_V2 = (4, 32, 40)
+LATENT_HW_V2 = LATENT_SHAPE_V2[1:]
+
+
+def latent_shape_v2(latent_channels=4):
+    """Per-frame latent shape of the stride-4 layout. 4 channels is SD KL-f8, 16 is SD 3.5's autoencoder."""
+    return (latent_channels,) + LATENT_HW_V2
 
 
 def list_latent_episodes(latents_dir):
@@ -220,12 +226,16 @@ def make_split_by_map(latents_dir, holdout_maps=(16, 17), holdout_frac=0.1, seed
 class LatentWindowDataset(Dataset):
     """L context decision frames -> next decision frame, over encode_parquet.py outputs.
 
-    context: (4L, 32, 40) float32, target: (4, 32, 40) float32, action: int64 recorded at the
-    last context frame (the action applied from it to the target).
+    context: (CL, 32, 40) float32, target: (C, 32, 40) float32, action: int64 recorded at the
+    last context frame (the action applied from it to the target). C is `latent_channels`: 4 for
+    the SD KL-f8 corpus, 16 for a corpus encoded with SD 3.5's autoencoder. Mixing the two would
+    silently reshape into the wrong channel count, so every episode's shape is checked here.
     """
 
-    def __init__(self, latents_dir, episode_ids=None, context_frames=32, require_chains=False):
+    def __init__(self, latents_dir, episode_ids=None, context_frames=32, require_chains=False, latent_channels=4):
         self.L = context_frames
+        self.latent_channels = latent_channels
+        want = latent_shape_v2(latent_channels)
         keep = None if episode_ids is None else set(int(e) for e in episode_ids)
         self.episodes, counts = [], []
         for ep, lat_path, meta_path in list_latent_episodes(latents_dir):
@@ -233,6 +243,8 @@ class LatentWindowDataset(Dataset):
                 continue
             lat = np.load(lat_path, mmap_mode="r")
             meta = np.load(meta_path)
+            if tuple(lat.shape[1:]) != want:
+                raise ValueError(f"{lat_path}: latent shape {tuple(lat.shape[1:])} != {want}")
             T = lat.shape[0]
             if require_chains:
                 # verified-transition contract: chain ids and real tics present, consecutive frames in a chain 4 tics apart
@@ -274,6 +286,6 @@ class LatentWindowDataset(Dataset):
         slot, start = self.locate(idx)
         ep, lat, act = self.episodes[slot][:3]
         L = self.L
-        ctx = torch.from_numpy(np.asarray(lat[start:start + L], dtype=np.float32)).reshape(-1, 32, 40)
+        ctx = torch.from_numpy(np.asarray(lat[start:start + L], dtype=np.float32)).reshape(-1, *LATENT_HW_V2)
         tgt = torch.from_numpy(np.asarray(lat[start + L], dtype=np.float32))
         return ctx, tgt, torch.tensor(int(act[start + L - 1]), dtype=torch.long)

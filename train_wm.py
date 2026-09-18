@@ -4,7 +4,9 @@ Train a DoomDiT world model, any backbone, under one recipe.
 Shared between backbones: stride-4 latents, L context frames channel-stacked, single action at
 the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target,
 AdamW, bf16 autocast with fp32 master weights, EMA in fp32 on the CPU, held-out latent v-loss
-for checkpoint selection. The only thing the --backbone flag changes is the network.
+for checkpoint selection. The only thing the --backbone flag changes is the network, and the
+only thing --latent-channels changes is the autoencoder the corpus was encoded with; it
+defaults to whichever one the warm start was pretrained in.
 
 Fit check (no data needed):
     python train_wm.py --backbone dit --fit-check 30 --per-gpu-batch 4 --context-frames 32
@@ -23,20 +25,20 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
-from backbones import build_model
+from backbones import BACKBONES, LATENT_HW, build_model, resolve_latent_channels
 from diffusion_v import VDiffusion, noise_augment
 
 
 class SyntheticWindows(Dataset):
-    def __init__(self, n, context_frames, num_actions):
-        self.n, self.L, self.A = n, context_frames, num_actions
+    def __init__(self, n, context_frames, num_actions, latent_channels=4):
+        self.n, self.L, self.A, self.C = n, context_frames, num_actions, latent_channels
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, i):
         g = torch.Generator().manual_seed(i)
-        return (torch.randn(4 * self.L, 32, 40, generator=g), torch.randn(4, 32, 40, generator=g),
+        return (torch.randn(self.C * self.L, *LATENT_HW, generator=g), torch.randn(self.C, *LATENT_HW, generator=g),
                 torch.randint(0, self.A, (1,), generator=g)[0])
 
 
@@ -61,14 +63,16 @@ class SeededCorruption(Dataset):
         return ctx, tgt, act, t, level, ctx_eps, tgt_noise
 
 
-def build_loaders(args):
+def build_loaders(args, latent_channels):
     if args.fit_check:
-        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions)
+        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels)
         return ds, None
     from doom_data import LatentWindowDataset, load_split
     split = load_split(args.split)
-    train = LatentWindowDataset(args.latents_dir, split["train"], args.context_frames, require_chains=args.require_verified_transitions)
-    val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames, require_chains=args.require_verified_transitions)
+    train = LatentWindowDataset(args.latents_dir, split["train"], args.context_frames, require_chains=args.require_verified_transitions,
+                                latent_channels=latent_channels)
+    val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames, require_chains=args.require_verified_transitions,
+                              latent_channels=latent_channels)
     rng = np.random.RandomState(0)
     val_idx = np.sort(rng.choice(len(val), size=min(args.val_windows, len(val)), replace=False))
     return train, Subset(val, val_idx.tolist())
@@ -161,9 +165,10 @@ def main(args):
                 print(f"log write failed: {e}", flush=True)
             print(json.dumps(kw), flush=True)
 
+    latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
-                        action_dropout=args.action_dropout)
+                        action_dropout=args.action_dropout, latent_channels=latent_channels)
     start_step = 0
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=False)
@@ -181,7 +186,7 @@ def main(args):
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
 
-    train_ds, val_ds = build_loaders(args)
+    train_ds, val_ds = build_loaders(args, latent_channels)
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
                         pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0)
     model, opt, loader = acc.prepare(model, opt, loader)   # scheduler stays unwrapped: one step per optimizer update
@@ -204,8 +209,9 @@ def main(args):
         split_hash = hashlib.md5(open(args.split, "rb").read()).hexdigest() if (not args.fit_check and os.path.exists(args.split)) else None
         with open(os.path.join(args.results_dir, "config.json"), "w") as f:
             json.dump({**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum,
-                       "split_md5": split_hash, "torch": torch.__version__}, f, indent=1)
-    log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum,
+                       "split_md5": split_hash, "torch": torch.__version__,
+                       "resolved_latent_channels": latent_channels}, f, indent=1)
+    log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
         per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum)
 
     def model_fn(ctx, act, bucket):
@@ -235,12 +241,14 @@ def main(args):
         return (tot / n).item(), (bins / bin_n.clamp(min=1)).tolist()
 
     model.train()
-    step, t0, tokens = start_step, time.time(), 0
+    step, t0 = start_step, time.time()
     running, grad_norms = [], []
     skipped = int(ck.get("skipped", 0)) if args.resume else 0
-    # probe tensors: input projection, output layer, and adaLN modulation of the first, middle, and last DiT blocks (or U-Net analogues)
+    # probe tensors: input projection, output layer, and adaLN modulation of the first, middle, and last DiT blocks (or U-Net / U-ViT analogues)
     want = ["x_embedder.proj.weight", "final_layer.linear.weight", "blocks.0.adaLN_modulation.1.weight", "blocks.14.adaLN_modulation.1.weight",
-            "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight"]
+            "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight",
+            "vae_img_in.proj.weight", "vae_img_out.weight", "transformer_mid_block.attn1.to_q.weight",
+            "pos_embed.proj.weight", "proj_out.weight"]
     probe_params = [(n, p) for n, p in raw.named_parameters() if any(n.endswith(w) for w in want)]
     probe_names = [n for n, _ in probe_params]
     probe_prev = {n: torch.empty_like(p.detach()) for n, p in probe_params}
@@ -340,14 +348,17 @@ def main(args):
         dt = time.time() - t0
         mem = torch.cuda.max_memory_allocated(device) / 2**30 if device.type == "cuda" else 0
         log(event="fit_check", backbone=args.backbone, context_frames=args.context_frames, per_gpu_batch=args.per_gpu_batch,
-            world=world, steps=step, steps_per_s=step / dt, peak_mem_gb=round(mem, 2), params=n_params, optim=args.optim)
+            world=world, steps=step, steps_per_s=step / dt, peak_mem_gb=round(mem, 2), params=n_params, optim=args.optim,
+            latent_channels=latent_channels, grad_ckpt=bool(args.grad_ckpt))
     acc.wait_for_everyone()
     log(event="end", step=step)
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--backbone", choices=["dit", "unet", "pixart"], required=True)
+    p.add_argument("--backbone", choices=list(BACKBONES), required=True)
+    p.add_argument("--latent-channels", type=int, default=0,
+                   help="latent channels of the corpus and the backbone; 0 takes the warm start's own (4 for every current row)")
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
@@ -356,7 +367,8 @@ if __name__ == "__main__":
     p.add_argument("--split", default="data/split_arnold.json")
     p.add_argument("--results-dir", default="results/fit_check")
     p.add_argument("--warm-start", default=None,
-                   help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path")
+                   help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path; "
+                        "UniDiffuser: thu-ml/unidiffuser-v1 repo or path")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--global-batch", type=int, default=32)
     p.add_argument("--per-gpu-batch", type=int, default=4)

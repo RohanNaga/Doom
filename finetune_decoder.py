@@ -19,10 +19,8 @@ Usage:
         --latent-channels 16 --scaling-factor 0.3611 --shift-factor 0.1159 ...
 """
 import argparse
-import glob
 import io
 import json
-import math
 import os
 import random
 import time
@@ -31,46 +29,10 @@ import numpy as np
 import torch
 from PIL import Image
 
-from doomdit_utils import LATENT_SCALE, load_vae
+from doomdit_utils import build_vae, latent_contract
 
 PAD_TO = 256
 HUD_ROWS = 32
-
-
-def build_vae(vae_id="", subfolder="", device="cpu", cache_dir=None,
-              latent_channels=None, scaling_factor=None, shift_factor=None):
-    """Load the decoder's autoencoder and assert it is the latent space the caller declared.
-
-    With no `vae_id` this is `doomdit_utils.load_vae`, i.e. sd-vae-ft-mse, unchanged.
-    `scaling_factor` and `shift_factor` never enter reconstruction (encode/decode round-trips
-    the raw latent mean), but a later corpus re-encode must apply them, so they are checked
-    against the config here and recorded in the run's metrics.
-    """
-    if not vae_id:
-        vae = load_vae(device)
-    else:
-        from diffusers import AutoencoderKL
-        kw = {"subfolder": subfolder} if subfolder else {}
-        vae = AutoencoderKL.from_pretrained(vae_id, cache_dir=cache_dir, **kw).to(device).eval()
-        vae.requires_grad_(False)
-    got = latent_contract(vae)
-    want = {"latent_channels": latent_channels, "scaling_factor": scaling_factor, "shift_factor": shift_factor}
-    bad = {k: (got[k], v) for k, v in want.items() if v is not None and not _same(got[k], v)}
-    if bad:
-        raise SystemExit(f"{vae_id or 'sd-vae-ft-mse'} latent contract mismatch (config, requested): {bad}")
-    return vae
-
-
-def _same(a, b):
-    return a is not None and math.isclose(float(a), float(b), rel_tol=1e-6, abs_tol=1e-9)
-
-
-def latent_contract(vae):
-    """The three numbers that define how latents of this autoencoder are normalised."""
-    cfg = vae.config
-    shift = getattr(cfg, "shift_factor", None)
-    return {"latent_channels": int(cfg.latent_channels), "scaling_factor": float(cfg.scaling_factor),
-            "shift_factor": None if shift is None else float(shift)}
 
 
 def trainable_decoder_params(vae):
@@ -189,6 +151,10 @@ def main(args):
     print("before:", json.dumps(before), flush=True)
 
     params = trainable_decoder_params(vae)
+    if args.channels_last:
+        # NHWC is what the bf16 tensor cores want; the conv results differ only in the last bits,
+        # so this is a throughput switch, not a recipe change. Off by default.
+        vae.to(memory_format=torch.channels_last)
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.0)
     micro, eff = args.batch_size, args.batch_size * args.accum
     steps_per_epoch = len(train_frames) // eff
