@@ -358,9 +358,13 @@ def main(args):
     if args.fit_check:
         dt = time.time() - t0
         mem = torch.cuda.max_memory_allocated(device) / 2**30 if device.type == "cuda" else 0
+        # allocated is what the tensors need; reserved is what the caching allocator holds from the
+        # card, so reserved is the number a "does this configuration fit" decision has to use
+        reserved = torch.cuda.max_memory_reserved(device) / 2**30 if device.type == "cuda" else 0
         log(event="fit_check", backbone=args.backbone, context_frames=args.context_frames, per_gpu_batch=args.per_gpu_batch,
             world=world, steps=step, steps_per_s=step / dt, peak_mem_gb=round(mem, 2), params=n_params, optim=args.optim,
-            latent_channels=latent_channels, grad_ckpt=bool(args.grad_ckpt))
+            latent_channels=latent_channels, grad_ckpt=bool(args.grad_ckpt), accum=accum,
+            global_batch=args.per_gpu_batch * world * accum, peak_reserved_gb=round(reserved, 2))
     acc.wait_for_everyone()
     log(event="end", step=step)
 
