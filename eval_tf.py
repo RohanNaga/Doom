@@ -163,7 +163,7 @@ def main(args):
     print(json.dumps({k: v for k, v in summary.items() if k not in ("config", "per_map")}, indent=1))
 
 
-if __name__ == "__main__":
+def build_parser():
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True)
     p.add_argument("--backbone", choices=list(BACKBONES), required=True)
@@ -198,4 +198,8 @@ if __name__ == "__main__":
     p.add_argument("--save-images", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-dir", required=True)
-    main(p.parse_args())
+    return p
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())
