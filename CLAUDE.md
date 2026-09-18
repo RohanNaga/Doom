@@ -15,6 +15,8 @@ Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A400
 
 **Always invoke the `/run-server` skill before any SSH, SCP, or remote command.** The skill in `.claude/skills/run-server/` was copied from the Lego repo; for this project only the Superman section applies.
 
+**Fill the card (Rohan, Sep 17 2026).** Every GPU job uses the whole card it holds: largest micro-batch that fits (about 40 to 44 GB on an A6000), no gradient accumulation, gradient checkpointing only when the batch does not fit otherwise, fused AdamW, bf16 autocast, and a short throughput sweep before any multi-hour run. Reports state peak memory and updates/s. The recipe's global batch stays fixed; the levers are micro-batch and memory settings.
+
 ## Standing facts that shape code changes
 
 - 16 GB VRAM budget drove everything: bf16, fused AdamW, CPU-resident VAE, mmap dataset with low `num_workers`, per-segment sampling, `empty_cache()` after sampling, weights moved to CPU before the bf16 cast on save.
