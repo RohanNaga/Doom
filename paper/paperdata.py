@@ -104,6 +104,8 @@ class Run:
         self.spec, self.run = spec, spec["run"]
         self.key, self.label, self.short = spec["key"], spec["label"], spec.get("short", spec["label"])
         self.placeholder = bool(spec.get("placeholder"))
+        self.own_vae = spec.get("own_vae")
+        self.root = root
         self.dir = os.path.join(root, self.run)
         self.exists = os.path.isdir(self.dir)
         self.corpora = reg["corpora"]
@@ -237,6 +239,28 @@ class Run:
     def blur(self, h, sigma, key):
         return get(self.audit, "blur_sweep", str(h), str(float(sigma)), key)
 
+    def own_vae_ceiling(self, corpus, key):
+        """This row's own reconstruction ceiling, read from the decoder gate, or None.
+
+        A row whose latents are not the SD KL-f8 space cannot share the table's one VAE-ceiling
+        line: its autoencoder reconstructs the same frames to a different number. `own_vae` names
+        the gate directory `vae_gate_score.py` wrote and the decoder entry inside it, where the
+        ceiling was measured on the same windows `eval_tf.py` scores. The gate runs before the row
+        finishes, so this deliberately does not require the run directory to exist.
+
+        `key` is one of the gate's metrics: psnr, lpips, hud_psnr.
+        """
+        if not self.own_vae:
+            return None
+        gate = self.own_vae["gate"]
+        if "own_vae" not in self._cache:
+            self._cache["own_vae"] = read_json(os.path.join(self.root, gate, "metrics.json"),
+                                               f"{gate}/metrics.json (VAE ceiling of row '{self.key}')")
+        v = get(self._cache["own_vae"], "metrics", corpus, self.own_vae["decoder"], key, "mean")
+        if v is None and self._cache["own_vae"] is not None:
+            warn(f"row '{self.key}': {gate}/metrics.json has no {corpus}/{self.own_vae['decoder']}/{key}")
+        return v
+
     @property
     def knobs(self):
         """What a grid cell's own artifacts say it trained with: the recipe fields from config.json
@@ -293,8 +317,11 @@ def reference(rows, corpus, key, tol=0.02):
     """A corpus-level reference (copy-last, VAE ceiling) that every run's eval_tf reports identically.
 
     Takes the first run that has it and warns if another run disagrees beyond `tol`, which would
-    mean the runs were not scored on the same windows.
+    mean the runs were not scored on the same windows. Rows that declare `own_vae` are skipped:
+    their autoencoder is a different one, so their ceiling is legitimately a different number and
+    belongs on its own line rather than in this comparison.
     """
+    rows = [r for r in rows if not r.own_vae]
     vals = [(r.run, r.tf_mean(corpus, key)) for r in rows if r.tf_mean(corpus, key) is not None]
     if not vals:
         warn(f"no run provides the {corpus} reference '{key}'")

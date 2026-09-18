@@ -204,6 +204,37 @@ def write_idm(out, rng):
               "args": {"window": window, "steps": 8000}})
 
 
+# ---- 16-channel decoder gate -----------------------------------------------------------------
+# vae_gate_score.py's metrics.json for the SD 3.5 candidate. It exists before the row that uses it
+# does, which is the point: the 035 row's ceiling is read from here, not from its own eval_tf.
+GATE_DECODERS = {              # decoder -> (psnr, lpips, hud_psnr) on every scored set
+    "tuned_sd": (28.34, 0.051, 32.09),
+    "stock_16ch": (27.46, 0.030, 21.46),
+    "tuned_16ch": (31.02, 0.024, 34.88),
+}
+
+
+def write_vae_gate(out, name="vae_gate_sd35", sets=("dev", "seen", "unseen", "unseen2")):
+    metrics, paired = {}, {}
+    for i, s in enumerate(sets):
+        metrics[s] = {"episodes": 40 + i}
+        paired[s] = {}
+        for dec, (psnr_, lpips_, hud) in GATE_DECODERS.items():
+            # a small per-set offset so a test that reads the wrong set cannot pass by accident
+            metrics[s][dec] = {k: {"mean": v - 0.1 * i, "sem": 0.05, "n": 2048}
+                               for k, v in (("psnr", psnr_), ("lpips", lpips_), ("hud_psnr", hud))}
+            if dec != "tuned_sd":
+                base = GATE_DECODERS["tuned_sd"]
+                paired[s][dec] = {k: {"delta": v - b, "ci95": [v - b - 0.2, v - b + 0.2], "episodes": 40 + i,
+                                      "excludes_zero": abs(v - b) > 0.2}
+                                  for k, v, b in (("psnr", psnr_, base[0]), ("lpips", lpips_, base[1]),
+                                                  ("hud_psnr", hud, base[2]))}
+    dump(os.path.join(out, name, "metrics.json"),
+         {"decoders": {d: f"fixture://{d}" for d in GATE_DECODERS}, "baseline": "tuned_sd",
+          "latent_contracts": {"tuned_16ch": {"latent_channels": 16, "scaling_factor": 1.5305, "shift_factor": 0.0609}},
+          "metrics": metrics, "paired": paired})
+
+
 # ---- knob grid -------------------------------------------------------------------------------
 # (knob field, knob value, seen psnr, seen lpips, unseen2 psnr, unseen2 lpips, psnr@64, lpips@64,
 #  idm, fvd16, fvd32, final val loss, context frames)
@@ -323,6 +354,7 @@ def build(out, seed=0):
         summary["paired"][f"{unet}_minus_{dit}"] = entry
     dump(os.path.join(out, "tmp", "audit", "summary.json"), summary)
     write_idm(out, rng)
+    write_vae_gate(out)
     build_grid(out, rng)
     return out
 

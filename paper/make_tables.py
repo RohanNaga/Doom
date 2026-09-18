@@ -99,7 +99,8 @@ def model_block(rows, with_meta=True, with_vloss=False):
         cols[k] = bold_best(cols[k], [v[k] for v in vals], higher)
     out = []
     for i, r in enumerate(rows):
-        cells = [r.label]
+        # a row with its own autoencoder is marked, because its ceiling is a different line
+        cells = [r.label + ("$^{" + r.spec["vae_note"] + "}$" if r.spec.get("vae_note") else "")]
         if with_meta:
             cells += [r.spec.get("exposure", NA), fmt_params(r.params)]
         cells += [cols["seen_psnr"][i], cols["seen_lpips"][i], cols["unseen_psnr"][i], cols["unseen_lpips"][i],
@@ -126,7 +127,25 @@ def reference_rows(rows, pad):
     return [
         ["copy-last / copy-seed"] + lead + [fmt(copy_seen), DASH, fmt(copy_unseen), DASH, fmt(seed_psnr), fmt(seed_lpips, 3), DASH, DASH],
         ["VAE ceiling"] + lead + [fmt(vae[0]), fmt(vae[1], 3), fmt(vae[2]), fmt(vae[3], 3), DASH, DASH, DASH, fmt(idm_real, 3) + "$^*$"],
-    ]
+    ] + own_vae_rows(rows, pad)
+
+
+def own_vae_rows(rows, pad):
+    """One extra ceiling line per row whose latents are not the SD KL-f8 space.
+
+    Those rows reconstruct the same frames through a different autoencoder, so they have their own
+    ceiling, measured by `vae_gate_score.py` on the same windows. Printing it as a separate line is
+    what keeps a reader from reading such a row's gap against the wrong ceiling.
+    """
+    lead = [DASH] * pad
+    out = []
+    for r in rows:
+        if not r.own_vae:
+            continue
+        v = [r.own_vae_ceiling(c, k) for c in ("seen", "unseen") for k in ("psnr", "lpips")]
+        label = r.own_vae.get("label", f"{r.short} VAE ceiling")
+        out.append([label] + lead + [fmt(v[0]), fmt(v[1], 3), fmt(v[2]), fmt(v[3], 3), DASH, DASH, DASH, DASH])
+    return out
 
 
 MAIN_HEADER = [
@@ -135,8 +154,9 @@ MAIN_HEADER = [
      "PSNR$\\uparrow$", "LPIPS$\\downarrow$", "FVD$_{16/32}\\downarrow$", "IDM$\\uparrow$"],
 ]
 MAIN_NOTE = ("$^*$IDM agreement on the real counterparts of the same rollouts. $^\\S$the video row's rollouts pass "
-             "through the SD encoder to reach the judge; read against its own real reference. n/a: artifact not "
-             "yet produced.")
+             "through the SD encoder to reach the judge; read against its own real reference. $^\\dag$this row is "
+             "trained in a 16-channel latent space: read it against its own VAE-ceiling line, not the shared one. "
+             "n/a: artifact not yet produced.")
 
 
 def table_main(rows):
