@@ -1,5 +1,5 @@
 """
-Teacher-forced next-frame metrics for the new stack (velocity backbones, stride-4 latents).
+Teacher-forced next-frame metrics for the new stack (velocity or epsilon backbones, stride-4 latents).
 
 For each held-out window: L real context latents and the action, one DDIM sample, decode
 through the (optionally fine-tuned) VAE, score against the raw lossless frame from the
@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader, Subset
 
 from backbones import (BACKBONES, PIXART_DEFAULT, SD35_DEFAULT, UNIDIFFUSER_DEFAULT, build_model,
                        resolve_latent_channels)
-from diffusion_v import VDiffusion
+from diffusion_v import VDiffusion, checkpoint_objective
 from doom_data import LatentWindowDataset, load_split
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
 
@@ -52,6 +52,8 @@ def backbone_source(args):
 
 
 def load_model(args, device, latent_channels):
+    """(model, step, objective). The objective is the checkpoint's own, so an epsilon-trained cell
+    is sampled as epsilon without the caller having to remember which it was."""
     ck = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     # the action table's size depends on the training-time dropout (fast-DiT adds the null row only when it is > 0)
     dropout = ck.get("args", {}).get("action_dropout", 0.1)
@@ -61,7 +63,7 @@ def load_model(args, device, latent_channels):
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     load_world_model_state(model, ck, args.use_ema)
-    return model.to(device).eval(), ck.get("step", "?")
+    return model.to(device).eval(), ck.get("step", "?"), checkpoint_objective(ck, args.objective)
 
 
 class RawFrames:
@@ -85,12 +87,12 @@ def main(args):
     os.makedirs(args.out_dir, exist_ok=True)
     torch.manual_seed(args.seed)
     latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
-    model, step = load_model(args, device, latent_channels)
+    model, step, objective = load_model(args, device, latent_channels)
     vae = build_vae(args.vae_path, args.vae_subfolder, device, args.hf_cache, latent_channels=latent_channels,
                     scaling_factor=args.latent_scale, shift_factor=args.latent_shift)
     import lpips
     lp = lpips.LPIPS(net=args.lpips_net, verbose=False).to(device).eval()
-    diffusion = VDiffusion(device=device)
+    diffusion = VDiffusion(device=device, objective=objective)
 
     split = load_split(args.split)
     ds = LatentWindowDataset(args.latents_dir, split[args.subset], args.context_frames, latent_channels=latent_channels)
@@ -98,7 +100,7 @@ def main(args):
     idx = np.sort(rng.choice(len(ds), size=min(args.num_windows, len(ds)), replace=False))
     loader = DataLoader(Subset(ds, idx.tolist()), batch_size=args.batch_size, shuffle=False, num_workers=2)
     raw = RawFrames(args.parquet_dir) if args.parquet_dir else None
-    print(f"{args.subset}: {len(ds.episodes)} episodes, {len(ds):,} windows, evaluating {len(idx)}, step {step}")
+    print(f"{args.subset}: {len(ds.episodes)} episodes, {len(ds):,} windows, evaluating {len(idx)}, step {step}, objective {objective}")
 
     def dec(z):
         return decode(vae, z, args.latent_scale, args.latent_shift)
@@ -151,7 +153,8 @@ def main(args):
     summary["per_map"] = {str(m): {k: float(np.mean([r[k] for r in rows if r["map"] == m])) for k in ("psnr_dec", "lpips_dec")}
                           for m in sorted(set(r["map"] for r in rows))}
     summary["sampling_frames_per_s"] = n / max(t_sample, 1e-9)
-    summary["config"] = {**vars(args), "step": step, "resolved_latent_channels": latent_channels}
+    summary["config"] = {**vars(args), "step": step, "resolved_latent_channels": latent_channels,
+                         "resolved_objective": objective}
     json.dump(summary, open(os.path.join(args.out_dir, "metrics.json"), "w"), indent=1)
     with open(os.path.join(args.out_dir, "per_window.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
@@ -164,6 +167,8 @@ if __name__ == "__main__":
     p.add_argument("--backbone", choices=list(BACKBONES), required=True)
     p.add_argument("--latent-channels", type=int, default=0, help="0 takes the backbone's own (4 for the SD KL-f8 rows, 16 for sd35)")
     p.add_argument("--use-ema", action="store_true")
+    p.add_argument("--objective", choices=["auto", "v", "eps"], default="auto",
+                   help="auto reads the parameterization the checkpoint was trained in (v for every pre-grid row)")
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)

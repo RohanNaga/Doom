@@ -2,7 +2,8 @@
 Train a DoomDiT world model, any backbone, under one recipe.
 
 Shared between backbones: stride-4 latents, L context frames channel-stacked, single action at
-the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target,
+the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target
+(or epsilon under --objective eps, which is one cell of the knob grid),
 AdamW, bf16 autocast with fp32 master weights, EMA in fp32 on the CPU, held-out latent v-loss
 for checkpoint selection. The only thing the --backbone flag changes is the network, and the
 only thing --latent-channels changes is the autoencoder the corpus was encoded with (4 for the
@@ -26,7 +27,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
 from backbones import BACKBONES, LATENT_HW, build_model, resolve_latent_channels
-from diffusion_v import VDiffusion, noise_augment
+from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
 
 
 class SyntheticWindows(Dataset):
@@ -208,7 +209,7 @@ def main(args):
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
                         pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0)
     model, opt, loader = acc.prepare(model, opt, loader)   # scheduler stays unwrapped: one step per optimizer update
-    diffusion = VDiffusion(device=device)
+    diffusion = VDiffusion(device=device, objective=args.objective)
     raw = acc.unwrap_model(model)
     if args.resume and "optimizer" in ck:
         opt.load_state_dict(ck["optimizer"]); sched.load_state_dict(ck["scheduler"])
@@ -236,7 +237,7 @@ def main(args):
                 json.dump({"train_fraction": args.train_fraction, "seed": args.seed,
                            "num_episodes": len(train_ids), "episodes": train_ids}, f, indent=1)
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
-        per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum,
+        per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum, objective=args.objective,
         train_fraction=args.train_fraction, train_episodes=None if train_ids is None else len(train_ids))
 
     def model_fn(ctx, act, bucket):
@@ -392,6 +393,9 @@ if __name__ == "__main__":
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
     p.add_argument("--noise-aug-max", type=float, default=0.7)
+    p.add_argument("--objective", choices=list(OBJECTIVES), default="v",
+                   help="prediction target: velocity (every finished row) or epsilon, same betas and same sampler; "
+                        "recorded in every checkpoint so eval_tf.py and rollout_eval.py sample in the right one")
     p.add_argument("--train-fraction", type=float, default=1.0,
                    help="fraction of the split's TRAINING episodes to use, whole episodes, seeded by --seed and "
                         "nested across fractions; validation and evaluation are untouched (1.0 = every train episode)")

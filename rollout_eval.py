@@ -23,7 +23,7 @@ import torch
 
 from backbones import (BACKBONES, LATENT_HW, PIXART_DEFAULT, SD35_DEFAULT, UNIDIFFUSER_DEFAULT,
                        resolve_latent_channels)
-from diffusion_v import VDiffusion
+from diffusion_v import VDiffusion, checkpoint_objective
 from doom_data import list_latent_episodes, load_split
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
 
@@ -78,7 +78,10 @@ def do_rollout(args):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     load_world_model_state(model, ck, args.use_ema)
     model = model.to(device).eval()
-    diffusion = VDiffusion(device=device)
+    # the parameterization the checkpoint was trained in, so an epsilon cell rolls out as epsilon
+    objective = checkpoint_objective(ck, args.objective)
+    diffusion = VDiffusion(device=device, objective=objective)
+    print(f"rollout: step {ck.get('step', '?')}, objective {objective}")
     split = load_split(args.split)
     picks = collect_rollout_windows(args.latents_dir, split[args.subset], args.context_frames, args.horizon,
                                     args.num_rollouts, args.seed, latent_channels=C)
@@ -108,7 +111,8 @@ def do_rollout(args):
     np.savez(args.out, pred=np.concatenate(pred_all), gt=np.concatenate(gt_all), actions=np.concatenate(act_all),
              seed=np.stack([np.asarray(lat[s:s + L], dtype=np.float16) for _, _, s, lat, _ in picks]),
              episode=np.array([m[0] for m in meta]), map=np.array([m[1] for m in meta]), start=np.array([m[2] for m in meta]),
-             config=json.dumps({**vars(args), "step": ck.get("step", "?"), "resolved_latent_channels": C}))
+             config=json.dumps({**vars(args), "step": ck.get("step", "?"), "resolved_latent_channels": C,
+                                "resolved_objective": objective}))
     print("DONE", args.out)
 
 
@@ -196,6 +200,8 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--rollout", action="store_true"); p.add_argument("--score", action="store_true")
     p.add_argument("--ckpt"); p.add_argument("--backbone", choices=list(BACKBONES)); p.add_argument("--use-ema", action="store_true")
+    p.add_argument("--objective", choices=["auto", "v", "eps"], default="auto",
+                   help="auto reads the parameterization the checkpoint was trained in (v for every pre-grid row)")
     p.add_argument("--latent-channels", type=int, default=0, help="0 takes the backbone's own (4 for the SD KL-f8 rows, 16 for sd35)")
     p.add_argument("--context-frames", type=int, default=32); p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10); p.add_argument("--infer-noise", type=float, default=0.0); p.add_argument("--train-noise-max", type=float, default=0.7)
