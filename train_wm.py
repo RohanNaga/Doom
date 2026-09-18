@@ -347,12 +347,12 @@ def main(args):
                 val_hist.append(v)
                 excursion = len(val_hist) > 3 and v > 1.15 * float(np.median(val_hist[-4:-1]))
                 log(event="val", step=step, val_loss=v, val_loss_by_t_quartile=vbins, excursion=bool(excursion))
-                if is_main and args.remote_results and step % args.snapshot_every == 0:
+                if is_main and (args.remote_results or args.local_snapshots) and step % args.snapshot_every == 0:
                     # compact bf16 weights at every validation so an excursion can be located afterwards; never pruned
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
                                      "ema": {k: t.to(torch.bfloat16) for k, t in zip(ema_keys(raw), ema)} if ema is not None else None,
                                      "step": step, "val_loss": v, "args": vars(args)},
-                                    os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=False)
+                                    os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=args.local_snapshots)
                 if is_main and v < best_val:
                     best_val = v
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
@@ -445,6 +445,7 @@ def build_parser():
     p.add_argument("--keep-last", type=int, default=2, help="rolling checkpoints kept locally; 0 keeps none when --remote-results is set")
     p.add_argument("--keep-remote", type=int, default=2, help="rolling recovery checkpoints kept on --remote-results")
     p.add_argument("--snapshot-every", type=int, default=5000, help="compact bf16 weight snapshot to --remote-results at these validation steps (never pruned)")
+    p.add_argument("--local-snapshots", action="store_true", help="keep the compact bf16 weight snapshots (live and EMA) in the results dir, so intermediate budgets can be evaluated later; never pruned")
     p.add_argument("--action-dropout", type=float, default=0.1, help="fraction of actions replaced by the null id during training (0 disables CFG training)")
     p.add_argument("--action-inject", choices=list(ACTION_INJECTIONS), default="token",
                    help="PixArt only: action and bucket as cross-attention caption tokens (every finished row) or "

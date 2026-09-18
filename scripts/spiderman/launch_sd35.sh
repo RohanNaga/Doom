@@ -13,7 +13,7 @@
 #   --grad-ckpt        the 2.246B transformer needs about 44 to 46 GB allocated at batch 32 with
 #                      activation checkpointing on (fit_sd35.sh measures it); without it the
 #                      arithmetic puts the row over the 48 GB card. The other rows train without.
-#   --skip-grad-norm 5 --skip-grad-after 3000 the PaLM-style spike guard that rescued the UniDiffuser row after its two
+#   --skip-grad-norm 5 --skip-grad-after 3000 --local-snapshots --snapshot-every 10000 the PaLM-style spike guard that rescued the UniDiffuser row after its two
 #                      gradient excursions. It skips the optimizer step, the schedule and the EMA
 #                      when the pre-clip gradient norm exceeds 5, about 20x a healthy norm.
 #
