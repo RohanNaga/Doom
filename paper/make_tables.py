@@ -18,10 +18,16 @@ Tables:
   late_drop.tex  appendix: horizon-32-to-64 late-drop distribution.
   paired.tex     appendix: paired U-Net minus DiT differences from tmp/audit/summary.json.
   idm.tex        appendix: IDM judge quality (K=8 and K=2) and per-row rollout agreement.
+  knobs.tex      appendix: the twelve-cell knob grid, ordered by rollout LPIPS@64.
+
+Also writes rows_grid.json next to the tables: one record per knob-grid cell with the knob the
+launcher turns, the recipe fields that cell's own config.json recorded, its metrics, and the
+LPIPS@64 ranking. A cell whose recorded recipe contradicts its knob is warned about.
 
 Every number is read from the files; a missing artifact renders as n/a with a warning.
 """
 import argparse
+import json
 import os
 import sys
 
@@ -253,6 +259,88 @@ def table_idm(rows, idm, idm_k2):
     return tabular("lcccc", header, body, "Rollout agreement is the mean over 64 horizons of the top-1 match between the judge's action and the action given to the model.")
 
 
+# ---- knob grid ------------------------------------------------------------------------------
+
+GRID_METRICS = (  # (name in rows_grid.json, corpus or None, eval_tf key, decimals, higher_is_better)
+    ("seen_psnr", "seen", "psnr_raw", 2, True), ("seen_lpips", "seen", "lpips_raw", 3, False),
+    ("unseen_psnr", "unseen", "psnr_raw", 2, True), ("unseen_lpips", "unseen", "lpips_raw", 3, False),
+    ("unseen2_psnr", "unseen2", "psnr_raw", 2, True), ("unseen2_lpips", "unseen2", "lpips_raw", 3, False),
+    ("seen_psnr_ema", "seen_ema", "psnr_raw", 2, True), ("seen_lpips_ema", "seen_ema", "lpips_raw", 3, False),
+    ("unseen_psnr_ema", "unseen_ema", "psnr_raw", 2, True), ("unseen_lpips_ema", "unseen_ema", "lpips_raw", 3, False),
+    ("unseen2_psnr_ema", "unseen2_ema", "psnr_raw", 2, True), ("unseen2_lpips_ema", "unseen2_ema", "lpips_raw", 3, False),
+)
+
+
+def grid_values(cell):
+    """Every number one cell contributes, read from its own result directory."""
+    v = {name: cell.tf_mean(corpus, key) for name, corpus, key, _, _ in GRID_METRICS}
+    v.update(psnr8=cell.rollout_at("psnr", 8), psnr64=cell.rollout_at("psnr", 64),
+             lpips64=cell.rollout_at("lpips", 64), fvd16=cell.fvd(16), fvd32=cell.fvd(32),
+             idm=cell.idm_top1(), vloss_final=cell.vloss_final, params=cell.params)
+    return v
+
+
+def grid_records(cells, reg):
+    """The `rows_grid.json` payload: one record per cell, its knobs as recorded by training, its
+    metrics, and the ranking the grid is read on (rollout LPIPS@64, then PSNR@64)."""
+    records = []
+    for c in cells:
+        knobs = c.knobs
+        declared = c.spec.get("knob", "")
+        records.append({"key": c.key, "label": c.label, "run": c.run, "exists": c.exists,
+                        "knob": declared, "trained": knobs, "metrics": grid_values(c),
+                        "knob_confirmed": _knob_confirmed(declared, knobs)})
+    ranked = sorted([r for r in records if r["metrics"]["lpips64"] is not None],
+                    key=lambda r: (r["metrics"]["lpips64"], -(r["metrics"]["psnr64"] or 0)))
+    for i, r in enumerate(ranked, 1):
+        r["rank_lpips64"] = i
+    return {"results_root": reg.get("_results_root"), "ranked_on": "rollout lpips@64 then psnr@64",
+            "cells": records,
+            "complete": [r["key"] for r in records if r["metrics"]["lpips64"] is not None],
+            "incomplete": [r["key"] for r in records if r["metrics"]["lpips64"] is None]}
+
+
+def _knob_confirmed(declared, trained):
+    """Did the cell train with the flag the launcher says it turns? None when the cell has no config."""
+    if not any(v is not None for v in trained.values()):
+        return None
+    if declared in ("", DASH):
+        return True
+    flag, _, value = declared.partition(" ")
+    key = flag.lstrip("-").replace("-", "_")
+    got = trained.get(key)
+    if got is None:
+        return False
+    try:
+        return float(got) == float(value)
+    except (TypeError, ValueError):
+        return str(got) == value
+
+
+def table_grid(cells):
+    """One row per cell, ordered by rollout LPIPS@64: the ranking the grid design reads it on."""
+    header = [["", "", "\\multicolumn{2}{c}{Seen (EMA)}", "\\multicolumn{2}{c}{Unseen-2 (EMA)}",
+               "\\multicolumn{3}{c}{Rollout}", "", ""],
+              ["Cell", "Knob", "PSNR$\\uparrow$", "LPIPS$\\downarrow$", "PSNR$\\uparrow$", "LPIPS$\\downarrow$",
+               "PSNR@8$\\uparrow$", "PSNR@64$\\uparrow$", "LPIPS@64$\\downarrow$", "FVD$_{16/32}\\downarrow$", "v-loss$\\downarrow$"]]
+    rows = []
+    for c in cells:
+        v = grid_values(c)
+        rows.append((v["lpips64"] if v["lpips64"] is not None else float("inf"), c, v))
+    rows.sort(key=lambda r: r[0])
+    body = []
+    for _, c, v in rows:
+        body.append([c.label, "\\texttt{" + c.spec.get("knob", DASH).replace("_", "\\_") + "}",
+                     fmt(v["seen_psnr_ema"]), fmt(v["seen_lpips_ema"], 3),
+                     fmt(v["unseen2_psnr_ema"]), fmt(v["unseen2_lpips_ema"], 3),
+                     fmt(v["psnr8"]), fmt(v["psnr64"]), fmt(v["lpips64"], 3),
+                     f"{fmt(v['fvd16'], 0)} / {fmt(v['fvd32'], 0)}", fmt(v["vloss_final"], 4)])
+    note = ("Twelve cells, one knob each against the first row, 30k updates of the shared PixArt-$\\alpha$ recipe. "
+            "EMA weights come from each cell's last recovery checkpoint; rows are ordered by rollout LPIPS@64. "
+            "n/a: that cell's artifact does not exist yet.")
+    return tabular("ll" + "c" * 9, header, body, note)
+
+
 def main(args):
     reg = pd.load_registry(args.rows)
     root = args.results_root
@@ -272,6 +360,16 @@ def main(args):
     idm = pd.read_json(os.path.join(root, reg["idm"], "metrics.json"), "IDM metrics")
     idm_k2 = pd.read_json(os.path.join(root, reg["idm_k2"], "metrics.json"), "IDM K=2 metrics")
     write(args.out, "idm.tex", table_idm(rows("main"), idm, idm_k2))
+    cells = pd.load_grid(root, reg)
+    write(args.out, "knobs.tex", table_grid(cells))
+    grid = grid_records(cells, {**reg, "_results_root": root})
+    os.makedirs(args.out, exist_ok=True)
+    json.dump(grid, open(args.grid_json or os.path.join(args.out, "rows_grid.json"), "w"), indent=1)
+    print(f"wrote {args.grid_json or os.path.join(args.out, 'rows_grid.json')}: "
+          f"{len(grid['complete'])}/{len(grid['cells'])} cells complete")
+    for r in grid["cells"]:
+        if r["knob_confirmed"] is False:
+            pd.warn(f"cell '{r['key']}' trained with {r['trained']}, which does not match its knob '{r['knob']}'")
     if pd.warn.seen:
         print(f"[paper] {len(pd.warn.seen)} warning(s); see stderr", file=sys.stderr)
 
@@ -281,4 +379,5 @@ if __name__ == "__main__":
     p.add_argument("--results-root", required=True, help="local mirror of results_spiderman (see sync_results.sh)")
     p.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "tables"))
     p.add_argument("--rows", default=pd.ROWS_JSON)
+    p.add_argument("--grid-json", default="", help="where to write the collected knob-grid records (default <out>/rows_grid.json)")
     main(p.parse_args())

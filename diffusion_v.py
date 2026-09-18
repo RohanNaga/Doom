@@ -1,22 +1,43 @@
 """
-Velocity-parameterized DDPM used by both DoomDiT backbones.
+DDPM used by every DoomDiT backbone, in either the velocity or the epsilon parameterization.
 
-The network predicts v = sqrt(abar_t) * eps - sqrt(1 - abar_t) * x0 (Salimans and Ho, 2022),
-the target MultiGen and most 2024+ video world models train on. Linear beta schedule with 1,000
-steps, matching the April recipe and both warm starts' schedules. Sampling is DDIM on the
-velocity prediction; `eta=0` is deterministic given the noise, which is what the rollout
-metrics need.
+By default the network predicts v = sqrt(abar_t) * eps - sqrt(1 - abar_t) * x0 (Salimans and Ho,
+2022), the target MultiGen and most 2024+ video world models train on, and the one every finished
+row was trained with. `objective="eps"` switches the loss target and the sampler's conversion to
+the classic noise prediction, which is one cell of the knob grid; the betas, the timestep
+distribution and the sampler itself are untouched, so the cell isolates the parameterization.
+Linear beta schedule with 1,000 steps, matching the April recipe and every warm start's schedule.
+Sampling is DDIM on the prediction; `eta=0` is deterministic given the noise, which is what the
+rollout metrics need.
 """
-import math
-
 import torch
+
+OBJECTIVES = ("v", "eps")
+
+
+def checkpoint_objective(ck, override="auto"):
+    """The parameterization a checkpoint's prediction has to be read in.
+
+    `train_wm.py` records it in `ck["args"]["objective"]`. Checkpoints written before the flag
+    existed carry no key and are velocity models, which is what the default returns, so the five
+    finished rows keep scoring exactly as they did. Anything other than "auto" in `override` wins,
+    for the case where a checkpoint's record is wrong and has to be forced by hand.
+    """
+    if override and override != "auto":
+        if override not in OBJECTIVES:
+            raise ValueError(f"objective must be one of {OBJECTIVES} or 'auto', got {override}")
+        return override
+    return (ck.get("args") or {}).get("objective") or "v"
 
 
 class VDiffusion:
-    def __init__(self, num_steps=1000, beta_start=1e-4, beta_end=0.02, device="cpu"):
+    def __init__(self, num_steps=1000, beta_start=1e-4, beta_end=0.02, device="cpu", objective="v"):
+        if objective not in OBJECTIVES:
+            raise ValueError(f"objective must be one of {OBJECTIVES}, got {objective}")
         betas = torch.linspace(beta_start, beta_end, num_steps, dtype=torch.float64)
         abar = torch.cumprod(1.0 - betas, dim=0)
         self.num_steps = num_steps
+        self.objective = objective
         self.sqrt_abar = abar.sqrt().float().to(device)
         self.sqrt_1m_abar = (1.0 - abar).sqrt().float().to(device)
 
@@ -46,16 +67,32 @@ class VDiffusion:
         a, s = self._coef(t, xt.ndim)
         return s * xt + a * v
 
+    def x0_from_eps(self, xt, t, eps):
+        a, s = self._coef(t, xt.ndim)
+        return (xt - s * eps) / a
+
+    def target(self, x0, t, noise):
+        """What the network is trained to output at (x_t, t): the velocity, or the noise itself."""
+        return noise if self.objective == "eps" else self.v_target(x0, t, noise)
+
+    def x0_from_pred(self, xt, t, pred):
+        """x0 estimate from whatever this parameterization's network predicts."""
+        return self.x0_from_eps(xt, t, pred) if self.objective == "eps" else self.x0_from_v(xt, t, pred)
+
+    def eps_from_pred(self, xt, t, pred):
+        """Noise estimate from whatever this parameterization's network predicts."""
+        return pred if self.objective == "eps" else self.eps_from_v(xt, t, pred)
+
     def training_loss(self, model_fn, x0, noise=None, t=None, per_sample=False):
-        """MSE on v. `model_fn(x_t, t)` returns the v prediction with x0's shape.
+        """MSE on this parameterization's target. `model_fn(x_t, t)` returns the prediction with x0's shape.
         `per_sample=True` returns one loss per batch element (for timestep-binned validation)."""
         b = x0.shape[0]
         if t is None:
             t = torch.randint(0, self.num_steps, (b,), device=x0.device)
         noise = torch.randn_like(x0) if noise is None else noise
         xt = self.q_sample(x0, t, noise)
-        v_pred = model_fn(xt, t)
-        err = (v_pred.float() - self.v_target(x0, t, noise)) ** 2
+        pred = model_fn(xt, t)
+        err = (pred.float() - self.target(x0, t, noise)) ** 2
         return err.flatten(1).mean(1) if per_sample else err.mean()
 
     @torch.no_grad()
@@ -66,11 +103,11 @@ class VDiffusion:
         ts = torch.linspace(self.num_steps - 1, 0, steps, device=device).round().long()
         for i, t in enumerate(ts):
             tb = t.expand(shape[0])
-            v = model_fn(x, tb).float()
-            x0 = self.x0_from_v(x, tb, v)
+            pred = model_fn(x, tb).float()
+            x0 = self.x0_from_pred(x, tb, pred)
             if clip is not None:
                 x0 = x0.clamp(-clip, clip)
-            eps = self.eps_from_v(x, tb, v)
+            eps = self.eps_from_pred(x, tb, pred)
             if i == steps - 1:
                 x = x0
                 break

@@ -1,15 +1,17 @@
 """
-The four world-model backbones behind one interface.
+The five world-model backbones behind one interface.
 
-    model(x_noisy, t, action, context, noise_bucket) -> v prediction, (B, 4, 32, 40)
+    model(x_noisy, t, action, context, noise_bucket) -> v prediction, (B, C, 32, 40)
 
-All four take the same 4L+4-channel input (L context latents channel-stacked, then the noisy
+All five take the same C*(L+1)-channel input (L context latents channel-stacked, then the noisy
 target), the same discrete action, the same context-noise bucket, and predict the same
-4-channel velocity. Where the conditioning enters is each backbone's native pathway: adaLN for
-the DiT, cross-attention (action) plus class embedding (noise bucket) for the U-Net, GameNGen's
-construction, cross-attention on two learned caption tokens for PixArt, and two learned text tokens in
-UniDiffuser's joint token sequence. All four warm-start
-from published weights with the input projection inflated: pretrained weights on the 4 target
+C-channel velocity, where C is the autoencoder's latent channel count (`latent_channels`, 4 for
+the SD KL-f8 rows, 16 for SD 3.5's autoencoder). Where the conditioning enters is each
+backbone's native pathway: adaLN for the DiT, cross-attention (action) plus class embedding
+(noise bucket) for the U-Net, GameNGen's construction, cross-attention on two learned caption
+tokens for PixArt, two learned text tokens in UniDiffuser's joint token sequence, and two
+joint-attention context tokens plus the pooled projection for SD 3.5. All five warm-start
+from published weights with the input projection inflated: pretrained weights on the C target
 channels, zeros on the context channels, so step 0 equals the pretrained model applied to the
 noisy target.
 
@@ -29,11 +31,15 @@ What PixArt-alpha needed on top of that, and why:
   runtime branch would build; only the recomputation goes away. Being non-persistent, the buffer
   never enters the state dict, so save/load is unaffected.
 * Conditioning. PixArt has no class-label path; its only non-timestep conditioning is the T5
-  caption sequence. We feed two learned tokens through the pretrained caption projection: an
-  action embedding with a trailing null row for CFG dropout (same `action_dropout` semantics as
-  the U-Net) and a context-noise-bucket embedding, both of width `caption_channels` (4096). The
-  timestep keeps PixArt's own adaLN-single path untouched, and `use_additional_conditions` is
-  forced False so no resolution or aspect-ratio embeddings are required.
+  caption sequence. Under the default `action_inject="token"` we feed two learned tokens through the
+  pretrained caption projection: an action embedding with a trailing null row for CFG dropout (same
+  `action_dropout` semantics as the U-Net) and a context-noise-bucket embedding, both of width
+  `caption_channels` (4096). The timestep keeps PixArt's own adaLN-single path untouched, and
+  `use_additional_conditions` is forced False so no resolution or aspect-ratio embeddings are required.
+  `action_inject="adaln"` is the grid's injection cell: the two embeddings, now `inner_dim` wide and
+  zero-initialised, are *added* to the embedded timestep that feeds adaLN-single and the final
+  shift/scale (`AdaLNActionInjection`), and cross-attention sees one learned action-free caption token
+  instead. Nothing is added to the attention pathway, which is the point of the comparison.
 * Output head. PixArt is a learn-sigma model: 8 output channels, epsilon first and the learned
   variance second (`PixArtAlphaPipeline` takes `chunk(2, dim=1)[0]`). We return the first 4 after
   unpatchify. Those are the pretrained epsilon channels, retrained here toward velocity, exactly
@@ -42,6 +48,9 @@ What PixArt-alpha needed on top of that, and why:
 What UniDiffuser v1 needed is documented on `UniDiffuserWorldModel` itself: it is the one backbone whose
 positional table is learned (sliced and interpolated rather than regenerated), whose conditioning is a token
 sequence rather than adaLN or cross-attention, and whose original forward cannot unpatchify a rectangular grid.
+
+What SD 3.5 Medium needed is documented on `SD35WorldModel`: it is the one backbone in a 16-channel latent
+space, so it is the reason `latent_channels` exists as an argument instead of a literal 4.
 """
 import torch
 import torch.nn as nn
@@ -49,17 +58,98 @@ import torch.nn as nn
 from models import DiT_models, get_2d_sincos_pos_embed
 
 LATENT_HW = (32, 40)
+LATENT_CHANNELS = 4          # SD KL-f8; SD 3.5's autoencoder is 16 and passes latent_channels=16
 PIXART_DEFAULT = "PixArt-alpha/PixArt-XL-2-512x512"
 UNIDIFFUSER_DEFAULT = "thu-ml/unidiffuser-v1"
+SD35_DEFAULT = "stabilityai/stable-diffusion-3.5-medium"
+
+# The latent space each warm start was pretrained in. A backbone cannot be built in any other one:
+# its patch projection has exactly this many input channels (see `inflate_input_conv`).
+BACKBONE_LATENT_CHANNELS = {"dit": 4, "unet": 4, "pixart": 4, "unidiffuser": 4, "sd35": 16}
+BACKBONES = tuple(BACKBONE_LATENT_CHANNELS)
+
+
+WARM_START_NONE = "none"
+ACTION_INJECTIONS = ("token", "adaln")
+
+
+def resolve_latent_channels(backbone, latent_channels=None):
+    """Latent channel count for a backbone: the caller's value, else the warm start's native one."""
+    return BACKBONE_LATENT_CHANNELS[backbone] if latent_channels in (None, 0) else int(latent_channels)
+
+
+def resolve_warm_start(backbone, warm_start):
+    """(source, scratch) for `build_model`, resolving `--warm-start none`.
+
+    "none" means the same architecture with a random init, which is the grid's scratch cell. The
+    DiT is built from local code, so scratch is simply naming no checkpoint. PixArt still needs
+    its repo, but only for the config that fixes the shapes; no weights are read from it. The
+    other diffusers backbones have no scratch path here, so asking for one is an error rather
+    than a silent warm start.
+    """
+    if not (isinstance(warm_start, str) and warm_start.strip().lower() == WARM_START_NONE):
+        return warm_start, False
+    if backbone == "dit":
+        return None, True
+    if backbone == "pixart":
+        return PIXART_DEFAULT, True
+    raise NotImplementedError(f"--warm-start {WARM_START_NONE} is implemented for dit and pixart, not {backbone}")
+
+
+class AdaLNActionInjection(nn.Module):
+    """Adds a per-sample conditioning vector to PixArt's timestep embedding.
+
+    `AdaLayerNormSingle.emb` produces the embedded timestep that feeds both every block's
+    adaLN-single modulation and the final layer's shift and scale, so adding to its output is the
+    additive injection Nano World Models prices at zero new attention parameters. diffusers calls
+    `emb` itself and takes no extra argument, so the world model's forward stashes the vector here
+    and clears it again; the wrapper registers no parameter or buffer of its own.
+    """
+
+    def __init__(self, emb):
+        super().__init__()
+        self.emb = emb
+        self.extra = None
+
+    def forward(self, *args, **kwargs):
+        out = self.emb(*args, **kwargs)
+        return out if self.extra is None else out + self.extra.to(out.dtype)
+
+
+def stacked_in_channels(latent_channels, context_frames):
+    """Input channel count: L context latents channel-stacked, then the noisy target."""
+    return latent_channels * (context_frames + 1)
+
+
+def inflate_input_conv(old, in_channels, latent_channels):
+    """The shared warm-start trick: a conv over `in_channels` inputs holding the pretrained kernel on
+    the last `latent_channels` (the noisy target) and zeros on the context channels, plus the
+    pretrained bias, so step 0 equals the pretrained model applied to the noisy target alone.
+
+    The pretrained conv must already take exactly `latent_channels` inputs, which is what ties a
+    backbone to the latent space it was trained in.
+    """
+    if old.weight.shape[1] != latent_channels:
+        raise ValueError(f"pretrained input projection takes {old.weight.shape[1]} channels, "
+                         f"latent_channels={latent_channels}")
+    new = nn.Conv2d(in_channels, old.out_channels, old.kernel_size, old.stride, old.padding,
+                    bias=old.bias is not None)
+    with torch.no_grad():
+        new.weight.zero_(); new.weight[:, -latent_channels:] = old.weight
+        if old.bias is not None:
+            new.bias.copy_(old.bias)
+    return new
 
 
 class DiTWorldModel(nn.Module):
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, model_name="DiT-XL/2",
-                 action_dropout=0.1, grad_ckpt=True):
+                 action_dropout=0.1, grad_ckpt=True, latent_channels=LATENT_CHANNELS):
         super().__init__()
         self.context_frames = context_frames
-        self.dit = DiT_models[model_name](input_size=LATENT_HW, in_channels=4 * context_frames + 4,
-                                          pred_channels=4, num_classes=num_actions,
+        self.latent_channels = latent_channels
+        self.dit = DiT_models[model_name](input_size=LATENT_HW,
+                                          in_channels=stacked_in_channels(latent_channels, context_frames),
+                                          pred_channels=latent_channels, num_classes=num_actions,
                                           class_dropout_prob=action_dropout, learn_sigma=False)
         self.dit.use_grad_ckpt = grad_ckpt
         hidden = self.dit.t_embedder.mlp[-1].out_features
@@ -79,7 +169,13 @@ class DiTWorldModel(nn.Module):
 
     def load_imagenet_warm_start(self, path):
         """ImageNet DiT-XL/2-256 checkpoint: inflate the patch projection, rebuild pos_embed for the
-        16x20 grid, keep the eps half of the 8-channel output head, skip the class table."""
+        16x20 grid, keep the eps half of the 8-channel output head, skip the class table.
+
+        The checkpoint is a 4-channel SD-KL-f8 model, so its patch projection and output head only
+        line up with `latent_channels == 4`; any other latent space has no ImageNet warm start.
+        """
+        if self.latent_channels != 4:
+            raise ValueError(f"the ImageNet DiT-XL/2 checkpoint is 4-channel; latent_channels={self.latent_channels}")
         sd = torch.load(path, map_location="cpu", weights_only=False)
         sd = sd.get("ema", sd.get("model", sd))
         own = self.dit.state_dict()
@@ -108,20 +204,18 @@ class DiTWorldModel(nn.Module):
 
 class UNetWorldModel(nn.Module):
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, sd_path="CompVis/stable-diffusion-v1-4",
-                 action_dropout=0.1, grad_ckpt=True, cache_dir=None):
+                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=LATENT_CHANNELS):
         super().__init__()
         from diffusers import UNet2DConditionModel
         self.context_frames = context_frames
         self.num_actions = num_actions
         self.action_dropout = action_dropout
+        self.latent_channels = latent_channels
+        in_channels = stacked_in_channels(latent_channels, context_frames)
         self.unet = UNet2DConditionModel.from_pretrained(sd_path, subfolder="unet", cache_dir=cache_dir,
                                                          num_class_embeds=noise_buckets, low_cpu_mem_usage=False)
-        old = self.unet.conv_in
-        new = nn.Conv2d(4 * context_frames + 4, old.out_channels, old.kernel_size, old.stride, old.padding)
-        with torch.no_grad():
-            new.weight.zero_(); new.weight[:, -4:] = old.weight; new.bias.copy_(old.bias)
-        self.unet.conv_in = new
-        self.unet.register_to_config(in_channels=4 * context_frames + 4)
+        self.unet.conv_in = inflate_input_conv(self.unet.conv_in, in_channels, latent_channels)
+        self.unet.register_to_config(in_channels=in_channels)
         self.action_embedder = nn.Embedding(num_actions + 1, self.unet.config.cross_attention_dim)  # last id = null
         nn.init.normal_(self.action_embedder.weight, std=0.02)
         if grad_ckpt:
@@ -143,27 +237,40 @@ class PixArtWorldModel(nn.Module):
     """
 
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, pixart_path=PIXART_DEFAULT,
-                 action_dropout=0.1, grad_ckpt=True, cache_dir=None):
+                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=LATENT_CHANNELS,
+                 scratch=False, action_inject="token", transformer=None):
         super().__init__()
         from diffusers import PixArtTransformer2DModel
         from diffusers.models.embeddings import get_2d_sincos_pos_embed as diffusers_pos_embed
+        if action_inject not in ACTION_INJECTIONS:
+            raise ValueError(f"action injection must be one of {ACTION_INJECTIONS}, got {action_inject}")
         self.context_frames = context_frames
         self.num_actions = num_actions
         self.action_dropout = action_dropout
-        in_channels = 4 * context_frames + 4
-        self.transformer = PixArtTransformer2DModel.from_pretrained(
-            pixart_path, subfolder="transformer", cache_dir=cache_dir, low_cpu_mem_usage=False,
-            use_additional_conditions=False)
+        self.latent_channels = latent_channels
+        self.action_inject = action_inject
+        in_channels = stacked_in_channels(latent_channels, context_frames)
+        if transformer is not None:
+            # a pre-built transformer: how the CPU gate exercises this wrapper without the 611M checkpoint
+            self.transformer = transformer
+        elif scratch:
+            # same architecture, random init: the config fixes every shape, the checkpoint is never read
+            cfg = PixArtTransformer2DModel.load_config(pixart_path, subfolder="transformer", cache_dir=cache_dir)
+            self.transformer = PixArtTransformer2DModel.from_config({**cfg, "use_additional_conditions": False})
+        else:
+            self.transformer = PixArtTransformer2DModel.from_pretrained(
+                pixart_path, subfolder="transformer", cache_dir=cache_dir, low_cpu_mem_usage=False,
+                use_additional_conditions=False)
 
         patch = self.transformer.pos_embed
-        old = patch.proj
-        new = nn.Conv2d(in_channels, old.out_channels, old.kernel_size, old.stride, old.padding,
-                        bias=old.bias is not None)
-        with torch.no_grad():
-            new.weight.zero_(); new.weight[:, -4:] = old.weight
-            if old.bias is not None:
-                new.bias.copy_(old.bias)
-        patch.proj = new
+        if scratch:
+            # nothing pretrained to preserve, so a plain conv over all in_channels under the default
+            # init, rather than the pretrained kernel on the target slice and zeros on the context
+            old = patch.proj
+            patch.proj = nn.Conv2d(in_channels, old.out_channels, old.kernel_size, old.stride, old.padding,
+                                   bias=old.bias is not None)
+        else:
+            patch.proj = inflate_input_conv(patch.proj, in_channels, latent_channels)
         self.transformer.register_to_config(in_channels=in_channels)
 
         # fixed table for our 16x20 token grid, built the way PatchEmbed would build it at runtime
@@ -177,10 +284,23 @@ class PixArtWorldModel(nn.Module):
         patch.height, patch.width = grid
 
         caption_channels = self.transformer.config.caption_channels
-        self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
-        self.bucket_embedder = nn.Embedding(noise_buckets, caption_channels)
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
-        nn.init.normal_(self.bucket_embedder.weight, std=0.02)
+        if action_inject == "token":
+            self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
+            self.bucket_embedder = nn.Embedding(noise_buckets, caption_channels)
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
+            nn.init.normal_(self.bucket_embedder.weight, std=0.02)
+        else:
+            inner = self.transformer.config.num_attention_heads * self.transformer.config.attention_head_dim
+            self.action_embedder = nn.Embedding(num_actions + 1, inner)
+            self.bucket_embedder = nn.Embedding(noise_buckets, inner)
+            # zero init keeps step 0 equal to the pretrained model on the noisy target, the property the
+            # token path gets from the zeroed context channels. The gradient through adaLN-single's SiLU
+            # is nonzero at zero, so both tables still train from the first update.
+            nn.init.zeros_(self.action_embedder.weight)
+            nn.init.zeros_(self.bucket_embedder.weight)
+            # cross-attention stays alive but action-free: one learned caption token, zero at init
+            self.null_caption = nn.Parameter(torch.zeros(1, 1, caption_channels))
+            self.transformer.adaln_single.emb = AdaLNActionInjection(self.transformer.adaln_single.emb)
         if grad_ckpt:
             self.transformer.enable_gradient_checkpointing()
 
@@ -188,12 +308,21 @@ class PixArtWorldModel(nn.Module):
         if self.training and self.action_dropout > 0:
             drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
             action = torch.where(drop, torch.full_like(action, self.num_actions), action)
-        tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
-        # older diffusers unpack added_cond_kwargs unconditionally; both keys are ignored with use_additional_conditions=False
-        out = self.transformer(torch.cat([context, x], dim=1), encoder_hidden_states=tokens, timestep=t,
-                               encoder_attention_mask=None,
-                               added_cond_kwargs={"resolution": None, "aspect_ratio": None}).sample
-        return out[:, :4]   # epsilon half of the learn-sigma head, retrained as velocity
+        if self.action_inject == "token":
+            tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
+        else:
+            # adaln_single runs once, before any checkpointed block, so the stash is read before a recompute
+            self.transformer.adaln_single.emb.extra = self.action_embedder(action) + self.bucket_embedder(noise_bucket)
+            tokens = self.null_caption.expand(x.shape[0], -1, -1)
+        try:
+            # older diffusers unpack added_cond_kwargs unconditionally; both keys are ignored with use_additional_conditions=False
+            out = self.transformer(torch.cat([context, x], dim=1), encoder_hidden_states=tokens, timestep=t,
+                                   encoder_attention_mask=None,
+                                   added_cond_kwargs={"resolution": None, "aspect_ratio": None}).sample
+        finally:
+            if self.action_inject == "adaln":
+                self.transformer.adaln_single.emb.extra = None
+        return out[:, :self.latent_channels]   # epsilon half of the learn-sigma head, retrained as velocity
 
 
 class UniDiffuserWorldModel(nn.Module):
@@ -271,14 +400,16 @@ class UniDiffuserWorldModel(nn.Module):
     """
 
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, unidiffuser_path=UNIDIFFUSER_DEFAULT,
-                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_hw=LATENT_HW, cond_tokens=2):
+                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_hw=LATENT_HW, cond_tokens=2,
+                 latent_channels=LATENT_CHANNELS):
         super().__init__()
         from diffusers import UniDiffuserModel
         self.context_frames = context_frames
         self.num_actions = num_actions
         self.action_dropout = action_dropout
         self.grad_ckpt = grad_ckpt
-        in_channels = 4 * context_frames + 4
+        self.latent_channels = latent_channels
+        in_channels = stacked_in_channels(latent_channels, context_frames)
         # the repo ships only diffusion_pytorch_model.bin; saying so skips the safetensors probe, which offline mode would turn into a failed lookup
         m = UniDiffuserModel.from_pretrained(unidiffuser_path, subfolder="unet", cache_dir=cache_dir, low_cpu_mem_usage=False, use_safetensors=False)
         cfg = m.config
@@ -286,13 +417,7 @@ class UniDiffuserWorldModel(nn.Module):
             "UniDiffuserWorldModel was written against the unidiffuser-v1 config"
         self.uvit = m
 
-        old = m.vae_img_in.proj
-        new = nn.Conv2d(in_channels, old.out_channels, old.kernel_size, old.stride, old.padding, bias=old.bias is not None)
-        with torch.no_grad():
-            new.weight.zero_(); new.weight[:, -4:] = old.weight
-            if old.bias is not None:
-                new.bias.copy_(old.bias)
-        m.vae_img_in.proj = new
+        m.vae_img_in.proj = inflate_input_conv(m.vae_img_in.proj, in_channels, latent_channels)
         m.register_to_config(in_channels=in_channels)
 
         p = cfg.patch_size
@@ -367,21 +492,128 @@ class UniDiffuserWorldModel(nn.Module):
         return tr.norm_out(h)
 
 
-def build_model(backbone, num_actions, context_frames, noise_buckets=10, grad_ckpt=True, warm_start=None, cache_dir=None, action_dropout=0.1):
+class SD35WorldModel(nn.Module):
+    """Stable Diffusion 3.5 Medium's MMDiT-X (2B, patch 2, 16-channel latents) as the world model.
+
+    Source facts, read Sep 17 2026 from `stabilityai/stable-diffusion-3.5-medium` and diffusers 0.40
+    (`models/transformers/transformer_sd3.py`, `models/embeddings.py`):
+
+    * Transformer: subfolder `transformer` (`SD3Transformer2DModel`), `in_channels` 16, `out_channels` 16,
+      `patch_size` 2, `pos_embed_max_size` 96, `sample_size` 128, `joint_attention_dim` 4096,
+      `pooled_projection_dim` 2048, `caption_projection_dim` = the inner width, dual-attention blocks in
+      the first 12 layers (MMDiT-X). Flow matching, no learned variance, so the head is 16 channels flat.
+    * Autoencoder: 16 channels, f8, `scaling_factor` 1.5305 and `shift_factor` 0.0609, applied as
+      `(z - shift) * scale` by `StableDiffusion3Pipeline`. Our 320x256 padded frame gives 16x32x40, so
+      context 32 x 16 = 512 channels plus the noisy target 16 = 528 input channels.
+    * Conditioning: `encoder_hidden_states` is the T5/CLIP token sequence at width `joint_attention_dim`
+      through `context_embedder`; `pooled_projections` is the CLIP pooled vector at width
+      `pooled_projection_dim` through `time_text_embed.text_embedder`, summed with the timestep embedding.
+      No text encoder is instantiated here: only the two projections inside the transformer are used.
+
+    Adaptation, in the order the tensors are touched:
+
+    * Patch projection. `pos_embed.proj` (Conv2d 16 -> inner, kernel 2, stride 2) is inflated to 528 input
+      channels by `inflate_input_conv`, so step 0 equals the pretrained model applied to the noisy target.
+      `register_to_config(in_channels=528)` keeps the config a checkpoint carries in step with the weights.
+    * Positional embedding. Nothing to do, and this is the one backbone where that is true: SD3's
+      `PatchEmbed` stores a 96x96 sin-cos table and `cropped_pos_embed` center-crops it to the incoming
+      token grid at every forward, which is how the pipeline itself serves non-square resolutions. Our
+      16x20 grid takes rows 40..55 and columns 38..57 of that table. So the rows we use are pretrained
+      rows at their pretrained spacing (unlike UniDiffuser, whose learned table has to be interpolated),
+      and the parity gate is exact at our own grid rather than only at the native one. The buffer is
+      persistent, so it rides in the state dict and the shape never changes.
+    * Conditioning. Action (`num_actions + 1` rows, the last being the null row for dropout, same
+      `action_dropout` semantics as the other backbones) and noise bucket become two learned tokens of
+      width `joint_attention_dim` through the pretrained `context_embedder`, the PixArt construction. The
+      pooled slot, which has no text-free neutral value, is a learned per-action vector added to a learned
+      base vector of width `pooled_projection_dim`; the base starts at zeros, so at step 0 the pooled
+      contribution is `text_embedder(0)` for every sample. The diffusion timestep keeps the model's own
+      `time_text_embed` path.
+    * Output. The 16-channel head, flat (no learn-sigma chunk to take), retrained from flow-matching
+      velocity to our v-prediction under `VDiffusion`'s linear 1e-4..0.02 DDPM schedule. That schedule
+      mismatch against SD 3.5's rectified-flow training is the same mismatch the U-Net, PixArt and
+      UniDiffuser rows carry.
+    * Forward. The pretrained `forward` already reads height and width off the input and unpatchifies with
+      both, so a 16x20 grid needs no reimplementation, unlike UniDiffuser's square-only unpatchify.
+
+    `transformer=` takes an already-constructed `SD3Transformer2DModel` instead of downloading one, which
+    is how `verify_sd35.py` runs the CPU gates on a small randomly initialised config of the same class.
+    """
+
+    def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, sd35_path=SD35_DEFAULT,
+                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=16, transformer=None):
+        super().__init__()
+        self.context_frames = context_frames
+        self.num_actions = num_actions
+        self.action_dropout = action_dropout
+        self.latent_channels = latent_channels
+        in_channels = stacked_in_channels(latent_channels, context_frames)
+        if transformer is None:
+            try:
+                from diffusers import SD3Transformer2DModel
+            except ImportError as e:   # SD3 landed in diffusers 0.29; Spiderman has 0.40, Superman 0.37
+                raise ImportError("SD35WorldModel needs a diffusers with SD3Transformer2DModel (>= 0.29)") from e
+            transformer = SD3Transformer2DModel.from_pretrained(sd35_path, subfolder="transformer",
+                                                                cache_dir=cache_dir, low_cpu_mem_usage=False)
+        self.transformer = transformer
+        cfg = self.transformer.config
+        assert cfg.patch_size == 2 and cfg.pos_embed_max_size, \
+            "SD35WorldModel was written against the SD 3.5 config (patch 2, cropped positional table)"
+
+        self.transformer.pos_embed.proj = inflate_input_conv(self.transformer.pos_embed.proj, in_channels, latent_channels)
+        self.transformer.register_to_config(in_channels=in_channels)
+
+        self.action_embedder = nn.Embedding(num_actions + 1, cfg.joint_attention_dim)   # last id = null
+        self.bucket_embedder = nn.Embedding(noise_buckets, cfg.joint_attention_dim)
+        self.pooled_action = nn.Embedding(num_actions + 1, cfg.pooled_projection_dim)
+        nn.init.normal_(self.action_embedder.weight, std=0.02)
+        nn.init.normal_(self.bucket_embedder.weight, std=0.02)
+        nn.init.normal_(self.pooled_action.weight, std=0.02)
+        self.pooled_base = nn.Parameter(torch.zeros(cfg.pooled_projection_dim))
+        if grad_ckpt:
+            self.transformer.enable_gradient_checkpointing()
+
+    def conditioning(self, action, noise_bucket):
+        """The two joint-attention context tokens and the pooled projection for one batch."""
+        tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
+        return tokens, self.pooled_action(action) + self.pooled_base
+
+    def forward(self, x, t, action, context, noise_bucket):
+        if self.training and self.action_dropout > 0:
+            drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
+            action = torch.where(drop, torch.full_like(action, self.num_actions), action)
+        tokens, pooled = self.conditioning(action, noise_bucket)
+        return self.transformer(torch.cat([context, x], dim=1), encoder_hidden_states=tokens,
+                                pooled_projections=pooled, timestep=t).sample
+
+
+def build_model(backbone, num_actions, context_frames, noise_buckets=10, grad_ckpt=True, warm_start=None,
+                cache_dir=None, action_dropout=0.1, latent_channels=None, action_inject="token"):
+    latent_channels = resolve_latent_channels(backbone, latent_channels)
+    warm_start, scratch = resolve_warm_start(backbone, warm_start)
+    if action_inject != "token" and backbone != "pixart":
+        raise NotImplementedError(f"--action-inject {action_inject} is a PixArt knob, not a {backbone} one")
     if backbone == "dit":
-        m = DiTWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt)
+        m = DiTWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
+                          latent_channels=latent_channels)
         if warm_start:
             n, skipped = m.load_imagenet_warm_start(warm_start)
             print(f"DiT warm start: {n} tensors loaded, skipped {skipped}")
     elif backbone == "unet":
         m = UNetWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
-                           sd_path=warm_start or "CompVis/stable-diffusion-v1-4", cache_dir=cache_dir)
+                           sd_path=warm_start or "CompVis/stable-diffusion-v1-4", cache_dir=cache_dir,
+                           latent_channels=latent_channels)
     elif backbone == "pixart":
         m = PixArtWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout,
-                             grad_ckpt=grad_ckpt, pixart_path=warm_start or PIXART_DEFAULT, cache_dir=cache_dir)
+                             grad_ckpt=grad_ckpt, pixart_path=warm_start or PIXART_DEFAULT, cache_dir=cache_dir,
+                             latent_channels=latent_channels, scratch=scratch, action_inject=action_inject)
     elif backbone == "unidiffuser":
         m = UniDiffuserWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
-                                  unidiffuser_path=warm_start or UNIDIFFUSER_DEFAULT, cache_dir=cache_dir)
+                                  unidiffuser_path=warm_start or UNIDIFFUSER_DEFAULT, cache_dir=cache_dir,
+                                  latent_channels=latent_channels)
+    elif backbone == "sd35":
+        m = SD35WorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
+                           sd35_path=warm_start or SD35_DEFAULT, cache_dir=cache_dir, latent_channels=latent_channels)
     else:
         raise ValueError(backbone)
     return m

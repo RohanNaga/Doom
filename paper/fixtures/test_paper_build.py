@@ -7,6 +7,8 @@ exists, that the numbers in the tables are the fixture's numbers (read back from
 files, never typed here), that missing artifacts show as "n/a" with a warning instead of a
 crash, and that an empty results root still produces complete output. When pdflatex is on
 the path, the tables are compiled in a standalone document.
+The knob grid is covered too: its table, the collected `rows_grid.json`, and the warning a cell
+raises when its own config.json contradicts the knob the launcher turns.
 
     python -m pytest paper/fixtures/test_paper_build.py -q
 """
@@ -29,7 +31,7 @@ import paperdata  # noqa: E402
 
 FIGURES = ["drift_psnr.pdf", "drift_lpips.pdf", "drift.pdf", "tf_seen_unseen.pdf", "blur_control.pdf"]
 TABLES = ["main.tex", "transfer.tex", "ema.tex", "seeds.tex", "cm.tex", "grid.tex", "horizons.tex", "blur.tex",
-          "paired.tex", "idm.tex", "late_drop.tex"]
+          "paired.tex", "idm.tex", "late_drop.tex", "knobs.tex"]
 
 
 def run_builder(script, root, out, extra=()):
@@ -171,3 +173,53 @@ def test_tables_compile(built, tmp_path):
                           capture_output=True, text=True, cwd=str(tmp_path))
     assert proc.returncode == 0, proc.stdout[-3000:]
     assert (tmp_path / "preview.pdf").exists()
+
+
+def test_knob_grid_table_and_json_come_from_the_cell_directories(built, fixture_root):
+    out, _, tabs = built
+    knobs = read(os.path.join(out, "tables", "knobs.tex"))
+    grid = json.load(open(os.path.join(out, "tables", "rows_grid.json")))
+    registry = json.load(open(os.path.join(PAPER, "rows.json")))
+    keys = [c["key"] for c in registry["grid_cells"]]
+    assert [c["key"] for c in grid["cells"]] == keys, "rows_grid.json must carry every registered cell"
+    assert len(keys) == 12
+
+    for cell in ("base30k", "scratch", "eps"):
+        drift = json.load(open(os.path.join(fixture_root, "grid", cell, "rollout_metrics_seen", "drift.json")))
+        seen = json.load(open(os.path.join(fixture_root, "grid", cell, "eval_tf_seen_ema", "metrics.json")))
+        rec = next(c for c in grid["cells"] if c["key"] == cell)
+        assert rec["metrics"]["lpips64"] == drift["lpips@64"]
+        assert rec["metrics"]["seen_psnr_ema"] == seen["psnr_raw"]["mean"]
+        for text in (f"{drift['psnr@64']:.2f}", f"{drift['lpips@64']:.3f}", f"{seen['psnr_raw']['mean']:.2f}"):
+            assert text in knobs, f"{cell}: {text} not in knobs.tex"
+
+    # the cell with no directory and the cell with no rollout are incomplete, everything else is not
+    assert set(grid["incomplete"]) == {"data-1_8", "lr2.5e-5"}
+    assert set(grid["complete"]) | set(grid["incomplete"]) == set(keys)
+    assert grid["ranked_on"].startswith("rollout lpips@64")
+    ranks = {c["key"]: c.get("rank_lpips64") for c in grid["cells"]}
+    assert ranks["data-1_8"] is None and ranks["lr2.5e-5"] is None
+    by_lpips = sorted((c["metrics"]["lpips64"], c["key"]) for c in grid["cells"] if c["metrics"]["lpips64"] is not None)
+    assert [k for _, k in by_lpips] == [k for k, r in sorted(ranks.items(), key=lambda kv: (kv[1] is None, kv[1])) if r]
+
+    # the table is ordered the same way, best rollout LPIPS first
+    body = [ln for ln in knobs.splitlines() if "\\texttt{" in ln]
+    labels = {c["key"]: c["label"] for c in registry["grid_cells"]}
+    assert body[0].startswith(labels[by_lpips[0][1]]), body[0]
+
+    # a cell whose config.json contradicts its knob is flagged, not silently reported
+    mismatched = [c["key"] for c in grid["cells"] if c["knob_confirmed"] is False]
+    assert mismatched == ["ctx16"], mismatched
+    assert "does not match its knob" in tabs.stderr
+    assert all(c["knob_confirmed"] for c in grid["cells"] if c["key"] not in ("ctx16", "data-1_8"))
+    assert next(c for c in grid["cells"] if c["key"] == "data-1_8")["knob_confirmed"] is None
+
+
+def test_knob_grid_records_the_training_episode_count_of_each_data_cell(built, fixture_root):
+    out, _, _ = built
+    grid = json.load(open(os.path.join(out, "tables", "rows_grid.json")))
+    for cell in ("base30k", "data-1_4", "data-1_2"):
+        rec = next(c for c in grid["cells"] if c["key"] == cell)
+        written = json.load(open(os.path.join(fixture_root, "grid", cell, "train_episodes.json")))
+        assert rec["trained"]["train_episodes"] == written["num_episodes"]
+        assert rec["trained"]["train_fraction"] == written["train_fraction"]

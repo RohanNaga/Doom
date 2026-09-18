@@ -2,9 +2,12 @@
 Train a DoomDiT world model, any backbone, under one recipe.
 
 Shared between backbones: stride-4 latents, L context frames channel-stacked, single action at
-the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target,
+the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target
+(or epsilon under --objective eps, which is one cell of the knob grid),
 AdamW, bf16 autocast with fp32 master weights, EMA in fp32 on the CPU, held-out latent v-loss
-for checkpoint selection. The only thing the --backbone flag changes is the network.
+for checkpoint selection. The only thing the --backbone flag changes is the network, and the
+only thing --latent-channels changes is the autoencoder the corpus was encoded with (4 for the
+SD KL-f8 rows, 16 for sd35's own autoencoder); it defaults to whichever the warm start needs.
 
 Fit check (no data needed):
     python train_wm.py --backbone dit --fit-check 30 --per-gpu-batch 4 --context-frames 32
@@ -23,20 +26,20 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Subset
 
-from backbones import build_model
-from diffusion_v import VDiffusion, noise_augment
+from backbones import ACTION_INJECTIONS, BACKBONES, LATENT_HW, build_model, resolve_latent_channels
+from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
 
 
 class SyntheticWindows(Dataset):
-    def __init__(self, n, context_frames, num_actions):
-        self.n, self.L, self.A = n, context_frames, num_actions
+    def __init__(self, n, context_frames, num_actions, latent_channels=4):
+        self.n, self.L, self.A, self.C = n, context_frames, num_actions, latent_channels
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, i):
         g = torch.Generator().manual_seed(i)
-        return (torch.randn(4 * self.L, 32, 40, generator=g), torch.randn(4, 32, 40, generator=g),
+        return (torch.randn(self.C * self.L, *LATENT_HW, generator=g), torch.randn(self.C, *LATENT_HW, generator=g),
                 torch.randint(0, self.A, (1,), generator=g)[0])
 
 
@@ -61,23 +64,43 @@ class SeededCorruption(Dataset):
         return ctx, tgt, act, t, level, ctx_eps, tgt_noise
 
 
-def build_loaders(args):
+def build_loaders(args, latent_channels):
+    """(train dataset, validation subset, training episode ids). The ids are None for a fit check.
+
+    `--train-fraction` thins the *training* episode list only; the validation list and the fixed
+    `RandomState(0)` draw of validation windows are the same for every fraction, so a data cell's
+    held-out loss is comparable to the full-data cell's.
+    """
     if args.fit_check:
-        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions)
-        return ds, None
-    from doom_data import LatentWindowDataset, load_split
+        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels)
+        return ds, None, None
+    from doom_data import LatentWindowDataset, load_split, select_train_episodes
     split = load_split(args.split)
-    train = LatentWindowDataset(args.latents_dir, split["train"], args.context_frames, require_chains=args.require_verified_transitions)
-    val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames, require_chains=args.require_verified_transitions)
+    train_ids = select_train_episodes(split["train"], args.train_fraction, args.seed)
+    train = LatentWindowDataset(args.latents_dir, train_ids, args.context_frames, require_chains=args.require_verified_transitions,
+                                latent_channels=latent_channels)
+    val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames, require_chains=args.require_verified_transitions,
+                              latent_channels=latent_channels)
     rng = np.random.RandomState(0)
     val_idx = np.sort(rng.choice(len(val), size=min(args.val_windows, len(val)), replace=False))
-    return train, Subset(val, val_idx.tolist())
+    return train, Subset(val, val_idx.tolist()), train_ids
 
 
 @torch.no_grad()
 def ema_update(ema_params, params, decay):
     for e, p in zip(ema_params, params):
         e.mul_(decay).add_(p.detach().float().cpu(), alpha=1.0 - decay)
+
+
+def ema_keys(raw):
+    """Names for the fp32 CPU EMA list, which holds one tensor per *parameter*.
+
+    Earlier code zipped the list against `state_dict().keys()`. Those agree only while a model has
+    no persistent buffers: SD 3.5's positional table is one (`pos_embed.pos_embed`), and it sorts
+    before the patch projection, so that zip would shift every EMA key by one and silently save an
+    EMA whose tensors belong to the wrong weights. Parameter names are the list's own order.
+    """
+    return [n for n, _ in raw.named_parameters()]
 
 
 
@@ -161,9 +184,11 @@ def main(args):
                 print(f"log write failed: {e}", flush=True)
             print(json.dumps(kw), flush=True)
 
+    latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
-                        action_dropout=args.action_dropout)
+                        action_dropout=args.action_dropout, latent_channels=latent_channels,
+                        action_inject=args.action_inject)
     start_step = 0
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=False)
@@ -181,11 +206,11 @@ def main(args):
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
 
-    train_ds, val_ds = build_loaders(args)
+    train_ds, val_ds, train_ids = build_loaders(args, latent_channels)
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
                         pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0)
     model, opt, loader = acc.prepare(model, opt, loader)   # scheduler stays unwrapped: one step per optimizer update
-    diffusion = VDiffusion(device=device)
+    diffusion = VDiffusion(device=device, objective=args.objective)
     raw = acc.unwrap_model(model)
     if args.resume and "optimizer" in ck:
         opt.load_state_dict(ck["optimizer"]); sched.load_state_dict(ck["scheduler"])
@@ -199,7 +224,7 @@ def main(args):
             print(f"resume overrides learning rate {old_lr:g} -> {args.lr:g} (recipe deviation)")
     ema = [p.detach().float().cpu().clone() for p in raw.parameters()] if args.ema_every > 0 else None
     if args.resume and ema is not None and "ema" in ck:
-        for e, (k, _) in zip(ema, raw.state_dict().items()):
+        for e, k in zip(ema, ema_keys(raw)):
             if k in ck["ema"] and ck["ema"][k].shape == e.shape:
                 e.copy_(ck["ema"][k].float())
 
@@ -212,9 +237,20 @@ def main(args):
         split_hash = hashlib.md5(open(args.split, "rb").read()).hexdigest() if (not args.fit_check and os.path.exists(args.split)) else None
         with open(os.path.join(args.results_dir, "config.json"), "w") as f:
             json.dump({**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum,
-                       "split_md5": split_hash, "torch": torch.__version__}, f, indent=1)
-    log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum,
-        per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum)
+                       "split_md5": split_hash, "torch": torch.__version__,
+                       "resolved_latent_channels": latent_channels}, f, indent=1)
+        if train_ids is not None:
+            # which episodes this run actually trained on, so a data cell is reproducible from the
+            # results directory alone and not only from (split, fraction, seed)
+            with open(os.path.join(args.results_dir, "train_episodes.json"), "w") as f:
+                json.dump({"train_fraction": args.train_fraction, "seed": args.seed,
+                           "num_episodes": len(train_ids), "episodes": train_ids}, f, indent=1)
+    log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
+        per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum, objective=args.objective,
+        train_fraction=args.train_fraction, train_episodes=None if train_ids is None else len(train_ids),
+        # state-dict entries the EMA does not cover, i.e. persistent buffers: 0 for every backbone
+        # in the SD KL-f8 latent space, 1 for sd35 (its sin-cos positional table)
+        buffers_outside_ema=len(raw.state_dict()) - len(ema_keys(raw)))
 
     def model_fn(ctx, act, bucket):
         return lambda xt, t: model(xt, t, act, ctx, bucket)
@@ -243,13 +279,14 @@ def main(args):
         return (tot / n).item(), (bins / bin_n.clamp(min=1)).tolist()
 
     model.train()
-    step, t0, tokens = start_step, time.time(), 0
+    step, t0 = start_step, time.time()
     running, grad_norms = [], []
     skipped = int(ck.get("skipped", 0)) if args.resume else 0
     # probe tensors: input projection, output layer, and adaLN modulation of the first, middle, and last DiT blocks (or U-Net / U-ViT analogues)
     want = ["x_embedder.proj.weight", "final_layer.linear.weight", "blocks.0.adaLN_modulation.1.weight", "blocks.14.adaLN_modulation.1.weight",
             "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight",
-            "vae_img_in.proj.weight", "vae_img_out.weight", "transformer_mid_block.attn1.to_q.weight"]
+            "vae_img_in.proj.weight", "vae_img_out.weight", "transformer_mid_block.attn1.to_q.weight",
+            "pos_embed.proj.weight", "proj_out.weight", "context_embedder.weight", "transformer_blocks.11.attn.to_q.weight"]
     probe_params = [(n, p) for n, p in raw.named_parameters() if any(n.endswith(w) for w in want)]
     probe_names = [n for n, _ in probe_params]
     probe_prev = {n: torch.empty_like(p.detach()) for n, p in probe_params}
@@ -313,7 +350,7 @@ def main(args):
                 if is_main and args.remote_results and step % args.snapshot_every == 0:
                     # compact bf16 weights at every validation so an excursion can be located afterwards; never pruned
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
-                                     "ema": {k: t.to(torch.bfloat16) for k, t in zip(raw.state_dict().keys(), ema)} if ema is not None else None,
+                                     "ema": {k: t.to(torch.bfloat16) for k, t in zip(ema_keys(raw), ema)} if ema is not None else None,
                                      "step": step, "val_loss": v, "args": vars(args)},
                                     os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=False)
                 if is_main and v < best_val:
@@ -332,7 +369,7 @@ def main(args):
                       "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
                               "numpy": np.random.get_state()}}
                 if ema is not None:
-                    ck["ema"] = {k: t.clone() for k, t in zip(raw.state_dict().keys(), ema)}
+                    ck["ema"] = {k: t.clone() for k, t in zip(ema_keys(raw), ema)}
                 # rolling checkpoints live on the remote copy of record; the local copy is kept only when --keep-last > 0
                 written = save_checkpoint(ck, os.path.join(args.results_dir, f"{step:07d}.pt"), args.remote_results, keep_local=args.keep_last > 0)
                 if args.remote_results and is_main:
@@ -351,24 +388,40 @@ def main(args):
     if args.fit_check:
         dt = time.time() - t0
         mem = torch.cuda.max_memory_allocated(device) / 2**30 if device.type == "cuda" else 0
+        # allocated is what the tensors need; reserved is what the caching allocator holds from the
+        # card, so reserved is the number a "does this configuration fit" decision has to use
+        reserved = torch.cuda.max_memory_reserved(device) / 2**30 if device.type == "cuda" else 0
         log(event="fit_check", backbone=args.backbone, context_frames=args.context_frames, per_gpu_batch=args.per_gpu_batch,
-            world=world, steps=step, steps_per_s=step / dt, peak_mem_gb=round(mem, 2), params=n_params, optim=args.optim)
+            world=world, steps=step, steps_per_s=step / dt, peak_mem_gb=round(mem, 2), params=n_params, optim=args.optim,
+            latent_channels=latent_channels, grad_ckpt=bool(args.grad_ckpt), accum=accum,
+            global_batch=args.per_gpu_batch * world * accum, peak_reserved_gb=round(reserved, 2))
     acc.wait_for_everyone()
     log(event="end", step=step)
 
 
-if __name__ == "__main__":
+def build_parser():
+    """Every trainer flag in one place, so a test can construct args without a subprocess."""
     p = argparse.ArgumentParser()
-    p.add_argument("--backbone", choices=["dit", "unet", "pixart", "unidiffuser"], required=True)
+    p.add_argument("--backbone", choices=list(BACKBONES), required=True)
+    p.add_argument("--latent-channels", type=int, default=0,
+                   help="latent channels of the corpus and the backbone; 0 takes the warm start's own (4 for the SD KL-f8 rows, 16 for sd35)")
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
     p.add_argument("--noise-aug-max", type=float, default=0.7)
+    p.add_argument("--objective", choices=list(OBJECTIVES), default="v",
+                   help="prediction target: velocity (every finished row) or epsilon, same betas and same sampler; "
+                        "recorded in every checkpoint so eval_tf.py and rollout_eval.py sample in the right one")
+    p.add_argument("--train-fraction", type=float, default=1.0,
+                   help="fraction of the split's TRAINING episodes to use, whole episodes, seeded by --seed and "
+                        "nested across fractions; validation and evaluation are untouched (1.0 = every train episode)")
     p.add_argument("--latents-dir", default="data/latents_arnold")
     p.add_argument("--split", default="data/split_arnold.json")
     p.add_argument("--results-dir", default="results/fit_check")
     p.add_argument("--warm-start", default=None,
-                   help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path; UniDiffuser: thu-ml/unidiffuser-v1 repo or path")
+                   help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path; "
+                        "UniDiffuser: thu-ml/unidiffuser-v1 repo or path; sd35: stabilityai/stable-diffusion-3.5-medium repo or path; "
+                        "'none' (dit and pixart) builds the same architecture with a random init")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--global-batch", type=int, default=32)
     p.add_argument("--per-gpu-batch", type=int, default=4)
@@ -392,9 +445,16 @@ if __name__ == "__main__":
     p.add_argument("--keep-remote", type=int, default=2, help="rolling recovery checkpoints kept on --remote-results")
     p.add_argument("--snapshot-every", type=int, default=5000, help="compact bf16 weight snapshot to --remote-results at these validation steps (never pruned)")
     p.add_argument("--action-dropout", type=float, default=0.1, help="fraction of actions replaced by the null id during training (0 disables CFG training)")
+    p.add_argument("--action-inject", choices=list(ACTION_INJECTIONS), default="token",
+                   help="PixArt only: action and bucket as cross-attention caption tokens (every finished row) or "
+                        "added into the timestep/adaLN-single path; recorded in every checkpoint so the evaluators rebuild the right graph")
     p.add_argument("--require-verified-transitions", action="store_true", help="refuse latents without chain ids and 4-tic spacing")
     p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
     p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")
     p.add_argument("--seed", type=int, default=0)
-    main(p.parse_args())
+    return p
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())

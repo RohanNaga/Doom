@@ -1,5 +1,5 @@
 """
-Teacher-forced next-frame metrics for the new stack (velocity backbones, stride-4 latents).
+Teacher-forced next-frame metrics for the new stack (velocity or epsilon backbones, stride-4 latents).
 
 For each held-out window: L real context latents and the action, one DDIM sample, decode
 through the (optionally fine-tuned) VAE, score against the raw lossless frame from the
@@ -21,10 +21,11 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Subset
 
-from backbones import build_model
-from diffusion_v import VDiffusion, noise_augment
+from backbones import (BACKBONES, PIXART_DEFAULT, SD35_DEFAULT, UNIDIFFUSER_DEFAULT, build_model,
+                       resolve_latent_channels)
+from diffusion_v import VDiffusion, checkpoint_objective
 from doom_data import LatentWindowDataset, load_split
-from doomdit_utils import LATENT_SCALE, load_vae
+from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
 
 HUD_ROWS = 32
 
@@ -35,8 +36,8 @@ def psnr(a, b):
 
 
 @torch.no_grad()
-def decode(vae, z):
-    img = vae.decode(z.float() / LATENT_SCALE).sample[:, :, :240]
+def decode(vae, z, scale=LATENT_SCALE, shift=None):
+    img = vae.decode(denormalize_latents(z.float(), scale, shift)).sample[:, :, :240]
     return (img * 0.5 + 0.5).clamp(0, 1)
 
 
@@ -46,20 +47,25 @@ def backbone_source(args):
     The DiT is built from local code, so it needs nothing; the diffusers backbones must be
     instantiated from the same repo they were trained from before the checkpoint is loaded.
     """
-    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path, "unidiffuser": args.unidiffuser_path}[args.backbone]
+    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path, "unidiffuser": args.unidiffuser_path,
+            "sd35": args.sd35_path}[args.backbone]
 
 
-def load_model(args, device):
+def load_model(args, device, latent_channels):
+    """(model, step, objective). The objective is the checkpoint's own, so an epsilon-trained cell
+    is sampled as epsilon without the caller having to remember which it was."""
     ck = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     # the action table's size depends on the training-time dropout (fast-DiT adds the null row only when it is > 0)
     dropout = ck.get("args", {}).get("action_dropout", 0.1)
+    # the adaLN injection cell renames the adaln_single subtree, so the graph has to be rebuilt the way it was trained
+    inject = (ck.get("args") or {}).get("action_inject") or "token"
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets, grad_ckpt=False,
-                        warm_start=backbone_source(args), cache_dir=args.hf_cache, action_dropout=dropout)
+                        warm_start=backbone_source(args), cache_dir=args.hf_cache, action_dropout=dropout,
+                        latent_channels=latent_channels, action_inject=inject)
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
-    state = ck["ema"] if args.use_ema else ck["model"]
-    model.load_state_dict({k: v.float() for k, v in state.items()}, strict=True)
-    return model.to(device).eval(), ck.get("step", "?")
+    load_world_model_state(model, ck, args.use_ema)
+    return model.to(device).eval(), ck.get("step", "?"), checkpoint_objective(ck, args.objective)
 
 
 class RawFrames:
@@ -82,19 +88,24 @@ def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     os.makedirs(args.out_dir, exist_ok=True)
     torch.manual_seed(args.seed)
-    model, step = load_model(args, device)
-    vae = load_vae(device) if not args.vae_path else __import__("diffusers").models.AutoencoderKL.from_pretrained(args.vae_path).to(device).eval()
+    latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
+    model, step, objective = load_model(args, device, latent_channels)
+    vae = build_vae(args.vae_path, args.vae_subfolder, device, args.hf_cache, latent_channels=latent_channels,
+                    scaling_factor=args.latent_scale, shift_factor=args.latent_shift)
     import lpips
     lp = lpips.LPIPS(net=args.lpips_net, verbose=False).to(device).eval()
-    diffusion = VDiffusion(device=device)
+    diffusion = VDiffusion(device=device, objective=objective)
 
     split = load_split(args.split)
-    ds = LatentWindowDataset(args.latents_dir, split[args.subset], args.context_frames)
+    ds = LatentWindowDataset(args.latents_dir, split[args.subset], args.context_frames, latent_channels=latent_channels)
     rng = np.random.RandomState(args.seed)
     idx = np.sort(rng.choice(len(ds), size=min(args.num_windows, len(ds)), replace=False))
     loader = DataLoader(Subset(ds, idx.tolist()), batch_size=args.batch_size, shuffle=False, num_workers=2)
     raw = RawFrames(args.parquet_dir) if args.parquet_dir else None
-    print(f"{args.subset}: {len(ds.episodes)} episodes, {len(ds):,} windows, evaluating {len(idx)}, step {step}")
+    print(f"{args.subset}: {len(ds.episodes)} episodes, {len(ds):,} windows, evaluating {len(idx)}, step {step}, objective {objective}")
+
+    def dec(z):
+        return decode(vae, z, args.latent_scale, args.latent_shift)
 
     rows, t_sample, n = [], 0.0, 0
     for b, (ctx, tgt, act) in enumerate(loader):
@@ -110,7 +121,7 @@ def main(args):
             pred = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket), tgt.shape, steps=args.steps, eta=args.eta, device=device)
         torch.cuda.synchronize() if device == "cuda" else None
         t_sample += time.time() - t0; n += ctx.shape[0]
-        pred_img, gt_img, last_img = decode(vae, pred), decode(vae, tgt), decode(vae, ctx[:, -4:])
+        pred_img, gt_img, last_img = dec(pred), dec(tgt), dec(ctx[:, -latent_channels:])
         lat_mse = ((pred.float() - tgt.float()) ** 2).flatten(1).mean(1)
         for i in range(ctx.shape[0]):
             gi = int(idx[b * args.batch_size + i]); slot, start = ds.locate(gi)
@@ -144,7 +155,8 @@ def main(args):
     summary["per_map"] = {str(m): {k: float(np.mean([r[k] for r in rows if r["map"] == m])) for k in ("psnr_dec", "lpips_dec")}
                           for m in sorted(set(r["map"] for r in rows))}
     summary["sampling_frames_per_s"] = n / max(t_sample, 1e-9)
-    summary["config"] = {**vars(args), "step": step}
+    summary["config"] = {**vars(args), "step": step, "resolved_latent_channels": latent_channels,
+                         "resolved_objective": objective}
     json.dump(summary, open(os.path.join(args.out_dir, "metrics.json"), "w"), indent=1)
     with open(os.path.join(args.out_dir, "per_window.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
@@ -154,8 +166,11 @@ def main(args):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True)
-    p.add_argument("--backbone", choices=["dit", "unet", "pixart", "unidiffuser"], required=True)
+    p.add_argument("--backbone", choices=list(BACKBONES), required=True)
+    p.add_argument("--latent-channels", type=int, default=0, help="0 takes the backbone's own (4 for the SD KL-f8 rows, 16 for sd35)")
     p.add_argument("--use-ema", action="store_true")
+    p.add_argument("--objective", choices=["auto", "v", "eps"], default="auto",
+                   help="auto reads the parameterization the checkpoint was trained in (v for every pre-grid row)")
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
@@ -171,10 +186,14 @@ if __name__ == "__main__":
     p.add_argument("--steps", type=int, default=50)
     p.add_argument("--eta", type=float, default=0.0)
     p.add_argument("--lpips-net", default="alex")
-    p.add_argument("--vae-path", default="", help="fine-tuned VAE directory; default sd-vae-ft-mse")
+    p.add_argument("--vae-path", default="", help="fine-tuned VAE directory or repo id; default sd-vae-ft-mse")
+    p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-path (e.g. vae for a full pipeline repo)")
+    p.add_argument("--latent-scale", type=float, default=LATENT_SCALE, help="scaling_factor the corpus was encoded with")
+    p.add_argument("--latent-shift", type=float, default=None, help="shift_factor the corpus was encoded with (SD 3.5: 0.0609)")
     p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4")
-    p.add_argument("--pixart-path", default="PixArt-alpha/PixArt-XL-2-512x512")
-    p.add_argument("--unidiffuser-path", default="thu-ml/unidiffuser-v1")
+    p.add_argument("--pixart-path", default=PIXART_DEFAULT)
+    p.add_argument("--unidiffuser-path", default=UNIDIFFUSER_DEFAULT)
+    p.add_argument("--sd35-path", default=SD35_DEFAULT)
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--save-images", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)

@@ -3,9 +3,28 @@
   "corpora": {
     "seen": "eval_tf_seen",
     "unseen": "eval_tf_unseen",
+    "unseen2": "eval_tf_unseen2",
     "seen_ema": "eval_tf_seen_ema",
+    "unseen_ema": "eval_tf_unseen_ema",
+    "unseen2_ema": "eval_tf_unseen2_ema",
     "unseen15": "eval_tf_unseen15"
   },
+  "grid_dir": "grid",
+  "_grid_comment": "One knob per cell against base30k, all 30k updates of the PixArt-alpha recipe; run directory is <grid_dir>/<key>. The knob string is the flag scripts/spiderman/launch_cell.sh passes, and make_tables.py checks it against what each cell's config.json recorded.",
+  "grid_cells": [
+    {"key": "base30k", "label": "base, 30k", "knob": "--"},
+    {"key": "data-1_8", "label": "data 1/8", "knob": "--train-fraction 0.125"},
+    {"key": "data-1_4", "label": "data 1/4", "knob": "--train-fraction 0.25"},
+    {"key": "data-1_2", "label": "data 1/2", "knob": "--train-fraction 0.5"},
+    {"key": "scratch", "label": "random init", "knob": "--warm-start none"},
+    {"key": "eps", "label": "$\\epsilon$ objective", "knob": "--objective eps"},
+    {"key": "ctx8", "label": "context 8", "knob": "--context-frames 8"},
+    {"key": "ctx16", "label": "context 16", "knob": "--context-frames 16"},
+    {"key": "noaug", "label": "no context noise", "knob": "--noise-aug-max 0.0"},
+    {"key": "adaln", "label": "adaLN action", "knob": "--action-inject adaln"},
+    {"key": "lr1e-4", "label": "lr 1e-4", "knob": "--lr 1e-4"},
+    {"key": "lr2.5e-5", "label": "lr 2.5e-5", "knob": "--lr 2.5e-5"}
+  ],
   "rollout_dir": "rollout_metrics_seen",
   "audit_dir": "audit",
   "audit_summary": "tmp/audit/summary.json",

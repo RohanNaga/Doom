@@ -15,6 +15,8 @@ warning; `fmt` turns None into "n/a". Schemas (all produced by scripts in this r
     <run>/audit/per_rollout.npz             rollout_audit.py: episode + per-rollout values at horizons 8/32/64
     tmp/audit/summary.json                  rollout_audit.py: identity, per_run, paired differences
     idm_aligned*/metrics.json               train_idm.py: top1, macro_recall, movement, majority_baseline
+    grid/<cell>/                            one knob-grid cell, same schemas; plus train_episodes.json
+                                            (train_wm.py: the episode ids --train-fraction selected)
 """
 import csv
 import json
@@ -26,6 +28,10 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROWS_JSON = os.path.join(HERE, "rows.json")
 NA = "n/a"
+
+# recipe fields a knob-grid cell records in config.json, in the order the knob table prints them
+GRID_KNOB_KEYS = ("steps", "train_fraction", "objective", "context_frames", "noise_aug_max",
+                  "lr", "warm_start", "action_inject")
 
 
 class Warn:
@@ -231,10 +237,33 @@ class Run:
     def blur(self, h, sigma, key):
         return get(self.audit, "blur_sweep", str(h), str(float(sigma)), key)
 
+    @property
+    def knobs(self):
+        """What a grid cell's own artifacts say it trained with: the recipe fields from config.json
+        plus the training-episode count from train_episodes.json. Reading these back is what catches
+        a cell launched with the wrong flag, which no metric would reveal."""
+        cfg = self.config or {}
+        out = {k: cfg.get(k) for k in GRID_KNOB_KEYS}
+        eps = self._json("train_episodes", os.path.join(self.dir, "train_episodes.json"),
+                         f"{self.run}/train_episodes.json")
+        out["train_episodes"] = get(eps, "num_episodes")
+        return out
+
 
 def load_rows(root, reg, group=None):
     rows = [Run(root, s, reg) for s in reg["rows"] if group is None or group in s.get("groups", [])]
     return rows
+
+
+def load_grid(root, reg):
+    """One `Run` per knob-grid cell, reading `<grid_dir>/<key>/` with the same accessors as a paper row.
+
+    The cells are not paper rows: they live under one subdirectory, they carry a knob string instead
+    of a pretraining-exposure string, and they are read by `make_tables.grid_records`.
+    """
+    sub = reg.get("grid_dir", "grid")
+    return [Run(root, {**c, "run": os.path.join(sub, c["key"]), "groups": ["grid"]}, reg)
+            for c in reg.get("grid_cells", [])]
 
 
 # ---- bootstrap (same convention as rollout_audit.episode_resamples) ------------------------

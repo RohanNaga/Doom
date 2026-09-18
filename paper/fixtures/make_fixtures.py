@@ -11,11 +11,15 @@ Writes, under --out, the layout `scripts/spiderman/after_run2.sh`, `rollout_audi
     <run>/audit/audit.json + per_rollout.npz       rollout_audit.py
     tmp/audit/summary.json                         rollout_audit.py --summary
     idm_aligned/metrics.json, idm_aligned_k2/metrics.json                  train_idm.py
+    grid/<cell>/                                   one knob-grid cell (launch_cell.sh) plus the
+                                                   train_episodes.json train_wm.py writes
 
 Some artifacts are left out on purpose so the builders' "n/a" paths are exercised:
 PixArt has no audit, the SkyReels row has no FVD and no audit, the PixArt compute-matched
 run has no rollout, the grid-label rows have no EMA evaluation, and the UniDiffuser run
-directory does not exist at all. Nothing here is a real measurement; the base values are
+directory does not exist at all. In the knob grid one cell has no rollout, one has no EMA
+evaluation, one has no directory, and one records a recipe that contradicts its knob, so the
+grid reader's mismatch warning fires. Nothing here is a real measurement; the base values are
 only chosen so the rendered figures look like the real ones.
 
     python paper/fixtures/make_fixtures.py --out /tmp/paper_fixture
@@ -200,6 +204,72 @@ def write_idm(out, rng):
               "args": {"window": window, "steps": 8000}})
 
 
+# ---- knob grid -------------------------------------------------------------------------------
+# (knob field, knob value, seen psnr, seen lpips, unseen2 psnr, unseen2 lpips, psnr@64, lpips@64,
+#  idm, fvd16, fvd32, final val loss, context frames)
+GRID = {
+    "base30k":  (None, None, 20.90, 0.290, 18.70, 0.470, 17.60, 0.560, 0.470, 250, 520, 0.2210, 32),
+    "data-1_8": ("train_fraction", 0.125, 20.10, 0.330, 18.30, 0.500, 16.90, 0.590, 0.430, 300, 620, 0.2380, 32),
+    "data-1_4": ("train_fraction", 0.25, 20.40, 0.315, 18.45, 0.490, 17.10, 0.580, 0.445, 285, 590, 0.2320, 32),
+    "data-1_2": ("train_fraction", 0.5, 20.70, 0.300, 18.60, 0.478, 17.40, 0.570, 0.460, 265, 550, 0.2260, 32),
+    "scratch":  ("warm_start", "none", 18.90, 0.430, 17.80, 0.560, 15.90, 0.640, 0.330, 420, 860, 0.2820, 32),
+    "eps":      ("objective", "eps", 20.20, 0.330, 18.40, 0.500, 16.80, 0.600, 0.420, 310, 640, 0.2500, 32),
+    "ctx8":     ("context_frames", 8, 20.60, 0.300, 18.55, 0.482, 17.20, 0.575, 0.450, 270, 560, 0.2280, 8),
+    "ctx16":    ("context_frames", 16, 20.80, 0.294, 18.65, 0.475, 17.45, 0.566, 0.462, 258, 535, 0.2240, 16),
+    "noaug":    ("noise_aug_max", 0.0, 20.85, 0.292, 18.60, 0.480, 16.40, 0.610, 0.440, 340, 700, 0.2200, 32),
+    "adaln":    ("action_inject", "adaln", 20.75, 0.296, 18.62, 0.478, 17.30, 0.572, 0.455, 262, 545, 0.2230, 32),
+    "lr1e-4":   ("lr", 0.0001, 20.95, 0.288, 18.72, 0.468, 17.70, 0.556, 0.475, 245, 510, 0.2190, 32),
+    "lr2.5e-5": ("lr", 2.5e-05, 20.60, 0.305, 18.50, 0.486, 17.20, 0.578, 0.448, 275, 570, 0.2270, 32),
+}
+# left out on purpose so the grid reader's "n/a", "incomplete" and knob-mismatch paths are exercised
+GRID_NO_ROLLOUT = {"lr2.5e-5"}
+GRID_NO_EMA = {"noaug"}
+GRID_MISSING = {"data-1_8"}          # the cell directory does not exist at all
+GRID_WRONG_KNOB = {"ctx16"}          # config.json contradicts the knob the launcher turns
+
+
+def build_grid(out, rng, grid_dir="grid"):
+    """One directory per knob-grid cell, with the schemas launch_cell.sh produces."""
+    episodes = np.repeat(np.arange(3000, 3064), 4)
+    for cell, spec in GRID.items():
+        if cell in GRID_MISSING:
+            continue
+        key, value, ps, ls, p2, l2, p64, l64, idm, fvd16, fvd32, vloss, _ctx = spec
+        r = os.path.join(out, grid_dir, cell)
+        # the base recipe; the cell's own knob is written over it below, except for GRID_WRONG_KNOB
+        cfg = {"backbone": "pixart", "params": 612_000_000, "steps": 30000, "seed": 0, "git": "fixture0",
+               "context_frames": 32, "global_batch": 32, "per_gpu_batch": 32, "lr": 5e-05,
+               "warmup": 2000, "objective": "v", "train_fraction": 1.0, "noise_aug_max": 0.7,
+               "action_inject": "token", "warm_start": "PixArt-alpha/PixArt-XL-2-512x512",
+               "world_size": 1, "accum": 1, "torch": "2.5.0"}
+        if key is not None and cell not in GRID_WRONG_KNOB:
+            cfg[key] = value
+        n_eps = max(1, round(cfg["train_fraction"] * 675))
+        dump(os.path.join(r, "config.json"), cfg)
+        dump(os.path.join(r, "train_episodes.json"),
+             {"train_fraction": cfg["train_fraction"], "seed": 0, "num_episodes": n_eps,
+              "episodes": list(range(n_eps))})
+        with open(os.path.join(r, "log.jsonl"), "w") as f:
+            f.write(json.dumps({"event": "start", "backbone": "pixart", "objective": cfg["objective"],
+                                "train_fraction": cfg["train_fraction"], "train_episodes": n_eps}) + "\n")
+            for step in range(1000, 30001, 5000):
+                v = vloss + (0.6 - vloss) * np.exp(-step / 7500)
+                f.write(json.dumps({"event": "val", "step": step, "val_loss": float(v),
+                                    "val_loss_by_t_quartile": [v] * 4, "excursion": False}) + "\n")
+            f.write(json.dumps({"event": "val", "step": 30000, "val_loss": float(vloss),
+                                "val_loss_by_t_quartile": [vloss] * 4, "excursion": False}) + "\n")
+            f.write(json.dumps({"event": "end", "step": 30000}) + "\n")
+        for corpus, pm, lm in (("seen", ps, ls), ("unseen", ps - 2.2, ls + 0.17), ("unseen2", p2, l2)):
+            c = "seen" if corpus == "seen" else "unseen"
+            write_tf(os.path.join(r, f"eval_tf_{corpus}"), tf_windows(rng, c, 256, pm, lm), 30000)
+            if cell not in GRID_NO_EMA:
+                write_tf(os.path.join(r, f"eval_tf_{corpus}_ema"),
+                         tf_windows(rng, c, 256, pm + 0.25, lm - 0.012), 30000)
+        if cell not in GRID_NO_ROLLOUT:
+            write_rollout(r, rng, ("pixart", 0, 0, 0, 0, 0, p64, l64, idm, fvd16, fvd32, 0, 0, 0), episodes)
+    return os.path.join(out, grid_dir)
+
+
 def build(out, seed=0):
     rng = np.random.RandomState(seed)
     summary = {"runs": AUDITED, "results_root": out, "horizons": list(AUDIT_HORIZONS), "sigmas": list(SIGMAS),
@@ -253,6 +323,7 @@ def build(out, seed=0):
         summary["paired"][f"{unet}_minus_{dit}"] = entry
     dump(os.path.join(out, "tmp", "audit", "summary.json"), summary)
     write_idm(out, rng)
+    build_grid(out, rng)
     return out
 
 
