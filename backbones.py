@@ -499,9 +499,10 @@ class SD35WorldModel(nn.Module):
     (`models/transformers/transformer_sd3.py`, `models/embeddings.py`):
 
     * Transformer: subfolder `transformer` (`SD3Transformer2DModel`), `in_channels` 16, `out_channels` 16,
-      `patch_size` 2, `pos_embed_max_size` 96, `sample_size` 128, `joint_attention_dim` 4096,
+      `patch_size` 2, `pos_embed_max_size` 384, `sample_size` 128, `joint_attention_dim` 4096,
       `pooled_projection_dim` 2048, `caption_projection_dim` = the inner width, dual-attention blocks in
-      the first 12 layers (MMDiT-X). Flow matching, no learned variance, so the head is 16 channels flat.
+      the first 12 layers (MMDiT-X); 2.246B parameters once the patch projection is inflated. Flow
+      matching, no learned variance, so the head is 16 channels flat.
     * Autoencoder: 16 channels, f8, `scaling_factor` 1.5305 and `shift_factor` 0.0609, applied as
       `(z - shift) * scale` by `StableDiffusion3Pipeline`. Our 320x256 padded frame gives 16x32x40, so
       context 32 x 16 = 512 channels plus the noisy target 16 = 528 input channels.
@@ -516,9 +517,10 @@ class SD35WorldModel(nn.Module):
       channels by `inflate_input_conv`, so step 0 equals the pretrained model applied to the noisy target.
       `register_to_config(in_channels=528)` keeps the config a checkpoint carries in step with the weights.
     * Positional embedding. Nothing to do, and this is the one backbone where that is true: SD3's
-      `PatchEmbed` stores a 96x96 sin-cos table and `cropped_pos_embed` center-crops it to the incoming
-      token grid at every forward, which is how the pipeline itself serves non-square resolutions. Our
-      16x20 grid takes rows 40..55 and columns 38..57 of that table. So the rows we use are pretrained
+      `PatchEmbed` stores a 384x384 sin-cos table (`pos_embed_max_size`, read from the checkpoint at
+      init rather than assumed here) and `cropped_pos_embed` center-crops it to the incoming token grid
+      at every forward, which is how the pipeline itself serves non-square resolutions. Our 16x20 grid
+      takes rows 184..199 and columns 182..201 of that table. So the rows we use are pretrained
       rows at their pretrained spacing (unlike UniDiffuser, whose learned table has to be interpolated),
       and the parity gate is exact at our own grid rather than only at the native one. The buffer is
       persistent, so it rides in the state dict and the shape never changes.
