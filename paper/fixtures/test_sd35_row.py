@@ -128,7 +128,7 @@ def test_a_single_card_runs_the_plain_interpreter_at_the_requested_micro_batch()
 
 def test_two_cards_launch_under_accelerate_with_no_accumulation():
     cmd = dry("2,3").stdout
-    assert "accelerate launch --num_processes 2 --mixed_precision bf16 train_wm.py" in cmd
+    assert "accelerate.commands.launch --num_processes 2 --mixed_precision bf16 train_wm.py" in cmd  # module form: the server env has no accelerate CLI
     assert "--per-gpu-batch 16" in cmd, "16 x 2 cards = the global batch of 32, so accum stays 1"
     assert "--global-batch 32" in cmd
     assert "CUDA_VISIBLE_DEVICES=2,3" in cmd
