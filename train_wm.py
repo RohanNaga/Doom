@@ -84,6 +84,17 @@ def ema_update(ema_params, params, decay):
         e.mul_(decay).add_(p.detach().float().cpu(), alpha=1.0 - decay)
 
 
+def ema_keys(raw):
+    """Names for the fp32 CPU EMA list, which holds one tensor per *parameter*.
+
+    Earlier code zipped the list against `state_dict().keys()`. Those agree only while a model has
+    no persistent buffers: SD 3.5's positional table is one (`pos_embed.pos_embed`), and it sorts
+    before the patch projection, so that zip would shift every EMA key by one and silently save an
+    EMA whose tensors belong to the wrong weights. Parameter names are the list's own order.
+    """
+    return [n for n, _ in raw.named_parameters()]
+
+
 
 def save_checkpoint(obj, path, remote=None, keep_local=True):
     """Serialize once, then write to the remote copy of record and, space permitting, to the local path.
@@ -196,7 +207,7 @@ def main(args):
         opt.load_state_dict(ck["optimizer"]); sched.load_state_dict(ck["scheduler"])
     ema = [p.detach().float().cpu().clone() for p in raw.parameters()] if args.ema_every > 0 else None
     if args.resume and ema is not None and "ema" in ck:
-        for e, (k, _) in zip(ema, raw.state_dict().items()):
+        for e, k in zip(ema, ema_keys(raw)):
             if k in ck["ema"] and ck["ema"][k].shape == e.shape:
                 e.copy_(ck["ema"][k].float())
 
@@ -309,7 +320,7 @@ def main(args):
                 if is_main and args.remote_results and step % args.snapshot_every == 0:
                     # compact bf16 weights at every validation so an excursion can be located afterwards; never pruned
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
-                                     "ema": {k: t.to(torch.bfloat16) for k, t in zip(raw.state_dict().keys(), ema)} if ema is not None else None,
+                                     "ema": {k: t.to(torch.bfloat16) for k, t in zip(ema_keys(raw), ema)} if ema is not None else None,
                                      "step": step, "val_loss": v, "args": vars(args)},
                                     os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=False)
                 if is_main and v < best_val:
@@ -328,7 +339,7 @@ def main(args):
                       "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
                               "numpy": np.random.get_state()}}
                 if ema is not None:
-                    ck["ema"] = {k: t.clone() for k, t in zip(raw.state_dict().keys(), ema)}
+                    ck["ema"] = {k: t.clone() for k, t in zip(ema_keys(raw), ema)}
                 # rolling checkpoints live on the remote copy of record; the local copy is kept only when --keep-last > 0
                 written = save_checkpoint(ck, os.path.join(args.results_dir, f"{step:07d}.pt"), args.remote_results, keep_local=args.keep_last > 0)
                 if args.remote_results and is_main:

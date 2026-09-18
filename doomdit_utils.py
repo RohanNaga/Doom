@@ -38,6 +38,25 @@ def load_doomdit(ckpt_path, use_ema=False, device="cuda", model_name="DiT-XL/2")
     return model, info
 
 
+def load_world_model_state(model, ck, use_ema=False):
+    """Load a `train_wm.py` checkpoint into an already-built backbone. Returns which half was used.
+
+    `ck["model"]` is a full state dict and loads strictly. `ck["ema"]` holds one tensor per
+    parameter, so it is applied on top of the live weights and may leave buffers untouched; any
+    other gap means the EMA does not belong to this model and is an error rather than a warning.
+    For the 4-channel rows, whose models have no persistent buffers, the two paths are identical
+    to the strict load they replace.
+    """
+    model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
+    if not use_ema:
+        return "model"
+    missing, unexpected = model.load_state_dict({k: v.float() for k, v in ck["ema"].items()}, strict=False)
+    gap = set(missing) - {n for n, _ in model.named_buffers()}
+    if gap or unexpected:
+        raise SystemExit(f"EMA weights do not match this model: missing {sorted(gap)}, unexpected {sorted(unexpected)}")
+    return "ema"
+
+
 def load_vae(device="cpu"):
     vae = AutoencoderKL.from_pretrained(VAE_NAME).to(device).eval()
     vae.requires_grad_(False)

@@ -25,7 +25,7 @@ from backbones import (BACKBONES, PIXART_DEFAULT, SD35_DEFAULT, UNIDIFFUSER_DEFA
                        resolve_latent_channels)
 from diffusion_v import VDiffusion
 from doom_data import LatentWindowDataset, load_split
-from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents
+from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
 
 HUD_ROWS = 32
 
@@ -60,8 +60,7 @@ def load_model(args, device, latent_channels):
                         latent_channels=latent_channels)
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
-    state = ck["ema"] if args.use_ema else ck["model"]
-    model.load_state_dict({k: v.float() for k, v in state.items()}, strict=True)
+    load_world_model_state(model, ck, args.use_ema)
     return model.to(device).eval(), ck.get("step", "?")
 
 

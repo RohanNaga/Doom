@@ -25,7 +25,7 @@ from backbones import (BACKBONES, LATENT_HW, PIXART_DEFAULT, SD35_DEFAULT, UNIDI
                        resolve_latent_channels)
 from diffusion_v import VDiffusion
 from doom_data import list_latent_episodes, load_split
-from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents
+from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
 
 
 def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_channels=None):
@@ -76,8 +76,7 @@ def do_rollout(args):
                         latent_channels=C)
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
-    state = ck["ema"] if args.use_ema else ck["model"]
-    model.load_state_dict({k: v.float() for k, v in state.items()}, strict=True)
+    load_world_model_state(model, ck, args.use_ema)
     model = model.to(device).eval()
     diffusion = VDiffusion(device=device)
     split = load_split(args.split)
