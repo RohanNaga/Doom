@@ -26,7 +26,7 @@ Seven checks, all on the CPU and all reporting a number rather than a pass/fail 
                episode with the real autoencoder.
 
 By default the checks run on a small randomly initialised `SD3Transformer2DModel` of the same
-class and the same structural switches (patch 2, `pos_embed_max_size` 96, 16 in/out channels,
+class and the same structural switches (patch 2, a cropped positional table, 16 in/out channels,
 dual attention in the first block). That is enough for every check here, because none of them
 depends on the *values* of the pretrained weights: parity is a statement about where the
 pretrained kernel was placed, and random non-zero weights test it more sharply than real ones.
@@ -48,7 +48,10 @@ from backbones import SD35_DEFAULT, SD35WorldModel, stacked_in_channels
 from diffusion_v import VDiffusion, noise_augment
 
 # Small but structurally faithful: the switches the wrapper reads (patch size, cropped positional
-# table, 16 in/out channels, dual attention, qk norm) are the real ones; only width and depth shrink.
+# table, 16 in/out channels, dual attention, qk norm) are the real ones; only width, depth and the
+# size of the positional table shrink. The real checkpoint's `pos_embed_max_size` is 384, so our
+# 16x20 grid crops rows 184..199 there and rows 40..55 here; the wrapper reads the value off the
+# config either way, which is what `--real` confirms.
 TINY = dict(sample_size=128, patch_size=2, in_channels=16, out_channels=16, num_layers=2,
             attention_head_dim=8, num_attention_heads=2, joint_attention_dim=32,
             caption_projection_dim=16, pooled_projection_dim=24, pos_embed_max_size=96,
