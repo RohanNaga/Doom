@@ -64,18 +64,25 @@ class SeededCorruption(Dataset):
 
 
 def build_loaders(args, latent_channels):
+    """(train dataset, validation subset, training episode ids). The ids are None for a fit check.
+
+    `--train-fraction` thins the *training* episode list only; the validation list and the fixed
+    `RandomState(0)` draw of validation windows are the same for every fraction, so a data cell's
+    held-out loss is comparable to the full-data cell's.
+    """
     if args.fit_check:
         ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels)
-        return ds, None
-    from doom_data import LatentWindowDataset, load_split
+        return ds, None, None
+    from doom_data import LatentWindowDataset, load_split, select_train_episodes
     split = load_split(args.split)
-    train = LatentWindowDataset(args.latents_dir, split["train"], args.context_frames, require_chains=args.require_verified_transitions,
+    train_ids = select_train_episodes(split["train"], args.train_fraction, args.seed)
+    train = LatentWindowDataset(args.latents_dir, train_ids, args.context_frames, require_chains=args.require_verified_transitions,
                                 latent_channels=latent_channels)
     val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames, require_chains=args.require_verified_transitions,
                               latent_channels=latent_channels)
     rng = np.random.RandomState(0)
     val_idx = np.sort(rng.choice(len(val), size=min(args.val_windows, len(val)), replace=False))
-    return train, Subset(val, val_idx.tolist())
+    return train, Subset(val, val_idx.tolist()), train_ids
 
 
 @torch.no_grad()
@@ -197,7 +204,7 @@ def main(args):
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
 
-    train_ds, val_ds = build_loaders(args, latent_channels)
+    train_ds, val_ds, train_ids = build_loaders(args, latent_channels)
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
                         pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0)
     model, opt, loader = acc.prepare(model, opt, loader)   # scheduler stays unwrapped: one step per optimizer update
@@ -222,8 +229,15 @@ def main(args):
             json.dump({**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum,
                        "split_md5": split_hash, "torch": torch.__version__,
                        "resolved_latent_channels": latent_channels}, f, indent=1)
+        if train_ids is not None:
+            # which episodes this run actually trained on, so a data cell is reproducible from the
+            # results directory alone and not only from (split, fraction, seed)
+            with open(os.path.join(args.results_dir, "train_episodes.json"), "w") as f:
+                json.dump({"train_fraction": args.train_fraction, "seed": args.seed,
+                           "num_episodes": len(train_ids), "episodes": train_ids}, f, indent=1)
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
-        per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum)
+        per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum,
+        train_fraction=args.train_fraction, train_episodes=None if train_ids is None else len(train_ids))
 
     def model_fn(ctx, act, bucket):
         return lambda xt, t: model(xt, t, act, ctx, bucket)
@@ -378,6 +392,9 @@ if __name__ == "__main__":
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
     p.add_argument("--noise-aug-max", type=float, default=0.7)
+    p.add_argument("--train-fraction", type=float, default=1.0,
+                   help="fraction of the split's TRAINING episodes to use, whole episodes, seeded by --seed and "
+                        "nested across fractions; validation and evaluation are untouched (1.0 = every train episode)")
     p.add_argument("--latents-dir", default="data/latents_arnold")
     p.add_argument("--split", default="data/split_arnold.json")
     p.add_argument("--results-dir", default="results/fit_check")

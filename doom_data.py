@@ -223,6 +223,28 @@ def make_split_by_map(latents_dir, holdout_maps=(16, 17), holdout_frac=0.1, seed
                      "episodes_per_map": {str(m): len(v) for m, v in sorted(by_map.items())}}}
 
 
+def select_train_episodes(train_ids, fraction, seed=0):
+    """Seeded subset of a split's *training* episode list, by whole episode.
+
+    One permutation under `RandomState(seed)`, then the first `round(fraction * N)` ids. Nesting is
+    the point: the 1/8 list is a subset of the 1/4 list, which is a subset of the 1/2 list, so a
+    data-scaling ladder differs only in how much data it saw, never in which episodes were drawn.
+    Whole episodes rather than windows, for the same reason `make_split` splits by episode:
+    neighbouring windows share all but one context frame.
+
+    Validation and evaluation are untouched by construction, because this only ever receives the
+    train list. `fraction == 1.0` returns the list unchanged, which is the default recipe.
+    """
+    if not 0 < fraction <= 1:
+        raise ValueError(f"train fraction must be in (0, 1], got {fraction}")
+    ids = sorted(set(int(e) for e in train_ids))
+    if fraction == 1.0:
+        return ids
+    n = max(1, int(round(fraction * len(ids))))
+    perm = np.random.RandomState(seed).permutation(len(ids))
+    return sorted(ids[i] for i in perm[:n])
+
+
 class LatentWindowDataset(Dataset):
     """L context decision frames -> next decision frame, over encode_parquet.py outputs.
 
