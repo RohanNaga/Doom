@@ -1,7 +1,7 @@
 #!/bin/bash
 # Evaluation suite for one corrected run, fired when its log reports the end event, then the next run on that GPU.
 # Chain: dit -> PixArt-alpha third row (launch_pixart.sh); unet -> DiT seed 1 (launch_seed1.sh). Usage: after_run2.sh <run> <backbone> <gpu>
-RUN=$1; BB=$2; GPU=$3; D=/sata2/data/rnagabhi/doom; R=$D/results_spiderman/$RUN; PY=~/miniconda3/envs/doom/bin/python
+RUN=$1; BB=$2; GPU=$3; D=/sata2/data/rnagabhi/doom; R=$D/results_spiderman/$RUN; PY=${PY:-~/miniconda3/envs/doom/bin/python}
 export TMPDIR=/sata2/data/rnagabhi/doom/tmp/tmpdir; mkdir -p $TMPDIR
 until grep -q "\"event\": \"end\"" $R/log.jsonl 2>/dev/null; do sleep 300; done
 until [ -f $D/latents_arnold_eval/split_unseen.json ]; do sleep 60; done
