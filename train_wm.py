@@ -5,8 +5,8 @@ Shared between backbones: stride-4 latents, L context frames channel-stacked, si
 the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target,
 AdamW, bf16 autocast with fp32 master weights, EMA in fp32 on the CPU, held-out latent v-loss
 for checkpoint selection. The only thing the --backbone flag changes is the network, and the
-only thing --latent-channels changes is the autoencoder the corpus was encoded with; it
-defaults to whichever one the warm start was pretrained in.
+only thing --latent-channels changes is the autoencoder the corpus was encoded with (4 for the
+SD KL-f8 rows, 16 for sd35's own autoencoder); it defaults to whichever the warm start needs.
 
 Fit check (no data needed):
     python train_wm.py --backbone dit --fit-check 30 --per-gpu-batch 4 --context-frames 32
@@ -248,7 +248,7 @@ def main(args):
     want = ["x_embedder.proj.weight", "final_layer.linear.weight", "blocks.0.adaLN_modulation.1.weight", "blocks.14.adaLN_modulation.1.weight",
             "blocks.27.adaLN_modulation.1.weight", "conv_in.weight", "conv_out.weight", "time_embedding.linear_2.weight", "class_embedding.weight",
             "vae_img_in.proj.weight", "vae_img_out.weight", "transformer_mid_block.attn1.to_q.weight",
-            "pos_embed.proj.weight", "proj_out.weight"]
+            "pos_embed.proj.weight", "proj_out.weight", "context_embedder.weight", "transformer_blocks.11.attn.to_q.weight"]
     probe_params = [(n, p) for n, p in raw.named_parameters() if any(n.endswith(w) for w in want)]
     probe_names = [n for n, _ in probe_params]
     probe_prev = {n: torch.empty_like(p.detach()) for n, p in probe_params}
@@ -358,7 +358,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--backbone", choices=list(BACKBONES), required=True)
     p.add_argument("--latent-channels", type=int, default=0,
-                   help="latent channels of the corpus and the backbone; 0 takes the warm start's own (4 for every current row)")
+                   help="latent channels of the corpus and the backbone; 0 takes the warm start's own (4 for the SD KL-f8 rows, 16 for sd35)")
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10)
@@ -368,7 +368,7 @@ if __name__ == "__main__":
     p.add_argument("--results-dir", default="results/fit_check")
     p.add_argument("--warm-start", default=None,
                    help="DiT: path to DiT-XL-2-256x256.pt; U-Net: SD 1.4 repo or path; PixArt: PixArt-alpha repo or path; "
-                        "UniDiffuser: thu-ml/unidiffuser-v1 repo or path")
+                        "UniDiffuser: thu-ml/unidiffuser-v1 repo or path; sd35: stabilityai/stable-diffusion-3.5-medium repo or path")
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--global-batch", type=int, default=32)
     p.add_argument("--per-gpu-batch", type=int, default=4)

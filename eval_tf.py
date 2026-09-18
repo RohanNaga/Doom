@@ -21,7 +21,8 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Subset
 
-from backbones import BACKBONES, PIXART_DEFAULT, UNIDIFFUSER_DEFAULT, build_model, resolve_latent_channels
+from backbones import (BACKBONES, PIXART_DEFAULT, SD35_DEFAULT, UNIDIFFUSER_DEFAULT, build_model,
+                       resolve_latent_channels)
 from diffusion_v import VDiffusion
 from doom_data import LatentWindowDataset, load_split
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents
@@ -46,7 +47,8 @@ def backbone_source(args):
     The DiT is built from local code, so it needs nothing; the diffusers backbones must be
     instantiated from the same repo they were trained from before the checkpoint is loaded.
     """
-    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path, "unidiffuser": args.unidiffuser_path}[args.backbone]
+    return {"dit": None, "unet": args.sd_path, "pixart": args.pixart_path, "unidiffuser": args.unidiffuser_path,
+            "sd35": args.sd35_path}[args.backbone]
 
 
 def load_model(args, device, latent_channels):
@@ -161,7 +163,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True)
     p.add_argument("--backbone", choices=list(BACKBONES), required=True)
-    p.add_argument("--latent-channels", type=int, default=0, help="0 takes the backbone's own (4 for every current row)")
+    p.add_argument("--latent-channels", type=int, default=0, help="0 takes the backbone's own (4 for the SD KL-f8 rows, 16 for sd35)")
     p.add_argument("--use-ema", action="store_true")
     p.add_argument("--context-frames", type=int, default=32)
     p.add_argument("--num-actions", type=int, default=29)
@@ -181,10 +183,11 @@ if __name__ == "__main__":
     p.add_argument("--vae-path", default="", help="fine-tuned VAE directory or repo id; default sd-vae-ft-mse")
     p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-path (e.g. vae for a full pipeline repo)")
     p.add_argument("--latent-scale", type=float, default=LATENT_SCALE, help="scaling_factor the corpus was encoded with")
-    p.add_argument("--latent-shift", type=float, default=None, help="shift_factor the corpus was encoded with (a 16-channel autoencoder needs one)")
+    p.add_argument("--latent-shift", type=float, default=None, help="shift_factor the corpus was encoded with (SD 3.5: 0.0609)")
     p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4")
     p.add_argument("--pixart-path", default=PIXART_DEFAULT)
     p.add_argument("--unidiffuser-path", default=UNIDIFFUSER_DEFAULT)
+    p.add_argument("--sd35-path", default=SD35_DEFAULT)
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--save-images", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)

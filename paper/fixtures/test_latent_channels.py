@@ -6,8 +6,8 @@ the shared helpers still produce the 132-channel input and the 4-channel target,
 synthetic windows and the dataset still hand back (4L, 32, 40) / (4, 32, 40), and the latent
 normalisation round-trips to the same numbers `LATENT_SCALE` alone used to give.
 
-The heavy diffusers backbones are not built here: they need network access and gigabytes of
-weights.
+The heavy diffusers backbones are not built here (they need network access and gigabytes of
+weights); `verify_sd35.py` gates those on CPU.
 
     python -m pytest paper/fixtures/test_latent_channels.py -q
 """
@@ -31,12 +31,14 @@ from train_wm import SyntheticWindows  # noqa: E402
 def test_stacked_input_channels_match_the_trained_rows():
     # 132 = 32 context latents x 4 + 4, the number every finished row's config.json carries
     assert backbones.stacked_in_channels(4, 32) == 132
+    assert backbones.stacked_in_channels(16, 32) == 528
 
 
 def test_backbone_latent_channels_defaults():
     for backbone in ("dit", "unet", "pixart", "unidiffuser"):
         assert backbones.resolve_latent_channels(backbone) == 4
         assert backbones.resolve_latent_channels(backbone, 0) == 4
+    assert backbones.resolve_latent_channels("sd35") == 16
     assert backbones.resolve_latent_channels("dit", 16) == 16   # an explicit request always wins
 
 
