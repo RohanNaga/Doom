@@ -3,13 +3,15 @@
 `--channels-last` calls `vae.to(memory_format=torch.channels_last)`, which leaves every 4-D
 conv weight strided as NHWC. `safetensors.torch.save_file` refuses a non-contiguous tensor, so
 `save_pretrained` wrote `config.json` and then raised, after the tuning GPU hours were already
-spent. These checks pin the two things that keep that from recurring: the weights are packed
-before the write, and the written directory is proved loadable before it replaces the previous
-checkpoint.
+spent. These checks pin the three things that keep that from recurring: the weights are packed
+before the write, the written directory is proved loadable before it replaces the previous
+checkpoint, and a directory holding only a config fails with a message that names it.
 
     python -m pytest paper/fixtures/test_decoder_save.py -q
 """
+import json
 import os
+import re
 import sys
 
 import pytest
@@ -21,6 +23,7 @@ sys.path.insert(0, REPO)
 
 from diffusers.models import AutoencoderKL  # noqa: E402
 
+from doomdit_utils import build_vae, resolve_vae_dir  # noqa: E402
 from finetune_decoder import save_vae  # noqa: E402
 
 
@@ -91,3 +94,30 @@ def test_save_vae_rejects_a_reload_that_differs(tmp_path, monkeypatch):
     monkeypatch.setattr(AutoencoderKL, "from_pretrained", classmethod(wrong))
     with pytest.raises(SystemExit, match="reload"):
         save_vae(tiny_vae(), str(tmp_path / "run"))
+
+
+def test_resolve_vae_dir_accepts_both_layouts(tmp_path):
+    """The scorer is pointed at `<out>/vae`, but `<out>` itself has to work too."""
+    out = tmp_path / "run"
+    save_vae(tiny_vae(), str(out))
+    assert resolve_vae_dir(str(out / "vae")) == str(out / "vae")
+    assert resolve_vae_dir(str(out)) == str(out / "vae")
+    assert resolve_vae_dir("Alpha-VLLM/Lumina-Image-2.0") == "Alpha-VLLM/Lumina-Image-2.0"
+
+
+def test_resolve_vae_dir_accepts_a_pickle_checkpoint(tmp_path):
+    """`save_pretrained(safe_serialization=False)` writes a .bin; that is still a real decoder."""
+    d = tmp_path / "vae"
+    d.mkdir()
+    tiny_vae().save_pretrained(str(d), safe_serialization=False)
+    assert os.path.exists(d / "diffusion_pytorch_model.bin")
+    assert resolve_vae_dir(str(d)) == str(d)
+
+
+def test_build_vae_names_a_weightless_directory(tmp_path):
+    """Exactly what the failed gate left behind: a config and nothing else."""
+    d = tmp_path / "vae"
+    d.mkdir()
+    json.dump({"_class_name": "AutoencoderKL"}, open(d / "config.json", "w"))
+    with pytest.raises(SystemExit, match=re.escape(str(d))):
+        build_vae(str(d))
