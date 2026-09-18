@@ -13,8 +13,9 @@ LOCAL=${1:-$(cd "$(dirname "$0")" && pwd)/results_mirror}
 : "${PERSEVE_SERVER_PASSWORD:?set PERSEVE_SERVER_PASSWORD}"
 
 RUNS=(030-dit-l32-aligned 032-dit-l32-aligned-seed1 031-unet-l32-aligned 033-pixart-l32-aligned
-      050-skyreels-l8-flow 060-dit-cm2500 061-unet-cm2500 062-pixart-cm2500
-      idm_aligned idm_aligned_k2)
+      035-sd35-l32-aligned 050-skyreels-l8-flow 060-dit-cm2500 061-unet-cm2500 062-pixart-cm2500
+      idm_aligned idm_aligned_k2
+      vae_gate_sd35)          # the 16-channel row's own VAE ceiling (rows.json own_vae)
 
 FILTER=(--include='*/' --include='*.json' --include='*.jsonl' --include='*.csv' --include='audit/per_rollout.npz' --exclude='*')
 RSYNC=(sshpass -p "$PERSEVE_SERVER_PASSWORD" rsync -az --prune-empty-dirs -e "ssh -o StrictHostKeyChecking=accept-new")

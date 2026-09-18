@@ -1,5 +1,5 @@
 {
-  "_comment": "Row registry for make_figures.py and make_tables.py. Every measured number is read from the result directories; the only typed-in fields here are labels, the literature 'exposure' strings (with their source), and which run directory each row maps to. 'groups' selects which figures and tables a row appears in. 'placeholder' rows render as n/a until their run directory exists.",
+  "_comment": "Row registry for make_figures.py and make_tables.py. Every measured number is read from the result directories; the only typed-in fields here are labels, the literature 'exposure' strings (with their source), and which run directory each row maps to. 'groups' selects which figures and tables a row appears in. 'placeholder' rows render as n/a until their run directory exists. 'own_vae' marks a row whose latents are not the SD KL-f8 space: it is left out of the shared VAE-ceiling reference and gets its own ceiling line, read from {gate}/metrics.json (vae_gate_score.py) under the named decoder, with 'vae_note' as the marker on the model row.",
   "corpora": {
     "seen": "eval_tf_seen",
     "unseen": "eval_tf_unseen",
@@ -46,6 +46,12 @@
     {"key": "unidiffuser", "run": "040-unidiffuser-l32-aligned", "label": "UniDiffuser U-ViT", "short": "UniDiffuser",
      "exposure": "LAION-2B, -HR, -aesthetics", "exposure_source": "Bao et al. 2023", "placeholder": true,
      "groups": ["main", "ema", "horizon", "drift", "blur", "transfer", "tf"]},
+    {"key": "sd35", "run": "035-sd35-l32-aligned", "label": "SD 3.5 Medium MMDiT-X (16-channel VAE)", "short": "SD 3.5",
+     "exposure": "undisclosed, SD 3 lineage", "exposure_source": "Esser et al. 2024", "placeholder": true,
+     "vae_note": "\\dag",
+     "own_vae": {"gate": "vae_gate_sd35", "decoder": "tuned_16ch",
+                 "label": "SD 3.5 VAE ceiling (16 channels, tuned decoder)"},
+     "groups": ["main", "ema", "horizon", "drift", "transfer", "tf"]},
     {"key": "skyreels", "run": "050-skyreels-l8-flow", "label": "SkyReels-V2 DF 1.3B (video, own VAE)", "short": "SkyReels",
      "exposure": "video, hours not disclosed", "exposure_source": "Chen et al. 2025", "placeholder": true,
      "idm_note": "\\S",
