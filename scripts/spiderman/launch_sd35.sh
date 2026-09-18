@@ -32,7 +32,7 @@ GPU=${1:?gpu}
 D=/sata2/data/rnagabhi/doom
 R=$D/results_spiderman/035-sd35-l32-aligned
 PY=${PY:-$HOME/wanenc/bin/python}
-ACCELERATE=${ACCELERATE:-"$PY -m accelerate.commands.launch"}  # the wanenc env has the accelerate package but no CLI entry point
+ACCELERATE=${ACCELERATE:-"$PY -m accelerate.commands.launch"}  # the wanenc env has the accelerate package but no CLI entry point; an override must include the launch subcommand
 MB=${MB:-16}
 GLOBAL=32
 NP=$(( $(echo "$GPU" | tr -cd , | wc -c) + 1 ))
@@ -41,7 +41,7 @@ if [ $(( GLOBAL % (MB * NP) )) -ne 0 ]; then
   echo "per-GPU batch $MB on $NP card(s) cannot reach the global batch of $GLOBAL" >&2; exit 1
 fi
 if [ "$NP" -gt 1 ]; then
-  LAUNCHER="$ACCELERATE launch --num_processes $NP --mixed_precision bf16"
+  LAUNCHER="$ACCELERATE --num_processes $NP --mixed_precision bf16"  # ACCELERATE already names the launch subcommand
 else
   LAUNCHER="$PY"
 fi
