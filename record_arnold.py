@@ -13,6 +13,13 @@ Row semantics: `frame` is the screen at `tic`; `action` (Arnold action id) and `
 (0/1 string over the game's available buttons) are what is applied from this tic to the next.
 Game variables are read at the same tic. Frames are 320x240 RGB with HUD, weapon, crosshair.
 
+`--decision-only` stores one row per agent decision instead of one per tic: the engine advances
+with the agent's native frame skip in a single `make_action(buttons, frame_skip)` call, so the
+three tics in between are never rendered, never converted and never PNG-encoded. Only training
+frames survive either way (`encode_parquet.py` keeps decision tics), so the rows are the same rows;
+the file records `stored_tic_stride` in its episode metadata and `action`/`buttons` then describe
+the next `stored_tic_stride` tics rather than the next one. An absent key means a per-tic file.
+
 Usage (run with Arnold's usual flags after the script's own):
     python record_arnold.py --arnold-dir /sata2/data/rnagabhi/doom/Arnold \
         --out-dir /sata2/data/rnagabhi/doom/raw_arnold --map-ids 1-17 --episodes 850 \
@@ -137,7 +144,25 @@ def record_episode(game, network, params, map_id, episode_id):
     gv = dg.get_game_variable
     cols = {k: [] for k in ["tic", "action", "buttons", "health", "ammo", "kills", "deaths", "frags",
                             "pos_x", "pos_y", "angle", "frame"]}
+
+    def store(st, tic, action_id, bstr):
+        """One row: the screen at `tic`, and the game variables read at the same tic."""
+        frame = np.asarray(st.screen_buffer)
+        if frame.ndim == 3 and frame.shape[0] == 3:      # CRCGCB -> HWC
+            frame = np.ascontiguousarray(frame.transpose(1, 2, 0))
+        cols["tic"].append(tic); cols["action"].append(int(action_id)); cols["buttons"].append(bstr)
+        cols["health"].append(int(gv(GameVariable.HEALTH)))
+        cols["ammo"].append(int(gv(GameVariable.SELECTED_WEAPON_AMMO)))
+        cols["kills"].append(int(gv(GameVariable.KILLCOUNT)))
+        cols["deaths"].append(int(gv(GameVariable.DEATHCOUNT)))
+        cols["frags"].append(int(gv(GameVariable.FRAGCOUNT)))
+        cols["pos_x"].append(float(gv(GameVariable.POSITION_X)))
+        cols["pos_y"].append(float(gv(GameVariable.POSITION_Y)))
+        cols["angle"].append(float(gv(GameVariable.ANGLE)))
+        cols["frame"].append(png_bytes(frame, REC.compress_level))
+
     last_states, tic, t0 = [], 0, time.time()
+    decisions = 0
     while not game.is_episode_finished():
         if game.is_player_dead():
             # a death on the tic the episode clock expires leaves no state to respawn into
@@ -154,27 +179,27 @@ def record_episode(game, network, params, map_id, episode_id):
         action_id = network.next_action(last_states)
         buttons, n_tics, logical = decision_buttons(game, action_id)
         bstr = "".join("1" if b else "0" for b in buttons)
-        for _ in range(n_tics):
+        decisions += 1
+        if REC.decision_only:
+            # the whole skip in one engine call: the tics in between are never rendered or stored.
+            # A death inside the skip is seen after it, and the respawn row that follows carries the
+            # incremented `deaths`, so the life ends here exactly as it does per tic and this row is
+            # rejected as a transition source rather than pointing across the death.
             st = dg.get_state()
-            if st is None:
-                break
-            frame = np.asarray(st.screen_buffer)
-            if frame.ndim == 3 and frame.shape[0] == 3:      # CRCGCB -> HWC
-                frame = np.ascontiguousarray(frame.transpose(1, 2, 0))
-            cols["tic"].append(tic); cols["action"].append(int(action_id)); cols["buttons"].append(bstr)
-            cols["health"].append(int(gv(GameVariable.HEALTH)))
-            cols["ammo"].append(int(gv(GameVariable.SELECTED_WEAPON_AMMO)))
-            cols["kills"].append(int(gv(GameVariable.KILLCOUNT)))
-            cols["deaths"].append(int(gv(GameVariable.DEATHCOUNT)))
-            cols["frags"].append(int(gv(GameVariable.FRAGCOUNT)))
-            cols["pos_x"].append(float(gv(GameVariable.POSITION_X)))
-            cols["pos_y"].append(float(gv(GameVariable.POSITION_Y)))
-            cols["angle"].append(float(gv(GameVariable.ANGLE)))
-            cols["frame"].append(png_bytes(frame, REC.compress_level))
-            dg.make_action(buttons, 1)
-            tic += 1
-            if game.is_player_dead() or game.is_episode_finished():
-                break
+            if st is not None:
+                store(st, tic, action_id, bstr)
+            dg.make_action(buttons, n_tics)
+            tic += n_tics
+        else:
+            for _ in range(n_tics):
+                st = dg.get_state()
+                if st is None:
+                    break
+                store(st, tic, action_id, bstr)
+                dg.make_action(buttons, 1)
+                tic += 1
+                if game.is_player_dead() or game.is_episode_finished():
+                    break
         gs = dg.get_state()
         if gs is not None:
             game._screen_buffer = gs.screen_buffer
@@ -203,8 +228,11 @@ def record_episode(game, network, params, map_id, episode_id):
         "frame": pa.array(cols["frame"], pa.binary()),
     })
     provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id), "map_id": int(map_id), "seeds": seeds}
+    if REC.decision_only:
+        provenance["stored_tic_stride"] = int(REC.frame_skip)   # absent means 1, so per-tic files are unchanged
     table = table.replace_schema_metadata({**(table.schema.metadata or {}), b"doomdit_episode": json.dumps(provenance, sort_keys=True).encode()})
-    stats.update(tics=n, seconds=time.time() - t0, png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0)
+    stats.update(rows=n, tics=tic, decisions=decisions, seconds=time.time() - t0,
+                 png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0)
     stats.update(provenance)   # carries episode_id and map_id
     return table, stats
 
@@ -238,15 +266,20 @@ def record_all(game, network, params):
         os.replace(tmp, out)
         with open(log_path, "a") as f:
             f.write(json.dumps(stats) + "\n")
-        print(f"ep {e} map {map_id}: {stats['tics']} tics in {stats['seconds']:.0f}s "
-              f"({stats['tics'] / max(stats['seconds'], 1e-6):.0f} tics/s), {stats['png_bytes_mean'] / 1024:.1f} KB/frame, "
+        secs = max(stats["seconds"], 1e-6)
+        print(f"ep {e} map {map_id}: {stats['rows']} rows / {stats['tics']} tics in {stats['seconds']:.0f}s "
+              f"({stats['tics'] / secs:.0f} tics/s, {stats['decisions'] / secs:.0f} decisions/s), "
+              f"{stats['png_bytes_mean'] / 1024:.1f} KB/frame, "
               f"kills {stats['kills']} deaths {stats['deaths']}", flush=True)
     meta_path = os.path.join(REC.out_dir, "buttons.json")
     if buttons and not os.path.exists(meta_path):
+        meta = {"available_buttons": buttons, "action_combinations": params.action_combinations,
+                "n_actions": game.action_builder.n_actions, "frame_skip": params.frame_skip,
+                "screen": "RES_320X240 RGB HUD on weapon on crosshair on", "agent": "Arnold vizdoom_2017_track2"}
+        if REC.decision_only:
+            meta["stored_tic_stride"] = int(params.frame_skip)
         with open(meta_path, "w") as f:
-            json.dump({"available_buttons": buttons, "action_combinations": params.action_combinations,
-                       "n_actions": game.action_builder.n_actions, "frame_skip": params.frame_skip,
-                       "screen": "RES_320X240 RGB HUD on weapon on crosshair on", "agent": "Arnold vizdoom_2017_track2"}, f, indent=1)
+            json.dump(meta, f, indent=1)
     print("DONE", flush=True)
 
 
@@ -260,6 +293,9 @@ def main():
     p.add_argument("--worker-id", type=int, default=0)
     p.add_argument("--num-workers", type=int, default=1)
     p.add_argument("--compress-level", type=int, default=6)
+    p.add_argument("--decision-only", action="store_true",
+                   help="store one row per agent decision and advance the engine with the agent's frame skip "
+                        "(several times faster; the file records stored_tic_stride)")
     p.add_argument("--corpus-id", required=True, help="immutable corpus name; with the episode id it determines every seed")
     mine, arnold_args = p.parse_known_args()
     if arnold_args and arnold_args[0] == "--":
@@ -267,6 +303,7 @@ def main():
     REC.out_dir, REC.map_ids, REC.episodes = mine.out_dir, parse_map_ids(mine.map_ids), mine.episodes
     REC.episode_time, REC.worker_id, REC.num_workers = mine.episode_time, mine.worker_id, mine.num_workers
     REC.compress_level = mine.compress_level
+    REC.decision_only = mine.decision_only
     REC.corpus_id = mine.corpus_id
 
     os.chdir(mine.arnold_dir)

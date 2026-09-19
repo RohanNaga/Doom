@@ -2,6 +2,11 @@
 Encode per-episode parquet recordings (from record_episodes.py or record_arnold.py) into
 stride-4 latents for training.
 
+Both recording layouts are accepted. A per-tic file keeps every tic, so a decision is `stride` rows
+apart; a `record_arnold.py --decision-only` file already holds one row per decision and says so with
+`stored_tic_stride` in its parquet metadata, so the control interval spans `stride // stored` rows.
+The latents layout, the metadata columns and the chain ids are identical either way.
+
 For every episode: take one frame per agent decision (tic % stride == 0), pad 320x240 to
 320x256 at the image level (GameNGen), encode with a frozen `AutoencoderKL` encoder (posterior
 mean), normalise the latent the way that autoencoder's own pipeline does, and write
@@ -41,6 +46,7 @@ import torch
 from PIL import Image
 
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, latent_contract, normalize_latents
+from transitions import decision_rows, stored_tic_stride
 
 PAD_TO = 256
 LEGACY_HW = (120, 160)      # April pipeline: frames resized to 160x120, latents (4, 15, 20), no padding
@@ -102,13 +108,14 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
     t = pq.read_table(path)
     tic = np.array(t["tic"])
     chain_id = None
+    stored = stored_tic_stride(t.schema.metadata)
     if align_decisions and "buttons" in t.schema.names:
-        from transitions import valid_transitions, chain_frames
-        src, ch = valid_transitions(t["action"].to_numpy(zero_copy_only=False), np.array(t["buttons"].to_pylist()),
-                                    t["deaths"].to_numpy(zero_copy_only=False), repeat=stride, canonical=CANONICAL)
-        keep, chain_id = chain_frames(src, ch, stride)
+        keep, chain_id = decision_rows(t["action"].to_numpy(zero_copy_only=False), np.array(t["buttons"].to_pylist()),
+                                       t["deaths"].to_numpy(zero_copy_only=False), stride, CANONICAL, stored)
         if len(keep) == 0:
             return dict(episode=ep, frames=0, map_id=-1)
+    elif stored > 1:
+        keep = np.arange(t.num_rows)                 # a decision-only file holds nothing but decision tics
     else:
         keep = np.flatnonzero(tic % stride == 0)
     cols = {}
@@ -142,7 +149,7 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
 CANONICAL = None
 
 
-def write_meta(args, contract, scale, shift, check):
+def write_meta(args, contract, scale, shift, check, stored=1):
     """Record what a consumer of this directory has to know: the latent contract and the encoder."""
     try:
         git = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
@@ -150,7 +157,7 @@ def write_meta(args, contract, scale, shift, check):
         git = "?"
     meta = {"vae_id": args.vae_id or "stabilityai/sd-vae-ft-mse", "vae_subfolder": args.vae_subfolder,
             "latent_contract": contract, "scaling_factor_applied": scale, "shift_factor_applied": shift,
-            "pad_to": PAD_TO, "legacy": bool(args.legacy), "stride": args.stride,
+            "pad_to": PAD_TO, "legacy": bool(args.legacy), "stride": args.stride, "source_stored_tic_stride": stored,
             "align_decisions": bool(args.align_decisions), "decode_check": check,
             "git": git, "torch": torch.__version__, "args": vars(args)}
     with open(os.path.join(args.out_dir, f"encode_meta_{args.shard or 0:02d}.json"), "w") as f:
@@ -188,7 +195,11 @@ def main(args):
         paths = paths[:args.max_episodes]
     if args.shard is not None:
         paths = paths[args.shard::args.num_shards]
-    print(f"{len(paths)} episodes on {device}", flush=True)
+    stored = 1
+    if paths:
+        import pyarrow.parquet as pq
+        stored = stored_tic_stride(pq.read_schema(paths[0]).metadata)
+    print(f"{len(paths)} episodes on {device}, source rows {stored} tic(s) apart", flush=True)
     check = None
     if args.decode_check and paths:
         import pyarrow.parquet as pq
@@ -197,7 +208,7 @@ def main(args):
             frames = np.stack(list(pool.map(decode, [t["frame"][i].as_py() for i in range(min(args.decode_check, t.num_rows))])))
         check = decode_check(vae, frames, device, dtype, args.legacy, scale, shift)
         print(f"decode check on {os.path.basename(paths[0])}: {json.dumps(check)}", flush=True)
-    write_meta(args, contract, scale, shift, check)
+    write_meta(args, contract, scale, shift, check, stored)
     summary_path = os.path.join(args.out_dir, f"episodes_{args.shard or 0:02d}.jsonl")
     t0 = time.time(); n_frames = 0
     with ThreadPoolExecutor(args.decode_threads) as pool:
