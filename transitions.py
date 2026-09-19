@@ -12,10 +12,42 @@ sources form a chain, and a training window or rollout never crosses a chain bou
 
 Row semantics (record_arnold.py): `action`/`buttons` on row t are applied from t to t+1;
 `deaths` increments on the respawn row.
+
+A `record_arnold.py --decision-only` recording stores only the tics the agent decides on, so its
+rows are already `frame_skip` tics apart and `repeat` becomes `stride // stored_tic_stride`. Every
+row-level rule above is unchanged: a death still cuts the life at the respawn row, so a decision
+whose skip was cut short is still the last row of its life and is still rejected as a source.
 """
+import json
+
 import numpy as np
 
 CONTROL_BITS = 9   # MOVE_FORWARD, MOVE_BACKWARD, TURN_LEFT, TURN_RIGHT, MOVE_LEFT, MOVE_RIGHT, ATTACK, SPEED, CROUCH; weapon-select bits ignored
+EPISODE_META_KEY = b"doomdit_episode"
+
+
+def stored_tic_stride(schema_metadata):
+    """Tics between consecutive stored rows, read from the parquet schema metadata.
+
+    1 for a per-tic recording, which is what an absent key means: `record_arnold.py` writes the key
+    only when `--decision-only` stored one row per agent decision, and every corpus recorded before
+    that flag existed is per-tic.
+    """
+    blob = (schema_metadata or {}).get(EPISODE_META_KEY)
+    return int(json.loads(blob).get("stored_tic_stride", 1)) if blob else 1
+
+
+def decision_rows(action, buttons, deaths, stride=4, canonical=None, stored=1):
+    """Rows to encode and their chain ids, for a recording whose rows are `stored` tics apart.
+
+    The single place the stride arithmetic lives: a control interval of `stride` tics spans
+    `stride // stored` rows, and everything else is `valid_transitions` unchanged.
+    """
+    if stride % stored:
+        raise ValueError(f"stride {stride} is not a multiple of the stored tic stride {stored}")
+    repeat = stride // stored
+    src, ch = valid_transitions(action, buttons, deaths, repeat, canonical)
+    return chain_frames(src, ch, repeat)
 
 
 def life_segments(deaths):

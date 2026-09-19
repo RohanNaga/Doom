@@ -13,6 +13,22 @@ Row semantics: `frame` is the screen at `tic`; `action` (Arnold action id) and `
 (0/1 string over the game's available buttons) are what is applied from this tic to the next.
 Game variables are read at the same tic. Frames are 320x240 RGB with HUD, weapon, crosshair.
 
+The episode metadata (parquet schema key `doomdit_episode`) records the seeds, the WAD, the map id
+as stored and as the engine saw it, and any console commands sent at spawn. Readers must tolerate
+keys being absent: corpora recorded before a key existed simply do not carry it.
+
+`--decision-only` stores one row per agent decision instead of one per tic: the engine advances
+with the agent's native frame skip in a single `make_action(buttons, frame_skip)` call, so the
+three tics in between are never rendered, never converted and never PNG-encoded. Only training
+frames survive either way (`encode_parquet.py` keeps decision tics), so the rows are the same rows;
+the file records `stored_tic_stride` in its episode metadata and `action`/`buttons` then describe
+the next `stored_tic_stride` tics rather than the next one. An absent key means a per-tic file.
+An anti-stuck override runs 40 tics rather than the skip, so the `tic` gap after that row is 40;
+the alignment rejects override rows in either mode, so no training frame is ever mislabelled by it.
+The engine is not stepped identically in the two modes, so the same seed does not replay the same
+episode: a death inside a skip is seen up to `frame_skip - 1` tics later here, and the episode
+diverges from there. Same agent, same seeds, same distribution; a different draw from it.
+
 Usage (run with Arnold's usual flags after the script's own):
     python record_arnold.py --arnold-dir /sata2/data/rnagabhi/doom/Arnold \
         --out-dir /sata2/data/rnagabhi/doom/raw_arnold --map-ids 1-17 --episodes 850 \
@@ -88,6 +104,21 @@ class Rec:
 
 REC = Rec()
 SEED_SCHEME = "doomdit-episode-v1"
+MAP_ID_LIMIT = 127          # the stored map_id column is int8
+
+
+def stored_map_id(map_id, offset):
+    """The `map_id` written to the corpus, which is not always the map the engine was told to load.
+
+    Arnold addresses every scenario's levels as MAP01 upward, so `deathmatch_simple`'s only map and
+    `full_deathmatch`'s arena 1 are both map 1 to the engine. Recording a second WAD under an offset
+    keeps the labels apart once the directories are merged at encode time; the WAD name goes into the
+    episode metadata alongside it, so the label is decodable rather than merely unique.
+    """
+    out = int(map_id) + int(offset)
+    if not 0 < out <= MAP_ID_LIMIT:
+        raise ValueError(f"map_id {map_id} + offset {offset} = {out}, outside 1..{MAP_ID_LIMIT} (int8 column)")
+    return out
 
 
 def episode_seeds(corpus_id, episode_id):
@@ -121,7 +152,19 @@ def start_seeded_episode(game, map_id, episode_id):
         game.start(map_id=map_id, episode_time=REC.episode_time, log_events=False, manual_control=True)
     finally:
         arnold_game.DoomGame = factory
+    send_init_commands(game)
     return seeds
+
+
+def send_init_commands(game):
+    """Console commands the scenario needs to be playable, sent after every spawn and respawn.
+
+    `deathmatch_simple` has no bots and keeps its monsters behind an ACS difficulty script, so
+    without `pukename change_difficulty 5` the agent records an empty map. The GameNGen
+    reproductions send exactly this, on reset, which is where Arnold's `initialize_game` leaves us.
+    """
+    for command in REC.init_game_commands:
+        game.game.send_game_command(command)
 
 
 def record_episode(game, network, params, map_id, episode_id):
@@ -137,7 +180,25 @@ def record_episode(game, network, params, map_id, episode_id):
     gv = dg.get_game_variable
     cols = {k: [] for k in ["tic", "action", "buttons", "health", "ammo", "kills", "deaths", "frags",
                             "pos_x", "pos_y", "angle", "frame"]}
+
+    def store(st, tic, action_id, bstr):
+        """One row: the screen at `tic`, and the game variables read at the same tic."""
+        frame = np.asarray(st.screen_buffer)
+        if frame.ndim == 3 and frame.shape[0] == 3:      # CRCGCB -> HWC
+            frame = np.ascontiguousarray(frame.transpose(1, 2, 0))
+        cols["tic"].append(tic); cols["action"].append(int(action_id)); cols["buttons"].append(bstr)
+        cols["health"].append(int(gv(GameVariable.HEALTH)))
+        cols["ammo"].append(int(gv(GameVariable.SELECTED_WEAPON_AMMO)))
+        cols["kills"].append(int(gv(GameVariable.KILLCOUNT)))
+        cols["deaths"].append(int(gv(GameVariable.DEATHCOUNT)))
+        cols["frags"].append(int(gv(GameVariable.FRAGCOUNT)))
+        cols["pos_x"].append(float(gv(GameVariable.POSITION_X)))
+        cols["pos_y"].append(float(gv(GameVariable.POSITION_Y)))
+        cols["angle"].append(float(gv(GameVariable.ANGLE)))
+        cols["frame"].append(png_bytes(frame, REC.compress_level))
+
     last_states, tic, t0 = [], 0, time.time()
+    decisions = 0
     while not game.is_episode_finished():
         if game.is_player_dead():
             # a death on the tic the episode clock expires leaves no state to respawn into
@@ -147,6 +208,7 @@ def record_episode(game, network, params, map_id, episode_id):
                 game.respawn_player()
             except AttributeError:
                 break
+            send_init_commands(game)
             network.reset()
             if game.is_player_dead() or game.is_episode_finished():
                 continue
@@ -154,27 +216,27 @@ def record_episode(game, network, params, map_id, episode_id):
         action_id = network.next_action(last_states)
         buttons, n_tics, logical = decision_buttons(game, action_id)
         bstr = "".join("1" if b else "0" for b in buttons)
-        for _ in range(n_tics):
+        decisions += 1
+        if REC.decision_only:
+            # the whole skip in one engine call: the tics in between are never rendered or stored.
+            # A death inside the skip is seen after it, and the respawn row that follows carries the
+            # incremented `deaths`, so the life ends here exactly as it does per tic and this row is
+            # rejected as a transition source rather than pointing across the death.
             st = dg.get_state()
-            if st is None:
-                break
-            frame = np.asarray(st.screen_buffer)
-            if frame.ndim == 3 and frame.shape[0] == 3:      # CRCGCB -> HWC
-                frame = np.ascontiguousarray(frame.transpose(1, 2, 0))
-            cols["tic"].append(tic); cols["action"].append(int(action_id)); cols["buttons"].append(bstr)
-            cols["health"].append(int(gv(GameVariable.HEALTH)))
-            cols["ammo"].append(int(gv(GameVariable.SELECTED_WEAPON_AMMO)))
-            cols["kills"].append(int(gv(GameVariable.KILLCOUNT)))
-            cols["deaths"].append(int(gv(GameVariable.DEATHCOUNT)))
-            cols["frags"].append(int(gv(GameVariable.FRAGCOUNT)))
-            cols["pos_x"].append(float(gv(GameVariable.POSITION_X)))
-            cols["pos_y"].append(float(gv(GameVariable.POSITION_Y)))
-            cols["angle"].append(float(gv(GameVariable.ANGLE)))
-            cols["frame"].append(png_bytes(frame, REC.compress_level))
-            dg.make_action(buttons, 1)
-            tic += 1
-            if game.is_player_dead() or game.is_episode_finished():
-                break
+            if st is not None:
+                store(st, tic, action_id, bstr)
+            dg.make_action(buttons, n_tics)
+            tic += n_tics
+        else:
+            for _ in range(n_tics):
+                st = dg.get_state()
+                if st is None:
+                    break
+                store(st, tic, action_id, bstr)
+                dg.make_action(buttons, 1)
+                tic += 1
+                if game.is_player_dead() or game.is_episode_finished():
+                    break
         gs = dg.get_state()
         if gs is not None:
             game._screen_buffer = gs.screen_buffer
@@ -184,11 +246,13 @@ def record_episode(game, network, params, map_id, episode_id):
         game.update_game_variables()
         game.update_statistics_and_reward(logical)
     stats = {k: game.statistics[map_id].get(k, 0) for k in ["kills", "deaths", "suicides", "frags"]}
+    wad = os.path.basename(game.scenario_path)
     game.close()
     n = len(cols["tic"])
+    label = stored_map_id(map_id, REC.map_id_offset)
     table = pa.table({
         "episode_id": pa.array([episode_id] * n, pa.int32()),
-        "map_id": pa.array([map_id] * n, pa.int8()),
+        "map_id": pa.array([label] * n, pa.int8()),
         "tic": pa.array(cols["tic"], pa.int32()),
         "action": pa.array(cols["action"], pa.int16()),
         "buttons": pa.array(cols["buttons"], pa.string()),
@@ -202,9 +266,15 @@ def record_episode(game, network, params, map_id, episode_id):
         "angle": pa.array(cols["angle"], pa.float32()),
         "frame": pa.array(cols["frame"], pa.binary()),
     })
-    provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id), "map_id": int(map_id), "seeds": seeds}
+    provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id),
+                  "map_id": label, "engine_map_id": int(map_id), "wad": wad, "seeds": seeds}
+    if REC.init_game_commands:
+        provenance["init_game_commands"] = list(REC.init_game_commands)
+    if REC.decision_only:
+        provenance["stored_tic_stride"] = int(REC.frame_skip)   # absent means 1, so per-tic files are unchanged
     table = table.replace_schema_metadata({**(table.schema.metadata or {}), b"doomdit_episode": json.dumps(provenance, sort_keys=True).encode()})
-    stats.update(tics=n, seconds=time.time() - t0, png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0)
+    stats.update(rows=n, tics=tic, decisions=decisions, seconds=time.time() - t0,
+                 png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0)
     stats.update(provenance)   # carries episode_id and map_id
     return table, stats
 
@@ -238,15 +308,23 @@ def record_all(game, network, params):
         os.replace(tmp, out)
         with open(log_path, "a") as f:
             f.write(json.dumps(stats) + "\n")
-        print(f"ep {e} map {map_id}: {stats['tics']} tics in {stats['seconds']:.0f}s "
-              f"({stats['tics'] / max(stats['seconds'], 1e-6):.0f} tics/s), {stats['png_bytes_mean'] / 1024:.1f} KB/frame, "
+        secs = max(stats["seconds"], 1e-6)
+        print(f"ep {e} map {map_id}: {stats['rows']} rows / {stats['tics']} tics in {stats['seconds']:.0f}s "
+              f"({stats['tics'] / secs:.0f} tics/s, {stats['decisions'] / secs:.0f} decisions/s), "
+              f"{stats['png_bytes_mean'] / 1024:.1f} KB/frame, "
               f"kills {stats['kills']} deaths {stats['deaths']}", flush=True)
     meta_path = os.path.join(REC.out_dir, "buttons.json")
     if buttons and not os.path.exists(meta_path):
+        meta = {"available_buttons": buttons, "action_combinations": params.action_combinations,
+                "n_actions": game.action_builder.n_actions, "frame_skip": params.frame_skip,
+                "screen": "RES_320X240 RGB HUD on weapon on crosshair on", "agent": "Arnold vizdoom_2017_track2",
+                "wad": os.path.basename(game.scenario_path), "map_id_offset": REC.map_id_offset,
+                "init_game_commands": list(REC.init_game_commands),
+                "bots": "zdoom addbot" if REC.zdoom_bots else "arnold scripted marines", "n_bots": params.n_bots}
+        if REC.decision_only:
+            meta["stored_tic_stride"] = int(params.frame_skip)
         with open(meta_path, "w") as f:
-            json.dump({"available_buttons": buttons, "action_combinations": params.action_combinations,
-                       "n_actions": game.action_builder.n_actions, "frame_skip": params.frame_skip,
-                       "screen": "RES_320X240 RGB HUD on weapon on crosshair on", "agent": "Arnold vizdoom_2017_track2"}, f, indent=1)
+            json.dump(meta, f, indent=1)
     print("DONE", flush=True)
 
 
@@ -260,6 +338,19 @@ def main():
     p.add_argument("--worker-id", type=int, default=0)
     p.add_argument("--num-workers", type=int, default=1)
     p.add_argument("--compress-level", type=int, default=6)
+    p.add_argument("--decision-only", action="store_true",
+                   help="store one row per agent decision and advance the engine with the agent's frame skip "
+                        "(several times faster; the file records stored_tic_stride)")
+    p.add_argument("--map-id-offset", type=int, default=0,
+                   help="added to the stored map_id only; the engine still loads --map-ids. Use it when a "
+                        "second WAD's MAP01 would collide with the first WAD's arena 1 (e.g. 100 -> map_id 101)")
+    p.add_argument("--init-game-command", action="append", default=[], metavar="CMD",
+                   help="console command sent after every spawn and respawn, repeatable; an escape hatch for "
+                        "scenarios that need ACS setup")
+    p.add_argument("--zdoom-bots", action="store_true",
+                   help="fill the game with ZDoom's own addbot instead of Arnold's scripted marines. Arnold's "
+                        "deathmatch scenario hardcodes scripted marines, whose ACS script lives in "
+                        "full_deathmatch.wad, so on any other WAD no opponent ever spawns")
     p.add_argument("--corpus-id", required=True, help="immutable corpus name; with the episode id it determines every seed")
     mine, arnold_args = p.parse_known_args()
     if arnold_args and arnold_args[0] == "--":
@@ -267,7 +358,12 @@ def main():
     REC.out_dir, REC.map_ids, REC.episodes = mine.out_dir, parse_map_ids(mine.map_ids), mine.episodes
     REC.episode_time, REC.worker_id, REC.num_workers = mine.episode_time, mine.worker_id, mine.num_workers
     REC.compress_level = mine.compress_level
+    REC.decision_only = mine.decision_only
+    REC.map_id_offset = mine.map_id_offset
+    REC.init_game_commands = mine.init_game_command
+    REC.zdoom_bots = mine.zdoom_bots
     REC.corpus_id = mine.corpus_id
+    stored_map_id(max(REC.map_ids), REC.map_id_offset)      # fail now, not after an episode of recording
 
     os.chdir(mine.arnold_dir)
     sys.path.insert(0, mine.arnold_dir)
@@ -279,7 +375,13 @@ def main():
     from src.doom.scenarios import deathmatch
     from src.doom.game import Game
     deathmatch.evaluate_deathmatch = record_all
-    deathmatch.Game = functools.partial(Game, screen_resolution="RES_320X240")
+    game_kwargs = {"screen_resolution": "RES_320X240"}
+    if mine.zdoom_bots:
+        # `src/doom/scenarios/deathmatch.py` hardcodes use_scripted_marines=True, and that ACS script is part
+        # of full_deathmatch.wad. On deathmatch_simple it silently adds nobody, so the agent records an empty
+        # map; ZDoom's own addbot fills it (measured: 4 to 5 opponents visible).
+        game_kwargs["use_scripted_marines"] = False
+    deathmatch.Game = functools.partial(Game, **game_kwargs)
     from src.args import parse_game_args
     parse_game_args(arnold_args + ["--dump_path", dump_path, "--render_hud", "1"])
 
