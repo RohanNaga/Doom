@@ -1,14 +1,14 @@
-# Dense corpus (`arnold-train-dense-v1`)
+# Dense corpus
 
 A second training corpus, kept separate from the original 17-map corpus (`raw_arnold`, 850 episodes). Started Sep 19 2026. It tests data density per map directly: our models beat "repeat the last frame" by about 2 dB on training maps, while GameNGen reports 29.4 dB with roughly 100x more frames per map on about five levels.
 
 | | Original corpus | Dense corpus |
 |---|---|---|
-| Server directory | `/sata2/data/rnagabhi/doom/raw_arnold` | `raw_arnold_dense/arenas`, `raw_arnold_dense/dmsimple` |
-| Corpus id | (recorded before seeding existed; not seed-reproducible) | `arnold-train-dense-v1` (seed = stable hash of corpus id and episode id) |
-| Train maps | Arnold deathmatch arenas 1 to 17 (16 and 17 held out) | arenas 2, 3, 4, 5 of `full_deathmatch`, plus `deathmatch_simple` MAP01 |
-| Test maps | — | arenas 6, 7, 8, never recorded into the training corpus |
-| Episodes | 850, about 50 per map | 2,000 per map, 150 game-seconds each, every tic stored |
+| Server directory | `/sata2/data/rnagabhi/doom/raw_arnold` | `raw_arnold_dense/arenas`, `raw_arnold_dense/arenas_678`, `raw_arnold_dense/dmsimple` |
+| Corpus id | (recorded before seeding existed; not seed-reproducible) | one per segment, see the table below (seed = stable hash of corpus id and episode id) |
+| Maps | Arnold deathmatch arenas 1 to 17 (16 and 17 held out) | arenas 2, 3, 4, 5 and arenas 6, 7, 8 of `full_deathmatch`, plus `deathmatch_simple` MAP01 (blocked, see below) |
+| Train or test | fixed episode split | **not decided by the recording**: every segment is recorded densely and the split is chosen later (Rohan, Sep 19 2026) |
+| Episodes | 850, about 50 per map | 2,000 per map on arenas 2 to 5, 1,000 per map on arenas 6 to 8, 150 game-seconds each (about 5,100 tics, 270 MB), every tic stored |
 | Agent, bots, assets | Arnold (Lample and Chaplot 2017), 8 bots, Freedoom assets, frame skip 4 | identical |
 | Format | one parquet per episode: `episode_id, map_id, tic, action, buttons, health, ammo, kills, deaths, frags, pos_x, pos_y, angle, frame` (lossless PNG, 320x240 RGB with HUD) | identical |
 
@@ -18,13 +18,13 @@ A second training corpus, kept separate from the original 17-map corpus (`raw_ar
 
 ## Recording
 
-`TARGET=arenas bash scripts/spiderman/record_dense.sh` on Spiderman; resume-safe, so a relaunch skips finished episodes and continues a corpus. Knobs: `WORKERS` (32), `EPISODES_PER_MAP` (2,000; 20 for the eval targets), `MAPS`, `MODE` (`pertic`), `PNG_LEVEL` (6), `N_BOTS` (8), `EPISODE_TIME` (150).
+`TARGET=arenas bash scripts/spiderman/record_dense.sh` on Spiderman; resume-safe, so a relaunch skips finished episodes and continues a corpus. Knobs: `WORKERS` (32), `EPISODES_PER_MAP` (2,000 for `arenas`, 1,000 for `arenas678` and `dmsimple`, 20 for `test-dmsimple`), `MAPS`, `MODE` (`pertic`), `PNG_LEVEL` (6), `N_BOTS` (8), `EPISODE_TIME` (150).
 
 | TARGET | maps | corpus id | output |
 |---|---|---|---|
 | `arenas` | 2,3,4,5 of `full_deathmatch` | `arnold-train-dense-v1` | `raw_arnold_dense/arenas` |
-| `dmsimple` | `deathmatch_simple` MAP01, stored as `map_id` 101 | `arnold-train-dense-v1` | `raw_arnold_dense/dmsimple` |
-| `test678` | 6,7,8 of `full_deathmatch`, 20 episodes per map | `arnold-eval-dense-test-v1` | `raw_arnold_dense_eval/test678` |
+| `dmsimple` | `deathmatch_simple` MAP01, stored as `map_id` 101, 1,000 episodes | `arnold-dense-dmsimple-v1` | `raw_arnold_dense/dmsimple` |
+| `arenas678` | 6,7,8 of `full_deathmatch`, 1,000 per map; recorded on Superman (16 workers) and streamed to Spiderman by rsync | `arnold-dense-arenas678-v1` | `raw_arnold_dense/arenas_678` |
 | `test-dmsimple` | `deathmatch_simple`, 20 episodes | `arnold-eval-dense-dmsimple-v1` | `raw_arnold_dense_eval/dmsimple` |
 
 `deathmatch_simple`'s only map is MAP01, which is `full_deathmatch`'s arena 1 as far as the engine is concerned, so `--map-id-offset 100` stores it as 101 and the two directories stay unambiguous when they are merged at encode time. The episode metadata carries the WAD name, the engine's own map id and any console commands sent at spawn, so the label is decodable and not merely unique. Readers must tolerate a metadata key being absent: a corpus recorded before a key existed does not carry it.

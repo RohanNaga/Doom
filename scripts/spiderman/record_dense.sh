@@ -3,23 +3,25 @@
 # its own directories, its own corpus ids, its own seeds. Purpose: test whether data density per map, not
 # architecture, explains the gap to GameNGen-style results (tens of millions of frames on about five levels).
 #
-#   TARGET=arenas        train  maps 2,3,4,5 of full_deathmatch      -> raw_arnold_dense/arenas
-#   TARGET=dmsimple      train  deathmatch_simple MAP01, map_id 101  -> raw_arnold_dense/dmsimple
-#   TARGET=test678       eval   maps 6,7,8 of full_deathmatch        -> raw_arnold_dense_eval/test678
+#   TARGET=arenas        maps 2,3,4,5 of full_deathmatch             -> raw_arnold_dense/arenas
+#   TARGET=dmsimple      deathmatch_simple MAP01, map_id 101         -> raw_arnold_dense/dmsimple
+#   TARGET=arenas678     maps 6,7,8 of full_deathmatch, 1,000 per map -> raw_arnold_dense/arenas_678
+#                        (recorded on Superman and streamed here; see raw_arnold_dense/arenas_678/README.txt)
 #   TARGET=test-dmsimple eval   deathmatch_simple MAP01, map_id 101  -> raw_arnold_dense_eval/dmsimple
 #
 # Maps. Arenas 2,3,4,5 and 6,7,8 are the agent paper's own published train/test split (Arnold README:
 # --map_ids_train "2,3,4,5" --map_ids_test "6,7,8"), so the split is the agent authors' and not ours.
 # deathmatch_simple is the only named map in prior Doom world-model work; both open GameNGen
 # reproductions use it, which is what makes a number on it comparable to anything outside this repo.
-# The test maps are never recorded into the training corpus.
+# Recording decides nothing about training: which segments train and which test is chosen later
+# (Rohan, Sep 19 2026). Each segment has its own folder and corpus id so any split stays possible.
 #
 # This replaces an earlier plan (maps 3,10,12,13 of full_deathmatch, corpus arnold-train-dense4-v1).
 # Those four were picked by reading our own per-map evaluation scores, which selects the training set on
 # the outcome being measured; Rohan rejected it on Sep 19 2026. 134 episodes of that aborted corpus remain
 # in $D/raw_arnold_dense4 and are unused. Nothing downstream should read that directory.
 #
-# Knobs: WORKERS=32  EPISODES_PER_MAP=2000 (20 for the eval targets)  MAPS  MODE=pertic  PNG_LEVEL=6
+# Knobs: WORKERS=32  EPISODES_PER_MAP (2000 arenas, 1000 arenas678 and dmsimple, 20 test-dmsimple)  MAPS  MODE=pertic  PNG_LEVEL=6
 #        N_BOTS=8  EPISODE_TIME=150.  Positional [workers] [total episodes] still override.
 # Resume-safe: an episode whose parquet already exists is skipped, so a relaunch continues a corpus.
 #
@@ -30,10 +32,10 @@ EPISODE_TIME=${EPISODE_TIME:-150}; N_BOTS=${N_BOTS:-8}; LEVEL=${PNG_LEVEL:-6}
 WAD=full_deathmatch; OFFSET=0; CMD=(); EPM=${EPISODES_PER_MAP:-2000}
 case $TARGET in
   arenas)        MAPS=${MAPS:-2,3,4,5}; CID=arnold-train-dense-v1;          OUT=$D/raw_arnold_dense/arenas ;;
-  dmsimple)      MAPS=${MAPS:-1};       CID=arnold-train-dense-v1;          OUT=$D/raw_arnold_dense/dmsimple ;;
-  test678)       MAPS=${MAPS:-6,7,8};   CID=arnold-eval-dense-test-v1;      OUT=$D/raw_arnold_dense_eval/test678;  EPM=${EPISODES_PER_MAP:-20} ;;
+  dmsimple)      MAPS=${MAPS:-1};       CID=arnold-dense-dmsimple-v1;       OUT=$D/raw_arnold_dense/dmsimple;      EPM=${EPISODES_PER_MAP:-1000} ;;
+  arenas678)     MAPS=${MAPS:-6,7,8};   CID=arnold-dense-arenas678-v1;      OUT=$D/raw_arnold_dense/arenas_678;    EPM=${EPISODES_PER_MAP:-1000} ;;
   test-dmsimple) MAPS=${MAPS:-1};       CID=arnold-eval-dense-dmsimple-v1;  OUT=$D/raw_arnold_dense_eval/dmsimple; EPM=${EPISODES_PER_MAP:-20} ;;
-  *) echo "unknown TARGET=$TARGET (arenas|dmsimple|test678|test-dmsimple)" >&2; exit 2 ;;
+  *) echo "unknown TARGET=$TARGET (arenas|arenas678|dmsimple|test-dmsimple)" >&2; exit 2 ;;
 esac
 if [ "${TARGET#test-}" = dmsimple ] || [ "$TARGET" = dmsimple ]; then
   # deathmatch_simple's MAP01 is map 1 to the engine, which is full_deathmatch's arena 1; offset the stored
