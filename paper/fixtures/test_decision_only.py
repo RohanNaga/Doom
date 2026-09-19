@@ -5,7 +5,7 @@ branches would write from that same trajectory, and the tests assert the part th
 any machine: the alignment in `encode_parquet.py --align-decisions` keeps the same decisions, chains
 them the same way, and writes the same latents, whether the file stores every tic or only the tics
 the agent decided on. Divergence of the engine itself between the two stepping modes is a separate,
-measured question; it cannot be settled here and is recorded in `release/DENSE4_CORPUS.md`.
+measured question; it cannot be settled here and is recorded in `release/DENSE_CORPUS.md`.
 
     python -m pytest paper/fixtures/test_decision_only.py -q
 """
