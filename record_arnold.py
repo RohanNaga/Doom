@@ -13,6 +13,10 @@ Row semantics: `frame` is the screen at `tic`; `action` (Arnold action id) and `
 (0/1 string over the game's available buttons) are what is applied from this tic to the next.
 Game variables are read at the same tic. Frames are 320x240 RGB with HUD, weapon, crosshair.
 
+The episode metadata (parquet schema key `doomdit_episode`) records the seeds, the WAD, the map id
+as stored and as the engine saw it, and any console commands sent at spawn. Readers must tolerate
+keys being absent: corpora recorded before a key existed simply do not carry it.
+
 `--decision-only` stores one row per agent decision instead of one per tic: the engine advances
 with the agent's native frame skip in a single `make_action(buttons, frame_skip)` call, so the
 three tics in between are never rendered, never converted and never PNG-encoded. Only training
@@ -100,6 +104,21 @@ class Rec:
 
 REC = Rec()
 SEED_SCHEME = "doomdit-episode-v1"
+MAP_ID_LIMIT = 127          # the stored map_id column is int8
+
+
+def stored_map_id(map_id, offset):
+    """The `map_id` written to the corpus, which is not always the map the engine was told to load.
+
+    Arnold addresses every scenario's levels as MAP01 upward, so `deathmatch_simple`'s only map and
+    `full_deathmatch`'s arena 1 are both map 1 to the engine. Recording a second WAD under an offset
+    keeps the labels apart once the directories are merged at encode time; the WAD name goes into the
+    episode metadata alongside it, so the label is decodable rather than merely unique.
+    """
+    out = int(map_id) + int(offset)
+    if not 0 < out <= MAP_ID_LIMIT:
+        raise ValueError(f"map_id {map_id} + offset {offset} = {out}, outside 1..{MAP_ID_LIMIT} (int8 column)")
+    return out
 
 
 def episode_seeds(corpus_id, episode_id):
@@ -133,7 +152,19 @@ def start_seeded_episode(game, map_id, episode_id):
         game.start(map_id=map_id, episode_time=REC.episode_time, log_events=False, manual_control=True)
     finally:
         arnold_game.DoomGame = factory
+    send_init_commands(game)
     return seeds
+
+
+def send_init_commands(game):
+    """Console commands the scenario needs to be playable, sent after every spawn and respawn.
+
+    `deathmatch_simple` has no bots and keeps its monsters behind an ACS difficulty script, so
+    without `pukename change_difficulty 5` the agent records an empty map. The GameNGen
+    reproductions send exactly this, on reset, which is where Arnold's `initialize_game` leaves us.
+    """
+    for command in REC.init_game_commands:
+        game.game.send_game_command(command)
 
 
 def record_episode(game, network, params, map_id, episode_id):
@@ -177,6 +208,7 @@ def record_episode(game, network, params, map_id, episode_id):
                 game.respawn_player()
             except AttributeError:
                 break
+            send_init_commands(game)
             network.reset()
             if game.is_player_dead() or game.is_episode_finished():
                 continue
@@ -214,11 +246,13 @@ def record_episode(game, network, params, map_id, episode_id):
         game.update_game_variables()
         game.update_statistics_and_reward(logical)
     stats = {k: game.statistics[map_id].get(k, 0) for k in ["kills", "deaths", "suicides", "frags"]}
+    wad = os.path.basename(game.scenario_path)
     game.close()
     n = len(cols["tic"])
+    label = stored_map_id(map_id, REC.map_id_offset)
     table = pa.table({
         "episode_id": pa.array([episode_id] * n, pa.int32()),
-        "map_id": pa.array([map_id] * n, pa.int8()),
+        "map_id": pa.array([label] * n, pa.int8()),
         "tic": pa.array(cols["tic"], pa.int32()),
         "action": pa.array(cols["action"], pa.int16()),
         "buttons": pa.array(cols["buttons"], pa.string()),
@@ -232,7 +266,10 @@ def record_episode(game, network, params, map_id, episode_id):
         "angle": pa.array(cols["angle"], pa.float32()),
         "frame": pa.array(cols["frame"], pa.binary()),
     })
-    provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id), "map_id": int(map_id), "seeds": seeds}
+    provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id),
+                  "map_id": label, "engine_map_id": int(map_id), "wad": wad, "seeds": seeds}
+    if REC.init_game_commands:
+        provenance["init_game_commands"] = list(REC.init_game_commands)
     if REC.decision_only:
         provenance["stored_tic_stride"] = int(REC.frame_skip)   # absent means 1, so per-tic files are unchanged
     table = table.replace_schema_metadata({**(table.schema.metadata or {}), b"doomdit_episode": json.dumps(provenance, sort_keys=True).encode()})
@@ -280,7 +317,10 @@ def record_all(game, network, params):
     if buttons and not os.path.exists(meta_path):
         meta = {"available_buttons": buttons, "action_combinations": params.action_combinations,
                 "n_actions": game.action_builder.n_actions, "frame_skip": params.frame_skip,
-                "screen": "RES_320X240 RGB HUD on weapon on crosshair on", "agent": "Arnold vizdoom_2017_track2"}
+                "screen": "RES_320X240 RGB HUD on weapon on crosshair on", "agent": "Arnold vizdoom_2017_track2",
+                "wad": os.path.basename(game.scenario_path), "map_id_offset": REC.map_id_offset,
+                "init_game_commands": list(REC.init_game_commands),
+                "bots": "zdoom addbot" if REC.zdoom_bots else "arnold scripted marines", "n_bots": params.n_bots}
         if REC.decision_only:
             meta["stored_tic_stride"] = int(params.frame_skip)
         with open(meta_path, "w") as f:
@@ -301,6 +341,16 @@ def main():
     p.add_argument("--decision-only", action="store_true",
                    help="store one row per agent decision and advance the engine with the agent's frame skip "
                         "(several times faster; the file records stored_tic_stride)")
+    p.add_argument("--map-id-offset", type=int, default=0,
+                   help="added to the stored map_id only; the engine still loads --map-ids. Use it when a "
+                        "second WAD's MAP01 would collide with the first WAD's arena 1 (e.g. 100 -> map_id 101)")
+    p.add_argument("--init-game-command", action="append", default=[], metavar="CMD",
+                   help="console command sent after every spawn and respawn, repeatable; an escape hatch for "
+                        "scenarios that need ACS setup")
+    p.add_argument("--zdoom-bots", action="store_true",
+                   help="fill the game with ZDoom's own addbot instead of Arnold's scripted marines. Arnold's "
+                        "deathmatch scenario hardcodes scripted marines, whose ACS script lives in "
+                        "full_deathmatch.wad, so on any other WAD no opponent ever spawns")
     p.add_argument("--corpus-id", required=True, help="immutable corpus name; with the episode id it determines every seed")
     mine, arnold_args = p.parse_known_args()
     if arnold_args and arnold_args[0] == "--":
@@ -309,7 +359,11 @@ def main():
     REC.episode_time, REC.worker_id, REC.num_workers = mine.episode_time, mine.worker_id, mine.num_workers
     REC.compress_level = mine.compress_level
     REC.decision_only = mine.decision_only
+    REC.map_id_offset = mine.map_id_offset
+    REC.init_game_commands = mine.init_game_command
+    REC.zdoom_bots = mine.zdoom_bots
     REC.corpus_id = mine.corpus_id
+    stored_map_id(max(REC.map_ids), REC.map_id_offset)      # fail now, not after an episode of recording
 
     os.chdir(mine.arnold_dir)
     sys.path.insert(0, mine.arnold_dir)
@@ -321,7 +375,13 @@ def main():
     from src.doom.scenarios import deathmatch
     from src.doom.game import Game
     deathmatch.evaluate_deathmatch = record_all
-    deathmatch.Game = functools.partial(Game, screen_resolution="RES_320X240")
+    game_kwargs = {"screen_resolution": "RES_320X240"}
+    if mine.zdoom_bots:
+        # `src/doom/scenarios/deathmatch.py` hardcodes use_scripted_marines=True, and that ACS script is part
+        # of full_deathmatch.wad. On deathmatch_simple it silently adds nobody, so the agent records an empty
+        # map; ZDoom's own addbot fills it (measured: 4 to 5 opponents visible).
+        game_kwargs["use_scripted_marines"] = False
+    deathmatch.Game = functools.partial(Game, **game_kwargs)
     from src.args import parse_game_args
     parse_game_args(arnold_args + ["--dump_path", dump_path, "--render_hud", "1"])
 

@@ -191,6 +191,17 @@ def test_stride_must_be_a_multiple_of_the_stored_stride():
         decision_rows(action, buttons, deaths, stride=6, stored=SKIP)
 
 
+def test_map_id_offset_keeps_two_wads_apart_and_refuses_to_overflow():
+    """deathmatch_simple's MAP01 and full_deathmatch's arena 1 are both map 1 to the engine."""
+    record_arnold = pytest.importorskip("record_arnold")
+    assert record_arnold.stored_map_id(1, 0) == 1            # the arena keeps its own label
+    assert record_arnold.stored_map_id(1, 100) == 101        # the second WAD's MAP01 does not collide
+    assert record_arnold.stored_map_id(8, 0) == 8
+    for bad in ((1, 127), (1, -1), (0, 0), (100, 100)):
+        with pytest.raises(ValueError):                      # the stored column is int8
+            record_arnold.stored_map_id(*bad)
+
+
 class StubVAE:
     """Deterministic stand-in for the AutoencoderKL: an 8x average pool, so a latent still depends on
     its frame and two encodings of the same frame can be compared."""
