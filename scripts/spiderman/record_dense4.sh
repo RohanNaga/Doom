@@ -21,7 +21,9 @@ W=${1:-${WORKERS:-32}}; N=${2:-8000}; MAPS=${MAPS:-3,10,12,13}; MODE=${MODE:-per
 # because `encode_parquet.py` takes `stored_tic_stride` from the first file it reads.
 CID=arnold-train-dense4-v1; OUT=$D/raw_arnold_dense4; FAST=()
 if [ "$MODE" = decision ]; then OUT=$D/raw_arnold_dense4d; CID=arnold-train-dense4d-v1; FAST=(--decision-only); fi
-LEVEL=${PNG_LEVEL:-6}
+# PNG level, lossless at every setting: 6 is what the per-tic corpus was recorded at, and 1 is the
+# measured choice for decision mode (1.5x faster to record, 18% more bytes; see release/DENSE4_CORPUS.md)
+LEVEL=${PNG_LEVEL:-$([ "$MODE" = decision ] && echo 1 || echo 6)}
 ARN=(--frame_skip 4 --action_combinations "move_fb+move_lr;turn_lr;attack" --network_type dqn_rnn --recurrence lstm --n_rec_layers 1 --hist_size 4 --remember 1 --labels_mapping "" --game_features "target,enemy" --bucket_size "[10, 1]" --dropout 0.5 --speed on --crouch off --scenario deathmatch --wad full_deathmatch --n_bots 8 --reload $D/Arnold/pretrained/vizdoom_2017_track2.pth --evaluate 1 --visualize 0 --gpu_id -1)
 mkdir -p $OUT $D/logs/rec_dense4
 echo "$(date -Iseconds) start mode=$MODE workers=$W episodes=$N maps=$MAPS corpus=$CID png=$LEVEL git=$(cd $D/repo && git rev-parse --short HEAD)" >> $OUT/RECORDING_LOG.txt
