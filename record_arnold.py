@@ -19,6 +19,11 @@ three tics in between are never rendered, never converted and never PNG-encoded.
 frames survive either way (`encode_parquet.py` keeps decision tics), so the rows are the same rows;
 the file records `stored_tic_stride` in its episode metadata and `action`/`buttons` then describe
 the next `stored_tic_stride` tics rather than the next one. An absent key means a per-tic file.
+An anti-stuck override runs 40 tics rather than the skip, so the `tic` gap after that row is 40;
+the alignment rejects override rows in either mode, so no training frame is ever mislabelled by it.
+The engine is not stepped identically in the two modes, so the same seed does not replay the same
+episode: a death inside a skip is seen up to `frame_skip - 1` tics later here, and the episode
+diverges from there. Same agent, same seeds, same distribution; a different draw from it.
 
 Usage (run with Arnold's usual flags after the script's own):
     python record_arnold.py --arnold-dir /sata2/data/rnagabhi/doom/Arnold \

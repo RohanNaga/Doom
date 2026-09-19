@@ -237,6 +237,16 @@ def test_encoder_produces_the_same_latents_from_either_layout(tmp_path):
     assert np.all(np.diff(meta_d["tic"])[meta_d["chain_id"][1:] == meta_d["chain_id"][:-1]] == SKIP)
 
 
+def test_encode_wan_refuses_a_decision_only_recording(tmp_path):
+    """The video layouts need the tics between decisions, which this recording never rendered."""
+    encode_wan = pytest.importorskip("encode_wan")
+    _, dec, _ = trajectory(CLEAN)
+    path = str(tmp_path / "ep_00000.parquet")
+    write_parquet(path, dec, stored=SKIP)
+    with pytest.raises(ValueError, match="stored_tic_stride"):
+        encode_wan.encode_episode(path, str(tmp_path), None, None, None, 1)
+
+
 def test_unaligned_encoding_keeps_every_decision_row(tmp_path):
     """Without --align-decisions, `tic % stride == 0` is wrong for a file that already holds decisions."""
     import torch

@@ -99,7 +99,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from transitions import canonical_table, life_segments, valid_transitions
+from transitions import canonical_table, life_segments, stored_tic_stride, valid_transitions
 
 LAYOUTS = ("v2", "v1")
 SCHEMES = {"v1": "wan-chain-v1", "v2": "wan-chain-v2"}
@@ -286,6 +286,11 @@ def encode_episode(path, out_dir, encoder, canonical, pool, batch_chains, repeat
     for c in ("action", "buttons", "deaths", "tic", "frame"):
         if c not in names:
             raise ValueError(f"{path}: missing column {c!r}; schema is {sorted(names)}")
+    stored = stored_tic_stride(t.schema.metadata)
+    if stored != 1:
+        # the video layouts want the tics between decisions, and a decision-only recording never
+        # rendered them; there is no way to fill them in, so refuse rather than encode a gappy clip
+        raise ValueError(f"{path}: stored_tic_stride {stored}; encode_wan needs a per-tic recording")
 
     action = t["action"].to_numpy(zero_copy_only=False)
     buttons = np.array(t["buttons"].to_pylist())
