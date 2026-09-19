@@ -1,67 +1,50 @@
 #!/bin/bash
-# Dense training corpus (Sep 19 2026). A SEPARATE corpus from raw_arnold (the 17-map, 850-episode corpus):
-# its own directories, its own corpus ids, its own seeds. Purpose: test whether data density per map, not
-# architecture, explains the gap to GameNGen-style results (tens of millions of frames on about five levels).
+# Dense corpus, EVERY tic stored lossless. Separate from raw_arnold (the original 17-map corpus).
+# Started Sep 19 2026. Full documentation: release/DENSE_CORPUS.md.
 #
-#   TARGET=arenas        maps 2,3,4,5 of full_deathmatch             -> raw_arnold_dense/arenas
-#   TARGET=dmsimple      deathmatch_simple MAP01, map_id 101         -> raw_arnold_dense/dmsimple
-#   TARGET=arenas678     maps 6,7,8 of full_deathmatch, 1,000 per map -> raw_arnold_dense/arenas_678
-#                        (recorded on Superman and streamed here; see raw_arnold_dense/arenas_678/README.txt)
-#   TARGET=test-dmsimple eval   deathmatch_simple MAP01, map_id 101  -> raw_arnold_dense_eval/dmsimple
+#   usage: SEGMENT=arenas record_dense.sh [workers=32] [episodes=8000]
 #
-# Maps. Arenas 2,3,4,5 and 6,7,8 are the agent paper's own published train/test split (Arnold README:
-# --map_ids_train "2,3,4,5" --map_ids_test "6,7,8"), so the split is the agent authors' and not ours.
-# deathmatch_simple is the only named map in prior Doom world-model work; both open GameNGen
-# reproductions use it, which is what makes a number on it comparable to anything outside this repo.
-# Recording decides nothing about training: which segments train and which test is chosen later
-# (Rohan, Sep 19 2026). Each segment has its own folder and corpus id so any split stays possible.
+#   SEGMENT=arenas      maps 2,3,4,5 of full_deathmatch   arnold-train-dense-v1      raw_arnold_dense/arenas
+#   SEGMENT=arenas_678  maps 6,7,8 of full_deathmatch     arnold-dense-arenas678-v1  raw_arnold_dense/arenas_678
+#   SEGMENT=dm_simple   deathmatch_simple MAP01 as 101    arnold-dense-dmsimple-v1   raw_arnold_dense/dm_simple
 #
-# This replaces an earlier plan (maps 3,10,12,13 of full_deathmatch, corpus arnold-train-dense4-v1).
-# Those four were picked by reading our own per-map evaluation scores, which selects the training set on
-# the outcome being measured; Rohan rejected it on Sep 19 2026. 134 episodes of that aborted corpus remain
-# in $D/raw_arnold_dense4 and are unused. Nothing downstream should read that directory.
+# Maps 2 to 5 are the Arnold paper's training arenas and 6 to 8 its test arenas (Arnold README:
+# --map_ids_train "2,3,4,5" --map_ids_test "6,7,8"). They were fixed before looking at any model score.
+# WHAT TO TRAIN OR TEST ON IS DECIDED LATER; this script only records. deathmatch_simple is the only named
+# map in prior Doom world-model work, which is what would make a number on it externally comparable.
 #
-# Knobs: WORKERS=32  EPISODES_PER_MAP (2000 arenas, 1000 arenas678 and dmsimple, 20 test-dmsimple)  MAPS  MODE=pertic  PNG_LEVEL=6
-#        N_BOTS=8  EPISODE_TIME=150.  Positional [workers] [total episodes] still override.
-# Resume-safe: an episode whose parquet already exists is skipped, so a relaunch continues a corpus.
+# Seeds are a stable hash of (corpus id, episode id), independent of worker count, and every segment has its
+# own corpus id, so no two segments and no evaluation episode ever share a seed. Resume-safe: an episode whose
+# parquet already exists is skipped, so a relaunch continues a corpus and may use a newer build of the recorder.
 #
-#   TARGET=arenas bash scripts/spiderman/record_dense.sh
+# This replaces record_dense4.sh, which recorded maps 3,10,12,13. Those four were picked by reading our own
+# per-map evaluation scores, which selects the training set on the outcome being measured; Rohan rejected it
+# on Sep 19 2026. 134 episodes of that aborted corpus remain in $D/raw_arnold_dense4 and are unused.
 D=/sata2/data/rnagabhi/doom; cd $D; export TMPDIR=$D/tmp/tmpdir OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
-TARGET=${TARGET:-arenas}; MODE=${MODE:-pertic}; W=${1:-${WORKERS:-32}}
-EPISODE_TIME=${EPISODE_TIME:-150}; N_BOTS=${N_BOTS:-8}; LEVEL=${PNG_LEVEL:-6}
-WAD=full_deathmatch; OFFSET=0; CMD=(); EPM=${EPISODES_PER_MAP:-2000}
-case $TARGET in
-  arenas)        MAPS=${MAPS:-2,3,4,5}; CID=arnold-train-dense-v1;          OUT=$D/raw_arnold_dense/arenas ;;
-  dmsimple)      MAPS=${MAPS:-1};       CID=arnold-dense-dmsimple-v1;       OUT=$D/raw_arnold_dense/dmsimple;      EPM=${EPISODES_PER_MAP:-1000} ;;
-  arenas678)     MAPS=${MAPS:-6,7,8};   CID=arnold-dense-arenas678-v1;      OUT=$D/raw_arnold_dense/arenas_678;    EPM=${EPISODES_PER_MAP:-1000} ;;
-  test-dmsimple) MAPS=${MAPS:-1};       CID=arnold-eval-dense-dmsimple-v1;  OUT=$D/raw_arnold_dense_eval/dmsimple; EPM=${EPISODES_PER_MAP:-20} ;;
-  *) echo "unknown TARGET=$TARGET (arenas|arenas678|dmsimple|test-dmsimple)" >&2; exit 2 ;;
+W=${1:-32}; N=${2:-8000}; SEGMENT=${SEGMENT:-arenas}; WAD=full_deathmatch; EXTRA=()
+case $SEGMENT in
+  arenas)     MAPS=2,3,4,5; CID=arnold-train-dense-v1;     OUT=$D/raw_arnold_dense/arenas ;;
+  arenas_678) MAPS=6,7,8;   CID=arnold-dense-arenas678-v1; OUT=$D/raw_arnold_dense/arenas_678 ;;
+  dm_simple)
+    MAPS=1; CID=arnold-dense-dmsimple-v1; OUT=$D/raw_arnold_dense/dm_simple; WAD=deathmatch_simple
+    # MAP01 of deathmatch_simple is map 1 to the engine, which is full_deathmatch's arena 1, so the stored
+    # label is offset to 101 and the episode metadata carries the WAD name and the engine's own map id.
+    EXTRA=(--map-id-offset 100 --init-game-command "pukename change_difficulty 5")
+    # BLOCKED, Sep 19 2026: under Arnold this map records with no opponent at all, and the difficulty command
+    # does not change that (see release/DENSE_CORPUS.md for the measurements). Recording it now would produce
+    # thousands of empty episodes, so it refuses until someone verifies enemies appear.
+    if [ "${DM_SIMPLE_OK:-0}" != 1 ]; then
+      echo "SEGMENT=dm_simple refuses to run: Arnold records deathmatch_simple empty (0 kills, 0 deaths," >&2
+      echo "flat health and ammo). See release/DENSE_CORPUS.md. Set DM_SIMPLE_OK=1 once enemies appear." >&2
+      exit 3
+    fi ;;
+  *) echo "unknown SEGMENT=$SEGMENT (arenas|arenas_678|dm_simple)" >&2; exit 2 ;;
 esac
-if [ "${TARGET#test-}" = dmsimple ] || [ "$TARGET" = dmsimple ]; then
-  # deathmatch_simple's MAP01 is map 1 to the engine, which is full_deathmatch's arena 1; offset the stored
-  # label so the two directories can be merged at encode time.
-  WAD=deathmatch_simple; OFFSET=100; CMD=(--zdoom-bots)
-  # BLOCKED, Sep 19 2026: under Arnold this map records with no opponent at all. Measured over a full
-  # 150 game-second episode: 0 kills, 0 deaths, frags 0, health flat at 100, ammo flat at 50, with Arnold's
-  # scripted marines AND with --zdoom-bots. `pukename change_difficulty 5` changes nothing (no monster ever
-  # appears, with or without -deathmatch), so the ACS curriculum is not what populates it. The map itself is
-  # fine: driven straight from ViZDoom with the reproduction's own cfg and DOOM_ENV_WITH_BOTS_ARGS plus
-  # addbot, 4 to 5 opponents are visible at once and DeadDoomPlayer labels appear throughout. So the gap is
-  # between Arnold's game setup and the reproduction's, and it is not yet found. Recording this target now
-  # would produce thousands of empty episodes, so it refuses until someone clears it.
-  if [ "${DMSIMPLE_OK:-0}" != 1 ]; then
-    echo "TARGET=$TARGET refuses to run: Arnold records deathmatch_simple with no opponents (see the comment" >&2
-    echo "above and release/DENSE_CORPUS.md). Set DMSIMPLE_OK=1 once opponents are verified to appear." >&2
-    exit 3
-  fi
-fi
-N=${2:-$((EPM * $(echo $MAPS | tr ',' '\n' | wc -l)))}
-FAST=(); [ "$MODE" = decision ] && FAST=(--decision-only)
-ARN=(--frame_skip 4 --action_combinations "move_fb+move_lr;turn_lr;attack" --network_type dqn_rnn --recurrence lstm --n_rec_layers 1 --hist_size 4 --remember 1 --labels_mapping "" --game_features "target,enemy" --bucket_size "[10, 1]" --dropout 0.5 --speed on --crouch off --scenario deathmatch --wad $WAD --n_bots $N_BOTS --reload $D/Arnold/pretrained/vizdoom_2017_track2.pth --evaluate 1 --visualize 0 --gpu_id -1)
+ARN=(--frame_skip 4 --action_combinations "move_fb+move_lr;turn_lr;attack" --network_type dqn_rnn --recurrence lstm --n_rec_layers 1 --hist_size 4 --remember 1 --labels_mapping "" --game_features "target,enemy" --bucket_size "[10, 1]" --dropout 0.5 --speed on --crouch off --scenario deathmatch --wad $WAD --n_bots 8 --reload $D/Arnold/pretrained/vizdoom_2017_track2.pth --evaluate 1 --visualize 0 --gpu_id -1)
 mkdir -p $OUT $D/logs/rec_dense
-echo "$(date -Iseconds) start target=$TARGET mode=$MODE workers=$W episodes=$N maps=$MAPS wad=$WAD offset=$OFFSET png=$LEVEL corpus=$CID git=$(cd $D/repo && git rev-parse --short HEAD)" >> $OUT/RECORDING_LOG.txt
+echo "$(date -Iseconds) start segment=$SEGMENT workers=$W episodes=$N maps=$MAPS corpus=$CID mode=per-tic png=6 git=$(cd $D/repo && git rev-parse --short HEAD)" >> $OUT/RECORDING_LOG.txt
 for w in $(seq 0 $((W - 1))); do
-  PYTHONHASHSEED=0 nice -n 10 ~/miniconda3/envs/doom/bin/python repo/record_arnold.py --arnold-dir $D/Arnold --out-dir $OUT --map-ids $MAPS --episodes $N --episode-time $EPISODE_TIME --worker-id $w --num-workers $W --compress-level $LEVEL --map-id-offset $OFFSET "${CMD[@]}" "${FAST[@]}" --corpus-id $CID -- "${ARN[@]}" > $D/logs/rec_dense/${TARGET}_worker_$w.log 2>&1 &
+  PYTHONHASHSEED=0 nice -n 10 ~/miniconda3/envs/doom/bin/python repo/record_arnold.py --arnold-dir $D/Arnold --out-dir $OUT --map-ids $MAPS --episodes $N --episode-time 150 --worker-id $w --num-workers $W --compress-level 6 "${EXTRA[@]}" --corpus-id $CID -- "${ARN[@]}" > $D/logs/rec_dense/${SEGMENT}_worker_$w.log 2>&1 &
 done
 wait
-echo "$(date -Iseconds) done target=$TARGET files=$(ls $OUT/*.parquet 2>/dev/null | wc -l) bytes=$(du -sb $OUT | cut -f1)" >> $OUT/RECORDING_LOG.txt
+echo "$(date -Iseconds) done segment=$SEGMENT files=$(ls $OUT/*.parquet 2>/dev/null | wc -l) bytes=$(du -sb $OUT | cut -f1)" >> $OUT/RECORDING_LOG.txt

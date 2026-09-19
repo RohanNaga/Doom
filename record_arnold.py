@@ -167,6 +167,28 @@ def send_init_commands(game):
         game.game.send_game_command(command)
 
 
+def episode_provenance(episode_id, map_id, label, wad, seeds):
+    """The `doomdit_episode` record written into each episode's parquet metadata.
+
+    Only the first five keys are unconditional. Every other key appears exactly when the option that
+    needs it was used, so a default per-tic run writes byte-for-byte what the recorder wrote before
+    these options existed, and a segment already being recorded can be resumed by a newer build
+    without the files disagreeing. A reader defaults a missing key: offset 0, no commands, stride 1.
+    """
+    prov = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id),
+            "map_id": int(label), "seeds": seeds}
+    if REC.map_id_offset:
+        # the stored label is no longer the map the engine loaded, so both, and the WAD, become facts
+        prov.update(engine_map_id=int(map_id), map_id_offset=int(REC.map_id_offset), wad=wad)
+    if REC.init_game_commands:
+        prov["init_game_commands"] = list(REC.init_game_commands)
+    if REC.zdoom_bots:
+        prov["bots"] = "zdoom addbot"
+    if REC.decision_only:
+        prov["stored_tic_stride"] = int(REC.frame_skip)
+    return prov
+
+
 def record_episode(game, network, params, map_id, episode_id):
     from vizdoom import GameVariable
     import pyarrow as pa
@@ -266,12 +288,7 @@ def record_episode(game, network, params, map_id, episode_id):
         "angle": pa.array(cols["angle"], pa.float32()),
         "frame": pa.array(cols["frame"], pa.binary()),
     })
-    provenance = {"seed_scheme": SEED_SCHEME, "corpus_id": REC.corpus_id, "episode_id": int(episode_id),
-                  "map_id": label, "engine_map_id": int(map_id), "wad": wad, "seeds": seeds}
-    if REC.init_game_commands:
-        provenance["init_game_commands"] = list(REC.init_game_commands)
-    if REC.decision_only:
-        provenance["stored_tic_stride"] = int(REC.frame_skip)   # absent means 1, so per-tic files are unchanged
+    provenance = episode_provenance(episode_id, map_id, label, wad, seeds)
     table = table.replace_schema_metadata({**(table.schema.metadata or {}), b"doomdit_episode": json.dumps(provenance, sort_keys=True).encode()})
     stats.update(rows=n, tics=tic, decisions=decisions, seconds=time.time() - t0,
                  png_bytes_mean=float(np.mean([len(b) for b in cols["frame"]])) if n else 0.0)
@@ -318,9 +335,13 @@ def record_all(game, network, params):
         meta = {"available_buttons": buttons, "action_combinations": params.action_combinations,
                 "n_actions": game.action_builder.n_actions, "frame_skip": params.frame_skip,
                 "screen": "RES_320X240 RGB HUD on weapon on crosshair on", "agent": "Arnold vizdoom_2017_track2",
-                "wad": os.path.basename(game.scenario_path), "map_id_offset": REC.map_id_offset,
-                "init_game_commands": list(REC.init_game_commands),
-                "bots": "zdoom addbot" if REC.zdoom_bots else "arnold scripted marines", "n_bots": params.n_bots}
+                "wad": os.path.basename(game.scenario_path)}
+        if REC.map_id_offset:
+            meta["map_id_offset"] = REC.map_id_offset
+        if REC.init_game_commands:
+            meta["init_game_commands"] = list(REC.init_game_commands)
+        if REC.zdoom_bots:
+            meta["bots"] = "zdoom addbot"
         if REC.decision_only:
             meta["stored_tic_stride"] = int(params.frame_skip)
         with open(meta_path, "w") as f:
