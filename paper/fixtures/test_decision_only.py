@@ -191,6 +191,39 @@ def test_stride_must_be_a_multiple_of_the_stored_stride():
         decision_rows(action, buttons, deaths, stride=6, stored=SKIP)
 
 
+@pytest.fixture
+def rec(monkeypatch):
+    """`record_arnold.REC` set to the defaults a live per-tic segment runs with."""
+    record_arnold = pytest.importorskip("record_arnold")
+    for k, v in dict(corpus_id="arnold-train-dense-v1", map_id_offset=0, init_game_commands=[],
+                     zdoom_bots=False, decision_only=False, frame_skip=4).items():
+        monkeypatch.setattr(record_arnold.REC, k, v, raising=False)
+    return record_arnold
+
+
+def test_a_default_run_writes_the_metadata_it_always_wrote(rec):
+    """The live segments must keep writing exactly these keys, or a resumed corpus disagrees with itself."""
+    prov = rec.episode_provenance(7, 3, 3, "full_deathmatch.wad", {"vizdoom": 1})
+    assert sorted(prov) == ["corpus_id", "episode_id", "map_id", "seed_scheme", "seeds"]
+    assert prov["map_id"] == 3 and prov["episode_id"] == 7
+
+
+def test_each_extra_metadata_key_appears_only_with_its_option(rec):
+    record_arnold = rec
+    record_arnold.REC.map_id_offset = 100
+    prov = record_arnold.episode_provenance(7, 1, 101, "deathmatch_simple.wad", {})
+    assert prov["map_id"] == 101 and prov["engine_map_id"] == 1
+    assert prov["wad"] == "deathmatch_simple.wad" and prov["map_id_offset"] == 100
+    assert "init_game_commands" not in prov and "bots" not in prov and "stored_tic_stride" not in prov
+
+    record_arnold.REC.init_game_commands = ["pukename change_difficulty 5"]
+    record_arnold.REC.zdoom_bots = True
+    record_arnold.REC.decision_only = True
+    prov = record_arnold.episode_provenance(7, 1, 101, "deathmatch_simple.wad", {})
+    assert prov["init_game_commands"] == ["pukename change_difficulty 5"]
+    assert prov["bots"] == "zdoom addbot" and prov["stored_tic_stride"] == 4
+
+
 def test_map_id_offset_keeps_two_wads_apart_and_refuses_to_overflow():
     """deathmatch_simple's MAP01 and full_deathmatch's arena 1 are both map 1 to the engine."""
     record_arnold = pytest.importorskip("record_arnold")
