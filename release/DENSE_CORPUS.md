@@ -10,7 +10,7 @@ A second recording, kept separate from the original 17-map corpus (`raw_arnold`,
 |---|---|---|---|---|
 | `arenas` | 2, 3, 4, 5 of `full_deathmatch` | `arnold-train-dense-v1` | `raw_arnold_dense/arenas` | Spiderman |
 | `arenas_678` | 6, 7, 8 of `full_deathmatch` | `arnold-dense-arenas678-v1` | `raw_arnold_dense/arenas_678` | Superman |
-| `dm_simple` | `deathmatch_simple` MAP01, stored as `map_id` 101 | `arnold-dense-dmsimple-v1` | `raw_arnold_dense/dm_simple` | not recorded — blocked, see below |
+| `dm_simple` | `deathmatch_simple` MAP01, stored as `map_id` 101 | `arnold-dense-dmsimple-v1` | `raw_arnold_dense/dm_simple` | not recorded — engine blocker fixed Sep 20, still gated, see below |
 
 **Why these maps.** Arenas 2 to 5 are the Arnold paper's training maps and 6 to 8 its test maps (Arnold's README: `--map_ids_train "2,3,4,5" --map_ids_test "6,7,8"`). The split is the agent authors' and was fixed **before looking at any model score of ours**. `deathmatch_simple` is the only named map in prior Doom world-model work — both open GameNGen reproductions use it — which is what would make a number on it comparable to anything published.
 
@@ -47,15 +47,24 @@ One parquet per episode, `ep_XXXXX.parquet`, 150 game-seconds, about 5,100 tics 
 
 Level 3 records **1.52x faster for 8.8% more bytes**, level 1 1.76x faster for 17.3% more. Over 8,000 episodes that is roughly 12.2 h and 2.33 TB at level 6 against 7.9 h and 2.54 TB at level 3. The level 6 row matches what the live job actually does (31 to 34 tics/s per worker), which is the check that the projection is not fantasy. **The default stays 6** so a relaunch reproduces the job now running; mixing levels within a segment is safe, because every level decodes to the same array.
 
-## `deathmatch_simple` does not work under Arnold yet
+## `deathmatch_simple`: found and fixed (Sep 20 2026)
 
-`SEGMENT=dm_simple` refuses to run without `DM_SIMPLE_OK=1`, so that nobody produces thousands of empty episodes. Measured over full Arnold episodes: 0 kills, 0 deaths, 0 frags, health flat at 100, ammo flat at 50 — with Arnold's scripted marines and again with `--zdoom-bots`.
+**`--zdoom-bots` was never reaching Arnold.** It was not a game argument, a cvar, a skill level or the ACS script. The recorder does not build Arnold's `Game`; Arnold's `deathmatch.py` does, and it passes every choice as an explicit keyword, including `use_scripted_marines=True` at `src/doom/scenarios/deathmatch.py:106`. The recorder injected its own settings by rebinding that module's `Game` to a `functools.partial`, and partial keywords are **defaults a call site overrides**: `partial(Game, use_scripted_marines=False)(use_scripted_marines=True)` builds a Game with scripted marines. So every `--zdoom-bots` run silently kept Arnold's ACS marines, whose script lives in `full_deathmatch.wad` and adds nobody on another WAD. `screen_resolution` was the only injected setting that ever took effect, and only because that one line of Arnold's call site is commented out.
 
-- **`pukename change_difficulty 5` is not the fix.** Driving the map straight from ViZDoom with the reproduction's own `deathmatch_simple.cfg`, with and without `-deathmatch`, and with and without the command, no monster ever spawns: the only non-player objects are pickups (`Medikit`, `ShellBox`, `Clip`, `Shotgun`) and `BulletPuff`. The flag `--init-game-command` exists and works, and the segment sends the command, but it changes nothing here.
-- **The map itself is fine.** With the reproduction's `DOOM_ENV_WITH_BOTS_ARGS` plus `removebots` and eight `addbot` calls, 4 to 5 opponents are visible at once and `DeadDoomPlayer` labels appear throughout. The WAD is byte-identical to the reproduction's copy (md5 `421bc939f1015c25d09a9bbcc6d073f4`).
-- **So the gap is Arnold's game setup, and it has not been found.** Arnold's deathmatch scenario hardcodes `use_scripted_marines=True` (`src/doom/scenarios/deathmatch.py:106`), whose ACS script lives in `full_deathmatch.wad` and silently adds nobody on another WAD. `--zdoom-bots` switches Arnold to `addbot`, which is what works in the bare probe, but under Arnold it still yields no engagement.
+`record_arnold.py` now applies its settings *after* the caller's with `forced_game`, covered by `paper/fixtures/test_recorder_game_kwargs.py`.
 
-Next step: diff Arnold's argument list against `DOOM_ENV_WITH_BOTS_ARGS` item by item (Arnold adds `+sv_noautoaim`, `+sv_spawnfarthest`, `+freelook`, `+sv_cheats 1` and `set_doom_skill`; the reproduction adds `+viz_nocheat 0`, `+cl_run 1`, `+sv_nocrouch 1`, `+sv_noexit 1`), or enable the labels buffer in a recorded episode and count `DoomPlayer` directly. If it cannot be made to work, the map is exploration-only and that must be stated wherever a number from it is reported.
+**Proof.** Two 60-game-second Arnold episodes on `deathmatch_simple`, same corpus id so both draw the same seeds, same flags (`--zdoom-bots --map-id-offset 100 --init-game-command "pukename change_difficulty 5"`, `--n_bots 8`), one process at a time. The only difference is how the recorder injects its keywords:
+
+| | rows / tics | kills | deaths | frags | health | ammo |
+|---|---|---|---|---|---|---|
+| `forced_game` (fixed) | 1746 | 0 | **9** | **2** | 5 to 100, 17 changes | 21 to 50, 43 changes |
+| `functools.partial` (control) | 2097 | 0 | 0 | 0 | flat 100 | flat 50 |
+
+The control reproduces the previously recorded symptom exactly — 0 kills, 0 deaths, 0 frags, health flat at 100, ammo flat at 50 — which is what makes the mechanism above the explanation for all of it rather than one more suspect. The fixed episode ends early because the agent died nine times in sixty game-seconds; `kills` stays 0 in both because `KILLCOUNT` counts monsters, and a bot killed in deathmatch scores `FRAGCOUNT`.
+
+Two earlier findings still stand and are now explained: `pukename change_difficulty 5` changes nothing here (driving the map straight from ViZDoom with the reproduction's own `deathmatch_simple.cfg`, with and without `-deathmatch` and with and without the command, no monster ever spawns; the only non-player objects are pickups and `BulletPuff`), and the map itself was never the problem (with the reproduction's `DOOM_ENV_WITH_BOTS_ARGS` plus `removebots` and eight `addbot` calls, 4 to 5 opponents are visible at once; the WAD is byte-identical to the reproduction's copy, md5 `421bc939f1015c25d09a9bbcc6d073f4`).
+
+**Still gated.** `SEGMENT=dm_simple` continues to refuse without `DM_SIMPLE_OK=1`. The engine blocker is gone, but whether to spend the disk and the days on this segment is a corpus decision, not a bug fix, and one 60-second episode is not a corpus-scale check. Before lifting it, record a handful of full 150-second episodes and confirm deaths and frags are non-zero across all of them.
 
 ## How to verify a segment
 
