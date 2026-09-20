@@ -1,0 +1,210 @@
+{
+ "dir": "/sata2/data/rnagabhi/doom/raw_arnold_dense/arenas_678",
+ "name": "arenas_678",
+ "episodes_sampled": 200,
+ "anchors_per_episode": 100,
+ "cell_units": 64.0,
+ "near_static_threshold_db": 35.0,
+ "gaps_in_tics": [
+  1,
+  2,
+  4,
+  8
+ ],
+ "n_errors": 0,
+ "errors": [],
+ "all": {
+  "episodes": 200,
+  "rows": 985658,
+  "pairs": 20000,
+  "persistence_psnr": {
+   "1": 21.44433647813142,
+   "2": 19.84089995310887,
+   "4": 18.481207872739997,
+   "8": 17.578339871669996
+  },
+  "persistence_psnr_se": {
+   "1": 0.0560618705548235,
+   "2": 0.037932018588620595,
+   "4": 0.029003185855183126,
+   "8": 0.027159175533117724
+  },
+  "near_static_fraction": 0.01965,
+  "tic_step": [
+   0,
+   985458,
+   0,
+   0,
+   0,
+   0
+  ],
+  "run_lengths": [
+   0,
+   307,
+   313,
+   280,
+   112307,
+   104,
+   89,
+   75,
+   27132,
+   30
+  ],
+  "run_start_phase": [
+   59207,
+   31995,
+   34598,
+   32147
+  ],
+  "explored_cells_union": 1313,
+  "explored_cells_per_episode_mean": 194.65,
+  "explored_cells_per_episode_min": 86,
+  "explored_cells_per_episode_max": 336
+ },
+ "per_map": {
+  "6": {
+   "episodes": 60,
+   "rows": 297525,
+   "pairs": 6000,
+   "persistence_psnr": {
+    "1": 20.831304390898698,
+    "2": 19.49493348141082,
+    "4": 18.252677295533744,
+    "8": 17.458606719970703
+   },
+   "persistence_psnr_se": {
+    "1": 0.10366371154552018,
+    "2": 0.07960504374046555,
+    "4": 0.05394212933139015,
+    "8": 0.04445588070329841
+   },
+   "near_static_fraction": 0.011833333333333333,
+   "tic_step": [
+    0,
+    297465,
+    0,
+    0,
+    0,
+    0
+   ],
+   "run_lengths": [
+    0,
+    76,
+    80,
+    73,
+    31393,
+    19,
+    26,
+    19,
+    7869,
+    9
+   ],
+   "run_start_phase": [
+    18782,
+    8763,
+    9282,
+    8382
+   ],
+   "explored_cells_union": 657,
+   "explored_cells_per_episode_mean": 184.18333333333334,
+   "explored_cells_per_episode_min": 96,
+   "explored_cells_per_episode_max": 336
+  },
+  "7": {
+   "episodes": 65,
+   "rows": 313176,
+   "pairs": 6500,
+   "persistence_psnr": {
+    "1": 20.105078687586555,
+    "2": 18.2136445627652,
+    "4": 16.762653350830078,
+    "8": 15.88167953491211
+   },
+   "persistence_psnr_se": {
+    "1": 0.09313521119175526,
+    "2": 0.04612955404120156,
+    "4": 0.032629443443243776,
+    "8": 0.03389021215733376
+   },
+   "near_static_fraction": 0.0073846153846153844,
+   "tic_step": [
+    0,
+    313111,
+    0,
+    0,
+    0,
+    0
+   ],
+   "run_lengths": [
+    0,
+    128,
+    156,
+    128,
+    43067,
+    48,
+    39,
+    30,
+    9599,
+    9
+   ],
+   "run_start_phase": [
+    19141,
+    11439,
+    13378,
+    13209
+   ],
+   "explored_cells_union": 339,
+   "explored_cells_per_episode_mean": 155.84615384615384,
+   "explored_cells_per_episode_min": 86,
+   "explored_cells_per_episode_max": 231
+  },
+  "8": {
+   "episodes": 75,
+   "rows": 374957,
+   "pairs": 7500,
+   "persistence_psnr": {
+    "1": 23.095452233056477,
+    "2": 21.52796113543181,
+    "4": 20.15344571024892,
+    "8": 19.14456556899068
+   },
+   "persistence_psnr_se": {
+    "1": 0.09136872529109513,
+    "2": 0.06229324587940325,
+    "4": 0.05099605480807251,
+    "8": 0.04956741885531805
+   },
+   "near_static_fraction": 0.036533333333333334,
+   "tic_step": [
+    0,
+    374882,
+    0,
+    0,
+    0,
+    0
+   ],
+   "run_lengths": [
+    0,
+    103,
+    77,
+    79,
+    37847,
+    37,
+    24,
+    26,
+    9664,
+    12
+   ],
+   "run_start_phase": [
+    21284,
+    11793,
+    11938,
+    10556
+   ],
+   "explored_cells_union": 508,
+   "explored_cells_per_episode_mean": 236.65333333333334,
+   "explored_cells_per_episode_min": 125,
+   "explored_cells_per_episode_max": 315
+  }
+ }
+}

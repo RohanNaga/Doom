@@ -1,0 +1,81 @@
+/home/rnagabhi/miniconda3/envs/doom/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+Some weights of the model checkpoint at PixArt-alpha/PixArt-XL-2-512x512 were not used when initializing PixArtTransformer2DModel: ['caption_projection.y_embedding']
+- This IS expected if you are initializing PixArtTransformer2DModel from the checkpoint of a model trained on another task or with another architecture (e.g. initializing a BertForSequenceClassification model from a BertForPreTraining model).
+- This IS NOT expected if you are initializing PixArtTransformer2DModel from the checkpoint of a model that you expect to be exactly identical (initializing a BertForSequenceClassification model from a BertForSequenceClassification model).
+/home/rnagabhi/miniconda3/envs/doom/lib/python3.10/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/rnagabhi/miniconda3/envs/doom/lib/python3.10/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+val: 60 episodes, 57,413 windows, evaluating 512, step 89000, objective v
+/sata2/data/rnagabhi/doom/repo/eval_tf.py:130: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  psnr_dec=float(psnr(pred_img[i:i+1], gt_img[i:i+1])), lpips_dec=float(lp(pred_img[i:i+1] * 2 - 1, gt_img[i:i+1] * 2 - 1).flatten()),
+/sata2/data/rnagabhi/doom/repo/eval_tf.py:137: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:213.)
+  rf = torch.from_numpy(raw.get(ep_id, tic)).permute(2, 0, 1).float().div(255).unsqueeze(0).to(device)
+  160/512 psnr_dec=21.81
+  320/512 psnr_dec=21.86
+  480/512 psnr_dec=21.97
+{
+ "psnr_dec": {
+  "mean": 21.952053893357515,
+  "sem": 0.17213113817615125,
+  "n": 512
+ },
+ "lpips_dec": {
+  "mean": 0.26730253396817716,
+  "sem": 0.004642194542730535,
+  "n": 512
+ },
+ "copy_psnr_dec": {
+  "mean": 19.728467766195536,
+  "sem": 0.15421147018056394,
+  "n": 512
+ },
+ "latent_mse": {
+  "mean": 0.34073839667689754,
+  "sem": 0.0038561044499847465,
+  "n": 512
+ },
+ "hud_psnr_dec": {
+  "mean": 33.30385393276811,
+  "sem": 0.2086973267680639,
+  "n": 512
+ },
+ "psnr_raw": {
+  "mean": 21.059977559372783,
+  "sem": 0.15350071152715558,
+  "n": 512
+ },
+ "lpips_raw": {
+  "mean": 0.28012387368653435,
+  "sem": 0.0045306690055705616,
+  "n": 512
+ },
+ "copy_psnr_raw": {
+  "mean": 19.14119073189795,
+  "sem": 0.1384889278345519,
+  "n": 512
+ },
+ "vae_psnr": {
+  "mean": 28.55934054404497,
+  "sem": 0.09681782822675278,
+  "n": 512
+ },
+ "vae_lpips": {
+  "mean": 0.05074223223346053,
+  "sem": 0.0006187451198178734,
+  "n": 512
+ },
+ "hud_psnr_raw": {
+  "mean": 29.60808251053095,
+  "sem": 0.1447786856343013,
+  "n": 512
+ },
+ "hud_vae_psnr": {
+  "mean": 31.79804403334856,
+  "sem": 0.07014532614846389,
+  "n": 512
+ },
+ "sampling_frames_per_s": 3.1751122718637848
+}

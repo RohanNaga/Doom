@@ -30,12 +30,16 @@ case $SEGMENT in
     # MAP01 of deathmatch_simple is map 1 to the engine, which is full_deathmatch's arena 1, so the stored
     # label is offset to 101 and the episode metadata carries the WAD name and the engine's own map id.
     EXTRA=(--map-id-offset 100 --init-game-command "pukename change_difficulty 5")
-    # BLOCKED, Sep 19 2026: under Arnold this map records with no opponent at all, and the difficulty command
-    # does not change that (see release/DENSE_CORPUS.md for the measurements). Recording it now would produce
-    # thousands of empty episodes, so it refuses until someone verifies enemies appear.
+    # The engine blocker is fixed (Sep 20 2026): --zdoom-bots never reached Arnold, because the recorder
+    # injected it with a functools.partial whose keywords Arnold's own call site overrode. A 60-game-second
+    # episode now records 9 deaths and 2 frags where the control records none. See release/DENSE_CORPUS.md.
+    # The gate stays: whether to spend the disk and the days on this segment is a corpus decision, and one
+    # short episode is not a corpus-scale check.
+    EXTRA+=(--zdoom-bots)
     if [ "${DM_SIMPLE_OK:-0}" != 1 ]; then
-      echo "SEGMENT=dm_simple refuses to run: Arnold records deathmatch_simple empty (0 kills, 0 deaths," >&2
-      echo "flat health and ammo). See release/DENSE_CORPUS.md. Set DM_SIMPLE_OK=1 once enemies appear." >&2
+      echo "SEGMENT=dm_simple is gated, not broken. Arnold now fights on this map (--zdoom-bots works as of" >&2
+      echo "Sep 20 2026). Record a few full 150-second episodes, confirm deaths and frags are non-zero in all" >&2
+      echo "of them, then set DM_SIMPLE_OK=1. See release/DENSE_CORPUS.md." >&2
       exit 3
     fi ;;
   *) echo "unknown SEGMENT=$SEGMENT (arenas|arenas_678|dm_simple)" >&2; exit 2 ;;

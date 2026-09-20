@@ -1,0 +1,74 @@
+[
+ {
+  "dir": "q5_fixed",
+  "file": "ep_00000.parquet",
+  "rows": 1746,
+  "corpus_id": "q5-dmsimple-fixed",
+  "bots": "zdoom addbot",
+  "engine_map_id": 1,
+  "wad": "deathmatch_simple.wad",
+  "stored_map_id": 101,
+  "kills": {
+   "min": 0,
+   "max": 0,
+   "changes": 0
+  },
+  "deaths": {
+   "min": 0,
+   "max": 9,
+   "changes": 9
+  },
+  "frags": {
+   "min": 0,
+   "max": 2,
+   "changes": 2
+  },
+  "health": {
+   "min": 5,
+   "max": 100,
+   "changes": 17
+  },
+  "ammo": {
+   "min": 21,
+   "max": 50,
+   "changes": 43
+  },
+  "engaged": true
+ },
+ {
+  "dir": "q5_control",
+  "file": "ep_00000.parquet",
+  "rows": 2097,
+  "corpus_id": "q5-dmsimple-fixed",
+  "bots": "zdoom addbot",
+  "engine_map_id": 1,
+  "wad": "deathmatch_simple.wad",
+  "stored_map_id": 101,
+  "kills": {
+   "min": 0,
+   "max": 0,
+   "changes": 0
+  },
+  "deaths": {
+   "min": 0,
+   "max": 0,
+   "changes": 0
+  },
+  "frags": {
+   "min": 0,
+   "max": 0,
+   "changes": 0
+  },
+  "health": {
+   "min": 100,
+   "max": 100,
+   "changes": 0
+  },
+  "ammo": {
+   "min": 50,
+   "max": 50,
+   "changes": 0
+  },
+  "engaged": false
+ }
+]

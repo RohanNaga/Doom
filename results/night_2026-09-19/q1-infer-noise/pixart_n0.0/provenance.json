@@ -1,0 +1,1 @@
+{"git":"103b15e488cbfe0f233fb902d2a55aa2718e51c8","backbone":"pixart","run":"033-pixart-l32-aligned","infer_noise":0.0,"num_rollouts":128,"batch_size":64,"horizon":64,"steps":50,"eta":0.0,"seed":0,"decode_batch":64,"save_clips":128,"vae":"/sata2/data/rnagabhi/doom/vae_decoder_arnold_lpips/vae","latents":"/sata2/data/rnagabhi/doom/latents_arnold_eval/seen"}

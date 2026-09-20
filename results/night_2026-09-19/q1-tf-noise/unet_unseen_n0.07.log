@@ -1,0 +1,80 @@
+/home/rnagabhi/miniconda3/envs/doom/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+Some weights of UNet2DConditionModel were not initialized from the model checkpoint at CompVis/stable-diffusion-v1-4 and are newly initialized: ['class_embedding.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+/home/rnagabhi/miniconda3/envs/doom/lib/python3.10/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/rnagabhi/miniconda3/envs/doom/lib/python3.10/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+val: 20 episodes, 22,180 windows, evaluating 512, step 87000, objective v
+/sata2/data/rnagabhi/doom/repo/eval_tf.py:130: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  psnr_dec=float(psnr(pred_img[i:i+1], gt_img[i:i+1])), lpips_dec=float(lp(pred_img[i:i+1] * 2 - 1, gt_img[i:i+1] * 2 - 1).flatten()),
+/sata2/data/rnagabhi/doom/repo/eval_tf.py:137: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:213.)
+  rf = torch.from_numpy(raw.get(ep_id, tic)).permute(2, 0, 1).float().div(255).unsqueeze(0).to(device)
+  160/512 psnr_dec=19.75
+  320/512 psnr_dec=19.70
+  480/512 psnr_dec=20.05
+{
+ "psnr_dec": {
+  "mean": 20.065430480986834,
+  "sem": 0.11042374176786111,
+  "n": 512
+ },
+ "lpips_dec": {
+  "mean": 0.4374381289235316,
+  "sem": 0.0024964274833877077,
+  "n": 512
+ },
+ "copy_psnr_dec": {
+  "mean": 19.286962555721402,
+  "sem": 0.10982502793891027,
+  "n": 512
+ },
+ "latent_mse": {
+  "mean": 0.4166122864698991,
+  "sem": 0.002168663188565625,
+  "n": 512
+ },
+ "hud_psnr_dec": {
+  "mean": 31.187906600534916,
+  "sem": 0.1577451432467629,
+  "n": 512
+ },
+ "psnr_raw": {
+  "mean": 19.2130039986223,
+  "sem": 0.0980460316882518,
+  "n": 512
+ },
+ "lpips_raw": {
+  "mean": 0.4511094558984041,
+  "sem": 0.0024257889102600317,
+  "n": 512
+ },
+ "copy_psnr_raw": {
+  "mean": 18.544195853173733,
+  "sem": 0.09863438058982721,
+  "n": 512
+ },
+ "vae_psnr": {
+  "mean": 26.43346893787384,
+  "sem": 0.06593422352086212,
+  "n": 512
+ },
+ "vae_lpips": {
+  "mean": 0.06978899200839805,
+  "sem": 0.0005636357455962153,
+  "n": 512
+ },
+ "hud_psnr_raw": {
+  "mean": 28.305575776845217,
+  "sem": 0.11965205389109623,
+  "n": 512
+ },
+ "hud_vae_psnr": {
+  "mean": 30.484508480876684,
+  "sem": 0.07649652942632602,
+  "n": 512
+ },
+ "sampling_frames_per_s": 4.018118046467476
+}

@@ -1,0 +1,81 @@
+{
+ "dir": "/sata2/data/rnagabhi/doom/raw_arnold_eval/seen",
+ "name": "ours_seen",
+ "episodes_sampled": 40,
+ "anchors_per_episode": 500,
+ "cell_units": 64.0,
+ "near_static_threshold_db": 35.0,
+ "gaps_in_tics": [
+  1,
+  2,
+  4,
+  8
+ ],
+ "n_errors": 0,
+ "errors": [],
+ "all": {
+  "episodes": 40,
+  "rows": 197459,
+  "pairs": 20000,
+  "persistence_psnr": {
+   "1": 21.587499555546636,
+   "2": 20.2001830954585,
+   "4": 18.938136109677522,
+   "8": 18.12293815612793
+  },
+  "persistence_psnr_se": {
+   "1": 0.05552639018242906,
+   "2": 0.04093935506299115,
+   "4": 0.028161013773628445,
+   "8": 0.026138114946186546
+  },
+  "near_static_fraction": 0.01465,
+  "tic_step": [
+   0,
+   197419,
+   0,
+   0,
+   0,
+   0
+  ],
+  "run_lengths": [
+   0,
+   70,
+   69,
+   46,
+   21888,
+   22,
+   14,
+   16,
+   5084,
+   3
+  ],
+  "run_start_phase": [
+   11427,
+   6586,
+   6584,
+   6244
+  ],
+  "explored_cells_union": 3628,
+  "explored_cells_per_episode_mean": 268.875,
+  "explored_cells_per_episode_min": 118,
+  "explored_cells_per_episode_max": 576
+ },
+ "frames_cached": {
+  "path": "/sata2/data/rnagabhi/doom/tmp/night/q4/frames_ours_seen.npy",
+  "shape": [
+   20000,
+   240,
+   320,
+   3
+  ]
+ },
+ "vae_ceiling": {
+  "vae_id": "stabilityai/sd-vae-ft-mse",
+  "frames": 20000,
+  "psnr": 23.643171310424805,
+  "psnr_se": 0.007418805443126428,
+  "lpips": 0.0973820835351944,
+  "lpips_se": 0.00013751125823103862
+ }
+}
