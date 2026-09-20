@@ -24,6 +24,10 @@ def load(directory):
         d = json.load(open(p))
         prov = os.path.join(os.path.dirname(p), "provenance.json")
         d["_provenance"] = json.load(open(prov)) if os.path.exists(prov) else {}
+        # FVD is only computed where clips were kept (the 0.0 reference and the best level)
+        for f in (16, 32):
+            fp = os.path.join(os.path.dirname(p), f"fvd{f}.json")
+            d[f"fvd{f}"] = json.load(open(fp))["fvd"] if os.path.exists(fp) else None
         out.setdefault(backbone, {})[float(noise)] = d
     return out
 
@@ -45,17 +49,19 @@ def table(data):
         copy = at(next(iter(rows.values())), "copy_seed_psnr", 64)
         lines += [f"### {ROW_NAME.get(bb, bb)}", ""]
         lines.append("| infer-noise | " + " | ".join(f"PSNR@{h}" for h in HORIZONS)
-                     + " | " + " | ".join(f"LPIPS@{h}" for h in HORIZONS) + " | IDM top-1 | n |")
-        lines.append("|---" * (2 + 2 * len(HORIZONS) + 1) + "|")
+                     + " | " + " | ".join(f"LPIPS@{h}" for h in HORIZONS)
+                     + " | IDM top-1 | FVD16 | FVD32 | n |")
+        lines.append("|---" * (2 + 2 * len(HORIZONS) + 3) + "|")
         for nz in sorted(rows):
             d = rows[nz]
             lines.append(
                 f"| {nz:g} | " + " | ".join(fmt(at(d, "psnr", h)) for h in HORIZONS)
                 + " | " + " | ".join(fmt(at(d, "lpips", h), 3) for h in HORIZONS)
-                + f" | {fmt(d.get('idm_top1_mean'), 3)} | {d.get('num_rollouts', '--')} |")
+                + f" | {fmt(d.get('idm_top1_mean'), 3)} | {fmt(d.get('fvd16'), 1)}"
+                + f" | {fmt(d.get('fvd32'), 1)} | {d.get('num_rollouts', '--')} |")
         lines.append("| _copy-seed reference_ | " + " | ".join(
             fmt(at(next(iter(rows.values())), "copy_seed_psnr", h)) for h in HORIZONS)
-            + " | " + " | ".join("--" for _ in HORIZONS) + " | -- | -- |")
+            + " | " + " | ".join("--" for _ in HORIZONS) + " | -- | -- | -- | -- |")
         best = max(rows, key=lambda k: at(rows[k], "psnr", 64) or -1e9)
         base = at(rows.get(0.0, {}), "psnr", 64)
         top = at(rows[best], "psnr", 64)
