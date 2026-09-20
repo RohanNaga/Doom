@@ -1,0 +1,33 @@
+{
+ "new_dir": "/sata2/data/rnagabhi/doom/tmp/night/q3a_b16",
+ "ref_dir": "/sata2/data/rnagabhi/doom/tmp/night/q3a_ref",
+ "episodes": 5,
+ "ref_episodes": 5,
+ "frames": 6158,
+ "stored_frames": 24558,
+ "ref_frames": 6158,
+ "chains": 48,
+ "maps": {
+  "1": 1,
+  "2": 1,
+  "3": 1,
+  "4": 1,
+  "5": 1
+ },
+ "reduce_decisions": true,
+ "problems": [
+  "ep_00000: latent values differ by up to 0.3135 (tolerance 0.0009765625)",
+  "ep_00001: latent values differ by up to 0.07959 (tolerance 0.0009765625)",
+  "ep_00002: latent values differ by up to 0.1421 (tolerance 0.0009765625)",
+  "ep_00003: latent values differ by up to 0.1552 (tolerance 0.0009765625)",
+  "ep_00004: latent values differ by up to 0.25 (tolerance 0.0009765625)"
+ ],
+ "latent_diff": {
+  "max_abs": 0.3134765625,
+  "mean_abs": 1.4528107761585419e-05,
+  "values": 31528960,
+  "tolerance": 0.0009765625
+ },
+ "transitions": 6110,
+ "ok": false
+}
