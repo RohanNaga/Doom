@@ -71,6 +71,26 @@ def test_every_flag_it_passes_exists_in_the_encoder(text):
     assert used <= known, f"launcher passes flags the encoder does not define: {sorted(used - known)}"
 
 
+def test_each_corpus_uses_the_batch_size_its_reference_was_built_with(text):
+    """The micro-batch is part of reproducing the reference: cuDNN picks its algorithm from the batch
+    shape under bf16 autocast, so batch 64 on an evaluation corpus built at 16 leaves only 60% of
+    latent values bit-identical instead of 99.6%."""
+    assert "BATCH_TRAIN=${BATCH_TRAIN:-64}" in text      # reencode_aligned.sh used 64
+    assert "BATCH_EVAL=${BATCH_EVAL:-16}" in text        # record_eval_corpus.sh:16 used 16
+    case = text.split("case $CORPUS in", 1)[1]
+    assert "$BATCH_TRAIN" in case and "$BATCH_EVAL" in case
+    # the train corpus must never be encoded at the evaluation batch, or vice versa
+    train_line = [ln for ln in case.splitlines() if "latents_arnold_pertic " in ln]
+    assert train_line and all("$BATCH_TRAIN" in ln for ln in train_line)
+    eval_lines = [ln for ln in case.splitlines() if "latents_arnold_eval_pertic" in ln]
+    assert eval_lines and all("$BATCH_EVAL" in ln for ln in eval_lines)
+
+
+def test_the_measured_equivalence_numbers_are_recorded_in_the_header(text):
+    head = text.split("BATCH_TRAIN", 1)[0]
+    assert "99.62%" in head and "1.45e-05" in head and "60.3%" in head
+
+
 def test_header_states_the_disk_and_time_cost(text):
     head = text.split("set -u", 1)[0]
     assert "61.3 GiB" in head and "22 card-hours" in head
