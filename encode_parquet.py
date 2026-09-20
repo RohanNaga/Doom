@@ -97,8 +97,10 @@ def decode_check(vae, frames_u8, device, dtype, legacy, scale, shift):
 
 
 def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, legacy=False, align_decisions=False,
-                   latent_channels=4, scale=LATENT_SCALE, shift=None):
+                   latent_channels=4, scale=LATENT_SCALE, shift=None, every_tic=False):
     import pyarrow.parquet as pq
+    if every_tic and align_decisions:
+        raise ValueError("--every-tic keeps every row and --align-decisions selects a subset; pick one")
     ep = os.path.basename(path).replace(".parquet", "")
     if legacy:
         ep = "ep_%04d" % int(ep.split("_")[1])      # April layout: ep_XXXX_latents.npy + ep_XXXX_actions.npy
@@ -108,8 +110,24 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
     t = pq.read_table(path)
     tic = np.array(t["tic"])
     chain_id = None
+    is_decision = None
     stored = stored_tic_stride(t.schema.metadata)
-    if align_decisions and "buttons" in t.schema.names:
+    if every_tic:
+        if stored > 1:
+            raise ValueError(f"--every-tic needs a per-tic recording, but this file has "
+                             f"stored_tic_stride {stored}: the tics in between were never rendered")
+        # Keep every row, and additionally mark the rows `--align-decisions` would have kept, with
+        # their chain ids. Selecting those rows therefore reproduces the stride-4 corpus exactly,
+        # which is what makes a stride-1 result comparable with a stride-4 one.
+        keep = np.arange(t.num_rows)
+        dec, dec_chain = decision_rows(t["action"].to_numpy(zero_copy_only=False),
+                                       np.array(t["buttons"].to_pylist()),
+                                       t["deaths"].to_numpy(zero_copy_only=False), stride, CANONICAL, stored)
+        is_decision = np.zeros(t.num_rows, dtype=bool)
+        chain_id = np.full(t.num_rows, -1, dtype=np.int64)   # -1: this tic belongs to no chain
+        is_decision[dec] = True
+        chain_id[dec] = dec_chain
+    elif align_decisions and "buttons" in t.schema.names:
         keep, chain_id = decision_rows(t["action"].to_numpy(zero_copy_only=False), np.array(t["buttons"].to_pylist()),
                                        t["deaths"].to_numpy(zero_copy_only=False), stride, CANONICAL, stored)
         if len(keep) == 0:
@@ -125,6 +143,8 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
             cols[c] = arr[keep]
     if chain_id is not None:
         cols["chain_id"] = chain_id
+    if is_decision is not None:
+        cols["is_decision"] = is_decision
     frames_col = t["frame"]
     lat = []
     for i in range(0, len(keep), batch_size):
@@ -158,7 +178,9 @@ def write_meta(args, contract, scale, shift, check, stored=1):
     meta = {"vae_id": args.vae_id or "stabilityai/sd-vae-ft-mse", "vae_subfolder": args.vae_subfolder,
             "latent_contract": contract, "scaling_factor_applied": scale, "shift_factor_applied": shift,
             "pad_to": PAD_TO, "legacy": bool(args.legacy), "stride": args.stride, "source_stored_tic_stride": stored,
-            "align_decisions": bool(args.align_decisions), "decode_check": check,
+            "align_decisions": bool(args.align_decisions), "every_tic": bool(args.every_tic),
+            "row_semantics": "one row per tic" if args.every_tic else f"one row per {args.stride} tics",
+            "decode_check": check,
             "git": git, "torch": torch.__version__, "args": vars(args)}
     with open(os.path.join(args.out_dir, f"encode_meta_{args.shard or 0:02d}.json"), "w") as f:
         json.dump(meta, f, indent=1)
@@ -168,7 +190,10 @@ def main(args):
     global CANONICAL
     os.makedirs(args.out_dir, exist_ok=True)
     device = args.device if torch.cuda.is_available() else "cpu"
-    if args.align_decisions:
+    if args.every_tic and args.align_decisions:
+        raise SystemExit("--every-tic keeps every row and --align-decisions selects a subset; pick one")
+    # --every-tic also needs the canonical table, because it marks the decision rows as it goes
+    if args.align_decisions or args.every_tic:
         # canonical control bits per action id over the whole recording, so every shard filters identically
         import pyarrow.parquet as pq
         from transitions import canonical_table
@@ -214,7 +239,7 @@ def main(args):
     with ThreadPoolExecutor(args.decode_threads) as pool:
         for k, p in enumerate(paths):
             r = encode_episode(p, args.out_dir, vae, device, dtype, args.stride, args.batch_size, pool, args.legacy,
-                               args.align_decisions, channels, scale, shift)
+                               args.align_decisions, channels, scale, shift, args.every_tic)
             if r is None:
                 continue
             n_frames += r["frames"]
@@ -225,7 +250,7 @@ def main(args):
     print("DONE", flush=True)
 
 
-if __name__ == "__main__":
+def build_parser():
     p = argparse.ArgumentParser()
     p.add_argument("--in-dir", required=True)
     p.add_argument("--out-dir", required=True)
@@ -247,4 +272,13 @@ if __name__ == "__main__":
     p.add_argument("--decode-check", type=int, default=0, help="round-trip this many frames of the first episode and print PSNR")
     p.add_argument("--legacy", action="store_true", help="April layout: resize to 160x120, latents (4,15,20), ep_XXXX_actions.npy")
     p.add_argument("--align-decisions", action="store_true", help="one frame per reconstructed agent decision instead of every `stride` tics")
-    main(p.parse_args())
+    p.add_argument("--every-tic", action="store_true",
+                   help="encode every tic, not one frame per decision, and add `is_decision` and `chain_id` "
+                        "columns marking the rows --align-decisions would have kept. Selecting those rows "
+                        "reproduces the stride-`stride` corpus, so a stride-1 corpus stays comparable with it. "
+                        "Needs a per-tic recording; four times the frames and four times the disk")
+    return p
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())
