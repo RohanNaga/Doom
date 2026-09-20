@@ -121,6 +121,21 @@ def stored_map_id(map_id, offset):
     return out
 
 
+def forced_game(cls, **forced):
+    """`cls` with `forced` applied *after* the caller's keywords, not before them.
+
+    Arnold's `deathmatch.py` builds the Game itself and passes its choices as explicit keywords, so
+    the recorder can only intervene by replacing the name `Game` in that module. `functools.partial`
+    cannot do it: partial keywords are defaults the call site overrides, so `use_scripted_marines=True`
+    at `deathmatch.py:106` beat the recorder's False and `--zdoom-bots` silently did nothing. Only
+    `screen_resolution` ever worked, because that one line of the call site is commented out.
+    """
+    @functools.wraps(cls, updated=())
+    def make(*args, **kwargs):
+        return cls(*args, **{**kwargs, **forced})
+    return make
+
+
 def episode_seeds(corpus_id, episode_id):
     """Independent 32-bit seeds per RNG stream, a pure function of (corpus, episode); no worker, pid, or time."""
     def derive(stream):
@@ -402,7 +417,7 @@ def main():
         # of full_deathmatch.wad. On deathmatch_simple it silently adds nobody, so the agent records an empty
         # map; ZDoom's own addbot fills it (measured: 4 to 5 opponents visible).
         game_kwargs["use_scripted_marines"] = False
-    deathmatch.Game = functools.partial(Game, **game_kwargs)
+    deathmatch.Game = forced_game(Game, **game_kwargs)
     from src.args import parse_game_args
     parse_game_args(arnold_args + ["--dump_path", dump_path, "--render_hud", "1"])
 
