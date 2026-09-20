@@ -1,0 +1,73 @@
+{
+ "dir": "/sata2/data/rnagabhi/doom/raw_stiegler",
+ "name": "repro",
+ "episodes_sampled": 40,
+ "anchors_per_episode": 500,
+ "cell_units": 64.0,
+ "near_static_threshold_db": 35.0,
+ "gaps_in_tics": [
+  1,
+  2,
+  4,
+  8
+ ],
+ "n_errors": 0,
+ "errors": [],
+ "all": {
+  "episodes": 40,
+  "rows": 197674,
+  "pairs": 20000,
+  "persistence_psnr": {
+   "1": 23.78716866458719,
+   "2": 22.64989022168125,
+   "4": 21.23177719116211,
+   "8": 20.25021743774414
+  },
+  "persistence_psnr_se": {
+   "1": 0.04870322506837719,
+   "2": 0.041098160276332556,
+   "4": 0.021014425411027524,
+   "8": 0.022199854415740693
+  },
+  "near_static_fraction": 0.0081,
+  "tic_step": [
+   0,
+   197634,
+   0,
+   0,
+   0,
+   0
+  ],
+  "run_lengths": [
+   0,
+   0,
+   37,
+   0,
+   40329,
+   0,
+   2,
+   0,
+   3759,
+   0
+  ],
+  "run_start_phase": [
+   44616,
+   0,
+   0,
+   0
+  ],
+  "explored_cells_union": 391,
+  "explored_cells_per_episode_mean": 327.975,
+  "explored_cells_per_episode_min": 304,
+  "explored_cells_per_episode_max": 347
+ },
+ "frames_cached": {
+  "path": "/sata2/data/rnagabhi/doom/tmp/night/q4/frames_repro.npy",
+  "shape": [
+   20000,
+   240,
+   320,
+   3
+  ]
+ }
+}
