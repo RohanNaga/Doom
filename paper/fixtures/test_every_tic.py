@@ -137,6 +137,55 @@ def test_parser_exposes_the_flag_and_defaults_it_off():
     assert b.every_tic is True
 
 
+def test_verify_corpus_reduce_decisions_accepts_a_matching_pair(tmp_path):
+    """`verify_corpus.py --reduce-decisions` is how the equivalence is checked on the real corpus."""
+    import verify_corpus
+    per, _, _ = trajectory(MESSY)
+    canon = canonical_for(MESSY)
+    run(tmp_path, per, "pt", canon, every_tic=True)
+    run(tmp_path, per, "al", canon, align=True)
+    r = verify_corpus.verify(str(tmp_path / "pt"), str(tmp_path / "al"), 4, 4, reduce_decisions=True)
+    assert r["ok"], r["problems"]
+    assert r["latent_diff"]["max_abs"] == 0.0
+    assert r["frames"] == r["ref_frames"] > 0
+
+
+def test_verify_corpus_reduce_decisions_catches_a_corrupted_latent(tmp_path):
+    import verify_corpus
+    per, _, _ = trajectory(CLEAN)
+    canon = canonical_for(CLEAN)
+    run(tmp_path, per, "pt2", canon, every_tic=True)
+    run(tmp_path, per, "al2", canon, align=True)
+    p = str(tmp_path / "al2" / "ep_00000_latents.npy")
+    a = np.load(p)
+    a[0, 0, 0, 0] = np.float16(a[0, 0, 0, 0] + 1.0)
+    np.save(p, a)
+    r = verify_corpus.verify(str(tmp_path / "pt2"), str(tmp_path / "al2"), 4, 4, reduce_decisions=True)
+    assert not r["ok"] and any("latent" in x for x in r["problems"])
+    assert r["latent_diff"]["max_abs"] >= 1.0
+
+
+def test_verify_corpus_reduce_decisions_needs_the_is_decision_column(tmp_path):
+    import verify_corpus
+    per, _, _ = trajectory(CLEAN)
+    canon = canonical_for(CLEAN)
+    run(tmp_path, per, "plain2", canon)          # stride-4 output, no is_decision
+    run(tmp_path, per, "al3", canon, align=True)
+    r = verify_corpus.verify(str(tmp_path / "plain2"), str(tmp_path / "al3"), 4, 4, reduce_decisions=True)
+    assert not r["ok"] and any("is_decision" in x for x in r["problems"])
+
+
+def test_verify_corpus_default_mode_is_unchanged(tmp_path):
+    """Without the flag the tool compares the rows as stored, as it always has."""
+    import verify_corpus
+    per, _, _ = trajectory(CLEAN)
+    canon = canonical_for(CLEAN)
+    run(tmp_path, per, "a1", canon, align=True)
+    run(tmp_path, per, "a2", canon, align=True)
+    r = verify_corpus.verify(str(tmp_path / "a1"), str(tmp_path / "a2"), 4, 4)
+    assert r["ok"], r["problems"]
+
+
 def test_meta_records_the_mode(tmp_path):
     """A consumer must be able to tell a per-tic latent directory from a stride-4 one."""
     import json
