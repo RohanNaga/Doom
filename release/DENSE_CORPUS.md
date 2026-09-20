@@ -70,9 +70,18 @@ Two earlier findings still stand and are now explained: `pukename change_difficu
 
 ```
 python verify_dense.py --dir $D/raw_arnold_dense/arenas --expect-maps 2,3,4,5 \
-    --expect-corpus-id arnold-train-dense-v1 --min-tics 4800 --sample-frames 4 \
+    --expect-corpus-id arnold-train-dense-v1 --min-tics 4600 --sample-frames 4 \
     --manifest $D/raw_arnold_dense/arenas/md5.txt --out $D/raw_arnold_dense/arenas/verify.json
 ```
+
+**`--min-tics` is a death budget in disguise, so do not set it tight.** Episode length is determined
+entirely by how often the agent died: fitting rows against lives over 40 episodes of `arenas_678`
+gives `rows = -39.00 x lives + 5285.9` with R-squared 1.0000 and a worst residual of 3.9 tics. Every
+death costs exactly 39 tics of un-recorded respawn. So `--min-tics 4800` is really "at most about 12
+deaths", which flagged 188 of 1,466 `arenas_678` episodes as short when nothing was wrong with them —
+maps 6 to 8 are Arnold's *test* arenas and the agent dies more there (8.6, 11.7 and 7.1 lives per
+episode against 3.2 to 8.6 on the training arenas). Use 4600, below the lowest observed length, and
+read the tic distribution in the report rather than trusting a flat floor.
 
 It reports episode and tic counts per map, mean/min/max tics per episode, lives per map, bytes per episode, and the corpus ids present; it exits non-zero and names the file for a short or empty episode, a non-increasing `tic`, a reused episode id, two episodes sharing seeds, an unexpected map or corpus id, a column missing or of the wrong type, and two row semantics mixed into one directory. `--manifest` writes the md5 manifest in `md5sum` format. It needs no GPU, no ViZDoom and no torch, and can be run on a segment while it is still growing. `verify_corpus.py` is the different, later check: it compares two *latent* directories after re-encoding.
 
@@ -82,4 +91,46 @@ It reports episode and tic counts per map, mean/min/max tics per episode, lives 
 
 Measured at 8 workers on 150 game-second episodes: 2.01x faster (60 against 26 tics/s per worker) and 4.05x fewer bytes. It is not the same rollout: two seeded episodes recorded both ways diverge within a few game-seconds, and a no-bots control diverges too, so the cause is not a death landing inside a skip — ViZDoom does not step identically under `make_action(buttons, 4)` and four `make_action(buttons, 1)` calls. Each mode is reproducible on its own terms (the same episode recorded twice in one mode is byte-identical), so the stepping mode is a third input to the trajectory alongside the corpus id and the episode id.
 
-**Not yet done.** Latent encoding, the train/validation split file, and the md5 manifests for the finished segments.
+## What each segment measured (Sep 20 2026)
+
+`arenas` finished at 06:30 UTC; `verify_dense.py` passes with **zero problems**. `arenas_678` was
+still recording and has no manifest, because a manifest of a growing directory is stale as written.
+
+| | `arenas` | `arenas_678` (partial) |
+|---|---|---|
+| episodes | **8,000** (2,000 per map, exactly) | 1,466 of 3,000 (491 / 487 / 488) |
+| tics | 40,285,059 | 7,225,168 |
+| tics per episode, mean / min / max | 5,036 / 4,662 / 5,247 | 4,928 / 4,642 / 5,169 |
+| bytes per episode | 238 MB | 259 MB |
+| total | **1.732 TiB** | 254 GB |
+| `verify_dense.py` | **ok**, 0 problems | ok apart from `--min-tics`, see above |
+| md5 manifest | `arenas/md5.txt`, 8,000 lines | not yet (still recording) |
+
+Model-free statistics, 200-episode sample per segment, from `persistence_stats.py --per-map`.
+Persistence PSNR is the floor a world model has to beat; the gap-4 column is the decision spacing
+the models actually predict at.
+
+| map | gap 1 | gap 2 | **gap 4** | gap 8 | near-static | cells, unioned | cells per episode | lives per episode |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 21.90 | 20.62 | **19.55** | 18.82 | 1.65% | 872 | 227 | 5.67 |
+| 3 | 22.03 | 20.62 | **18.94** | 17.92 | 2.29% | 619 | 289 | 8.08 |
+| 4 | 23.05 | 21.55 | **20.18** | 19.31 | 0.23% | 1,339 | 327 | 3.21 |
+| 5 | 20.34 | 18.81 | **17.57** | 16.81 | 0.54% | 626 | 286 | 8.64 |
+| 6 | 20.83 | 19.49 | **18.25** | 17.46 | 1.18% | 657 | 184 | 8.62 |
+| 7 | 20.11 | 18.21 | **16.76** | 15.88 | 0.74% | 339 | 156 | 11.70 |
+| 8 | 23.10 | 21.53 | **20.15** | 19.14 | 3.65% | 508 | 237 | 7.11 |
+
+**The maps are not equally hard, and the spread is large.** At the decision spacing the floor runs
+from 16.76 dB (map 7) to 20.18 dB (map 4), a 3.4 dB range — bigger than the gap between any two of
+our model rows. Any per-map number has to be read against its own map's floor, and a train/test
+split across these maps changes the apparent difficulty on its own. Map 4 is the easiest and the most
+explored (1,339 cells); map 7 is the hardest, the least explored (339 cells) and the deadliest
+(11.7 lives per episode).
+
+Pooled over the four training arenas the floor at gap 4 is 19.02 dB, which lands within 0.1 dB of the
+18.94 dB measured on the separate evaluation corpus — the cross-check that the instrument agrees
+across corpora.
+
+**Not yet done.** Latent encoding (see `scripts/spiderman/encode_dense.sh`; every tic would be
+467 GiB, decision frames 117 GiB), the train/validation split file, and the md5 manifest for
+`arenas_678` once its recorder drains.
