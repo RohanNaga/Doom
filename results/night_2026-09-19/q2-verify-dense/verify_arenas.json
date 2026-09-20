@@ -1,0 +1,51 @@
+{
+ "directory": "/sata2/data/rnagabhi/doom/raw_arnold_dense/arenas",
+ "episodes": 8000,
+ "problems": [],
+ "per_map": {
+  "2": {
+   "episodes": 2000,
+   "tics": 10127829,
+   "lives": 11350,
+   "bytes": 430453392191
+  },
+  "3": {
+   "episodes": 2000,
+   "tics": 9939839,
+   "lives": 16151,
+   "bytes": 526438332353
+  },
+  "4": {
+   "episodes": 2000,
+   "tics": 10321338,
+   "lives": 6411,
+   "bytes": 387975203562
+  },
+  "5": {
+   "episodes": 2000,
+   "tics": 9896053,
+   "lives": 17272,
+   "bytes": 559015152182
+  }
+ },
+ "corpus_ids": [
+  "arnold-train-dense-v1"
+ ],
+ "tics": {
+  "total": 40285059,
+  "mean": 5035.632375,
+  "min": 4662,
+  "max": 5247
+ },
+ "bytes": 1903882080288,
+ "bytes_per_episode": 237985260,
+ "stored_tic_stride": [
+  1
+ ],
+ "ok": true,
+ "frame_check": {
+  "shapes": {
+   "(240, 320, 3)": 8
+  }
+ }
+}
