@@ -25,8 +25,14 @@
 #
 #   python verify_corpus.py --new $D/latents_arnold_pertic --ref $D/latents_arnold_aligned \
 #       --latent-channels 4 --ref-latent-channels 4 --reduce-decisions
+#
+# DRY=1 prints the command each corpus would be given and stops before every side effect, so a test
+# can check the wiring without starting a real encode. DOOM_ROOT repoints the data root for the same
+# reason. Both default to the real thing. A launcher test that runs this without DRY=1 starts a
+# multi-hour GPU job on any machine where /sata2 exists, which is what happened on Sep 21 2026.
 set -u
-D=/sata2/data/rnagabhi/doom
+D=${DOOM_ROOT:-/sata2/data/rnagabhi/doom}
+DRY=${DRY:-0}
 CORPUS=${CORPUS:-all}
 GPU=${GPU:-1}
 THREADS=${THREADS:-24}          # the encoder is PNG-decode bound, so threads matter for speed
@@ -48,13 +54,21 @@ CANON=$D/latents_arnold_aligned/canonical_controls.json
 # (Sep 21 2026). REPO can still override it for a machine whose repo cannot be updated.
 REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 ENC=$REPO/encode_parquet.py
-[ -f "$ENC" ] || { echo "no encode_parquet.py at $ENC (set REPO=/path/to/checkout)" >&2; exit 2; }
+[ "$DRY" = 1 ] || [ -f "$ENC" ] || { echo "no encode_parquet.py at $ENC (set REPO=/path/to/checkout)" >&2; exit 2; }
 export TMPDIR=$D/tmp/tmpdir HF_HOME=$D/hf
-mkdir -p $TMPDIR $D/logs
+[ "$DRY" = 1 ] || mkdir -p $TMPDIR $D/logs
 
-[ -f "$CANON" ] || { echo "missing canonical table $CANON" >&2; exit 2; }
+[ "$DRY" = 1 ] || [ -f "$CANON" ] || { echo "missing canonical table $CANON" >&2; exit 2; }
 
 one() {   # one <in-dir> <out-dir> <tag> <batch>
+  # built once, so what DRY prints is exactly what would be run
+  local CMD=($PY "$ENC" --in-dir "$1" --out-dir "$2" --every-tic --stride 4 --canonical "$CANON"
+             --batch-size "$4" --decode-threads "$THREADS" --device "cuda:$GPU" --dtype bf16
+             --cache-dir "$D/hf/hub" --decode-check 16)
+  if [ "$DRY" = 1 ]; then
+    echo "DRY $3 ${CMD[*]}"
+    return 0
+  fi
   [ -d "$1" ] || { echo "no such corpus directory: $1" >&2; return 2; }
   mkdir -p "$2"
   # one writer per output directory: two concurrent encodes of the same corpus race on each episode
@@ -63,10 +77,7 @@ one() {   # one <in-dir> <out-dir> <tag> <batch>
   fi
   trap 'rmdir "$2/.lock" 2>/dev/null' RETURN
   echo "$(date -Iseconds) encode-pertic $3 in=$1 out=$2 gpu=$GPU batch=$4 threads=$THREADS repo=$REPO git=$(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo '?')" | tee -a "$2/ENCODE_LOG.txt"
-  nice -n 5 $PY "$ENC" --in-dir "$1" --out-dir "$2" \
-    --every-tic --stride 4 --canonical $CANON \
-    --batch-size "$4" --decode-threads $THREADS --device cuda:$GPU --dtype bf16 \
-    --cache-dir $D/hf/hub --decode-check 16
+  nice -n 5 "${CMD[@]}"
   echo "$(date -Iseconds) done $3 exit=$? files=$(ls "$2"/ep_*_latents.npy 2>/dev/null | wc -l)" | tee -a "$2/ENCODE_LOG.txt"
 }
 

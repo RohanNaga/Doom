@@ -20,7 +20,11 @@
 # This replaces record_dense4.sh, which recorded maps 3,10,12,13. Those four were picked by reading our own
 # per-map evaluation scores, which selects the training set on the outcome being measured; Rohan rejected it
 # on Sep 19 2026. 134 episodes of that aborted corpus remain in $D/raw_arnold_dense4 and are unused.
-D=/sata2/data/rnagabhi/doom; cd $D; export TMPDIR=$D/tmp/tmpdir OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+# DRY=1 prints one worker's command and stops before every side effect; DOOM_ROOT repoints the data
+# root. Both default to the real thing, so a test can check the wiring without starting 32 recorders.
+D=${DOOM_ROOT:-/sata2/data/rnagabhi/doom}; DRY=${DRY:-0}
+[ "$DRY" = 1 ] || cd $D
+export TMPDIR=$D/tmp/tmpdir OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 W=${1:-32}; N=${2:-8000}; SEGMENT=${SEGMENT:-arenas}; WAD=full_deathmatch; EXTRA=()
 case $SEGMENT in
   arenas)     MAPS=2,3,4,5; CID=arnold-train-dense-v1;     OUT=$D/raw_arnold_dense/arenas ;;
@@ -45,10 +49,28 @@ case $SEGMENT in
   *) echo "unknown SEGMENT=$SEGMENT (arenas|arenas_678|dm_simple)" >&2; exit 2 ;;
 esac
 ARN=(--frame_skip 4 --action_combinations "move_fb+move_lr;turn_lr;attack" --network_type dqn_rnn --recurrence lstm --n_rec_layers 1 --hist_size 4 --remember 1 --labels_mapping "" --game_features "target,enemy" --bucket_size "[10, 1]" --dropout 0.5 --speed on --crouch off --scenario deathmatch --wad $WAD --n_bots 8 --reload $D/Arnold/pretrained/vizdoom_2017_track2.pth --evaluate 1 --visualize 0 --gpu_id -1)
+# One array, used both to print under DRY and to run for real, so the two cannot drift. `env` carries
+# PYTHONHASHSEED because a VAR=value prefix cannot live inside an array, and the array preserves the
+# quoting of the Arnold arguments, one of which contains a semicolon.
+worker_args() {   # worker_args <worker-id> -> WCMD
+  WCMD=(env PYTHONHASHSEED=0 nice -n 10 ~/miniconda3/envs/doom/bin/python repo/record_arnold.py
+        --arnold-dir $D/Arnold --out-dir $OUT --map-ids $MAPS --episodes $N --episode-time 150
+        --worker-id "$1" --num-workers $W --compress-level 6 "${EXTRA[@]}" --corpus-id $CID --
+        "${ARN[@]}")
+}
+
+if [ "$DRY" = 1 ]; then
+  worker_args 0
+  echo "DRY segment=$SEGMENT workers=$W episodes=$N maps=$MAPS corpus=$CID wad=$WAD out=$OUT"
+  echo "DRY worker0 ${WCMD[*]}"
+  exit 0
+fi
+
 mkdir -p $OUT $D/logs/rec_dense
 echo "$(date -Iseconds) start segment=$SEGMENT workers=$W episodes=$N maps=$MAPS corpus=$CID mode=per-tic png=6 git=$(cd $D/repo && git rev-parse --short HEAD)" >> $OUT/RECORDING_LOG.txt
 for w in $(seq 0 $((W - 1))); do
-  PYTHONHASHSEED=0 nice -n 10 ~/miniconda3/envs/doom/bin/python repo/record_arnold.py --arnold-dir $D/Arnold --out-dir $OUT --map-ids $MAPS --episodes $N --episode-time 150 --worker-id $w --num-workers $W --compress-level 6 "${EXTRA[@]}" --corpus-id $CID -- "${ARN[@]}" > $D/logs/rec_dense/${SEGMENT}_worker_$w.log 2>&1 &
+  worker_args "$w"
+  "${WCMD[@]}" > $D/logs/rec_dense/${SEGMENT}_worker_$w.log 2>&1 &
 done
 wait
 echo "$(date -Iseconds) done segment=$SEGMENT files=$(ls $OUT/*.parquet 2>/dev/null | wc -l) bytes=$(du -sb $OUT | cut -f1)" >> $OUT/RECORDING_LOG.txt

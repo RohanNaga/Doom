@@ -21,10 +21,31 @@ SCRIPT = os.path.join(REPO, "scripts", "spiderman", "encode_pertic.sh")
 sys.path.insert(0, REPO)
 
 
+def cmd_array(text):
+    """The text of the launcher's CMD=( ... ) array, the single definition of what it runs."""
+    i = text.index("CMD=(")
+    depth, j = 0, i + 4
+    while j < len(text):
+        if text[j] == "(":
+            depth += 1
+        elif text[j] == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    return text[i:j + 1]
+
+
 @pytest.fixture(scope="module")
 def text():
     with open(SCRIPT) as f:
         return f.read()
+
+
+def dry(root, **env):
+    """Run the launcher with every side effect disabled and a throwaway data root."""
+    e = {**os.environ, "DRY": "1", "DOOM_ROOT": str(root), **{k: str(v) for k, v in env.items()}}
+    return subprocess.run(["bash", SCRIPT], capture_output=True, text=True, env=e)
 
 
 def test_script_is_valid_bash():
@@ -38,13 +59,38 @@ def test_it_asks_for_every_tic_at_the_stride_the_old_corpora_used(text):
 
 def test_it_reuses_the_aligned_corpus_canonical_table(text):
     assert "latents_arnold_aligned/canonical_controls.json" in text
-    assert "--canonical $CANON" in text
+    assert '--canonical "$CANON"' in text
 
 
 def test_it_refuses_to_run_without_that_table(tmp_path):
-    r = subprocess.run(["bash", SCRIPT], capture_output=True, text=True)
-    # /sata2 does not exist off the server, so the table is missing and this is the path under test
+    """Without DRY this is the check, and it must never reach a real encode to make it."""
+    e = {**os.environ, "DOOM_ROOT": str(tmp_path), "CORPUS": "no_such_corpus"}
+    r = subprocess.run(["bash", SCRIPT], capture_output=True, text=True, env=e)
     assert r.returncode == 2 and "missing canonical table" in r.stderr
+
+
+def test_dry_prints_the_command_for_every_corpus_and_runs_nothing(tmp_path):
+    r = dry(tmp_path)
+    assert r.returncode == 0, r.stderr
+    lines = [ln for ln in r.stdout.splitlines() if ln.startswith("DRY ")]
+    assert len(lines) == 4, r.stdout
+    assert [ln.split()[1] for ln in lines] == ["seen", "unseen", "unseen2", "train"]
+    assert all("--every-tic" in ln and "--stride 4" in ln for ln in lines)
+    # nothing was created under the throwaway root
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dry_shows_each_corpus_at_its_reference_batch(tmp_path):
+    by = {ln.split()[1]: ln for ln in dry(tmp_path).stdout.splitlines() if ln.startswith("DRY ")}
+    assert "--batch-size 64" in by["train"]
+    for s_ in ("seen", "unseen", "unseen2"):
+        assert "--batch-size 16" in by[s_], s_
+
+
+def test_dry_resolves_the_encoder_inside_the_repo(tmp_path):
+    line = next(ln for ln in dry(tmp_path).stdout.splitlines() if ln.startswith("DRY "))
+    assert os.path.join(REPO, "encode_parquet.py") in line
+    assert "tmp/night" not in line
 
 
 def test_outputs_never_land_in_the_existing_stride4_directories(text):
@@ -67,7 +113,7 @@ def test_an_unknown_corpus_is_refused(text):
 def test_every_flag_it_passes_exists_in_the_encoder(text):
     from encode_parquet import build_parser
     known = {a.option_strings[0] for a in build_parser()._actions if a.option_strings}
-    used = set(re.findall(r"(--[a-z][a-z0-9-]+)", text.split('nice -n 5 $PY "$ENC"', 1)[1].split("echo", 1)[0]))
+    used = set(re.findall(r"(--[a-z][a-z0-9-]+)", cmd_array(text)))
     assert used <= known, f"launcher passes flags the encoder does not define: {sorted(used - known)}"
 
 
@@ -78,7 +124,8 @@ def test_it_runs_the_encoder_from_its_own_checkout_not_a_scratch_copy(text):
     code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
     assert "tmp/night" not in code, "an executable line still points at a scratch copy"
     assert 'REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}' in text
-    assert "ENC=$REPO/encode_parquet.py" in text and 'nice -n 5 $PY "$ENC"' in text
+    assert "ENC=$REPO/encode_parquet.py" in text
+    assert '"$ENC"' in cmd_array(text) and 'nice -n 5 "${CMD[@]}"' in text
 
 
 def test_a_missing_encoder_is_refused_with_a_way_out(text):
