@@ -23,9 +23,19 @@ at any other `AutoencoderKL`, which is how the 16-channel SD 3.5 corpus is built
 follows the pipelines exactly, `(z - shift_factor) * scaling_factor`, so a latent written here
 decodes with `doomdit_utils.denormalize_latents` and nothing else has to know the numbers.
 
+The canonical control table (`canonical_controls.json`, modal executed bits per action id) decides
+which rows count as verified decisions, so every shard and every corpus of one experiment must use
+ONE table. Build it once with `--canonical-only --canonical-ids 0:2000` and pass the file to every
+other invocation as `--canonical`, which is read before any recording is opened. Sidecars already
+written under a different table are repaired in place with `--rebuild-sidecar-masks`, which
+recomputes `is_decision`/`chain_id` from the raw parquet and never re-encodes a latent.
+
 Usage:
     python encode_parquet.py --in-dir /sata2/.../raw_arnold --out-dir /sata2/.../latents_arnold \
         --stride 4 --batch-size 64 --device cuda:1
+
+    python encode_parquet.py --in-dir /sata2/.../raw_arnold_dense/arenas \
+        --out-dir /sata2/.../canonical --canonical-only --canonical-ids 0:2000
 
     python encode_parquet.py --in-dir /sata2/.../raw_arnold --out-dir /sata2/.../latents_arnold_sd35 \
         --vae-id stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae \
@@ -184,7 +194,119 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
 
 CANONICAL = None
 
+CANONICAL_FILE = "canonical_controls.json"
+
 _EP_PARQUET = re.compile(r"ep_(\d+)\.parquet$")
+
+
+def load_canonical(path):
+    """A `canonical_controls.json` written by this module or `build_canonical.py`, keyed by int."""
+    with open(path) as f:
+        return {int(k): v for k, v in json.load(f).items()}
+
+
+def build_canonical(paths, progress_every=0):
+    """The canonical control table of `paths`, streamed one episode at a time.
+
+    Reads only the `action` and `buttons` columns, folds them straight into the counters and drops
+    both arrays before opening the next file, so peak memory is one episode's rows rather than the
+    corpus's. Nothing here retains a per-episode array: at 40M rows the old whole-corpus form cost
+    about 10 GB per process, and six shards each doing it was the host-memory risk behind the
+    Sep 20 outage.
+    """
+    import pyarrow.parquet as pq
+    from transitions import canonical_from_counters, control_counters, count_controls
+    counters = control_counters()
+    for k, p in enumerate(paths):
+        t = pq.read_table(p, columns=["action", "buttons"])
+        count_controls(counters, t["action"].to_numpy(zero_copy_only=False), t["buttons"].to_pylist())
+        del t
+        if progress_every and (k + 1) % progress_every == 0:
+            print(f"  canonical table: {k + 1}/{len(paths)} episodes, {len(counters)} action ids", flush=True)
+    return canonical_from_counters(counters)
+
+
+def resolve_canonical(args, paths):
+    """(table, provenance string) for this run, WITHOUT reading a column when one is supplied.
+
+    `--canonical` is checked before any parquet is opened. That ordering is the fix: the table load
+    used to sit after an unconditional scan of every episode in `--in-dir`, so passing the shared
+    table skipped nothing at all and each of six shards still paid for the whole 8,000-episode
+    corpus. When no table is supplied the scan covers only the episodes this run encodes, or
+    `--canonical-ids A:B` when a larger, explicitly named set should define it.
+    """
+    if args.canonical:
+        return load_canonical(args.canonical), f"supplied {args.canonical}"
+    if args.canonical_ids:
+        table_paths = select_paths(args.in_dir, args.canonical_ids)
+        if not table_paths:
+            raise SystemExit(f"--canonical-ids {args.canonical_ids} selects no episode in {args.in_dir}")
+        where = f"streamed over --canonical-ids {args.canonical_ids} ({len(table_paths)} episodes)"
+    else:
+        table_paths = paths
+        if not table_paths:
+            raise SystemExit("no episodes selected, so there is nothing to build a canonical table from; "
+                             "pass --canonical (preferred: one table shared by every shard) or --canonical-ids")
+        where = f"streamed over this run's {len(table_paths)} episodes"
+    return build_canonical(table_paths, progress_every=200), where
+
+
+def rebuild_sidecar_masks(paths, out_dir, canonical, stride=4, dry_run=False):
+    """Recompute `is_decision` / `chain_id` in sidecars that already exist, from the raw parquet.
+
+    The latents are never touched and the VAE is never built: the masks are a pure function of the
+    recording's `action`, `buttons` and `deaths` columns plus the canonical table, so a corpus that
+    was encoded under a per-shard table can be brought onto one shared table without re-encoding a
+    single frame. Every other sidecar column is copied through unchanged, and the file is replaced
+    atomically.
+
+    Only an `--every-tic` sidecar can be repaired this way, so the row count and the recorded tics
+    must match the raw file exactly; anything else is refused rather than silently realigned.
+    """
+    import pyarrow.parquet as pq
+    out = {"episodes": 0, "changed": 0, "unchanged": 0, "missing": [], "refused": []}
+    for p in paths:
+        ep = os.path.basename(p).replace(".parquet", "")
+        meta_path = os.path.join(out_dir, f"{ep}_meta.npz")
+        if not os.path.exists(meta_path):
+            out["missing"].append(ep)
+            continue
+        t = pq.read_table(p, columns=["action", "buttons", "deaths", "tic"])
+        stored = stored_tic_stride(pq.read_schema(p).metadata)
+        if stored > 1:
+            out["refused"].append(f"{ep}: stored_tic_stride {stored} is not a per-tic recording")
+            continue
+        with np.load(meta_path) as z:
+            cols = {k: z[k] for k in z.files}
+        if len(cols.get("tic", ())) != t.num_rows:
+            out["refused"].append(f"{ep}: {len(cols.get('tic', ()))} sidecar rows vs {t.num_rows} raw rows")
+            continue
+        if not np.array_equal(np.asarray(cols["tic"]).astype(np.int64),
+                              t["tic"].to_numpy(zero_copy_only=False).astype(np.int64)):
+            out["refused"].append(f"{ep}: sidecar tics differ from the raw tics")
+            continue
+        dec, dec_chain = decision_rows(t["action"].to_numpy(zero_copy_only=False),
+                                       np.array(t["buttons"].to_pylist()),
+                                       t["deaths"].to_numpy(zero_copy_only=False), stride, canonical, stored)
+        is_decision = np.zeros(t.num_rows, dtype=bool)
+        chain_id = np.full(t.num_rows, -1, dtype=np.int64)
+        is_decision[dec] = True
+        chain_id[dec] = dec_chain
+        out["episodes"] += 1
+        same = (np.array_equal(is_decision, np.asarray(cols.get("is_decision", ())).astype(bool))
+                and np.array_equal(chain_id, np.asarray(cols.get("chain_id", ())).astype(np.int64)))
+        if same:
+            out["unchanged"] += 1
+            continue
+        out["changed"] += 1
+        if dry_run:
+            continue
+        cols["is_decision"] = is_decision
+        cols["chain_id"] = chain_id
+        tmp = meta_path + ".tmp.npz"       # np.savez appends .npz to a name without one
+        np.savez(tmp, **cols)
+        os.replace(tmp, meta_path)
+    return out
 
 
 def episode_id_of(path):
@@ -262,20 +384,29 @@ def main(args):
     device = args.device if torch.cuda.is_available() else "cpu"
     if args.every_tic and args.align_decisions:
         raise SystemExit("--every-tic keeps every row and --align-decisions selects a subset; pick one")
-    # --every-tic also needs the canonical table, because it marks the decision rows as it goes
-    if args.align_decisions or args.every_tic:
-        # canonical control bits per action id over the whole recording, so every shard filters identically
-        import pyarrow.parquet as pq
-        from transitions import canonical_table
-        acts, btns = [], []
-        for p in sorted(glob.glob(os.path.join(args.in_dir, "ep_*.parquet"))):
-            t = pq.read_table(p, columns=["action", "buttons"]); acts.append(t["action"].to_numpy(zero_copy_only=False)); btns.append(np.array(t["buttons"].to_pylist()))
-        if args.canonical:
-            # a small corpus (evaluation set) reuses the main corpus's table so the transition filter is identical
-            CANONICAL = {int(k): v for k, v in json.load(open(args.canonical)).items()}
-        else:
-            CANONICAL = canonical_table(np.concatenate(acts), np.concatenate(btns))
-        json.dump(CANONICAL, open(os.path.join(args.out_dir, "canonical_controls.json"), "w"), indent=1)
+    # normalise "i/n" to the pair before anything formats the shard index into a filename
+    args.shard, args.num_shards = parse_shard(args.shard, args.num_shards)
+    paths = select_paths(args.in_dir, args.episode_ids, args.max_episodes, args.shard, args.num_shards)
+    # --every-tic also needs the canonical table, because it marks the decision rows as it goes.
+    # This runs BEFORE the VAE is built and before any frame column is touched, and a supplied
+    # --canonical costs no parquet read at all.
+    if args.align_decisions or args.every_tic or args.canonical_only or args.rebuild_sidecar_masks:
+        CANONICAL, where = resolve_canonical(args, paths)
+        print(f"canonical table: {len(CANONICAL)} action ids, {where}", flush=True)
+        with open(os.path.join(args.out_dir, CANONICAL_FILE), "w") as f:
+            json.dump(CANONICAL, f, indent=1)
+    if args.canonical_only:
+        print(f"wrote {os.path.join(args.out_dir, CANONICAL_FILE)}; pass it to every shard as --canonical")
+        print("DONE", flush=True)
+        return
+    if args.rebuild_sidecar_masks:
+        # repair masks written under a per-shard table, without re-encoding a single latent
+        r = rebuild_sidecar_masks(paths, args.out_dir, CANONICAL, args.stride, args.dry_run)
+        print(f"rebuilt sidecar masks: {json.dumps(r)}", flush=True)
+        if r["refused"]:
+            raise SystemExit(f"{len(r['refused'])} sidecar(s) refused: {r['refused'][:4]}")
+        print("DONE", flush=True)
+        return
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
     vae = build_vae(args.vae_id, args.vae_subfolder, device, args.cache_dir,
                     latent_channels=args.latent_channels, scaling_factor=args.scaling_factor,
@@ -285,9 +416,6 @@ def main(args):
     shift = args.shift_factor if args.shift_factor is not None else contract["shift_factor"]
     channels = contract["latent_channels"]
     print(f"latent contract: {json.dumps(contract)}; writing (z - {shift or 0}) * {scale}", flush=True)
-    # normalise "i/n" to the pair before anything formats the shard index into a filename
-    args.shard, args.num_shards = parse_shard(args.shard, args.num_shards)
-    paths = select_paths(args.in_dir, args.episode_ids, args.max_episodes, args.shard, args.num_shards)
     stored = 1
     if paths:
         import pyarrow.parquet as pq
@@ -339,7 +467,23 @@ def build_parser():
                         "read from the ep_XXXXX.parquet filename. This is how the dense corpus's held-out "
                         "evaluation latents are built straight out of the 8,000-episode directory")
     p.add_argument("--episode-range", dest="episode_ids", help=argparse.SUPPRESS)   # alias
-    p.add_argument("--canonical", default=None, help="canonical_controls.json from the main corpus, used instead of recomputing")
+    p.add_argument("--canonical", default=None,
+                   help="canonical_controls.json from the main corpus, used instead of building one. It is read "
+                        "BEFORE any recording is opened, so passing it costs zero parquet column reads; this is "
+                        "how every shard and every corpus filter decisions identically")
+    p.add_argument("--canonical-ids", dest="canonical_ids", default="",
+                   help="build the canonical table over these episode ids (A:B or a comma list) instead of the "
+                        "episodes this run encodes. Use it with --canonical-only to write the one table the "
+                        "whole corpus shares")
+    p.add_argument("--canonical-only", action="store_true",
+                   help="build the canonical table, write it to --out-dir/canonical_controls.json and stop. No "
+                        "VAE is loaded and no frame is read")
+    p.add_argument("--rebuild-sidecar-masks", dest="rebuild_sidecar_masks", action="store_true",
+                   help="recompute is_decision and chain_id in sidecars that already exist, from the raw parquet "
+                        "and --canonical, leaving the latents alone. This is the repair for a corpus encoded "
+                        "under a per-shard table")
+    p.add_argument("--dry-run", dest="dry_run", action="store_true",
+                   help="with --rebuild-sidecar-masks: report what would change and write nothing")
     p.add_argument("--max-episodes", type=int, default=0)
     p.add_argument("--vae-id", default="", help="AutoencoderKL repo or path (default: sd-vae-ft-mse)")
     p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-id (e.g. vae for a full pipeline repo)")

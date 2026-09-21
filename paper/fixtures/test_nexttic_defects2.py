@@ -40,11 +40,17 @@ def _dry(script, args, **env):
     return r.stdout
 
 
-STUB_ENCODER = '''import os, sys
+STUB_ENCODER = '''import json, os, sys
 import numpy as np
 out = sys.argv[sys.argv.index("--out-dir") + 1]
-lo = int(sys.argv[sys.argv.index("--episode-ids") + 1].split(":")[0])
 os.makedirs(out, exist_ok=True)
+if "--canonical-only" in sys.argv:
+    # the launcher builds the one shared canonical table before any corpus, and passes that file to
+    # every shard as --canonical; the stub has to produce it or nothing gets encoded
+    json.dump({"0": "100000000"}, open(os.path.join(out, "canonical_controls.json"), "w"))
+    sys.exit(0)
+assert "--canonical" in sys.argv, "a corpus was encoded without the shared canonical table"
+lo = int(sys.argv[sys.argv.index("--episode-ids") + 1].split(":")[0])
 T = 8
 np.save(os.path.join(out, "ep_%05d_latents.npy" % lo), np.zeros((T, 4, 32, 40), dtype=np.float16))
 np.savez(os.path.join(out, "ep_%05d_meta.npz" % lo),
