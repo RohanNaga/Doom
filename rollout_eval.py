@@ -152,8 +152,16 @@ def do_rollout(args):
                 ph = torch.from_numpy(np.stack([tics_since_decision(m["is_decision"],
                                                                     trained["phase_buckets"])[s + L + h]
                                                 for _, _, s, _, m in chunk])).to(device)
+            # per-window initial noise, keyed by (episode, start, step). Without it the noise comes
+            # from the global generator, so which values a window gets depends on the batch size and
+            # the step count and two runs are not paired: changing the batch from 1 to 2 left only
+            # 2 of 8 rollouts matching.
+            from eval_tf import window_noise
+            noise = window_noise((len(chunk), C, *LATENT_HW),
+                                 [args.seed * 1_000_003 + ep * 7919 + s * 97 + h
+                                  for ep, _, s, _, _ in chunk]).to(device)
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), (len(chunk), C, *LATENT_HW), steps=args.steps, eta=args.eta, device=device)
+                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), noise.shape, steps=args.steps, eta=args.eta, noise=noise, device=device)
             preds.append(x.half().cpu().numpy())
             ctx = torch.cat([ctx[:, C:], x.float()], dim=1)   # drop the oldest latent, append the prediction
         pred_all.append(np.stack(preds, axis=1)); gt_all.append(gt); act_all.append(acts)
@@ -276,11 +284,33 @@ def do_score(args):
                              "identified; re-run --rollout with the current code")
 
         def judged(n):
+            """(indices of the judged frames, the real seed frames before them) or (empty, None).
+
+            Taking every flagged decision frame is not enough: `is_decision` marks the rows the
+            verified-transition filter accepted, and an anti-stuck override between two of them
+            leaves an accepted pair EIGHT tics apart (a real one, rows 48 and 56). The IDM's
+            positional table is for four-tic gaps, so every judged interval has to be exactly four
+            tics, in the rollout and in the seed alike; anything else is dropped.
+            """
             if tic_stride != 1:
                 return np.arange(H), seed[n, -(K - 1):]
             k = np.flatnonzero(d["decision"][n])
+            # keep the longest run of exactly-4-tic steps, so the sequence the IDM sees is uniform
+            if len(k) > 1:
+                step_ok = np.diff(k) == 4
+                runs, start = [], 0
+                for i, ok in enumerate(list(step_ok) + [False]):
+                    if not ok:
+                        runs.append((start, i + 1)); start = i + 1
+                a, b = max(runs, key=lambda r: r[1] - r[0])
+                k = k[a:b]
             sd_mask = np.flatnonzero(d["seed_decision"][n])
-            return k, seed[n, sd_mask[-(K - 1):]] if len(sd_mask) >= K - 1 else None
+            if len(sd_mask) >= K - 1:
+                tail = sd_mask[-(K - 1):]
+                if not np.all(np.diff(tail) == 4) or (len(k) and k[0] + len(seed[n]) - tail[-1] != 4):
+                    return k, None       # the seed's own decision tics are off the grid
+                return k, seed[n, tail]
+            return k, None
         steps = None
         skipped = 0
         acc = None

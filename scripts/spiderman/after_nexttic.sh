@@ -43,13 +43,27 @@ PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}
 # per-tic latents and raw parquet per corpus; the dense ones and the original ones live apart
 if [ "$CH" = 16 ]; then LE=$D/latents_arnold_dense_pertic_eval_sd35; LO=$D/latents_arnold_eval_pertic_sd35
 else LE=$D/latents_arnold_dense_pertic_eval; LO=$D/latents_arnold_eval_pertic; fi
-corpus_args() {
+#
+# Two argument sets per corpus, because the two scripts take different flags: eval_tf.py reads raw
+# frames (`--parquet-dir`) and rollout_eval.py has no such flag and exits 2 on it. `corpus_latents`
+# is the intersection both accept; `corpus_tf` adds what only eval_tf takes.
+corpus_latents() {
   case $1 in
-    val|test)   echo "--latents-dir $LE/$1 --parquet-dir $D/raw_arnold_dense/arenas --split $LE/split_$1.json" ;;
-    arenas_678) echo "--latents-dir $LE/arenas_678 --parquet-dir $D/raw_arnold_dense/arenas_678 --split $LE/split_arenas_678.json" ;;
-    seen|unseen|unseen2) echo "--latents-dir $LO/$1 --parquet-dir $D/raw_arnold_eval/$1 --split $LO/split_$1.json" ;;
+    val|test)            echo "--latents-dir $LE/$1 --split $LE/split_$1.json" ;;
+    arenas_678)          echo "--latents-dir $LE/arenas_678 --split $LE/split_arenas_678.json" ;;
+    seen|unseen|unseen2) echo "--latents-dir $LO/$1 --split $LO/split_$1.json" ;;
   esac
 }
+corpus_parquet() {
+  case $1 in
+    val|test)            echo "$D/raw_arnold_dense/arenas" ;;
+    arenas_678)          echo "$D/raw_arnold_dense/arenas_678" ;;
+    seen|unseen|unseen2) echo "$D/raw_arnold_eval/$1" ;;
+  esac
+}
+corpus_tf() { echo "$(corpus_latents "$1") --parquet-dir $(corpus_parquet "$1")"; }
+# every split file written by make_dense_eval_splits.py uses one subset key
+SUBSET=val
 
 # The tuned decoder, or the stock one. Tested with one `[ -f a ] || [ -f b ]` per file: a single
 # `ls` of two paths reports success when only one exists, which is how the SD 3.5 row silently
@@ -71,9 +85,9 @@ COMMON="$BB --latent-channels $CH $VAE $SCALE --hf-cache $D/hf/hub --tic-stride 
 
 if [ "$DRY" = 1 ]; then
   echo "DRY $RUN decoder: $USED"
-  for S in $CORPORA; do echo "DRY eval_tf $S $PY eval_tf.py $COMMON $(corpus_args $S) --ckpt $R/best.pt --horizon-tics 1 --out-dir $R/eval_tf_$S"; done
-  echo "DRY eval_tf_h4 $PY eval_tf.py $COMMON $(corpus_args val) --ckpt $R/best.pt --horizon-tics 4 --out-dir $R/eval_tf_val_h4"
-  echo "DRY rollout $PY rollout_eval.py --rollout $COMMON --ckpt $R/best.pt $(corpus_args test) --num-rollouts 256 --horizon $HORIZON --out $R/rollouts_test.npz"
+  for S in $CORPORA; do echo "DRY eval_tf $S $PY eval_tf.py $COMMON $(corpus_tf $S) --subset $SUBSET --ckpt $R/best.pt --horizon-tics 1 --out-dir $R/eval_tf_$S"; done
+  echo "DRY eval_tf_h4 $PY eval_tf.py $COMMON $(corpus_tf val) --subset $SUBSET --ckpt $R/best.pt --horizon-tics 4 --out-dir $R/eval_tf_val_h4"
+  echo "DRY rollout $PY rollout_eval.py --rollout $COMMON --ckpt $R/best.pt $(corpus_latents test) --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --out $R/rollouts_test.npz"
   exit 0
 fi
 
@@ -86,10 +100,10 @@ echo "$(date -Iseconds) decoder_used $USED" | tee -a $R/decoder_used.txt
 # newest snapshot or recovery checkpoint carries the EMA; best.pt never does
 LAST=$(ls $R/[0-9]*.pt $R/snap_*.pt 2>/dev/null | sort | tail -1)
 
-TF="--subset val --num-windows $NUM_WINDOWS --batch-size 16 --steps 50"
+TF="--subset $SUBSET --num-windows $NUM_WINDOWS --batch-size 16 --steps 50"
 for S in $CORPORA; do
-  ARGS=$(corpus_args $S)
-  LAT=$(echo "$ARGS" | sed -n 's/.*--latents-dir \([^ ]*\).*/\1/p')
+  ARGS=$(corpus_tf $S)
+  LAT=$LE/$S; case $S in seen|unseen|unseen2) LAT=$LO/$S ;; esac
   [ -d "$LAT" ] || { echo "$RUN skipping $S: no per-tic latents at $LAT" | tee -a $D/logs/${RUN}_eval.log; continue; }
   for VARIANT in "" "_ema"; do
     CK=$R/best.pt; EMA=""
@@ -111,13 +125,13 @@ for S in $CORPORA; do
 done
 
 # rollouts on the sealed seen-map corpus, horizon in tics
-ROLL_ARGS=$(corpus_args test)
-ROLL_LAT=$(echo "$ROLL_ARGS" | sed -n 's/.*--latents-dir \([^ ]*\).*/\1/p')
+ROLL_ARGS=$(corpus_latents test)
+ROLL_LAT=$LE/test
 if [ -d "$ROLL_LAT" ]; then
   NPZ=$R/rollouts_test.npz
   if [ ! -f "$NPZ" ] || [ "${RESCORE:-0}" != 1 ]; then
     $PY rollout_eval.py --rollout $COMMON --ckpt $R/best.pt $ROLL_ARGS \
-      --subset val --num-rollouts 256 --horizon $HORIZON --batch-size 16 --steps 50 --out "$NPZ" \
+      --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --batch-size 16 --steps 50 --out "$NPZ" \
       > $D/logs/${RUN}_rollout.log 2>&1
     echo "$RUN rollout exit $?" >> $D/logs/${RUN}_rollout_status.log
   fi

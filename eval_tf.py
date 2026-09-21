@@ -60,14 +60,25 @@ def checkpoint_interface(ck, args):
     windows, or to feed a control-history model a single action id, and quietly get a number.
     """
     a = ck.get("args") or {}
+    # `resolved_control_bits` is the width the trainer actually built with; `control_bits` is the
+    # flag, which is 0 whenever the width came from the corpus. Prefer the resolved one and refuse a
+    # zero: a width-0 control embedder loads without complaint and predicts from nothing.
+    bits = int(a.get("resolved_control_bits") or a.get("control_bits") or 0)
     trained = {"tic_stride": int(a.get("tic_stride", 4)),
                "action_history": int(a.get("action_history", 0) or 0),
                "phase_buckets": int(a.get("phase_buckets", 0) or 0) if a.get("phase_conditioning") else 0,
-               "control_bits": int(a.get("control_bits", 0) or 0)}
+               "control_bits": bits}
+    # the mismatch complaint comes first: it is the more specific one, and a caller who asked for the
+    # wrong spacing should hear about that rather than about a width they never mentioned
     for key, given in (("tic_stride", args.tic_stride), ("action_history", args.action_history)):
         if given is not None and int(given) != trained[key]:
             raise SystemExit(f"--{key.replace('_', '-')} {given} disagrees with the checkpoint's {trained[key]}; "
                              f"{args.ckpt} was trained with {json.dumps(trained)}")
+    if trained["action_history"] and not bits:
+        raise SystemExit(f"{args.ckpt} was trained with --action-history {trained['action_history']} but records "
+                         "no button-vector width, so the control embedder cannot be rebuilt. It was written by "
+                         "a trainer that stored the flag rather than the resolved width; re-save it from the "
+                         "current trainer.")
     return trained
 
 

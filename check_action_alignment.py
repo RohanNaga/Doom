@@ -49,6 +49,14 @@ MOVE_FORWARD, MOVE_BACKWARD = 0, 1
 SHIFTS = (-1, 0, 1)
 CLASSES = (-1, 0, 1)
 
+# The engine's smallest turn is about 1.758 degrees per tic, so anything above a quarter of a degree
+# is a real turn and anything below it is float noise in the recorded angle. A larger deadband throws
+# away the slow turns, which are exactly the rows where one tic of lag is easiest to see.
+MIN_YAW_DEG = 0.25
+GATE_MIN_EPISODES = 20        # the bootstrap resamples episodes, so a handful of them decide nothing
+GATE_MIN_PER_CLASS = 100      # balanced accuracy over a class of ten rows is not a measurement
+GATE_AXIS = "yaw"             # translation is a diagnostic, never a veto; see `alignment_scores`
+
 EXIT_ALIGNED, EXIT_MISALIGNED, EXIT_INCONCLUSIVE = 0, 2, 3
 
 
@@ -127,11 +135,13 @@ def balanced_accuracy(truth, pred):
     return float(np.mean(recalls)) if recalls else float("nan")
 
 
-def score_axis(controls, delta, tic, deaths, plus, minus, deadband):
+def score_axis(controls, delta, tic, deaths, plus, minus, deadband, episode=0):
     """{"rows": n, "per_class": {...}, "shifts": {s: balanced accuracy}} on ONE shared row set.
 
     The per-shift predictions are gathered here, so everything downstream works on aligned arrays
-    of the same length and cannot shift a second time.
+    of the same length and cannot shift a second time. `_episode` records which episode each row came
+    from, because the bootstrap resamples EPISODES: rows inside one episode are not independent
+    evidence about a corpus-wide convention.
     """
     n = len(delta)
     truth = realised_class(delta, deadband)
@@ -142,37 +152,58 @@ def score_axis(controls, delta, tic, deaths, plus, minus, deadband):
     return {"rows": int(len(rows)),
             "per_class": {str(c): int((t == c).sum()) for c in CLASSES} if len(rows) else {},
             "shifts": {str(s): (balanced_accuracy(t, pred[s]) if len(rows) else float("nan")) for s in SHIFTS},
-            "_truth": t, "_pred": pred}
+            "_truth": t, "_pred": pred, "_episode": np.full(len(rows), int(episode), dtype=np.int64)}
 
 
 def bootstrap_margin_low(score, alpha=0.05, draws=1000, seed=0):
     """Lower end of a percentile bootstrap interval on (shift 0) minus (the better neighbour).
 
-    Resampling the scored ROWS, because they are the unit of evidence here. A point margin can come
-    from a handful of rows; requiring the interval to exclude zero is what makes the gate refuse a
-    lucky one.
+    Resampling EPISODES, not rows. Rows inside one episode share a trajectory, a map and one
+    agent's habits, so treating them as independent draws makes the interval far too narrow and a
+    two-episode sample look decisive.
     """
-    truth, pred = score["_truth"], score["_pred"]
-    if len(truth) < 2:
+    truth, pred, ep = score["_truth"], score["_pred"], score["_episode"]
+    groups = [np.flatnonzero(ep == e) for e in np.unique(ep)]
+    if len(truth) < 2 or len(groups) < 2:
         return float("nan")
     rng = np.random.RandomState(seed)
     m = np.empty(draws)
     for i in range(draws):
-        r = rng.randint(0, len(truth), len(truth))
+        r = np.concatenate([groups[j] for j in rng.randint(0, len(groups), len(groups))])
         b = {s: balanced_accuracy(truth[r], pred[s][r]) for s in SHIFTS}
         m[i] = b[0] - max(b[-1], b[1])
     return float(np.percentile(m[np.isfinite(m)], 100 * alpha)) if np.isfinite(m).any() else float("nan")
 
 
-def verdict(score, min_rows=1000, min_accuracy=0.95, margin=0.20, alpha=0.05, draws=1000):
+def verdict(score, min_rows=1000, min_accuracy=0.95, margin=0.20, alpha=0.05, draws=1000,
+            min_episodes=GATE_MIN_EPISODES, min_per_class=GATE_MIN_PER_CLASS):
     """Aligned, misaligned or inconclusive, with the reason. Every condition must hold to pass."""
     acc = {int(s): a for s, a in score["shifts"].items()}
-    if any(not np.isfinite(a) for a in acc.values()):
+    if not acc or any(not np.isfinite(a) for a in acc.values()):
         return {"verdict": "inconclusive", "reason": "not every shift could be scored", "best": None,
-                "rows": score["rows"]}
+                "rows": score.get("rows", 0)}
     if score["rows"] < min_rows:
         return {"verdict": "inconclusive", "best": int(max(acc, key=acc.get)), "rows": score["rows"],
                 "reason": f"{score['rows']} scored rows is below the floor of {min_rows}"}
+    episodes = score.get("episodes", len(np.unique(score["_episode"])) if "_episode" in score else 1)
+    if episodes < min_episodes:
+        return {"verdict": "inconclusive", "best": int(max(acc, key=acc.get)), "rows": score["rows"],
+                "episodes": episodes,
+                "reason": f"{episodes} episode(s) is below the floor of {min_episodes}; the bootstrap "
+                          "resamples episodes, so fewer than that cannot bound the margin"}
+    # Only the classes that actually occur: `balanced_accuracy` averages over those, so a class the
+    # footage never produced is not evidence missing, it is a class outside the question. But a
+    # single class would make the metric one recall, which no shift can lose, so require two.
+    present = {c: n for c, n in score["per_class"].items() if n > 0}
+    thin = {c: n for c, n in present.items() if n < min_per_class}
+    if len(present) < 2 or thin:
+        return {"verdict": "inconclusive", "best": int(max(acc, key=acc.get)), "rows": score["rows"],
+                "episodes": episodes, "per_class": score["per_class"],
+                "reason": (f"only {len(present)} motion class occurs, so balanced accuracy is a single "
+                           "recall that no shift can lose"
+                           if len(present) < 2 else
+                           f"motion class(es) {sorted(thin)} have fewer than {min_per_class} rows, so "
+                           "balanced accuracy over them is not a measurement")}
     best = int(max(acc, key=acc.get))
     neighbour = max(acc[-1], acc[1])
     lead = acc[0] - neighbour
@@ -197,22 +228,29 @@ def verdict(score, min_rows=1000, min_accuracy=0.95, margin=0.20, alpha=0.05, dr
 
 
 def alignment_scores(controls, angle, tic=None, deaths=None, pos_x=None, pos_y=None,
-                     min_yaw=1.0, min_move=1.0):
-    """{"yaw": score, "position": score} for one episode's recorded state."""
+                     min_yaw=MIN_YAW_DEG, min_move=1.0, episode=0):
+    """{"yaw": score, "position": score} for one episode's recorded state.
+
+    Only "yaw" is a gate; "position" is a printed diagnostic. Yaw responds to a turn button within
+    one tic, but translation has acceleration and friction: the displacement between t and t+1
+    reflects momentum built up before t, so the control one tic EARLIER legitimately explains it
+    better. A correct system scores about 0.83 at shift -1 against 0.50 at shift 0 on that axis, and
+    letting translation veto would report a correctly aligned corpus as misaligned.
+    """
     controls = np.asarray(controls, dtype=np.float32)
     angle = np.asarray(angle, dtype=np.float64)
     n = len(angle)
     tic = np.arange(n, dtype=np.int64) if tic is None else np.asarray(tic, dtype=np.int64)
     d_yaw = np.zeros(n)
     d_yaw[:-1] = wrap_deg(angle[1:] - angle[:-1])
-    out = {"yaw": score_axis(controls, d_yaw, tic, deaths, TURN_LEFT, TURN_RIGHT, min_yaw)}
+    out = {"yaw": score_axis(controls, d_yaw, tic, deaths, TURN_LEFT, TURN_RIGHT, min_yaw, episode)}
     if pos_x is not None and pos_y is not None:
         px, py = np.asarray(pos_x, dtype=np.float64), np.asarray(pos_y, dtype=np.float64)
         rad = np.deg2rad(angle)
         along = np.zeros(n)
         # displacement projected onto the facing direction of the frame the motion starts from
         along[:-1] = (px[1:] - px[:-1]) * np.cos(rad[:-1]) + (py[1:] - py[:-1]) * np.sin(rad[:-1])
-        out["position"] = score_axis(controls, along, tic, deaths, MOVE_FORWARD, MOVE_BACKWARD, min_move)
+        out["position"] = score_axis(controls, along, tic, deaths, MOVE_FORWARD, MOVE_BACKWARD, min_move, episode)
     return out
 
 
@@ -223,20 +261,22 @@ def merge(per_episode):
         keys |= set(sc)
     out = {}
     for key in sorted(keys):
-        truth, preds = [], {s: [] for s in SHIFTS}
+        truth, preds, eps = [], {s: [] for s in SHIFTS}, []
         for _, sc in per_episode:
             if key not in sc:
                 continue
             truth.append(sc[key]["_truth"])
+            eps.append(sc[key]["_episode"])
             for sh in SHIFTS:
                 preds[sh].append(sc[key]["_pred"][sh])
         if not truth:
             continue
-        t = np.concatenate(truth)
+        t, e = np.concatenate(truth), np.concatenate(eps)
         p = {sh: np.concatenate(preds[sh]) for sh in SHIFTS}
         out[key] = {"rows": int(len(t)), "per_class": {str(c): int((t == c).sum()) for c in CLASSES},
+                    "episodes": int(len(np.unique(e))),
                     "shifts": {str(sh): balanced_accuracy(t, p[sh]) for sh in SHIFTS},
-                    "_truth": t, "_pred": p}
+                    "_truth": t, "_pred": p, "_episode": e}
     return out
 
 
@@ -245,7 +285,7 @@ def public(scores):
     return {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")} for k, v in scores.items()}
 
 
-def from_parquet(path, min_yaw=1.0, min_move=1.0):
+def from_parquet(path, min_yaw=MIN_YAW_DEG, min_move=1.0):
     import pyarrow.parquet as pq
     from doom_data import control_matrix
     cols = [c for c in ("buttons", "angle", "pos_x", "pos_y", "tic", "deaths")
@@ -258,7 +298,7 @@ def from_parquet(path, min_yaw=1.0, min_move=1.0):
                             col("tic"), col("deaths"), col("pos_x"), col("pos_y"), min_yaw, min_move)
 
 
-def from_latents(latents_dir, episodes=1, min_yaw=1.0, min_move=1.0):
+def from_latents(latents_dir, episodes=1, min_yaw=MIN_YAW_DEG, min_move=1.0):
     """The same check off the encoder's per-tic `.npz` sidecars, so it runs where the latents are."""
     from doom_data import control_matrix, list_latent_episodes
     per = []
@@ -268,7 +308,8 @@ def from_latents(latents_dir, episodes=1, min_yaw=1.0, min_move=1.0):
         def col(name):
             return m[name] if name in m.files else None
         per.append((ep, alignment_scores(control_matrix(m["buttons"]), m["angle"], col("tic"),
-                                         col("deaths"), col("pos_x"), col("pos_y"), min_yaw, min_move)))
+                                         col("deaths"), col("pos_x"), col("pos_y"), min_yaw, min_move,
+                                         episode=ep)))
     return per
 
 
@@ -329,11 +370,16 @@ def main(args):
         scores = from_parquet(args.parquet, args.min_yaw, args.min_move)
     else:
         scores = merge(from_latents(args.latents_dir, args.episodes, args.min_yaw, args.min_move))
-    verdicts = {k: verdict(v, args.min_rows, args.min_accuracy, args.margin, draws=args.bootstrap)
+    verdicts = {k: verdict(v, args.min_rows, args.min_accuracy, args.margin, draws=args.bootstrap,
+                           min_episodes=args.min_episodes, min_per_class=args.min_per_class)
                 for k, v in scores.items()}
     report = {"sign_convention": "shift s means the control that produced the motion from frame t to "
                                  "t+1 is stored on row t+s; our recorder is s = 0, the open GameNGen "
                                  "reproduction is s = +1",
+              # Only yaw decides. Translation has acceleration and friction, so the control one tic
+              # earlier legitimately explains the displacement better and a correct system scores
+              # about 0.83 at shift -1 there; letting it veto reports a correct corpus as misaligned.
+              "gate_axis": GATE_AXIS,
               "scores": public(scores), "verdict": verdicts}
     if args.audit_parquet_dir:
         report["sidecar_audit"] = audit_sidecar(args.latents_dir, args.audit_parquet_dir,
@@ -341,9 +387,15 @@ def main(args):
     print(json.dumps(report, indent=1, default=float))
     if report.get("sidecar_audit") and not report["sidecar_audit"]["ok"]:
         return EXIT_MISALIGNED
-    if any(v["verdict"] == "misaligned" for v in verdicts.values()):
+    gate = verdicts.get(GATE_AXIS)
+    if gate is None:
+        # no yaw score at all (no episodes, --episodes 0, a corpus with no angle column): certifying
+        # nothing is the only honest answer, and it must not be exit 0
+        print(f"no {GATE_AXIS} score was produced, so the alignment is not confirmed")
+        return EXIT_INCONCLUSIVE
+    if gate["verdict"] == "misaligned":
         return EXIT_MISALIGNED
-    if any(v["verdict"] != "aligned" for v in verdicts.values()):
+    if gate["verdict"] != "aligned":
         return EXIT_INCONCLUSIVE
     return EXIT_ALIGNED
 
@@ -354,12 +406,18 @@ def build_parser():
     g.add_argument("--parquet", help="one ep_XXXXX.parquet recording")
     g.add_argument("--latents-dir", help="a per-tic latent directory (reads the .npz sidecars)")
     p.add_argument("--episodes", type=int, default=1, help="episodes to pool over with --latents-dir")
-    p.add_argument("--min-yaw", type=float, default=1.0, help="degrees of yaw change a row needs to count as a turn")
+    p.add_argument("--min-yaw", type=float, default=MIN_YAW_DEG,
+                   help="degrees of yaw change a row needs to count as a turn; the engine's smallest turn is "
+                        "about 1.758 degrees per tic, so a quarter degree separates a real turn from float noise")
     p.add_argument("--min-move", type=float, default=1.0, help="map units of displacement a row needs to count as a move")
     p.add_argument("--min-rows", type=int, default=1000, help="scored boundary rows required before a verdict is called")
     p.add_argument("--min-accuracy", type=float, default=0.95, help="balanced accuracy shift 0 must reach")
     p.add_argument("--margin", type=float, default=0.20, help="balanced-accuracy lead shift 0 needs over BOTH neighbours")
-    p.add_argument("--bootstrap", type=int, default=1000, help="bootstrap draws for the interval on that lead")
+    p.add_argument("--bootstrap", type=int, default=1000, help="bootstrap draws (over EPISODES) for that lead")
+    p.add_argument("--min-episodes", type=int, default=GATE_MIN_EPISODES,
+                   help="episodes required before a verdict is called; the bootstrap resamples episodes")
+    p.add_argument("--min-per-class", type=int, default=GATE_MIN_PER_CLASS,
+                   help="scored rows required in each motion class (left, none, right)")
     p.add_argument("--audit-parquet-dir", default="", help="also check the sidecar's buttons against these recordings")
     p.add_argument("--audit-rows", type=int, default=2000, help="rows per episode to check in the sidecar audit")
     p.add_argument("--seed", type=int, default=0)

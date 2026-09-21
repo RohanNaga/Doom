@@ -383,6 +383,9 @@ def main(args):
     if args.action_history and not control_bits:
         from doom_data import corpus_control_bits
         control_bits = fit_check_control_bits() if args.fit_check else corpus_control_bits(args.latents_dir)
+    # write the RESOLVED width back onto args, because every checkpoint stores `vars(args)` and the
+    # evaluators rebuild the control embedder from it; a 0 there builds a width-0 embedder
+    args.control_bits = control_bits
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
                         action_dropout=args.action_dropout, latent_channels=latent_channels,

@@ -28,7 +28,12 @@ sys.path.insert(0, HERE)
 import check_action_alignment as caa  # noqa: E402
 
 BITS = 9
-TEST_FLOOR = dict(min_rows=8, draws=200)   # the real gate wants 1,000 rows; a synthetic episode has fewer
+# The real gate wants 1,000 rows, 20 episodes and 100 rows per motion class. A synthetic episode has
+# far fewer of each, so the tests lower every floor and assert the floors themselves separately.
+TEST_FLOOR = dict(min_rows=8, draws=200, min_episodes=1, min_per_class=1)
+CLI_FLOOR = ["--min-rows", "8", "--bootstrap", "200", "--min-episodes", "4", "--min-per-class", "1",
+             "--episodes", "4"]
+N_EPS = 4                                  # enough episodes for the bootstrap to resample
 ALTERNATING = [1, -1]                      # turn left, turn right
 WITH_NO_TURN = [0, 1, 0, -1]               # the pattern Arnold's action set actually produces
 
@@ -55,18 +60,27 @@ def _episode(pattern, shift=0, reps=40, step=5.0, deaths=None):
 
 
 def _yaw(controls, angle, tic, deaths):
+    """One episode's yaw score. Verdicts need `_pooled`: the bootstrap resamples EPISODES."""
     return caa.alignment_scores(controls, angle, tic, deaths)["yaw"]
 
 
-def _write_latents(d, controls, angle, tic, deaths):
+def _pooled(*episode_args, n_eps=N_EPS):
+    """The same synthetic episode repeated under distinct ids, pooled as the real tool pools them."""
+    per = [(e, caa.alignment_scores(*episode_args, episode=e)) for e in range(n_eps)]
+    return caa.merge(per)["yaw"]
+
+
+def _write_latents(d, controls, angle, tic, deaths, n_eps=N_EPS):
+    """`n_eps` copies under distinct ids, because the gate needs more than one episode."""
     from pertic_fixtures import write_pertic_episode
     btns = ["".join(str(int(v)) for v in row) for row in controls]
-    write_pertic_episode(d, 0, np.zeros(len(btns), dtype=np.int64), buttons=btns,
-                         tics=tic, deaths=deaths)
-    meta_path = os.path.join(d, "ep_00000_meta.npz")
-    meta = dict(np.load(meta_path))
-    meta["angle"] = angle
-    np.savez(meta_path, **meta)
+    for ep in range(n_eps):
+        write_pertic_episode(d, ep, np.zeros(len(btns), dtype=np.int64), buttons=btns,
+                             tics=tic, deaths=deaths)
+        meta_path = os.path.join(d, f"ep_{ep:05d}_meta.npz")
+        meta = dict(np.load(meta_path))
+        meta["angle"] = angle
+        np.savez(meta_path, **meta)
 
 
 # ---------------------------------------------------------------------------------------
@@ -76,16 +90,16 @@ def _write_latents(d, controls, angle, tic, deaths):
 @pytest.mark.parametrize("pattern", [ALTERNATING, WITH_NO_TURN], ids=["alternating", "with_no_turn"])
 def test_the_unshifted_control_wins_on_a_correctly_aligned_episode(pattern):
     sc = _yaw(*_episode(pattern))
-    v = caa.verdict(sc, **TEST_FLOOR)
-    assert v["verdict"] == "aligned", v
     assert sc["shifts"]["0"] == 1.0, sc["shifts"]
+    v = caa.verdict(_pooled(*_episode(pattern)), **TEST_FLOOR)
+    assert v["verdict"] == "aligned", v
 
 
 def test_a_correctly_aligned_corpus_exits_zero(tmp_path):
     d = str(tmp_path / "good")
     _write_latents(d, *_episode(WITH_NO_TURN))
     assert caa.main(caa.build_parser().parse_args(
-        ["--latents-dir", d, "--min-rows", "8", "--bootstrap", "200"])) == caa.EXIT_ALIGNED
+        ["--latents-dir", d] + CLI_FLOOR)) == caa.EXIT_ALIGNED
 
 
 # ---------------------------------------------------------------------------------------
@@ -105,13 +119,13 @@ def test_the_stale_control_injection_fails_with_a_nonzero_exit_code(tmp_path):
     d = str(tmp_path / "stale")
     _write_latents(d, *_episode(WITH_NO_TURN, shift=1))
     code = caa.main(caa.build_parser().parse_args(
-        ["--latents-dir", d, "--min-rows", "8", "--bootstrap", "200"]))
+        ["--latents-dir", d] + CLI_FLOOR))
     assert code == caa.EXIT_MISALIGNED != 0
 
 
 @pytest.mark.parametrize("shift", [-1, 1])
 def test_an_injected_off_by_one_is_named_and_signed(shift):
-    v = caa.verdict(_yaw(*_episode(WITH_NO_TURN, shift=shift)), **TEST_FLOOR)
+    v = caa.verdict(_pooled(*_episode(WITH_NO_TURN, shift=shift)), **TEST_FLOOR)
     assert v["verdict"] == "misaligned", v
     assert v["best"] == shift, v
     assert "stored" in v["reason"]
@@ -119,7 +133,7 @@ def test_an_injected_off_by_one_is_named_and_signed(shift):
 
 def test_one_shift_scoring_a_single_row_is_not_a_pass():
     """`second = -inf` used to produce "aligned at shift 0" from one row."""
-    v = caa.verdict(_yaw(*_episode(WITH_NO_TURN, reps=1)), min_rows=1000)
+    v = caa.verdict(_pooled(*_episode(WITH_NO_TURN, reps=1)), min_rows=1000)
     assert v["verdict"] == "inconclusive", v
 
 
@@ -128,11 +142,14 @@ def test_one_shift_scoring_a_single_row_is_not_a_pass():
 # ---------------------------------------------------------------------------------------
 
 def test_too_few_rows_is_inconclusive_and_nonzero(tmp_path):
+    """The row floor itself, so this one keeps the real --min-rows."""
     d = str(tmp_path / "tiny")
     _write_latents(d, *_episode(WITH_NO_TURN, reps=2))
-    code = caa.main(caa.build_parser().parse_args(["--latents-dir", d, "--bootstrap", "200"]))
+    code = caa.main(caa.build_parser().parse_args(
+        ["--latents-dir", d, "--bootstrap", "200", "--min-episodes", "4",
+         "--min-per-class", "1", "--episodes", "4"]))
     assert code == caa.EXIT_INCONCLUSIVE != 0
-    v = caa.verdict(_yaw(*_episode(WITH_NO_TURN, reps=2)))
+    v = caa.verdict(_pooled(*_episode(WITH_NO_TURN, reps=2)))
     assert v["verdict"] == "inconclusive" and "below the floor" in v["reason"]
 
 
@@ -144,7 +161,7 @@ def test_a_weak_signal_is_inconclusive_not_aligned():
     pick = rng.randint(0, 3, len(controls))
     controls[pick == 1, caa.TURN_LEFT] = 1.0
     controls[pick == 2, caa.TURN_RIGHT] = 1.0
-    v = caa.verdict(_yaw(controls, angle, tic, deaths), **TEST_FLOOR)
+    v = caa.verdict(_pooled(controls, angle, tic, deaths), **TEST_FLOOR)
     assert v["verdict"] == "inconclusive", v
 
 
@@ -157,6 +174,14 @@ def test_the_gate_has_distinct_nonzero_codes():
 # ---------------------------------------------------------------------------------------
 # the row set
 # ---------------------------------------------------------------------------------------
+
+def test_a_single_motion_class_cannot_be_certified():
+    """Balanced accuracy over one class is one recall, which no shift can lose."""
+    controls, angle, tic, deaths = _episode(WITH_NO_TURN)
+    flat = caa.verdict(_pooled(np.zeros_like(controls), np.zeros_like(angle), tic, deaths),
+                       **TEST_FLOOR)
+    assert flat["verdict"] == "inconclusive", flat
+
 
 def test_all_three_shifts_are_scored_on_one_identical_row_set():
     sc = _yaw(*_episode(WITH_NO_TURN))
@@ -215,15 +240,17 @@ def test_position_alignment_is_scored_the_same_way():
     controls[intent < 0, caa.MOVE_BACKWARD] = 1.0
     sc = caa.alignment_scores(controls, angle, np.arange(n), np.zeros(n), px, np.zeros(n))
     assert sc["position"]["shifts"]["0"] == 1.0
-    assert caa.verdict(sc["position"], **TEST_FLOOR)["verdict"] == "aligned"
+    per = [(e, caa.alignment_scores(controls, angle, np.arange(n), np.zeros(n), px, np.zeros(n),
+                                    episode=e)) for e in range(N_EPS)]
+    assert caa.verdict(caa.merge(per)["position"], **TEST_FLOOR)["verdict"] == "aligned"
 
 
 def test_the_checker_runs_off_a_per_tic_latent_directory(tmp_path):
     """So it can be run where the latents are, without the 1.7 TiB of parquet."""
     d = str(tmp_path / "lat")
     _write_latents(d, *_episode(WITH_NO_TURN))
-    per = caa.from_latents(d, episodes=1)
-    assert len(per) == 1
+    per = caa.from_latents(d, episodes=N_EPS)
+    assert len(per) == N_EPS
     assert caa.verdict(caa.merge(per)["yaw"], **TEST_FLOOR)["verdict"] == "aligned"
 
 
@@ -238,7 +265,7 @@ def test_pooling_episodes_concatenates_rows_rather_than_averaging_accuracies():
 def test_the_report_names_the_sign_convention(tmp_path, capsys):
     d = str(tmp_path / "conv")
     _write_latents(d, *_episode(WITH_NO_TURN))
-    caa.main(caa.build_parser().parse_args(["--latents-dir", d, "--min-rows", "8", "--bootstrap", "200"]))
+    caa.main(caa.build_parser().parse_args(["--latents-dir", d] + CLI_FLOOR))
     report = json.loads(capsys.readouterr().out)
     assert "row t+s" in report["sign_convention"]
     assert "reproduction is s = +1" in report["sign_convention"]
@@ -251,6 +278,7 @@ def test_the_parser_defaults_are_the_real_gate_thresholds():
         caa.build_parser().parse_args(["--parquet", "a", "--latents-dir", "b"])
     a = caa.build_parser().parse_args(["--latents-dir", "b"])
     assert (a.min_rows, a.min_accuracy, a.margin) == (1000, 0.95, 0.20)
+    assert (a.min_episodes, a.min_per_class, a.min_yaw) == (20, 100, caa.MIN_YAW_DEG)
 
 
 # ---------------------------------------------------------------------------------------
@@ -314,6 +342,6 @@ def test_a_failing_audit_fails_the_gate(tmp_path, capsys):
     meta["angle"] = np.zeros(160)
     np.savez(meta_path, **meta)
     code = caa.main(caa.build_parser().parse_args(
-        ["--latents-dir", lat, "--audit-parquet-dir", rawdir, "--min-rows", "8", "--bootstrap", "100"]))
+        ["--latents-dir", lat, "--audit-parquet-dir", rawdir] + CLI_FLOOR))
     assert code == caa.EXIT_MISALIGNED
     assert json.loads(capsys.readouterr().out)["sidecar_audit"]["ok"] is False
