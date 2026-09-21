@@ -29,8 +29,28 @@ def text():
         return f.read()
 
 
+def dry(root, **env):
+    """Run the launcher with every side effect disabled and a throwaway data root."""
+    e = {**os.environ, "DRY": "1", "DOOM_ROOT": str(root), **{k: str(v) for k, v in env.items()}}
+    return subprocess.run(["bash", SCRIPT], capture_output=True, text=True, env=e)
+
+
 def test_script_is_valid_bash():
     assert subprocess.run(["bash", "-n", SCRIPT]).returncode == 0
+
+
+def test_dry_prints_the_command_and_runs_nothing(tmp_path):
+    r = dry(tmp_path, SEGMENT="arenas", MODE="decisions")
+    assert r.returncode == 0, r.stderr
+    line = next(ln for ln in r.stdout.splitlines() if ln.startswith("DRY "))
+    assert "--stride 4" in line and "--align-decisions" in line
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_dry_every_tic_mode_uses_stride_one_and_does_not_align(tmp_path):
+    line = next(ln for ln in dry(tmp_path, SEGMENT="arenas", MODE="every-tic").stdout.splitlines()
+                if ln.startswith("DRY "))
+    assert "--stride 1" in line and "--align-decisions" not in line
 
 
 def test_the_two_modes_map_to_the_strides_the_comment_promises(text):
@@ -57,19 +77,21 @@ def test_every_flag_the_launcher_passes_exists_in_the_encoder(text):
     with open(enc) as f:
         parser_src = f.read()
     known = set(re.findall(r'p\.add_argument\("(--[a-z0-9-]+)"', parser_src))
-    used = set(re.findall(r"(--[a-z][a-z0-9-]+)", text.split("encode_parquet.py", 1)[1]))
+    cmd = text[text.index("CMD=("):text.index("--decode-check 16)") + len("--decode-check 16)")]
+    used = set(re.findall(r"(--[a-z][a-z0-9-]+)", cmd))
     assert used <= known, f"launcher passes flags the encoder does not define: {sorted(used - known)}"
 
 
 def test_an_unknown_mode_is_refused(tmp_path):
-    r = subprocess.run(["bash", SCRIPT], env={**os.environ, "SEGMENT": "arenas", "MODE": "sideways"},
-                       capture_output=True, text=True)
+    r = subprocess.run(["bash", SCRIPT], capture_output=True, text=True,
+                       env={**os.environ, "DOOM_ROOT": str(tmp_path), "SEGMENT": "arenas",
+                            "MODE": "sideways"})
     assert r.returncode == 2 and "unknown MODE" in r.stderr
 
 
-def test_a_missing_segment_is_refused(text):
-    r = subprocess.run(["bash", SCRIPT], env={**os.environ, "SEGMENT": "no_such_segment"},
-                       capture_output=True, text=True)
+def test_a_missing_segment_is_refused(tmp_path):
+    r = subprocess.run(["bash", SCRIPT], capture_output=True, text=True,
+                       env={**os.environ, "DOOM_ROOT": str(tmp_path), "SEGMENT": "no_such_segment"})
     assert r.returncode == 2 and "no such segment directory" in r.stderr
 
 
@@ -79,8 +101,9 @@ def test_nothing_is_created_before_the_segment_is_validated(text):
     assert body.index("no such segment directory") < body.index("mkdir -p")
 
 
-def test_segment_is_required():
+def test_segment_is_required(tmp_path):
     env = {k: v for k, v in os.environ.items() if k != "SEGMENT"}
+    env["DOOM_ROOT"] = str(tmp_path)
     r = subprocess.run(["bash", SCRIPT], env=env, capture_output=True, text=True)
     assert r.returncode != 0 and "SEGMENT" in r.stderr
 
