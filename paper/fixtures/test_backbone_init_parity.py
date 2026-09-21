@@ -92,6 +92,9 @@ def _build(module, name, **extra):
     from diffusers import PixArtTransformer2DModel, SD3Transformer2DModel, UNet2DConditionModel
     common = dict(num_actions=3, context_frames=2, noise_buckets=4, action_dropout=0.0, grad_ckpt=False)
     if name == "unidiffuser":
+        # the stand-in is randomly initialised, so it has to be built under the seed too: two builds
+        # from an unseeded generator differ in the U-ViT's own weights, which says nothing about the wrapper
+        torch.manual_seed(SEED)
         tiny = _tiny_unidiffuser()
         import diffusers
         real = diffusers.UniDiffuserModel.from_pretrained
@@ -182,8 +185,17 @@ def test_action_history_is_the_only_thing_that_changes_the_state_dict(name):
         assert any("pooled_control" in k for k in on.state_dict())
     shared = sorted(set(off.state_dict()) & set(on.state_dict()))
     assert shared, name
-    moved = [k for k in shared if not torch.equal(off.state_dict()[k], on.state_dict()[k])]
+    sd_off, sd_on = off.state_dict(), on.state_dict()
+    # A tensor whose SHAPE follows the number of conditioning tokens is resized by design (UniDiffuser
+    # re-lays its joint positional table for L controls instead of one action); everything that keeps
+    # its shape must keep its values, and a resized table must still begin with the rows it had.
+    resized = [k for k in shared if sd_off[k].shape != sd_on[k].shape]
+    assert set(resized) <= {"uvit.pos_embed"}, f"{name}: unexpected resized tensors {resized}"
+    moved = [k for k in shared if k not in resized and not torch.equal(sd_off[k], sd_on[k])]
     assert not moved, f"{name}: turning --action-history on moved {moved[:6]}"
+    for k in resized:
+        lead = 2 + off.cond_tokens            # the two timestep rows and the legacy conditioning rows
+        assert torch.equal(sd_off[k][:, :lead], sd_on[k][:, :lead]), f"{name}: {k} lost its leading rows"
 
 
 @pytest.mark.parametrize("name", BACKBONE_NAMES)
