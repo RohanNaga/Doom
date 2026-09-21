@@ -820,7 +820,8 @@ def main(args):
                 # RECORD. `rng` is written and never read back: resume reseeds from (seed, rank, step) instead, and
                 # restoring these tensors would not restore the sampler's position in the epoch anyway, so a resume
                 # is a documented reshuffle rather than a state-exact continuation (see --resume)
-                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args), "episodes": pin, CORPUS_KEY: corpus,
+                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()},
+                      "step": step, "args": vars(args), "episodes": pin, CORPUS_KEY: corpus,
                       "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val, "micro": micro, "skipped": skipped,
                       "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
                               "numpy": np.random.get_state()}}

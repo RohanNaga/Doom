@@ -94,10 +94,28 @@ SUBSET=val
 if [ "$CH" = 16 ]; then TUNED=$D/vae_decoder_sd35_lpips/vae; STOCK="--vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae"
 else TUNED=$D/vae_decoder_arnold_lpips/vae; STOCK=""; fi
 if [ -f "$TUNED/diffusion_pytorch_model.safetensors" ] || [ -f "$TUNED/diffusion_pytorch_model.bin" ]; then
-  VAE="--vae-path $TUNED"; USED="tuned: $TUNED"
+  VAE="--vae-path $TUNED"; USED="tuned: $TUNED"; DEC_PATH=$TUNED; DEC_KIND=tuned
 else
   VAE="$STOCK"; USED="stock fallback (the tuned decoder at $TUNED has no weights)"
+  DEC_PATH=${STOCK:-stock}; DEC_KIND=stock
 fi
+# finetune_decoder.py writes metrics.json one level above the `vae` directory, with a `provenance`
+# block naming the corpus the decoder was tuned on and the loss it was tuned under. A score is only
+# readable next to that: a decoder that saw arenas 6-8 defeats an unseen-map claim whatever the
+# denoiser was initialised from, and the tuned-vs-stock fallback above is silent otherwise.
+DEC_METRICS=$(dirname "$TUNED")/metrics.json
+prov() {   # prov <score-dir>: say which decoder and which checkpoint produced the numbers in it
+  mkdir -p "$1" || return 0
+  {
+    echo "decoder_kind=$DEC_KIND"
+    echo "decoder_path=$DEC_PATH"
+    echo "decoder_metrics=$DEC_METRICS"
+    echo "scored_checkpoint=${PICK:-?} step=${PICK_STEP:-?}"
+    echo "recorded=$(date -Iseconds)"
+  } > "$1/decoder_provenance.txt"
+  [ -f "$DEC_METRICS" ] && cp "$DEC_METRICS" "$1/decoder_metrics.json"
+  return 0
+}
 SCALE=""
 [ "$CH" = 16 ] && SCALE="--latent-scale 1.5305 --latent-shift 0.0609"
 
@@ -158,6 +176,7 @@ for S in $CORPORA; do
     $PY eval_tf.py $COMMON $ARGS $TF --ckpt "$CK" $EMA --horizon-tics 1 --out-dir "$OUT" \
       > $D/logs/${RUN}_eval_tf_${S}${VARIANT}.log 2>&1; E=$?
     echo "$RUN eval_tf ${S}${VARIANT} ckpt=$CK exit $E" >> $D/logs/${RUN}_eval.log
+    prov "$OUT"
     [ $E -eq 0 ] || fail "eval_tf ${S}${VARIANT} exit $E"
   done
   # equal game time against the stride-4 rows' single decision step: four tics rolled forward
@@ -166,6 +185,7 @@ for S in $CORPORA; do
     $PY eval_tf.py $COMMON $ARGS $TF --ckpt "$PICK" --horizon-tics 4 --out-dir "$OUT4" \
       > $D/logs/${RUN}_eval_tf_${S}_h4.log 2>&1; E=$?
     echo "$RUN eval_tf ${S}_h4 ckpt=$PICK exit $E" >> $D/logs/${RUN}_eval.log
+    prov "$OUT4"
     [ $E -eq 0 ] || fail "eval_tf ${S}_h4 exit $E"
   fi
 done
@@ -190,6 +210,7 @@ if [ -d "$ROLL_LAT" ]; then
       --out-dir $R/rollout_metrics_test --save-clips 256 --clip-frames 128 \
       >> $D/logs/${RUN}_rollout.log 2>&1 || fail "rollout score"
   fi
+  prov "$R/rollout_metrics_test"
   # FVD on both clip spacings: every tic, and every fourth tic so the clip covers the same game
   # time as a stride-4 row's clip of the same frame count
   # the raw-reference clips first: those are the FVD numbers to report, and the decoded-ground-truth
