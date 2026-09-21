@@ -712,9 +712,10 @@ class SD35WorldModel(nn.Module):
       contribution is `text_embedder(0)` for every sample. The diffusion timestep keeps the model's own
       `time_text_embed` path.
     * Output. The 16-channel head, flat (no learn-sigma chunk to take), retrained from flow-matching
-      velocity to our v-prediction under `VDiffusion`'s linear 1e-4..0.02 DDPM schedule. That schedule
-      mismatch against SD 3.5's rectified-flow training is the same mismatch the U-Net, PixArt and
-      UniDiffuser rows carry.
+      velocity to our v-prediction under `VDiffusion`'s linear 1e-4..0.02 DDPM schedule. This is a
+      larger mismatch than the epsilon-trained U-Net, PixArt and UniDiffuser rows carry: rectified flow
+      changes the interpolation, the input amplitude and the target, not only the timestep-to-SNR map
+      (at SNR 1 flow mixes (0.5, 0.5) where the variance-preserving path mixes (0.7071, 0.7071)).
     * Forward. The pretrained `forward` already reads height and width off the input and unpatchifies with
       both, so a 16x20 grid needs no reimplementation, unlike UniDiffuser's square-only unpatchify.
 

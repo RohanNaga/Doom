@@ -529,3 +529,15 @@ def test_the_guard_refuses_a_training_range_that_reaches_into_validation():
         doom_data.check_dense_training_ids(s, "arenas", parse_episode_ids("0:6500"))
     with pytest.raises(ValueError, match="overlap"):
         doom_data.check_dense_training_ids(s, "arenas", parse_episode_ids("0:8000"))
+
+
+def test_a_corpus_without_the_deaths_column_is_refused(tmp_path):
+    """The respawn boundary is visible only in `deaths`; a sidecar without it must not train silently."""
+    d = str(tmp_path)
+    write_pertic_episode(d, 0, held_actions([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))
+    meta_path = os.path.join(d, "ep_00000_meta.npz")
+    meta = dict(np.load(meta_path))
+    meta.pop("deaths")
+    np.savez(meta_path, **meta)
+    with pytest.raises(ValueError, match="no deaths column"):
+        TicWindowDataset(d, None, context_frames=4)

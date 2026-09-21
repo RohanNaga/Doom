@@ -170,12 +170,24 @@ class RawFrames:
         self.dir, self.cache = parquet_dir, {}
 
     def get(self, episode_id, tic):
+        """The frame recorded at exactly `tic`, or a refusal.
+
+        `searchsorted` returns an INSERTION POINT, so a tic the recording does not hold silently
+        scored the next frame -- or, past the end, the last one. A raw reference that is off by a
+        tic is invisible in the metric: it moves the number by a fraction of a dB while looking
+        entirely healthy. The hit is therefore checked for equality.
+        """
         import pyarrow.parquet as pq
         if episode_id not in self.cache:
             t = pq.read_table(os.path.join(self.dir, f"ep_{episode_id:05d}.parquet"), columns=["tic", "frame"])
             self.cache = {episode_id: (np.array(t["tic"]), t["frame"])}   # keep one episode resident
         tics, frames = self.cache[episode_id]
         i = int(np.searchsorted(tics, tic))
+        if i >= len(tics) or int(tics[i]) != int(tic):
+            raise KeyError(f"episode {episode_id} has no frame at tic {tic} "
+                           f"(recorded tics {int(tics[0])}..{int(tics[-1])}, {len(tics)} rows); the "
+                           "sidecar and the recording do not agree, so the raw reference would be "
+                           "the wrong frame")
         return np.asarray(Image.open(io.BytesIO(frames[i].as_py())).convert("RGB"), dtype=np.uint8)
 
 
@@ -235,14 +247,19 @@ def main(args):
         run = ctx
         for k in range(K):
             run_in = run
+            keys = [(args.seed, g, k) for g in gis]
+            shape = (B, latent_channels) + tuple(tgts.shape[-2:])
             if args.infer_noise > 0:
                 lvl = args.infer_noise
                 bucket = torch.full_like(bucket, min(int(lvl / args.train_noise_max * args.noise_buckets), args.noise_buckets - 1))
-                run_in = (1.0 - lvl) ** 0.5 * run + lvl ** 0.5 * torch.randn_like(run)
+                # the context corruption is keyed on the same (seed, window, step) tuple as the
+                # initial noise, on its own purpose tag. `torch.randn_like` took it from the global
+                # generator, so with --infer-noise > 0 a window's context noise depended on the
+                # batch size and the sampler step count and the comparison was not paired at all
+                ctx_eps = window_noise(run.shape, keys, purpose="context").to(device)
+                run_in = (1.0 - lvl) ** 0.5 * run + lvl ** 0.5 * ctx_eps
             act = acts[:, k]
             ph = phases[:, k] if trained["phase_buckets"] else None
-            keys = [(args.seed, g, k) for g in gis]
-            shape = (B, latent_channels) + tuple(tgts.shape[-2:])
             noise = window_noise(shape, keys).to(device)
             nfn = eta_noise_fn(shape, keys, device) if args.eta > 0 else None
             with torch.autocast("cuda", dtype=torch.bfloat16):

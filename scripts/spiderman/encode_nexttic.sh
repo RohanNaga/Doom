@@ -31,6 +31,16 @@
 # shape, so the same frame encodes slightly differently at a different batch size. This corpus has
 # no stride-4 reference to reproduce, so 64 is used throughout and recorded in encode_meta.
 #
+# ONE canonical control table, built once from the TRAINING ids and passed to every shard and every
+# corpus as --canonical. The table is the modal executed button vector per action id, and it decides
+# which rows are verified decisions (`is_decision`, `chain_id`), so two corpora built under two
+# tables would have incomparable decision masks and the IDM would score different transitions. It
+# also has to be built once for cost: the encoder used to rebuild it from every episode in its input
+# directory, ~10 GB per process, and six shards doing that at once is what the Sep 20 host-memory
+# outage looks like. CANON points at the file; it is created on demand by --canonical-only and is
+# shared by the 4-channel and the SD 3.5 corpora, because the table is a property of the RECORDING,
+# not of the autoencoder.
+#
 # DRY=1 prints the command each corpus would be given and stops before every side effect;
 # DOOM_ROOT repoints the data root. Both default to the real thing.
 set -u
@@ -60,8 +70,23 @@ esac
 export TMPDIR=$D/tmp/tmpdir HF_HOME=$D/hf
 [ "$DRY" = 1 ] || mkdir -p $TMPDIR $D/logs
 
+canonical() {   # build the one shared table, from the TRAINING ids, if it is not there yet
+  if [ "$DRY" = 1 ]; then
+    echo "DRY canonical $PY $ENC --in-dir $A --out-dir $(dirname "$CANON") --every-tic --stride 4 --canonical-only --canonical-ids ${TRAIN_IDS:-0:2000}"
+    return 0
+  fi
+  [ -s "$CANON" ] && return 0
+  mkdir -p "$(dirname "$CANON")"
+  # --canonical-only loads no VAE and reads no frame column: it streams `action` and `buttons` of
+  # the training episodes one file at a time
+  "$PY" "$ENC" --in-dir "$A" --out-dir "$(dirname "$CANON")" --every-tic --stride 4 \
+        --canonical-only --canonical-ids "${TRAIN_IDS:-0:2000}" || return $?
+  [ -s "$CANON" ] || { echo "no canonical table at $CANON after --canonical-only" >&2; return 4; }
+}
+
 one() {   # one <in-dir> <out-dir> <tag> <episode-ids>
   local CMD=($PY "$ENC" --in-dir "$1" --out-dir "$2" --every-tic --stride 4 --episode-ids "$4"
+             --canonical "$CANON"
              --batch-size "$BATCH" --decode-threads "$THREADS" --decode-workers "$WORKERS"
              --device "cuda:$GPU" --dtype bf16 --cache-dir "$D/hf/hub" --decode-check 16 $VAE_FLAGS)
   [ -n "$SHARD" ] && CMD+=(--shard "$SHARD")
@@ -93,8 +118,10 @@ one() {   # one <in-dir> <out-dir> <tag> <episode-ids>
     [ $RC -eq 0 ] || exit $RC
     # the evaluation corpora need their split file before after_nexttic.sh can score them; the path
     # is derived by make_dense_eval_splits.py from the latents directory, so the writer and the
-    # reader cannot disagree about where it goes
-    [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" || exit $?
+    # reader cannot disagree about where it goes. --expect-ids is this corpus's own id range, so a
+    # shard that is still running, or a directory holding the wrong range, refuses to publish
+    # instead of naming a partial evaluation set
+    [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" --expect-ids "$4" || exit $?
   )
   local RC=$?
   if [ $RC -ne 0 ]; then
@@ -107,6 +134,9 @@ A=$D/raw_arnold_dense/arenas
 B=$D/raw_arnold_dense/arenas_678
 OT=$D/latents_arnold_dense_pertic${SUF}/arenas
 OE=$D/latents_arnold_dense_pertic_eval${SUF}
+# no ${SUF}: the same file serves both latent spaces, so the two corpora cannot disagree about
+# which rows are decisions
+CANON=${CANON:-$D/latents_arnold_dense_pertic/canonical_controls.json}
 
 train()  { one $A $OT train "${TRAIN_IDS:-0:2000}"; }
 val()    { one $A $OE/val val "${VAL_IDS:-6000:6100}"; }
@@ -115,6 +145,9 @@ unseen() { one $B $OE/arenas_678 unseen "${UNSEEN_IDS:-0:60}"; }
 
 RC=0
 run() { "$@" || RC=$?; }      # keep going through the other corpora, but remember the failure
+# the shared table first: without it there is nothing to pass as --canonical, and a corpus encoded
+# under a table of its own is not comparable with the others
+canonical || { echo "ENCODE_NEXTTIC_FAILED canonical $? $(date -Iseconds)" >&2; exit 4; }
 case $CORPUS in
   train)  run train ;;
   val)    run val ;;

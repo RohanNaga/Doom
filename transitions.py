@@ -58,13 +58,41 @@ def life_segments(deaths):
     return [(int(a), int(b)) for a, b in zip(bounds[:-1], bounds[1:]) if b > a]
 
 
-def canonical_table(action, buttons, num_actions=None):
-    """Modal control bits per requested action id, over the whole recording (overrides are a minority)."""
+def control_counters():
+    """The empty accumulator `count_controls` folds episodes into: action id -> Counter of control bits."""
     from collections import Counter, defaultdict
-    c = defaultdict(Counter)
-    for a, b in zip(np.asarray(action).tolist(), np.asarray(buttons).tolist()):
-        c[int(a)][str(b)[:CONTROL_BITS]] += 1
-    return {a: cnt.most_common(1)[0][0] for a, cnt in c.items()}
+    return defaultdict(Counter)
+
+
+def count_controls(counters, action, buttons):
+    """Fold one episode's rows into `counters` in place, and return it.
+
+    This is the streaming half of `canonical_table`. The counter keys are the first
+    `CONTROL_BITS` characters of the executed button string, so at most a few dozen keys per
+    action id survive however many rows are folded in; the caller can therefore drop each
+    episode's `action`/`buttons` arrays as soon as it has been counted instead of concatenating
+    the whole corpus first. A whole-corpus concatenation of 40M `<U19` strings costs about 6 GB
+    of arrays plus another 2.7 GB of Python strings, which is what made six concurrent encoder
+    shards a host-memory risk.
+    """
+    for a, b in zip(np.asarray(action).tolist(), list(buttons)):
+        counters[int(a)][str(b)[:CONTROL_BITS]] += 1
+    return counters
+
+
+def canonical_from_counters(counters):
+    """Modal control bits per action id, from an accumulator built by `count_controls`."""
+    return {a: cnt.most_common(1)[0][0] for a, cnt in counters.items()}
+
+
+def canonical_table(action, buttons, num_actions=None):
+    """Modal control bits per requested action id, over the whole recording (overrides are a minority).
+
+    The one-shot form, for a caller that already holds both columns of a single recording.
+    `count_controls` / `canonical_from_counters` are the streaming form a multi-episode corpus
+    should use.
+    """
+    return canonical_from_counters(count_controls(control_counters(), action, np.asarray(buttons).tolist()))
 
 
 def valid_transitions(action, buttons, deaths, repeat=4, canonical=None):

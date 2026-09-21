@@ -263,10 +263,13 @@ def test_the_encoder_launcher_passes_the_shard_through(tmp_path):
 
 
 def test_the_encoder_launcher_is_evaluation_first_by_default(tmp_path):
-    """260 held-out episodes gate the launch; the 2,000 training episodes take days."""
+    """260 held-out episodes gate the launch; the 2,000 training episodes take days.
+
+    The shared canonical table comes first, before any corpus: every corpus is passed the same file
+    as `--canonical`, so there is nothing to encode until it exists."""
     out = dry(ENCODE, root=str(tmp_path))
     tags = [ln.split()[1] for ln in out.splitlines() if ln.startswith("DRY ")]
-    assert tags == ["val", "test", "unseen"]
+    assert tags == ["canonical", "val", "test", "unseen"]
 
 
 def test_an_unknown_corpus_or_vae_is_refused():
