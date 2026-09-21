@@ -313,59 +313,109 @@ def from_latents(latents_dir, episodes=1, min_yaw=MIN_YAW_DEG, min_move=1.0):
     return per
 
 
-def audit_sidecar(latents_dir, parquet_dir, episodes=4, rows=2000, seed=0):
-    """Do the sidecar's button vectors match the raw recording's, row for row, by TIC?
+AUDIT_COLUMNS = ("buttons", "tic", "deaths", "map_id")
+
+
+def audit_sidecar(latents_dir, parquet_dir, episodes=4, rows=2000, seed=0, canonical=None):
+    """Do the sidecar's rows match the raw recording's, row for row, by TIC?
 
     The conditioning is read from the `.npz` the encoder wrote, so the pre-launch question is not
-    only "is the convention right" but "is this file the same data as the recording". Also counts
-    how many sampled rows are anti-stuck overrides -- rows whose executed vector is not the
-    canonical vector of the requested action id -- because those are exactly the rows on which
+    only "is the convention right" but "is this file the same data as the recording". Every audited
+    column has to agree: `buttons` is the control the model is conditioned on, `tic` is the join key
+    (and a duplicate in the recording makes the join ambiguous), `deaths` is the only respawn signal
+    the window rules have, and `map_id` decides which arena a score is attributed to.
+
+    Also counts how many sampled rows are anti-stuck overrides -- rows whose executed vector is not
+    the canonical vector of the requested action id -- because those are exactly the rows on which
     conditioning on the action id instead of the button vector would be wrong.
+
+    **Every column is materialised once per episode.** `m["buttons"][i]` inside the loop re-read the
+    whole column from the NPZ on every row: at ~5,035 rows and 76 bytes per 19-character string that
+    is about 1.9 GB of button arrays per episode, roughly 3.85 TB over the 2,000 training episodes,
+    to compare 0.38 MB of data.
     """
     import pyarrow.parquet as pq
     from doom_data import list_latent_episodes
-    canon = None
-    path = f"{latents_dir}/canonical_controls.json"
-    try:
-        with open(path) as f:
-            canon = {int(k): v for k, v in json.load(f).items()}
-    except OSError:
-        pass
+    canon = canonical
+    if canon is None:
+        try:
+            with open(f"{latents_dir}/canonical_controls.json") as f:
+                canon = {int(k): v for k, v in json.load(f).items()}
+        except OSError:
+            canon = None
     rng = np.random.RandomState(seed)
     checked = mismatch = overrides = 0
     problems = []
-    for ep, _, meta_path in list_latent_episodes(latents_dir)[:episodes]:
+    eps = list_latent_episodes(latents_dir)[:episodes]
+    for ep, _, meta_path in eps:
         m = np.load(meta_path)
+        side = {c: np.asarray(m[c]) for c in AUDIT_COLUMNS if c in m.files}
+        side_actions = np.asarray(m["action"]) if "action" in m.files else None
+        m.close()
+        absent = [c for c in AUDIT_COLUMNS if c not in side]
+        if absent:
+            problems.append(f"ep {ep}: sidecar has no {absent} column(s), so it cannot be audited")
+            mismatch += 1
+            continue
         src = f"{parquet_dir}/ep_{ep:05d}.parquet"
-        t = pq.read_table(src, columns=["tic", "buttons", "action"])
-        raw_tic = t["tic"].to_numpy(zero_copy_only=False)
-        raw_btn = np.array(t["buttons"].to_pylist())
-        by_tic = {int(x): i for i, x in enumerate(raw_tic)}
-        side_tic = np.asarray(m["tic"]).astype(np.int64)
+        want = [c for c in AUDIT_COLUMNS if c in pq.read_schema(src).names] + ["action"]
+        t = pq.read_table(src, columns=sorted(set(want)))
+        raw = {c: (np.array(t["buttons"].to_pylist()) if c == "buttons"
+                   else t[c].to_numpy(zero_copy_only=False))
+               for c in AUDIT_COLUMNS if c in t.schema.names}
+        raw_tic = np.asarray(raw["tic"]).astype(np.int64)
+        by_tic = {}
+        for i, x in enumerate(raw_tic.tolist()):
+            if x in by_tic:
+                problems.append(f"ep {ep}: tic {x} appears twice in {src}, so the join is ambiguous")
+                mismatch += 1
+            by_tic[x] = i
+        side_tic = side["tic"].astype(np.int64)
         take = rng.choice(len(side_tic), size=min(rows, len(side_tic)), replace=False)
         for i in take:
             tic = int(side_tic[i])
-            if tic not in by_tic:
+            j = by_tic.get(tic)
+            if j is None:
                 problems.append(f"ep {ep} tic {tic} is in the sidecar but not in {src}")
                 mismatch += 1
                 continue
-            a, b = str(m["buttons"][i]), str(raw_btn[by_tic[tic]])
             checked += 1
-            if a != b:
-                mismatch += 1
-                if len(problems) < 8:
-                    problems.append(f"ep {ep} tic {tic}: sidecar {a!r} vs recording {b!r}")
-            if canon is not None:
-                want = canon.get(int(m["action"][i]))
-                if want is not None and not a.startswith(want):
+            bits = str(side["buttons"][i])
+            for c in AUDIT_COLUMNS:
+                if c == "tic" or c not in raw:
+                    continue
+                a = str(side[c][i]) if c == "buttons" else int(side[c][i])
+                b = str(raw[c][j]) if c == "buttons" else int(raw[c][j])
+                if a != b:
+                    mismatch += 1
+                    if len(problems) < 8:
+                        problems.append(f"ep {ep} tic {tic} {c}: sidecar {a!r} vs recording {b!r}")
+            if canon is not None and side_actions is not None:
+                canonical_bits = canon.get(int(side_actions[i]))
+                if canonical_bits is not None and not bits.startswith(canonical_bits):
                     overrides += 1
-    return {"episodes": min(episodes, len(list_latent_episodes(latents_dir))), "rows_checked": checked,
+    return {"episodes": len(eps), "rows_checked": checked, "columns": list(AUDIT_COLUMNS),
             "mismatches": mismatch, "anti_stuck_override_rows": overrides,
             "override_fraction": overrides / checked if checked else 0.0,
-            "canonical_table": canon is not None, "problems": problems, "ok": mismatch == 0}
+            "canonical_table": canon is not None, "problems": problems[:32],
+            "ok": mismatch == 0 and checked > 0}
 
 
 def main(args):
+    canon = None
+    if getattr(args, "canonical", ""):
+        with open(args.canonical) as f:
+            canon = {int(k): v for k, v in json.load(f).items()}
+    if args.audit_only:
+        # the launch protocol's own gate: the sidecar audit alone, with no yaw scoring, because the
+        # yaw scorer can legitimately return inconclusive for physics reasons and would then hide a
+        # clean zero-mismatch audit behind exit 2
+        if not (args.latents_dir and args.audit_parquet_dir):
+            raise SystemExit("--audit-only needs --latents-dir and --audit-parquet-dir")
+        audit = audit_sidecar(args.latents_dir, args.audit_parquet_dir, args.episodes,
+                              args.audit_rows, args.seed, canon)
+        print(json.dumps({"sidecar_audit": audit}, indent=1, default=float))
+        return EXIT_ALIGNED if audit["ok"] else EXIT_MISALIGNED
     if args.parquet:
         scores = from_parquet(args.parquet, args.min_yaw, args.min_move)
     else:
@@ -383,7 +433,7 @@ def main(args):
               "scores": public(scores), "verdict": verdicts}
     if args.audit_parquet_dir:
         report["sidecar_audit"] = audit_sidecar(args.latents_dir, args.audit_parquet_dir,
-                                                args.episodes, args.audit_rows, args.seed)
+                                                args.episodes, args.audit_rows, args.seed, canon)
     print(json.dumps(report, indent=1, default=float))
     if report.get("sidecar_audit") and not report["sidecar_audit"]["ok"]:
         return EXIT_MISALIGNED
@@ -418,8 +468,15 @@ def build_parser():
                    help="episodes required before a verdict is called; the bootstrap resamples episodes")
     p.add_argument("--min-per-class", type=int, default=GATE_MIN_PER_CLASS,
                    help="scored rows required in each motion class (left, none, right)")
-    p.add_argument("--audit-parquet-dir", default="", help="also check the sidecar's buttons against these recordings")
+    p.add_argument("--audit-parquet-dir", default="",
+                   help="also check the sidecar's buttons, tic, deaths and map_id against these recordings")
     p.add_argument("--audit-rows", type=int, default=2000, help="rows per episode to check in the sidecar audit")
+    p.add_argument("--audit-only", dest="audit_only", action="store_true",
+                   help="run ONLY the sidecar audit and exit 0 on zero mismatches. The yaw scorer can return "
+                        "inconclusive for physics reasons, which would otherwise hide a clean audit behind exit 2")
+    p.add_argument("--canonical", default="",
+                   help="the shared canonical_controls.json, for the anti-stuck override count; by default the "
+                        "one inside --latents-dir, which may be a per-shard table")
     p.add_argument("--seed", type=int, default=0)
     return p
 

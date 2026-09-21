@@ -193,13 +193,10 @@ def tune(tmp_path, monkeypatch, **over):
     train = corpus(str(tmp_path / "train"), [0, 1], rows=24)
     split = str(tmp_path / "split.json")
     json.dump({"train": [0], "val": [1]}, open(split, "w"))
-    args = dict(in_dir=train, split=split, out_dir=str(tmp_path / "run"), train_frames=16,
-                val_frames=4, stride=1, epochs=1, batch_size=2, accum=1, lr=1e-5, lpips_weight=0.0,
-                report_lpips=False, val_every=0, channels_last=False, frame_cache="", vae_id="",
-                vae_subfolder="", cache_dir=None, latent_channels=None, scaling_factor=None,
-                shift_factor=None, device="cpu", stream_dir="", stream_frames=400000,
-                stream_episodes=0, stream_buffer=4096, workers=0, max_steps=0, max_hours=0.0,
-                ckpt_every_hours=0.0, seed=0)
+    # the parser's own defaults, so a new flag does not have to be repeated here to be exercised
+    args = vars(finetune_decoder.build_parser().parse_args(
+        ["--in-dir", train, "--split", split, "--out-dir", str(tmp_path / "run")]))
+    args.update(train_frames=16, val_frames=4, stride=1, epochs=1, batch_size=2, device="cpu")
     args.update(over)
     finetune_decoder.main(argparse_ns(args))
     return json.load(open(os.path.join(args["out_dir"], "metrics.json")))

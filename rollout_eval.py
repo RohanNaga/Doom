@@ -143,9 +143,13 @@ def do_rollout(args):
                                                  in zip(ctl, chunk)])).to(device)
             else:
                 act = torch.from_numpy(acts[:, h]).to(device)
+            # one key tuple per rollout and step, shared by the initial noise, the context
+            # corruption and the sampler's stochastic term, each on its own purpose tag
+            noise_keys = [(args.seed, ep, s, h) for ep, _, s, _, _ in chunk]
             ctx_in, bucket = (ctx, torch.zeros(len(chunk), dtype=torch.long, device=device))
             if args.infer_noise > 0:
-                ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max, args.noise_buckets)
+                ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max,
+                                             args.noise_buckets, noise_keys)
             ph = None
             if trained["phase_buckets"]:
                 from doom_data import tics_since_decision
@@ -157,10 +161,9 @@ def do_rollout(args):
             # depends on the batch size and the step count: changing the batch from 1 to 2 left only
             # 2 of 8 rollouts matching. An arithmetic key is not enough either -- it collides.
             from eval_tf import eta_noise_fn, window_noise
-            keys = [(args.seed, ep, s, h) for ep, _, s, _, _ in chunk]
             shape = (len(chunk), C, *LATENT_HW)
-            noise = window_noise(shape, keys).to(device)
-            nfn = eta_noise_fn(shape, keys, device) if args.eta > 0 else None
+            noise = window_noise(shape, noise_keys).to(device)
+            nfn = eta_noise_fn(shape, noise_keys, device) if args.eta > 0 else None
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), noise.shape, steps=args.steps, eta=args.eta, noise=noise, device=device, noise_fn=nfn)
             preds.append(x.half().cpu().numpy())
@@ -171,6 +174,14 @@ def do_rollout(args):
         meta += [(ep, mp, s) for ep, mp, s, _, _ in chunk]
         print(f"  {i + len(chunk)}/{len(picks)} rollouts, {(time.time() - t0) / (i + len(chunk)):.1f} s each", flush=True)
     extra = {}
+    # The recorded tic of every seed and rolled-out frame. This is what lets --score join a rollout
+    # to the RAW recording: without it the only available reference is the decoded ground-truth
+    # latent, which is a different target distribution per autoencoder and which the decoder's own
+    # blur can flatter.
+    extra["tic"] = np.stack([np.asarray(m["tic"][s + L:s + L + H], dtype=np.int64)
+                             for _, _, s, _, m in picks])
+    extra["seed_tic"] = np.stack([np.asarray(m["tic"][s:s + L], dtype=np.int64)
+                                  for _, _, s, _, m in picks])
     if tic_stride == 1:
         # which rolled-out tics are decision tics, so the IDM (trained at 4-tic spacing) can be
         # given the subsequence it expects instead of frames 4x closer together than it ever saw
@@ -193,16 +204,79 @@ def do_rollout(args):
     print("DONE", args.out)
 
 
-def fixed_noise(ctx, level, train_max, buckets):
-    """Corrupt context at one fixed level, with the bucket id defined on the training scale."""
+def fixed_noise(ctx, level, train_max, buckets, keys=None):
+    """Corrupt context at one fixed level, with the bucket id defined on the training scale.
+
+    `keys` are the same (seed, episode, start, step) tuples the initial noise is keyed by, on the
+    "context" purpose tag. Without them the corruption came from `torch.randn_like`, i.e. the global
+    generator, so with `--infer-noise > 0` which values a rollout got depended on the batch size and
+    the number of sampler steps: the initial noise was paired and the context noise was not.
+    """
     b = ctx.shape[0]
     bucket = torch.full((b,), min(int(level / train_max * buckets), buckets - 1), dtype=torch.long, device=ctx.device)
-    return (1.0 - level) ** 0.5 * ctx + level ** 0.5 * torch.randn_like(ctx), bucket
+    if keys is None:
+        eps = torch.randn_like(ctx)
+    else:
+        from eval_tf import window_noise
+        eps = window_noise(ctx.shape, keys, purpose="context").to(ctx.device)
+    return (1.0 - level) ** 0.5 * ctx + level ** 0.5 * eps, bucket
 
 
 def psnr(a, b):
     mse = ((a - b) ** 2).flatten(1).mean(1).clamp_min(1e-10)
     return 10 * torch.log10(1.0 / mse)
+
+
+class ClipStore:
+    """uint8 clips streamed to memmapped `.npy` staging files, then packed into one `.npz`.
+
+    256 rollouts x 256 frames x 3x240x320 uint8 is 15.10 GB per stack. The old code appended every
+    clip to a Python list and then `np.stack`ed both lists again while saving, so the peak held two
+    copies of both stacks: over 60 GB of host memory, next to the latents, the decoder and a second
+    training job. Here each rollout is written straight into a memmap, and `np.savez_compressed`
+    streams from those memmaps in 16 MiB chunks, so peak memory is one rollout's frames.
+
+    `frames` caps the stored horizon. FVD reads only the first 16 or 32 frames of a clip, and the
+    stride-4 artifact takes positions 3::4, so 128 tics already cover FVD32 at both spacings;
+    storing all 256 costs twice the disk for frames nothing reads.
+    """
+
+    def __init__(self, out_dir, n, frames, shape=(3, 240, 320)):
+        self.dir = os.path.join(out_dir, ".clips_tmp")
+        os.makedirs(self.dir, exist_ok=True)
+        self.n, self.frames, self.shape = int(n), int(frames), tuple(shape)
+        self.arrays = {}
+
+    def _get(self, name):
+        if name not in self.arrays:
+            self.arrays[name] = np.lib.format.open_memmap(
+                os.path.join(self.dir, f"{name}.npy"), mode="w+", dtype=np.uint8,
+                shape=(self.n, self.frames) + self.shape)
+        return self.arrays[name]
+
+    def put(self, name, n, h0, frames_u8):
+        """Frames `h0 .. h0+k` of rollout `n`, clipped to the stored horizon."""
+        if n >= self.n or h0 >= self.frames:
+            return
+        k = min(len(frames_u8), self.frames - h0)
+        self._get(name)[n, h0:h0 + k] = frames_u8[:k]
+
+    def save(self, out_dir, base, pred="pred", gt="gt", stride=None):
+        """Write `<base>.npz` with `pred`/`gt`, and `<base>_stride4.npz` when `stride` is given."""
+        if pred not in self.arrays or gt not in self.arrays:
+            return []
+        p, g = self.arrays[pred], self.arrays[gt]
+        written = [os.path.join(out_dir, f"{base}.npz")]
+        np.savez_compressed(written[0], pred=p, gt=g)
+        if stride:
+            written.append(os.path.join(out_dir, f"{base}_stride{stride}.npz"))
+            np.savez_compressed(written[1], pred=p[:, stride - 1::stride], gt=g[:, stride - 1::stride])
+        return written
+
+    def close(self):
+        import shutil
+        self.arrays.clear()
+        shutil.rmtree(self.dir, ignore_errors=True)
 
 
 @torch.no_grad()
@@ -225,11 +299,39 @@ def do_score(args):
         """`dec` over a whole rollout, in --decode-batch chunks so a 64-frame horizon fits."""
         return torch.cat([dec(z[i:i + args.decode_batch]) for i in range(0, len(z), args.decode_batch)])
 
+    # The decoded-ground-truth keys, kept under their original names for continuity with the
+    # stride-4 rows, and the RAW keys, which are the primary ones: each autoencoder defines a
+    # different decoded target distribution, and a blurry decoder improves its own decoded score
+    # while getting no closer to the game's pixels.
     psnr_h, lpips_h, copy_h, lat_h = np.zeros(H), np.zeros(H), np.zeros(H), np.zeros(H)
-    clips_pred, clips_gt = [], []
+    raw_keys = ("psnr_raw", "lpips_raw", "persist_seed_psnr_raw", "persist_last_psnr_raw",
+                "persist_seed_lpips_raw", "persist_last_lpips_raw", "vae_psnr_raw", "vae_lpips_raw")
+    rawh = {k: np.zeros(H) for k in raw_keys}
+    raw = None
+    if args.parquet_dir:
+        from eval_tf import RawFrames
+        if "tic" not in d.files or "seed_tic" not in d.files:
+            raise SystemExit("--parquet-dir scores against the RAW recording, keyed by recorded tic, and this "
+                             "rollout npz carries no `tic` array; re-run --rollout with the current code")
+        raw = RawFrames(args.parquet_dir)
+        episodes, tics, seed_tics = d["episode"], d["tic"], d["seed_tic"]
+    n_clips = min(int(args.save_clips), N)
+    clip_frames = min(H, int(args.clip_frames) or H)
+    clips = ClipStore(args.out_dir, n_clips, clip_frames) if n_clips > 0 else None
+
+    def to_img(frames_u8):
+        """(k, 240, 320, 3) uint8 raw frames -> (k, 3, 240, 320) in [0, 1], on the device."""
+        return torch.from_numpy(np.ascontiguousarray(frames_u8)).permute(0, 3, 1, 2).float().div(255).to(device)
+
+    os.makedirs(args.out_dir, exist_ok=True)
     for n in range(N):
         last = dec(seed[n, -1:])
-        rp, rg = [], []
+        raw_seq = raw_prev = raw_seed_last = None
+        if raw is not None:
+            ep_id = int(episodes[n])
+            raw_seq = np.stack([raw.get(ep_id, int(t)) for t in tics[n]])
+            raw_seed_last = to_img(raw.get(ep_id, int(seed_tics[n][-1]))[None])
+            raw_prev = np.concatenate([raw.get(ep_id, int(seed_tics[n][-1]))[None], raw_seq[:-1]])
         for h0 in range(0, H, args.decode_batch):
             p = dec(pred[n, h0:h0 + args.decode_batch]); g = dec(gt[n, h0:h0 + args.decode_batch])
             k = p.shape[0]
@@ -237,10 +339,26 @@ def do_score(args):
             lpips_h[h0:h0 + k] += lp(p * 2 - 1, g * 2 - 1).flatten().cpu().numpy()
             copy_h[h0:h0 + k] += psnr(last.expand_as(g), g).cpu().numpy()
             lat_h[h0:h0 + k] += ((pred[n, h0:h0 + k].astype(np.float32) - gt[n, h0:h0 + k].astype(np.float32)) ** 2).reshape(k, -1).mean(1)
-            if n < args.save_clips:
-                rp.append((p * 255).byte().cpu().numpy()); rg.append((g * 255).byte().cpu().numpy())
-        if rp:   # one clip per rollout, all H frames, (H, 3, 240, 320)
-            clips_pred.append(np.concatenate(rp)); clips_gt.append(np.concatenate(rg))
+            if raw is not None:
+                rt = to_img(raw_seq[h0:h0 + k])
+                pv = to_img(raw_prev[h0:h0 + k])
+                sl = raw_seed_last.expand_as(rt)
+                rawh["psnr_raw"][h0:h0 + k] += psnr(p, rt).cpu().numpy()
+                rawh["lpips_raw"][h0:h0 + k] += lp(p * 2 - 1, rt * 2 - 1).flatten().cpu().numpy()
+                # the two raw persistence floors: hold the last SEED frame for the whole horizon,
+                # and hold the previous frame one step at a time. Neither decodes anything, so
+                # neither carries the decoder's reconstruction error.
+                rawh["persist_seed_psnr_raw"][h0:h0 + k] += psnr(sl, rt).cpu().numpy()
+                rawh["persist_seed_lpips_raw"][h0:h0 + k] += lp(sl * 2 - 1, rt * 2 - 1).flatten().cpu().numpy()
+                rawh["persist_last_psnr_raw"][h0:h0 + k] += psnr(pv, rt).cpu().numpy()
+                rawh["persist_last_lpips_raw"][h0:h0 + k] += lp(pv * 2 - 1, rt * 2 - 1).flatten().cpu().numpy()
+                rawh["vae_psnr_raw"][h0:h0 + k] += psnr(g, rt).cpu().numpy()
+                rawh["vae_lpips_raw"][h0:h0 + k] += lp(g * 2 - 1, rt * 2 - 1).flatten().cpu().numpy()
+            if clips is not None and n < n_clips:
+                clips.put("pred", n, h0, (p * 255).byte().cpu().numpy())
+                clips.put("gt", n, h0, (g * 255).byte().cpu().numpy())
+                if raw is not None:
+                    clips.put("raw_gt", n, h0, raw_seq[h0:h0 + k].transpose(0, 3, 1, 2))
         if (n + 1) % 32 == 0:
             print(f"  scored {n + 1}/{N}", flush=True)
     cfg = json.loads(str(d["config"])) if "config" in d else {}
@@ -258,6 +376,18 @@ def do_score(args):
         if hh <= H:
             out[f"psnr@{hh}"] = float(psnr_h[hh - 1] / N); out[f"lpips@{hh}"] = float(lpips_h[hh - 1] / N)
             out[f"copy_seed_psnr@{hh}"] = float(copy_h[hh - 1] / N)
+    out["reference"] = "raw" if raw is not None else "decoded_gt"
+    out["decoded_note"] = ("psnr/lpips/copy_seed_psnr compare DECODED prediction against DECODED ground-truth "
+                           "latent, which is a different target per autoencoder; the *_raw keys compare against "
+                           "the game's own frames and are the ones to report")
+    if raw is not None:
+        out["raw_parquet_dir"] = args.parquet_dir
+        for k, v in rawh.items():
+            out[k] = (v / N).tolist()
+        for hh in at:
+            if hh <= H:
+                for k in raw_keys:
+                    out[f"{k}@{hh}"] = float(rawh[k][hh - 1] / N)
 
     if args.idm:
         from train_idm import IDM, movement_probs
@@ -329,17 +459,22 @@ def do_score(args):
                         return k, None   # the seed and the judged frames are not one verified chain
                 return k, seed[n, tail]
             return k, None
-        steps = None
-        skipped = 0
-        acc = None
+        # Every valid window counts, with its own denominator. The old loop fixed `steps` to the
+        # FIRST accepted rollout's run length and skipped every rollout of any other length, so the
+        # result depended on which rollout happened to come first and could discard most of them;
+        # a run of 40 verified decisions after a run of 9 contributed nothing.
+        tags = ("top1", "movement", "real_top1", "real_movement")
+        acc = {kk: np.zeros(H) for kk in tags}
+        den = np.zeros(H)
+        run_lengths, skipped = [], 0
         for n in range(N):
             k, seed_frames = judged(n)
-            if seed_frames is None or len(k) == 0 or (steps is not None and len(k) != steps):
+            if seed_frames is None or len(k) == 0:
                 skipped += 1
                 continue
             steps = len(k)
-            if acc is None:
-                acc = {kk: np.zeros(steps) for kk in ("top1", "movement", "real_top1", "real_movement")}
+            run_lengths.append(steps)
+            den[:steps] += 1
             y = torch.from_numpy(actions[n][k]).to(device)
             for tag, frames in (("", pred[n][k]), ("real_", gt[n][k])):
                 if sd is None:
@@ -348,30 +483,45 @@ def do_score(args):
                     seq = torch.cat([encode_for_idm(sd, dec_all(seed_frames), device, args.decode_batch),
                                      encode_for_idm(sd, dec_all(frames), device, args.decode_batch)])
                 logits = idm.predict_sequence(seq)[-steps:]
-                acc[tag + "top1"] += (logits.argmax(-1) == y).cpu().numpy()
-                acc[tag + "movement"] += (movement_probs(logits, mov, num_mov).argmax(-1) == mov[y]).cpu().numpy()
-        scored = N - skipped
+                acc[tag + "top1"][:steps] += (logits.argmax(-1) == y).cpu().numpy()
+                acc[tag + "movement"][:steps] += (movement_probs(logits, mov, num_mov).argmax(-1) == mov[y]).cpu().numpy()
+        scored = len(run_lengths)
         out["idm_spacing_tics"] = idm_spacing * tic_stride if tic_stride != 1 else idm_spacing
         out["idm_rollouts_scored"] = int(scored)
         out["idm_rollouts_skipped"] = int(skipped)
-        if acc is None or scored == 0:
-            raise SystemExit("no rollout had a usable decision-tic subsequence for the IDM")
-        for k, v in acc.items():
-            out[f"idm_{k}"] = (v / scored).tolist(); out[f"idm_{k}_mean"] = float(v.mean() / scored)
-        out["idm_val_top1"] = ck.get("val_top1"); out["idm_val_movement"] = ck.get("val_movement")
-        out["idm_majority_baseline"] = ck.get("val_metrics", {}).get("majority_baseline")
+        out["idm_windows_scored"] = int(den.sum())
+        out["idm_denominator"] = den.astype(int).tolist()
+        out["idm_run_length_min"] = int(min(run_lengths)) if run_lengths else 0
+        out["idm_run_length_max"] = int(max(run_lengths)) if run_lengths else 0
+        if scored == 0:
+            # the IDM is an optional judge, so its failure must not throw away the drift curve and
+            # the clips that were already computed
+            out["idm_error"] = "no rollout had a usable decision-tic subsequence for the IDM"
+            print("WARNING: " + out["idm_error"], flush=True)
+        else:
+            valid = den > 0
+            for k, v in acc.items():
+                per = np.full(H, np.nan)
+                per[valid] = v[valid] / den[valid]
+                out[f"idm_{k}"] = [None if np.isnan(x) else float(x) for x in per]
+                # the pooled mean over every scored window, not the mean of per-position rates
+                out[f"idm_{k}_mean"] = float(v.sum() / den.sum())
+            out["idm_val_top1"] = ck.get("val_top1"); out["idm_val_movement"] = ck.get("val_movement")
+            out["idm_majority_baseline"] = ck.get("val_metrics", {}).get("majority_baseline")
         out["idm_reencode_vae"] = args.idm_reencode_vae or None
-    os.makedirs(args.out_dir, exist_ok=True)
-    json.dump(out, open(os.path.join(args.out_dir, "drift.json"), "w"), indent=1)
-    if clips_pred:
-        np.savez_compressed(os.path.join(args.out_dir, "clips_u8.npz"), pred=np.stack(clips_pred), gt=np.stack(clips_gt))
-        if tic_stride == 1:
-            # FVD at both spacings. A 16-frame clip of consecutive tics is 0.46 s of game time; a
-            # 16-frame clip of every fourth tic is 1.83 s, which is what a stride-4 row's 16-frame
-            # clip covers. Comparing FVD across rows needs clips of the same game duration, so both
-            # are written and `after_nexttic.sh` scores both.
-            np.savez_compressed(os.path.join(args.out_dir, "clips_u8_stride4.npz"),
-                                pred=np.stack(clips_pred)[:, 3::4], gt=np.stack(clips_gt)[:, 3::4])
+    with open(os.path.join(args.out_dir, "drift.json"), "w") as f:
+        json.dump(out, f, indent=1)
+    if clips is not None:
+        # FVD at both spacings. A 16-frame clip of consecutive tics is 0.46 s of game time; a
+        # 16-frame clip of every fourth tic is 1.83 s, which is what a stride-4 row's 16-frame
+        # clip covers. Comparing FVD across rows needs clips of the same game duration, so both
+        # are written and `after_nexttic.sh` scores both.
+        stride = 4 if tic_stride == 1 else None
+        clips.save(args.out_dir, "clips_u8", stride=stride)
+        # the primary FVD reference: the real clips are the GAME's frames, not this decoder's
+        # reconstruction of the ground-truth latent
+        clips.save(args.out_dir, "clips_u8_raw", gt="raw_gt", stride=stride)
+        clips.close()
     print(json.dumps({k: v for k, v in out.items() if not isinstance(v, list)}, indent=1))
 
 
@@ -410,6 +560,15 @@ def build_parser():
                         f"IDM (bare flag = {VAE_NAME}); required when the rollout is not in the IDM's own "
                         "4-channel latent space, as for the 16-channel sd35 row")
     p.add_argument("--decode-batch", type=int, default=16); p.add_argument("--save-clips", type=int, default=64); p.add_argument("--out-dir")
+    p.add_argument("--clip-frames", dest="clip_frames", type=int, default=0,
+                   help="store only the first N frames of each clip (0 = the whole horizon). FVD reads the first "
+                        "16 or 32 frames, and the stride-4 artifact takes positions 3::4, so 128 already covers "
+                        "FVD32 at both spacings; the rest is disk nothing reads")
+    p.add_argument("--parquet-dir", dest="parquet_dir", default="",
+                   help="the RAW recordings this corpus was encoded from. With it the rollout is also scored "
+                        "against the game's own frames, keyed by recorded tic, with raw copy-seed and copy-last "
+                        "persistence floors and raw FVD reference clips. Those *_raw keys are the primary ones: "
+                        "the decoded-latent reference is a different target distribution per autoencoder")
     return p
 
 

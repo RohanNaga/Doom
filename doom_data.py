@@ -453,7 +453,13 @@ def tics_since_decision(is_decision, buckets=PHASE_BUCKETS):
     return out
 
 
-def tic_window_starts(meta, context_frames, horizon=1):
+TIC_VALIDITY_COLUMNS = ("tic", "deaths", "map_id")
+# what a per-tic TRAINING corpus must carry: the three validity columns, the executed control, the
+# decision mark that says this is an --every-tic corpus, and the action id the sample contract reads
+TIC_CORPUS_COLUMNS = ("tic", "deaths", "map_id", "buttons", "is_decision", "action")
+
+
+def tic_window_starts(meta, context_frames, horizon=1, strict=True):
     """Start rows whose `context_frames + horizon` consecutive rows form one legal per-tic window.
 
     A window is valid when, over every adjacent pair of rows it spans:
@@ -470,16 +476,34 @@ def tic_window_starts(meta, context_frames, horizon=1):
     `chain_id` is deliberately *not* used: it is -1 on every row that is not a verified decision
     source, so it would reject three quarters of a per-tic corpus. The rules above are the same
     physical constraints the verified-transition filter enforces, applied at tic resolution.
+
+    **`strict=True` (the default) requires every column the rules read.** R3 and R4 used to apply
+    only `if "deaths" in meta.files`, so a sidecar missing a column silently dropped that rule and
+    admitted windows that span a respawn or a map load -- the failure mode is invisible in the
+    window count and shows up only as a model trained to predict a teleport. `strict=False` keeps
+    the old permissive behaviour for a caller that deliberately has a partial sidecar; nothing in
+    the training or evaluation path asks for it.
     """
+    files = getattr(meta, "files", None) or list(meta)
+    if strict:
+        missing = [c for c in TIC_VALIDITY_COLUMNS if c not in files]
+        if missing:
+            raise ValueError(f"per-tic metadata is missing {missing}, and the window rules need every one of "
+                             f"them: `tic` for continuity, `deaths` for the respawn boundary, `map_id` for a "
+                             f"map load. Pass strict=False only if a dropped rule is what you want.")
     T = len(meta["tic"])
+    for c in TIC_VALIDITY_COLUMNS:
+        if c in files and len(meta[c]) != T:
+            raise ValueError(f"per-tic metadata column {c!r} has {len(meta[c])} rows, `tic` has {T}: "
+                             "the columns do not describe the same rows")
     span = int(context_frames) + int(horizon)   # rows one window covers
     need = span - 1                             # adjacent pairs inside it, all of which must be good
     if T < span:
         return np.zeros(0, dtype=np.int64)
     good = np.diff(np.asarray(meta["tic"]).astype(np.int64)) == 1
-    if "deaths" in meta.files:
+    if "deaths" in files:
         good &= np.diff(np.asarray(meta["deaths"]).astype(np.int64)) == 0
-    if "map_id" in meta.files:
+    if "map_id" in files:
         good &= np.diff(np.asarray(meta["map_id"]).astype(np.int64)) == 0
     run = np.concatenate([[0], np.cumsum(good.astype(np.int64))])
     ok = (run[need:T] - run[0:T - need]) == need
@@ -501,10 +525,30 @@ def control_matrix(buttons):
     button list rather than a number to hardcode.
     """
     b = [str(x) for x in np.asarray(buttons).tolist()]
+    check_control_strings(b)
+    return np.array([[float(c) for c in s] for s in b], dtype=np.float32)
+
+
+def check_control_strings(buttons):
+    """Constant-width binary control strings, or a refusal. Returns the width.
+
+    `float(c)` in `control_matrix` accepts any digit, so a '2' or a '-' from a mis-imported column
+    would become a control value of 2.0 or raise deep inside a DataLoader worker. The width and the
+    alphabet are checked once per episode instead, at corpus construction time, where the message
+    can name the file.
+    """
+    b = [str(x) for x in np.asarray(buttons).tolist()]
     widths = {len(s) for s in b}
     if len(widths) != 1:
         raise ValueError(f"button strings of differing width in one episode: {sorted(widths)}")
-    return np.array([[float(c) for c in s] for s in b], dtype=np.float32)
+    (width,) = widths
+    if width == 0:
+        raise ValueError("empty button strings: this column holds no executed control")
+    seen = set("".join(b))                      # one C-level pass; the alphabet is two characters
+    if not seen <= {"0", "1"}:
+        raise ValueError(f"button strings are not binary: {sorted(seen - {'0', '1'})[:4]} appear in them, "
+                         "so these are not the recorder's per-button 0/1 flags")
+    return width
 
 
 def corpus_control_bits(latents_dir):
@@ -566,6 +610,7 @@ class TicWindowDataset(Dataset):
         self.episodes, counts = [], []
         self.control_bits = None
         candidates = 0
+        widths = set()          # executed-control width, checked on every episode and never mixed
         span = self.L + self.horizon
         for ep, lat_path, meta_path in list_latent_episodes(latents_dir):
             if keep is not None and ep not in keep:
@@ -578,23 +623,35 @@ class TicWindowDataset(Dataset):
                 raise ValueError(f"{meta_path}: no is_decision column; this is a stride-4 corpus, "
                                  "not one written by encode_parquet.py --every-tic")
             if "deaths" not in meta.files:
-                # tic_window_starts treats `deaths` as optional for generic callers, but a training corpus
-                # without it would let windows cross a respawn silently (the tic counter keeps running
-                # through a death, so nothing else marks the boundary)
+                # tic_window_starts refuses this too, but the message has to name the FILE: with 2,000
+                # episodes the useful information is which sidecar to re-encode
                 raise ValueError(f"{meta_path}: no deaths column, so a window could span a respawn "
                                  "unnoticed; re-run the encoder (it copies deaths by default)")
-            if len(meta["tic"]) != lat.shape[0]:
-                raise ValueError(f"{lat_path}: {lat.shape[0]} latents vs {len(meta['tic'])} metadata rows")
+            if "buttons" not in meta.files:
+                raise ValueError(f"{meta_path}: no buttons column, so the executed control per tic is "
+                                 "unavailable; re-run the encoder (it stores buttons by default)")
+            missing = [c for c in TIC_CORPUS_COLUMNS if c not in meta.files]
+            if missing:
+                raise ValueError(f"{meta_path}: no {missing} column(s); a per-tic training corpus needs "
+                                 f"{list(TIC_CORPUS_COLUMNS)}")
+            # every column must describe the same rows as the latents: a short or long column is a
+            # misalignment, and the only rule that used to notice was the latent/`tic` comparison
+            for c in TIC_CORPUS_COLUMNS:
+                if len(meta[c]) != lat.shape[0]:
+                    raise ValueError(f"{meta_path}: {lat.shape[0]} latents vs {len(meta[c])} rows of {c!r}; "
+                                     "the sidecar does not describe these latents")
             candidates += max(0, lat.shape[0] - span + 1)
+            width = check_control_strings(meta["buttons"])
+            if widths and width not in widths:
+                raise ValueError(f"{meta_path}: {width} button bits, the corpus has {sorted(widths)[0]}; "
+                                 "two WADs' button lists cannot be mixed")
+            widths.add(width)
             starts = tic_window_starts(meta, self.L, self.horizon)
             if len(starts) == 0:
                 continue
             phase = tics_since_decision(meta["is_decision"], self.phase_buckets)
             controls = None
             if self.action_history:
-                if "buttons" not in meta.files:
-                    raise ValueError(f"{meta_path}: no buttons column, so the executed control per tic is "
-                                     "unavailable; re-run the encoder (it stores buttons by default)")
                 controls = control_matrix(meta["buttons"])
                 if self.control_bits is None:
                     self.control_bits = controls.shape[1]

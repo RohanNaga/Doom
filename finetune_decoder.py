@@ -338,6 +338,15 @@ def main(args):
         """Record the run so far. Written next to every checkpoint, so a later crash keeps it."""
         with open(os.path.join(args.out_dir, "metrics.json"), "w") as f:
             json.dump({"before": before, "after": after, "history": history, "args": vars(args),
+                       # what a score measured with this decoder has to state: which frames it was
+                       # tuned on and what it was tuned for. An unseen-map claim is about the whole
+                       # system, so a decoder that saw arenas 6-8 defeats it whatever the denoiser
+                       # was initialised from.
+                       "provenance": {"train_corpus": args.in_dir, "split": args.split,
+                                      "split_subset": "train", "vae_source": args.vae_id or "sd-vae-ft-mse",
+                                      "loss": ("mse" if args.lpips_weight <= 0
+                                               else f"mse + {args.lpips_weight} lpips"),
+                                      "mse_rows": int(args.mse_rows), "lpips_rows": 240},
                        "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
                        "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
                        "presentations": step * eff, "stream": stream_info, "stopped": stopped,
@@ -364,7 +373,13 @@ def main(args):
                     z = vae.encode(x).latent_dist.mean
                 with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device != "cpu"):
                     y = vae.decode(z).sample
-                loss = torch.mean((y.float() - x) ** 2)
+                # The MSE term covers the same 240 real picture rows the LPIPS term and every
+                # reported metric do. Over all 256 rows, 16/256 = 6.25% of the squared error is
+                # the gray padding the encoder added to reach a multiple of 8 -- pixels no metric
+                # scores and nothing ever looks at, competing for decoder capacity with the game.
+                # `--mse-rows 256` reproduces the old loss for the record.
+                rows = min(int(args.mse_rows), x.shape[2])
+                loss = torch.mean((y.float()[:, :, :rows] - x[:, :, :rows]) ** 2)
                 if args.lpips_weight > 0:
                     loss = loss + args.lpips_weight * lpips_fn(y.float()[:, :, :240].clamp(-1, 1), x[:, :, :240]).mean()
                 (loss / args.accum).backward()
@@ -410,7 +425,8 @@ def main(args):
     print("DONE", flush=True)
 
 
-if __name__ == "__main__":
+def build_parser():
+    """Every flag in one place, so a test can read the defaults without a subprocess."""
     p = argparse.ArgumentParser()
     p.add_argument("--in-dir", required=True, help="parquet episodes")
     p.add_argument("--split", required=True)
@@ -423,6 +439,11 @@ if __name__ == "__main__":
     p.add_argument("--accum", type=int, default=1)
     p.add_argument("--lr", type=float, default=1e-5)
     p.add_argument("--lpips-weight", type=float, default=0.0)
+    p.add_argument("--mse-rows", dest="mse_rows", type=int, default=240,
+                   help="picture rows the MSE term covers. 240 is the real picture, matching the LPIPS term "
+                        "and every reported metric; 256 includes the 16 gray padding rows the encoder added, "
+                        "which is 6.25%% of the loss spent on pixels nothing scores. Pass 256 only to reproduce "
+                        "a tune made before this flag existed")
     p.add_argument("--report-lpips", action="store_true")
     p.add_argument("--val-every", type=int, default=0, help="validate every N updates (0 = epoch ends only)")
     p.add_argument("--channels-last", action="store_true", help="NHWC decoder; throughput only")
@@ -444,4 +465,8 @@ if __name__ == "__main__":
     p.add_argument("--scaling-factor", type=float, default=None, help="asserted against the VAE config")
     p.add_argument("--shift-factor", type=float, default=None, help="asserted against the VAE config")
     p.add_argument("--device", default="cuda:3")
-    main(p.parse_args())
+    return p
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())
