@@ -28,25 +28,58 @@ from torch.utils.data import DataLoader, Dataset, Subset
 
 from backbones import ACTION_INJECTIONS, BACKBONES, LATENT_HW, build_model, resolve_latent_channels
 from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
+from doom_data import PHASE_BUCKETS
+
+ARNOLD_BUTTONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "cards", "arnold", "buttons.json")
+
+
+def fit_check_control_bits(path=ARNOLD_BUTTONS):
+    """Width of the Arnold button vector, read from the recorded card rather than hardcoded.
+
+    A fit check has no corpus to read the width from, and guessing it wrong changes the control
+    embedder's input layer and therefore the memory and throughput the check reports. The card says
+    19 (9 movement/attack/speed/crouch bits plus 10 weapon-selection bits).
+    """
+    try:
+        with open(path) as f:
+            return len(json.load(f)["available_buttons"])
+    except (OSError, KeyError):
+        return 19
 
 
 class SyntheticWindows(Dataset):
-    def __init__(self, n, context_frames, num_actions, latent_channels=4):
+    def __init__(self, n, context_frames, num_actions, latent_channels=4, action_history=0, control_bits=0,
+                 phase_buckets=0):
         self.n, self.L, self.A, self.C = n, context_frames, num_actions, latent_channels
+        self.action_history, self.control_bits = action_history, control_bits
+        self.phase_buckets = phase_buckets
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, i):
+        # the draw order is context, target, action, and it must stay that way: the fit-check
+        # windows are asserted bit-identical to the ones the finished rows' fit checks used
         g = torch.Generator().manual_seed(i)
-        return (torch.randn(self.C * self.L, *LATENT_HW, generator=g), torch.randn(self.C, *LATENT_HW, generator=g),
-                torch.randint(0, self.A, (1,), generator=g)[0])
+        ctx = torch.randn(self.C * self.L, *LATENT_HW, generator=g)
+        tgt = torch.randn(self.C, *LATENT_HW, generator=g)
+        act = (torch.randint(0, 2, (self.action_history, self.control_bits), generator=g).float()
+               if self.action_history else torch.randint(0, self.A, (1,), generator=g)[0])
+        if self.phase_buckets:
+            # a fit check under --phase-conditioning has to supply the fourth column, or the model
+            # refuses the batch and the check crashes instead of measuring anything
+            return ctx, tgt, act, torch.randint(0, self.phase_buckets, (1,), generator=g)[0]
+        return ctx, tgt, act
 
 
 class SeededCorruption(Dataset):
     """Wraps a validation dataset so each window's timestep, context noise level and noise, and target noise
     are drawn from a generator seeded by the window's own index: identical across checkpoints, backbones,
-    batch sizes, and world sizes."""
+    batch sizes, and world sizes.
+
+    The phase, when the wrapped dataset supplies one, is appended *after* the corruption tensors, so
+    the seven-element layout every existing run validates under is byte-for-byte unchanged.
+    """
 
     def __init__(self, ds, max_level, num_steps):
         self.ds, self.max_level, self.num_steps = ds, max_level, num_steps
@@ -55,35 +88,218 @@ class SeededCorruption(Dataset):
         return len(self.ds)
 
     def __getitem__(self, i):
-        ctx, tgt, act = self.ds[i]
+        sample = self.ds[i]
+        ctx, tgt, act = sample[0], sample[1], sample[2]
         g = torch.Generator().manual_seed(1234 + int(i))
         t = torch.randint(0, self.num_steps, (1,), generator=g)[0]
         level = torch.rand((), generator=g) * self.max_level
         ctx_eps = torch.randn(ctx.shape, generator=g, dtype=ctx.dtype)
         tgt_noise = torch.randn(tgt.shape, generator=g, dtype=tgt.dtype)
-        return ctx, tgt, act, t, level, ctx_eps, tgt_noise
+        out = (ctx, tgt, act, t, level, ctx_eps, tgt_noise)
+        return out + (sample[3],) if len(sample) > 3 else out
 
 
-def build_loaders(args, latent_channels):
+def unpack_batch(batch):
+    """(context, target, action, phase or None) from a training batch.
+
+    The stride-4 datasets yield three tensors and the per-tic dataset a fourth,
+    `tics_since_decision`, which only `--phase-conditioning` consumes. Reading the fourth
+    positionally here is what lets one training loop serve both without touching the old contract.
+    """
+    return batch[0], batch[1], batch[2], (batch[3] if len(batch) > 3 else None)
+
+
+def select_episodes(args):
+    """(train ids, val ids). Either the split's own lists or the explicit ranges, then the encoded prefix.
+
+    Two routes, and a run states which one it took in config.json:
+
+      * `--split`, as every finished row did: the seeded episode-level split, thinned by
+        `--train-fraction`.
+      * `--episode-ids A:B --val-episode-ids C:D`, which is what the dense corpus needs: its
+        episodes are consecutively numbered and its held-out ranges were fixed in
+        `release/dense_split.json` before anything was scored, so a range is the split.
+
+    Either way the two lists are checked disjoint, and `--dense-segment` additionally checks the
+    training range against that segment's recorded val and test ranges. A mistyped range is the one
+    mistake that silently produces a training-data headline, so it fails here rather than later.
+    """
+    from doom_data import (assert_disjoint, check_dense_training_ids, limit_to_encoded, load_dense_split,
+                           load_split, parse_episode_ids, select_train_episodes)
+    if args.episode_ids:
+        if not args.val_episode_ids:
+            raise SystemExit("--episode-ids names the training episodes explicitly, so --val-episode-ids "
+                             "must name the validation ones; there is no split file to fall back on")
+        train_ids = parse_episode_ids(args.episode_ids)
+        val_ids = parse_episode_ids(args.val_episode_ids)
+        if args.dense_segment:
+            check_dense_training_ids(load_dense_split(), args.dense_segment, train_ids)
+    else:
+        split = load_split(args.split)
+        train_ids = select_train_episodes(split["train"], args.train_fraction, args.seed)
+        val_ids = [int(e) for e in split["val"]]
+    assert_disjoint(train_ids, val_ids, "training and validation episode ids")
+    if not (args.max_episodes or args.episode_ids):
+        return train_ids, val_ids      # the split route as it has always been: the dataset filters
+    requested = (len(train_ids), len(val_ids))
+    train_ids = limit_to_encoded(args.latents_dir, train_ids, args.max_episodes)
+    val_ids = limit_to_encoded(args.val_latents_dir or args.latents_dir, val_ids,
+                               args.max_episodes if not args.val_latents_dir else 0)
+    if not train_ids:
+        raise SystemExit(f"no encoded training episodes in {args.latents_dir} for the requested ids")
+    if not val_ids:
+        raise SystemExit("no encoded validation episodes for the requested ids; with --max-episodes the "
+                         "validation range may lie entirely past the encoded prefix")
+    print(f"episodes: {len(train_ids)}/{requested[0]} requested training and {len(val_ids)}/{requested[1]} "
+          f"validation episodes are encoded")
+    short = (len(train_ids), len(val_ids)) != requested
+    if short and not (args.max_episodes or args.allow_partial):
+        raise SystemExit(
+            f"only {len(train_ids)}/{requested[0]} training and {len(val_ids)}/{requested[1]} validation "
+            "episodes of the requested ranges are encoded. A multi-day run must not start on a corpus that "
+            "is still being written: the episode set would then depend on when the run happened to start. "
+            "Wait for the encode, or pass --allow-partial (or --max-episodes N to fix the prefix on purpose).")
+    return train_ids, val_ids
+
+
+EPISODES_FILE = "train_episodes.json"
+
+# Args that define WHICH EXPERIMENT this is. A resume that changes any of them continues a run under
+# a different recipe while keeping its step count, its loss curve and its checkpoint name, so the
+# result is a row nobody can describe: a v-prediction checkpoint resumed under `--objective eps`
+# trains as eps and saves an eps-labelled checkpoint whose first N steps were velocity.
+RESUME_IDENTITY = ("backbone", "latent_channels", "context_frames", "tic_stride", "action_history",
+                   "control_bits", "objective", "noise_buckets", "noise_aug_max", "global_batch",
+                   "lr", "warm_start", "phase_buckets", "phase_conditioning")
+# `lr` is the one key a resume is allowed to change, because a diagnosed loss excursion is fixed by
+# lowering it; the trainer already rewrites `initial_lr` and logs it as a recipe deviation. It now
+# has to be asked for by name, so it cannot happen by forgetting to repeat a flag.
+RESUME_OVERRIDABLE = ("lr",)
+
+
+def parse_resume_override(values):
+    """`--resume-override lr=2.5e-5` -> {"lr": 2.5e-5}. Only `lr` is accepted."""
+    out = {}
+    for item in values or []:
+        if "=" not in item:
+            raise SystemExit(f"--resume-override takes key=value, got {item!r}")
+        k, v = item.split("=", 1)
+        if k not in RESUME_OVERRIDABLE:
+            raise SystemExit(f"--resume-override {k} is not allowed; only {list(RESUME_OVERRIDABLE)} may differ "
+                             "across a resume, because everything else changes what the run is")
+        out[k] = float(v)
+    return out
+
+
+def check_resume_identity(ck, args, overrides):
+    """Refuse a resume whose recipe-identity args differ from the checkpoint's.
+
+    `latents_dir` is compared by basename only: the same corpus is mounted at different paths on
+    different machines, and a run is legitimately resumed from another checkout.
+    """
+    old = ck.get("args") or {}
+    if not old:
+        return {}
+    now = vars(args)
+    differ = {}
+    for key in RESUME_IDENTITY:
+        if key not in old:
+            continue                       # a checkpoint from before this flag existed
+        a, b = old[key], now.get(key)
+        if isinstance(a, float) or isinstance(b, float):
+            same = a is not None and b is not None and abs(float(a) - float(b)) < 1e-12
+        else:
+            same = a == b
+        if not same:
+            differ[key] = (a, b)
+    ao, bo = os.path.basename(str(old.get("latents_dir", "")).rstrip("/")), \
+        os.path.basename(str(now.get("latents_dir", "")).rstrip("/"))
+    if old.get("latents_dir") is not None and ao != bo:
+        differ["latents_dir"] = (ao, bo)
+    allowed = {k: v for k, v in differ.items() if k in overrides and abs(overrides[k] - float(v[1])) < 1e-12}
+    blocked = {k: v for k, v in differ.items() if k not in allowed}
+    if blocked:
+        lines = "\n".join(f"  {k}: checkpoint {v[0]!r}, now {v[1]!r}" for k, v in sorted(blocked.items()))
+        raise SystemExit(f"--resume {args.resume} was trained under a different recipe:\n{lines}\n"
+                         f"Resuming would continue one experiment as another. Only "
+                         f"{list(RESUME_OVERRIDABLE)} may differ, and only with --resume-override key=value.")
+    for k, (a, b) in allowed.items():
+        print(f"resume override {k}: {a!r} -> {b!r} (recipe deviation, stated by --resume-override)")
+    return allowed
+
+
+def pin_episodes(args, train_ids, val_ids, checkpoint=None):
+    """Read the episode lists the run started with, or return the freshly resolved ones.
+
+    `limit_to_encoded` resolves the id ranges against what is encoded *now*, so a run resumed after
+    more episodes finished encoding would silently train on a larger set than it started with.
+
+    The pin is read from the CHECKPOINT first and only then from the destination results directory:
+    a resume into a new directory (a rerun, a copied tree, a different machine) finds no
+    `train_episodes.json` there and would re-resolve the list, which is exactly the case the pin
+    exists to prevent. Every checkpoint carries `episodes`, so the pin travels with the weights.
+    """
+    rec = (checkpoint or {}).get("episodes")
+    path = os.path.join(args.results_dir, EPISODES_FILE)
+    if args.resume and rec is None and os.path.exists(path):
+        with open(path) as f:
+            rec = json.load(f)
+    if args.resume and rec:
+        if "val_episodes" not in rec:
+            return train_ids, val_ids       # an old-format record from the split route; nothing to pin
+        from doom_data import limit_to_encoded
+        pinned_train, pinned_val = rec["episodes"], rec["val_episodes"]
+        have_t = set(limit_to_encoded(args.latents_dir, pinned_train))
+        have_v = set(limit_to_encoded(args.val_latents_dir or args.latents_dir, pinned_val))
+        gone = sorted((set(pinned_train) - have_t) | (set(pinned_val) - have_v))
+        if gone:
+            raise SystemExit(f"this run trained on {len(pinned_train)} + {len(pinned_val)} episodes, and "
+                             f"{len(gone)} of them are no longer in the latent directories: {gone[:8]}. "
+                             "Resuming would change the training set.")
+        print(f"resume pinned to the original {len(pinned_train)} training and {len(pinned_val)} validation episodes")
+        return pinned_train, pinned_val
+    return train_ids, val_ids
+
+
+def episode_record(args, train_ids, val_ids):
+    """The pin, as it is written to the results directory AND carried in every checkpoint."""
+    return {"train_fraction": args.train_fraction, "seed": args.seed,
+            "num_episodes": len(train_ids), "episodes": list(train_ids), "val_episodes": list(val_ids)}
+
+
+def build_loaders(args, latent_channels, checkpoint=None):
     """(train dataset, validation subset, training episode ids). The ids are None for a fit check.
 
     `--train-fraction` thins the *training* episode list only; the validation list and the fixed
     `RandomState(0)` draw of validation windows are the same for every fraction, so a data cell's
     held-out loss is comparable to the full-data cell's.
+
+    `--tic-stride 1` swaps `LatentWindowDataset` (one row per agent decision, four tics apart) for
+    `TicWindowDataset` (one row per tic). The sample shapes are identical, so every backbone and the
+    whole recipe are unchanged; only the game time between the last context frame and the target
+    moves, from 114 ms to 28.6 ms. `--tic-stride 4` is the default and takes the old path untouched.
     """
     if args.fit_check:
-        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels)
+        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels,
+                              args.action_history, args.control_bits or fit_check_control_bits(),
+                              args.phase_buckets if args.phase_conditioning else 0)
         return ds, None, None
-    from doom_data import LatentWindowDataset, load_split, select_train_episodes
-    split = load_split(args.split)
-    train_ids = select_train_episodes(split["train"], args.train_fraction, args.seed)
-    train = LatentWindowDataset(args.latents_dir, train_ids, args.context_frames, require_chains=args.require_verified_transitions,
-                                latent_channels=latent_channels)
-    val = LatentWindowDataset(args.latents_dir, split["val"], args.context_frames, require_chains=args.require_verified_transitions,
-                              latent_channels=latent_channels)
+    from doom_data import LatentWindowDataset, TicWindowDataset
+    train_ids, val_ids = pin_episodes(args, *select_episodes(args), checkpoint=checkpoint)
+    if args.tic_stride == 1:
+        def make(d, ids):
+            return TicWindowDataset(d, ids, args.context_frames, latent_channels=latent_channels,
+                                    with_phase=args.phase_conditioning, phase_buckets=args.phase_buckets,
+                                    action_history=args.action_history)
+    else:
+        def make(d, ids):
+            return LatentWindowDataset(d, ids, args.context_frames, latent_channels=latent_channels,
+                                       require_chains=args.require_verified_transitions)
+    train = make(args.latents_dir, train_ids)
+    val = make(args.val_latents_dir or args.latents_dir, val_ids)
     rng = np.random.RandomState(0)
     val_idx = np.sort(rng.choice(len(val), size=min(args.val_windows, len(val)), replace=False))
-    return train, Subset(val, val_idx.tolist()), train_ids
+    return train, Subset(val, val_idx.tolist()), (train_ids, val_ids)
 
 
 @torch.no_grad()
@@ -102,6 +318,42 @@ def ema_keys(raw):
     """
     return [n for n, _ in raw.named_parameters()]
 
+
+PHASE_PARAM_MARK = "phase_embedder"
+
+
+def load_init_weights(model, path):
+    """Start a NEW run from one of our own checkpoints' weights. Returns (step of the source, ema dict or None).
+
+    Accepts every format `train_wm.py` writes, because all three carry the full state dict under
+    `model`: `best.pt` (bf16 weights, no optimizer), a recovery `NNNNNNN.pt` (fp32 weights plus
+    optimizer, scheduler, EMA and RNG) and a `snap_*.pt` (bf16 weights and EMA). Only the weights
+    and, when present, the EMA are taken. Nothing else is: the step restarts at 0, the optimizer is
+    fresh and the warmup runs again, which is the difference between this and `--resume`.
+
+    Key matching is strict, with exactly one exception: the `tics_since_decision` tables that
+    `--phase-conditioning` adds have no counterpart in a checkpoint trained without it, so they are
+    reported as freshly initialised instead of failing the load. Any other gap is an error, because
+    it means the checkpoint belongs to a different architecture and a silent partial load would
+    produce a run nobody could interpret.
+    """
+    ck = torch.load(path, map_location="cpu", weights_only=False)
+    if "model" not in ck:
+        raise SystemExit(f"--init-from {path} carries no 'model' state dict; is it a train_wm.py checkpoint?")
+    try:
+        missing, unexpected = model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=False)
+    except RuntimeError as e:      # a shape mismatch: same key names, different architecture
+        raise SystemExit(f"--init-from {path} does not match this model: {e}") from e
+    fresh = [k for k in missing if PHASE_PARAM_MARK in k]
+    gap = sorted(set(missing) - set(fresh))
+    if gap or unexpected:
+        raise SystemExit(f"--init-from {path} does not match this model: missing {gap[:8]}, "
+                         f"unexpected {sorted(unexpected)[:8]}. Check --backbone, --context-frames "
+                         "and --latent-channels against the source run's config.json.")
+    if fresh:
+        print(f"--init-from: {len(fresh)} phase-conditioning tensor(s) initialised fresh: {fresh}")
+    print(f"initialised weights from {path} (source step {ck.get('step', '?')}); optimizer, step and warmup start over")
+    return int(ck.get("step", 0) or 0), ck.get("ema")
 
 
 def save_checkpoint(obj, path, remote=None, keep_local=True):
@@ -185,13 +437,44 @@ def main(args):
             print(json.dumps(kw), flush=True)
 
     latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
+    phase_buckets = args.phase_buckets if args.phase_conditioning else 0
+    if args.phase_conditioning and args.tic_stride != 1:
+        raise SystemExit("--phase-conditioning needs per-tic windows (--tic-stride 1); at stride 4 every "
+                         "target is a decision tic, so tics_since_decision is 0 for every sample")
+    if args.action_history:
+        if args.tic_stride != 1:
+            raise SystemExit("--action-history conditions on the executed control of each context TIC, so it "
+                             "needs --tic-stride 1")
+        if args.action_history != args.context_frames:
+            raise SystemExit(f"--action-history {args.action_history} must equal --context-frames "
+                             f"{args.context_frames}: one executed control per context tic")
+        if args.action_dropout > 0:
+            raise SystemExit("--action-dropout has no null row to drop to when the conditioning is a button "
+                             "vector; set --action-dropout 0")
+    # the control embedder's input width is a property of the corpus's button list, so it is read from
+    # the corpus rather than assumed (a fit check has no corpus and uses the recorded Arnold width)
+    control_bits = args.control_bits
+    if args.action_history and not control_bits:
+        from doom_data import corpus_control_bits
+        control_bits = fit_check_control_bits() if args.fit_check else corpus_control_bits(args.latents_dir)
+    # write the RESOLVED width back onto args, because every checkpoint stores `vars(args)` and the
+    # evaluators rebuild the control embedder from it; a 0 there builds a width-0 embedder
+    args.control_bits = control_bits
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
                         action_dropout=args.action_dropout, latent_channels=latent_channels,
-                        action_inject=args.action_inject)
+                        action_inject=args.action_inject, phase_buckets=phase_buckets,
+                        action_history=args.action_history, control_bits=control_bits)
     start_step = 0
+    if args.resume and args.init_from:
+        raise SystemExit("--resume continues a run from its own checkpoint and --init-from starts a new run "
+                         "from another run's weights; pick one")
+    init_step, init_ema = (None, None)
+    if args.init_from:
+        init_step, init_ema = load_init_weights(model, args.init_from)
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=False)
+        check_resume_identity(ck, args, parse_resume_override(args.resume_override))
         model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
         start_step = int(ck.get("step", 0))
         print(f"resumed weights from {args.resume} at step {start_step}" + (" with optimizer, scheduler, EMA, and RNG state" if "optimizer" in ck else " (optimizer state reset, warmup restarts)"))
@@ -206,9 +489,16 @@ def main(args):
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
 
-    train_ds, val_ds, train_ids = build_loaders(args, latent_channels)
+    train_ds, val_ds, episode_lists = build_loaders(args, latent_channels, ck if args.resume else None)
+    train_ids = None if episode_lists is None else episode_lists[0]
+    # the pin travels with the weights: a resume into a NEW results directory finds no
+    # train_episodes.json there and would otherwise re-resolve the episode list
+    pin = None if episode_lists is None else episode_record(args, *episode_lists)
+    # more workers than the stride-4 rows used: a per-tic corpus is 125 GB (4-channel) or 410 GB
+    # (16-channel), so random window reads miss the page cache and the loader is seek-bound
+    extra = {"prefetch_factor": args.prefetch_factor} if args.num_workers > 0 else {}
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
-                        pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0)
+                        pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0, **extra)
     model, opt, loader = acc.prepare(model, opt, loader)   # scheduler stays unwrapped: one step per optimizer update
     diffusion = VDiffusion(device=device, objective=args.objective)
     raw = acc.unwrap_model(model)
@@ -222,11 +512,14 @@ def main(args):
                 g["initial_lr"] = args.lr; g["lr"] = args.lr * sched.lr_lambdas[0](sched.last_epoch)
             sched.base_lrs = [args.lr for _ in sched.base_lrs]
             print(f"resume overrides learning rate {old_lr:g} -> {args.lr:g} (recipe deviation)")
+    # the EMA starts as a copy of the live weights, which after --init-from are already the loaded ones,
+    # so "copy live into EMA" needs no extra code; an EMA carried by the source checkpoint overrides it
     ema = [p.detach().float().cpu().clone() for p in raw.parameters()] if args.ema_every > 0 else None
-    if args.resume and ema is not None and "ema" in ck:
+    restore = ck["ema"] if (args.resume and "ema" in ck) else (init_ema if args.init_from else None)
+    if ema is not None and restore:
         for e, k in zip(ema, ema_keys(raw)):
-            if k in ck["ema"] and ck["ema"][k].shape == e.shape:
-                e.copy_(ck["ema"][k].float())
+            if k in restore and restore[k].shape == e.shape:
+                e.copy_(restore[k].float())
 
     if is_main:
         try:
@@ -238,22 +531,41 @@ def main(args):
         with open(os.path.join(args.results_dir, "config.json"), "w") as f:
             json.dump({**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum,
                        "split_md5": split_hash, "torch": torch.__version__,
-                       "resolved_latent_channels": latent_channels}, f, indent=1)
-        if train_ids is not None:
+                       "resolved_latent_channels": latent_channels,
+                       # what a consumer needs to know about the data contract this run trained under:
+                       # the frame spacing, the dataset class that produced it, and whether the phase
+                       # of the held action was a conditioning signal
+                       "tic_stride": args.tic_stride,
+                       "dataset_class": type(train_ds).__name__,
+                       "resolved_phase_buckets": phase_buckets,
+                       "resolved_control_bits": control_bits,
+                       "dataset_summary": getattr(train_ds, "summary", None),
+                       "init_from": args.init_from or None, "init_from_step": init_step}, f, indent=1)
+        if train_ids is not None and not (args.resume and os.path.exists(os.path.join(args.results_dir, EPISODES_FILE))):
             # which episodes this run actually trained on, so a data cell is reproducible from the
-            # results directory alone and not only from (split, fraction, seed)
-            with open(os.path.join(args.results_dir, "train_episodes.json"), "w") as f:
-                json.dump({"train_fraction": args.train_fraction, "seed": args.seed,
-                           "num_episodes": len(train_ids), "episodes": train_ids}, f, indent=1)
+            # results directory alone and not only from (split, fraction, seed) -- and so a resume
+            # can be pinned to the same set even after more of the corpus finishes encoding
+            with open(os.path.join(args.results_dir, EPISODES_FILE), "w") as f:
+                json.dump(episode_record(args, train_ids, episode_lists[1]), f, indent=1)
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
         per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum, objective=args.objective,
+        tic_stride=args.tic_stride, dataset_class=type(train_ds).__name__, phase_buckets=phase_buckets,
+        action_history=args.action_history, control_bits=control_bits,
+        # the fraction of candidate windows the per-tic validity contract removed (deaths, tic gaps,
+        # map changes), so a "within-life simulation" claim can state it
+        dataset_summary=getattr(train_ds, "summary", None),
+        init_from=args.init_from or None, init_from_step=init_step,
         train_fraction=args.train_fraction, train_episodes=None if train_ids is None else len(train_ids),
         # state-dict entries the EMA does not cover, i.e. persistent buffers: 0 for every backbone
         # in the SD KL-f8 latent space, 1 for sd35 (its sin-cos positional table)
         buffers_outside_ema=len(raw.state_dict()) - len(ema_keys(raw)))
 
-    def model_fn(ctx, act, bucket):
-        return lambda xt, t: model(xt, t, act, ctx, bucket)
+    def model_fn(ctx, act, bucket, phase=None):
+        # the sixth argument is passed only when there is one, so a run without phase conditioning
+        # calls the backbones exactly as every finished row did
+        if phase is None:
+            return lambda xt, t: model(xt, t, act, ctx, bucket)
+        return lambda xt, t: model(xt, t, act, ctx, bucket, phase)
 
     @torch.no_grad()
     def evaluate():
@@ -265,11 +577,13 @@ def main(args):
         vl = DataLoader(SeededCorruption(val_ds, args.noise_aug_max, diffusion.num_steps), batch_size=args.per_gpu_batch, shuffle=False, num_workers=2)
         tot = torch.zeros((), device=device); n = torch.zeros((), device=device)
         bins = torch.zeros(4, device=device); bin_n = torch.zeros(4, device=device)
-        for ctx, tgt, act, t, level, ctx_eps, tgt_noise in vl:
+        for batch in vl:
+            ctx, tgt, act, t, level, ctx_eps, tgt_noise = batch[:7]
+            phase = batch[7].to(device) if len(batch) > 7 else None
             ctx, tgt, act, t = ctx.to(device), tgt.to(device), act.to(device), t.to(device)
             ctx_n, bucket = noise_augment(ctx, args.noise_aug_max, args.noise_buckets, level=level.to(device), eps=ctx_eps.to(device))
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket), tgt, noise=tgt_noise.to(device), t=t, per_sample=True)
+                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket, phase), tgt, noise=tgt_noise.to(device), t=t, per_sample=True)
             tot += loss.detach().sum(); n += loss.numel()
             q = (t * 4) // diffusion.num_steps
             bins.index_add_(0, q, loss.detach()); bin_n.index_add_(0, q, torch.ones_like(loss))
@@ -297,12 +611,14 @@ def main(args):
     val_hist = []
     micro = int(ck.get("micro", 0)) if args.resume else 0
     while not done:
-        for ctx, tgt, act in loader:
+        for batch in loader:
             micro += 1
+            ctx, tgt, act, phase = unpack_batch(batch)
             ctx, tgt, act = ctx.to(device, non_blocking=True), tgt.to(device, non_blocking=True), act.to(device)
+            phase = None if phase is None else phase.to(device)
             ctx_n, bucket = noise_augment(ctx, args.noise_aug_max, args.noise_buckets)
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket), tgt) / accum
+                loss = diffusion.training_loss(model_fn(ctx_n, act, bucket, phase), tgt) / accum
             acc.backward(loss)
             running.append(loss.item() * accum)
             if micro % accum != 0:
@@ -351,12 +667,12 @@ def main(args):
                     # compact bf16 weights at every validation so an excursion can be located afterwards; never pruned
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
                                      "ema": {k: t.to(torch.bfloat16) for k, t in zip(ema_keys(raw), ema)} if ema is not None else None,
-                                     "step": step, "val_loss": v, "args": vars(args)},
+                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin},
                                     os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=args.local_snapshots)
                 if is_main and v < best_val:
                     best_val = v
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
-                                     "step": step, "val_loss": v, "args": vars(args)},
+                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin},
                                     os.path.join(args.results_dir, "best.pt"), args.remote_results, keep_local=True)
             if not args.fit_check and is_main and step % args.ckpt_every == 0:
                 # prune before writing so the disk never holds keep_last + 1 rolling checkpoints
@@ -364,7 +680,7 @@ def main(args):
                 for p in olds[:-max(0, args.keep_last - 1)] if args.keep_last > 0 else olds:
                     os.remove(os.path.join(args.results_dir, p))
                 # recovery checkpoint: fp32 master weights and EMA, optimizer, scheduler, RNG, so --resume reproduces the run
-                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args),
+                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args), "episodes": pin,
                       "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val, "micro": micro, "skipped": skipped,
                       "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
                               "numpy": np.random.get_state()}}
@@ -415,6 +731,38 @@ def build_parser():
     p.add_argument("--train-fraction", type=float, default=1.0,
                    help="fraction of the split's TRAINING episodes to use, whole episodes, seeded by --seed and "
                         "nested across fractions; validation and evaluation are untouched (1.0 = every train episode)")
+    p.add_argument("--tic-stride", type=int, choices=[1, 4], default=4,
+                   help="game time between the frames the model predicts, in ViZDoom tics. 4 (default) is "
+                        "one frame per agent decision, the spacing every finished row trained at; 1 selects "
+                        "the per-tic dataset, GameNGen's spacing. Sample shapes are identical either way, so "
+                        "the backbones and the whole recipe are unchanged")
+    p.add_argument("--action-history", type=int, default=0,
+                   help="GameNGen's action conditioning: one token per context tic carrying the EXECUTED button "
+                        "vector of that tic (the `buttons` column), oldest first, the newest being the control "
+                        "applied into the target. Must equal --context-frames. 0 (default) keeps the single "
+                        "action-id token every finished row trained with, bit-identically")
+    p.add_argument("--control-bits", type=int, default=0,
+                   help="width of the executed button vector; 0 reads it from the corpus's own metadata")
+    p.add_argument("--phase-conditioning", action="store_true",
+                   help="also condition on tics_since_decision, the target tic's position inside the held-action "
+                        "run, through the same small-embedding mechanism the noise bucket uses; needs --tic-stride 1")
+    p.add_argument("--phase-buckets", type=int, default=PHASE_BUCKETS,
+                   help="size of the tics_since_decision table: 4 grid positions plus one bucket for tics with no "
+                        "verified decision row within a control interval")
+    p.add_argument("--max-episodes", type=int, default=0,
+                   help="use only the first N episodes present in --latents-dir, so a run can start on the prefix "
+                        "of a corpus that is still being encoded (0 = every encoded episode)")
+    p.add_argument("--episode-ids", default="",
+                   help="explicit TRAINING episode ids as A:B (half-open, like a Python slice) or a comma list, "
+                        "instead of --split's train list; the dense corpus is numbered, so a range is the split")
+    p.add_argument("--val-episode-ids", default="",
+                   help="explicit VALIDATION episode ids; required with --episode-ids and checked disjoint from it")
+    p.add_argument("--val-latents-dir", default="",
+                   help="latent directory for validation when it is a separate corpus (the dense val corpus is); "
+                        "empty means validate out of --latents-dir")
+    p.add_argument("--dense-segment", default="",
+                   help="check --episode-ids against this segment's held-out ranges in release/dense_split.json "
+                        "(arenas | arenas_678); empty skips the check")
     p.add_argument("--latents-dir", default="data/latents_arnold")
     p.add_argument("--split", default="data/split_arnold.json")
     p.add_argument("--results-dir", default="results/fit_check")
@@ -438,6 +786,12 @@ def build_parser():
     p.add_argument("--grad-ckpt", action="store_true", help="recompute activations in the backward pass (about 30%% slower); needed on 16 GB cards, off by default on the A6000s")
     p.add_argument("--no-grad-ckpt", action="store_true", help=argparse.SUPPRESS)   # former default; kept so old launch lines still parse
     p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--prefetch-factor", type=int, default=4,
+                   help="batches each loader worker reads ahead; a per-tic corpus does not fit the page cache, "
+                        "so the loader is seek-bound and this matters more than it did at stride 4")
+    p.add_argument("--allow-partial", action="store_true",
+                   help="start even though some requested episodes are not encoded yet. Off by default: the "
+                        "episode set would otherwise depend on when the run happened to start")
     p.add_argument("--log-every", type=int, default=50)
     p.add_argument("--val-every", type=int, default=5000)
     p.add_argument("--val-windows", type=int, default=1024)
@@ -454,6 +808,13 @@ def build_parser():
     p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
     p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")
+    p.add_argument("--resume-override", action="append", default=[],
+                   help="permit one recipe-identity arg to differ across a resume, as key=value; only lr is "
+                        "accepted, for a diagnosed loss excursion, and the change is logged as a deviation")
+    p.add_argument("--init-from", default="",
+                   help="start a NEW run from one of our own checkpoints' weights (best.pt, a recovery "
+                        "NNNNNNN.pt or a snap_*.pt): weights and EMA only, fresh optimizer, step 0, warmup "
+                        "again. Mutually exclusive with --resume, and recorded in config.json")
     p.add_argument("--seed", type=int, default=0)
     return p
 
