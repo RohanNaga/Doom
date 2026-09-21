@@ -356,17 +356,57 @@ def load_init_weights(model, path):
     return int(ck.get("step", 0) or 0), ck.get("ema")
 
 
+def tensor_bytes(obj):
+    """Bytes of every tensor reachable in a checkpoint dict: what its file will mostly weigh.
+
+    The local write needs a size before it exists, to decide whether the disk can hold it. Without
+    a serialized buffer to measure, the tensor payload is the estimate: `torch.save` writes each
+    storage verbatim into a zip archive plus a small pickle, so this is the file size to within a
+    few hundred kilobytes.
+    """
+    total, stack, seen = 0, [obj], set()
+    while stack:
+        x = stack.pop()
+        if torch.is_tensor(x):
+            s = x.untyped_storage()
+            key = (s.data_ptr(), s.nbytes())
+            if key in seen:
+                continue
+            seen.add(key)
+            total += s.nbytes()
+        elif isinstance(x, dict):
+            stack.extend(x.values())
+        elif isinstance(x, (list, tuple, set)):
+            stack.extend(x)
+    return total
+
+
 def save_checkpoint(obj, path, remote=None, keep_local=True):
-    """Serialize once, then write to the remote copy of record and, space permitting, to the local path.
+    """Write the checkpoint to the remote copy of record and, space permitting, to the local path.
 
     `remote` is "user@host:/dir" reached with the key in REMOTE_SSH; the file lands as <dir>/<run>/<name>
     through an atomic rename. The local write is skipped when the disk has less than 1.5x the file free,
     so a full shared disk degrades to remote-only instead of killing the run. Raises only if no copy was written.
+
+    **A local-only save never builds a byte buffer.** `ssh` needs the bytes on stdin, so the remote
+    branch still serializes into memory, but with no `remote` the object goes straight to a temporary
+    file through `torch.save` and is renamed into place. The buffer was an artifact-sized allocation
+    on top of the fp32 model copy and two EMA copies the caller already holds: about 37 GB for an
+    SD 3.5 recovery checkpoint, next to which the host has to fit a second training job.
+
+    The object is serialized into an OPEN FILE, not a path: `torch.save` names its zip archive
+    after the path it is given, so `torch.save(obj, "0000005.pt.tmp")` would write bytes that
+    differ from every checkpoint this code has ever produced. Handed a file object it uses the
+    literal name "archive", exactly as the byte buffer did, so a checkpoint saved after this change
+    is byte-identical to one saved before it. The rename keeps the file atomic: a failure mid-write
+    leaves the previous checkpoint in place and removes the partial temporary.
     """
-    import io, shutil, subprocess
-    buf = io.BytesIO(); torch.save(obj, buf); data = buf.getvalue()
+    import shutil, subprocess
     written = []
+    data = None
     if remote:
+        import io
+        buf = io.BytesIO(); torch.save(obj, buf); data = buf.getvalue()
         host, rdir = remote.split(":", 1)
         rel = os.path.join(os.path.basename(os.path.dirname(path)), os.path.basename(path))
         rpath = os.path.join(rdir, rel)
@@ -380,24 +420,35 @@ def save_checkpoint(obj, path, remote=None, keep_local=True):
         except subprocess.TimeoutExpired:
             print(f"remote checkpoint write timed out after 1800 s: {rpath}", flush=True)
     if keep_local or not written:
+        size = len(data) if data is not None else tensor_bytes(obj)
         free = shutil.disk_usage(os.path.dirname(path)).free
-        if free > 1.5 * len(data) or not written:
+        if free > 1.5 * size or not written:
             tmp = path + ".tmp"
             try:
                 with open(tmp, "wb") as f:
-                    f.write(data)
+                    if data is not None:
+                        f.write(data)
+                    else:
+                        torch.save(obj, f)
                 os.replace(tmp, path); written.append(path)
             except OSError as e:   # a full local disk is survivable once the remote copy exists
                 print(f"local checkpoint write failed ({e}); remote copy {'exists' if written else 'MISSING'}", flush=True)
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
+                _unlink(tmp)
+            except BaseException:  # a partial file must never be mistaken for a checkpoint
+                _unlink(tmp)
+                raise
         else:
             print(f"skipped local checkpoint {path}: {free/2**30:.1f} GB free", flush=True)
     if not written:
         raise RuntimeError(f"could not write checkpoint {path} anywhere")
     return written
+
+
+def _unlink(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def prune_remote(remote, run_name, keep):
