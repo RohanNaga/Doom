@@ -118,8 +118,10 @@ one() {   # one <in-dir> <out-dir> <tag> <episode-ids>
     [ $RC -eq 0 ] || exit $RC
     # the evaluation corpora need their split file before after_nexttic.sh can score them; the path
     # is derived by make_dense_eval_splits.py from the latents directory, so the writer and the
-    # reader cannot disagree about where it goes
-    [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" || exit $?
+    # reader cannot disagree about where it goes. --expect-ids is this corpus's own id range, so a
+    # shard that is still running, or a directory holding the wrong range, refuses to publish
+    # instead of naming a partial evaluation set
+    [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" --expect-ids "$4" || exit $?
   )
   local RC=$?
   if [ $RC -ne 0 ]; then

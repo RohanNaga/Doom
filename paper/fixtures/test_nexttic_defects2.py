@@ -50,14 +50,17 @@ if "--canonical-only" in sys.argv:
     json.dump({"0": "100000000"}, open(os.path.join(out, "canonical_controls.json"), "w"))
     sys.exit(0)
 assert "--canonical" in sys.argv, "a corpus was encoded without the shared canonical table"
-lo = int(sys.argv[sys.argv.index("--episode-ids") + 1].split(":")[0])
+lo, hi = (int(x) for x in sys.argv[sys.argv.index("--episode-ids") + 1].split(":"))
 T = 8
-np.save(os.path.join(out, "ep_%05d_latents.npy" % lo), np.zeros((T, 4, 32, 40), dtype=np.float16))
-np.savez(os.path.join(out, "ep_%05d_meta.npz" % lo),
-         action=np.zeros(T, np.int64), buttons=np.array(["100000000"] * T),
-         tic=np.arange(T, dtype=np.int64), deaths=np.zeros(T, np.int64),
-         map_id=np.full(T, 2, np.int64), episode_id=np.full(T, lo, np.int64),
-         is_decision=(np.arange(T) % 4 == 0), chain_id=np.zeros(T, np.int64))
+# every episode of the requested range: make_dense_eval_splits refuses to publish a split that does
+# not cover --expect-ids exactly, which is the whole point of that gate
+for ep in range(lo, hi):
+    np.save(os.path.join(out, "ep_%05d_latents.npy" % ep), np.zeros((T, 4, 32, 40), dtype=np.float16))
+    np.savez(os.path.join(out, "ep_%05d_meta.npz" % ep),
+             action=np.zeros(T, np.int64), buttons=np.array(["100000000"] * T),
+             tic=np.arange(T, dtype=np.int64), deaths=np.zeros(T, np.int64),
+             map_id=np.full(T, 2, np.int64), episode_id=np.full(T, ep, np.int64),
+             is_decision=(np.arange(T) % 4 == 0), chain_id=np.zeros(T, np.int64))
 '''
 
 
