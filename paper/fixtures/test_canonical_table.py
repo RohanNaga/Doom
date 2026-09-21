@@ -328,6 +328,55 @@ def test_a_decision_only_recording_cannot_be_repaired_this_way(tmp_path):
     assert r["refused"] and "stored_tic_stride 4" in r["refused"][0]
 
 
+@pytest.mark.parametrize("column,value", [("action", 7), ("deaths", 3)])
+def test_a_sidecar_column_the_repair_depends_on_must_match_the_recording(tmp_path, column, value):
+    """The repair recomputes the masks from RAW action/buttons/deaths while copying those same
+    columns through from the OLD sidecar, so a sidecar that disagrees with the recording would come
+    out self-inconsistent: masks from one recording beside controls from another."""
+    raw, lat = _paired_corpus(tmp_path)
+    p = os.path.join(lat, "ep_00000_meta.npz")
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols[column] = np.full(32, value, dtype=np.int64)
+    np.savez(p, **cols)
+    r = encode_parquet.rebuild_sidecar_masks(
+        sorted(glob.glob(os.path.join(raw, "ep_*.parquet"))), lat, {0: FORWARD}, stride=4)
+    assert r["changed"] == 0 and r["refused"], r
+    assert column in r["refused"][0] and "self" not in r["refused"][0]
+    with np.load(p) as z:
+        assert not z["is_decision"].any(), "the corrupt sidecar was repaired anyway"
+
+
+def test_a_sidecar_whose_buttons_differ_from_the_recording_is_refused(tmp_path):
+    raw, lat = _paired_corpus(tmp_path)
+    p = os.path.join(lat, "ep_00000_meta.npz")
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols["buttons"] = np.array([STUCK] * 32)
+    np.savez(p, **cols)
+    r = encode_parquet.rebuild_sidecar_masks(
+        sorted(glob.glob(os.path.join(raw, "ep_*.parquet"))), lat, {0: FORWARD}, stride=4)
+    assert r["refused"] and "buttons" in r["refused"][0] and "ep_00000" in r["refused"][0]
+
+
+def test_a_sidecar_missing_a_depended_on_column_is_refused(tmp_path):
+    raw, lat = _paired_corpus(tmp_path)
+    p = os.path.join(lat, "ep_00000_meta.npz")
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files if k != "deaths"}
+    np.savez(p, **cols)
+    r = encode_parquet.rebuild_sidecar_masks(
+        sorted(glob.glob(os.path.join(raw, "ep_*.parquet"))), lat, {0: FORWARD}, stride=4)
+    assert r["refused"] and "deaths" in r["refused"][0]
+
+
+def test_an_agreeing_sidecar_is_still_repaired(tmp_path):
+    raw, lat = _paired_corpus(tmp_path)
+    r = encode_parquet.rebuild_sidecar_masks(
+        sorted(glob.glob(os.path.join(raw, "ep_*.parquet"))), lat, {0: FORWARD}, stride=4)
+    assert r["refused"] == [] and r["changed"] == 1
+
+
 def test_the_repair_mode_is_reachable_from_the_command_line(tmp_path):
     raw, lat = _paired_corpus(tmp_path)
     table = tmp_path / "canon.json"
@@ -335,6 +384,70 @@ def test_the_repair_mode_is_reachable_from_the_command_line(tmp_path):
     encode_parquet.main(enc_args(raw, lat, "--rebuild-sidecar-masks", "--canonical", str(table)))
     with np.load(os.path.join(lat, "ep_00000_meta.npz")) as z:
         assert z["is_decision"].any()
+
+
+# ---------------------------------------------------------------------------------------
+# the table is written atomically, once, and never by a mode that promises to write nothing
+# ---------------------------------------------------------------------------------------
+
+def test_the_table_is_renamed_into_place(tmp_path, monkeypatch):
+    """A reader that opens the file while a writer is inside `json.dump` sees a truncated table.
+    Two shards auto-building into one output directory do exactly that."""
+    out = tmp_path / "out"
+    out.mkdir()
+    seen = []
+    real = os.replace
+    monkeypatch.setattr(os, "replace", lambda a, b: seen.append((a, b)) or real(a, b))
+    path = encode_parquet.write_canonical({0: FORWARD}, str(out))
+    assert seen and seen[0][1] == path, seen
+    assert ".tmp" in seen[0][0]
+    assert encode_parquet.load_canonical(path) == {0: FORWARD}
+    assert [p for p in os.listdir(out) if ".tmp" in p] == []
+
+
+def test_a_failed_write_leaves_no_partial_table(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(json, "dump", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("injected")))
+    with pytest.raises(RuntimeError, match="injected"):
+        encode_parquet.write_canonical({0: FORWARD}, str(out))
+    assert os.listdir(out) == [], os.listdir(out)
+
+
+def test_a_dry_run_writes_no_table(tmp_path):
+    """`--rebuild-sidecar-masks --dry-run` promises to change no file, and wrote one anyway."""
+    raw, lat = _paired_corpus(tmp_path)
+    table = tmp_path / "canon.json"
+    table.write_text(json.dumps({"0": FORWARD}))
+    before = sorted(os.listdir(lat))
+    encode_parquet.main(enc_args(raw, lat, "--rebuild-sidecar-masks", "--dry-run",
+                                 "--canonical", str(table)))
+    assert sorted(os.listdir(lat)) == before, "the dry run wrote a file"
+    assert encode_parquet.write_canonical({0: FORWARD}, str(lat), dry_run=True) is None
+
+
+def test_the_shared_table_is_not_rewritten_from_itself(tmp_path):
+    """A shard given the table that already lives in its own output directory must leave it alone:
+    rewriting it is at best a no-op and at worst the truncation above, on the one file every other
+    shard is reading."""
+    out = tmp_path / "out"
+    out.mkdir()
+    path = encode_parquet.write_canonical({0: FORWARD}, str(out))
+    stamp = os.stat(path).st_ino, os.path.getsize(path)
+    assert encode_parquet.write_canonical({0: ATTACK}, str(out), supplied=path) is None
+    assert encode_parquet.load_canonical(path) == {0: FORWARD}
+    assert (os.stat(path).st_ino, os.path.getsize(path)) == stamp
+
+
+def test_a_table_supplied_from_elsewhere_is_still_recorded(tmp_path):
+    src = tmp_path / "shared" / encode_parquet.CANONICAL_FILE
+    src.parent.mkdir()
+    src.write_text(json.dumps({"0": FORWARD}))
+    out = tmp_path / "out"
+    out.mkdir()
+    path = encode_parquet.write_canonical({0: FORWARD}, str(out), supplied=str(src))
+    assert path == os.path.join(str(out), encode_parquet.CANONICAL_FILE)
+    assert encode_parquet.load_canonical(path) == {0: FORWARD}
 
 
 # ---------------------------------------------------------------------------------------
