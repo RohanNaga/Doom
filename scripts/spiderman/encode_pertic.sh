@@ -35,7 +35,12 @@ D=${DOOM_ROOT:-/sata2/data/rnagabhi/doom}
 DRY=${DRY:-0}
 CORPUS=${CORPUS:-all}
 GPU=${GPU:-1}
-THREADS=${THREADS:-24}          # the encoder is PNG-decode bound, so threads matter for speed
+THREADS=${THREADS:-24}          # threads for PNG decode; NOT the bottleneck, see below
+# Measured Sep 21 2026 (.claude/analyses/nexttic-design-2026-09-20.md section 9): one thread decodes
+# 5,000 frames/s of 320x240 PNG and a parquet read costs 0.0025 ms per frame, against the observed
+# 66 frames/s = 15 ms per frame. Decoding is three orders of magnitude off being the limit, so this
+# knob buys nothing above a handful of threads; the remaining suspects are the VAE forward at the
+# chosen batch size and reading 1.7 TiB off /sata2.
 # The micro-batch is NOT a free choice here, it is part of reproducing the reference corpus. Under
 # bf16 autocast cuDNN picks its algorithm from the batch shape, so the same frame encodes slightly
 # differently at a different batch size. Measured on 5 episodes against latents_arnold_eval/seen,

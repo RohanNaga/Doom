@@ -1,0 +1,39 @@
+{
+ "corpus": "raw_arnold_dense",
+ "decided": "2026-09-20 by Rohan, before any dense-corpus model was scored",
+ "id_to_map_rule": "record_arnold.py:322-323 assigns map_ids[episode_id % len(map_ids)], independent of the worker count, so any contiguous id range whose length is a multiple of len(map_ids) is exactly map-balanced",
+ "ranges_are": "half-open, like a Python slice: \"0:6000\" is ids 0 to 5999",
+ "segments": {
+  "arenas": {
+   "maps": [2, 3, 4, 5],
+   "episodes": 8000,
+   "note": "the Arnold paper's training arenas; maps fixed before any model score was read",
+   "ranges": {
+    "train": "0:6000",
+    "val": "6000:7000",
+    "test": "7000:8000"
+   }
+  },
+  "arenas_678": {
+   "maps": [6, 7, 8],
+   "episodes": 3000,
+   "note": "the Arnold paper's test arenas; the unseen-map row for the dense corpus",
+   "ranges": {
+    "unseen": "0:60"
+   }
+  }
+ },
+ "next_tic_runs": {
+  "note": "the first next-tic runs train on a 2,000-episode prefix of the train range, identical for every backbone",
+  "train_ids": "0:2000",
+  "val_ids": "6000:6100",
+  "test_ids": "7000:7100",
+  "unseen_ids": "0:60",
+  "latents": {
+   "train": "latents_arnold_dense_pertic/arenas",
+   "val": "latents_arnold_dense_pertic_eval/val",
+   "test": "latents_arnold_dense_pertic_eval/test",
+   "unseen": "latents_arnold_dense_pertic_eval/arenas_678"
+  }
+ }
+}

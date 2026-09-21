@@ -29,8 +29,17 @@ from doomdit_utils import (LATENT_SCALE, VAE_NAME, build_vae, denormalize_latent
                            load_world_model_state)
 
 
-def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_channels=None):
-    """Windows with L seed frames and H future frames, spread over episodes; never across a chain boundary."""
+def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_channels=None, tic_stride=4):
+    """Windows with L seed frames and H future frames, spread over episodes.
+
+    At decision spacing (`tic_stride=4`) the window must lie inside one chain of verified
+    transitions. At tic spacing the chain test is meaningless and dangerous: `chain_id` is -1 on
+    every non-decision tic, so `cid[s] == cid[s + L + H - 1]` is satisfied by two -1 endpoints and
+    would accept a rollout that runs straight through a death. Per-tic windows therefore use
+    `doom_data.tic_window_starts`: consecutive recorded tics, one continuous life, one map, across
+    the whole seed and the whole horizon.
+    """
+    from doom_data import tic_window_starts
     eps = []
     for ep, lp, mp in list_latent_episodes(latents_dir):
         if ep not in set(int(e) for e in episode_ids):
@@ -39,12 +48,18 @@ def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_chan
         if latent_channels is not None and lat.shape[1] != latent_channels:
             raise ValueError(f"{lp}: {lat.shape[1]} latent channels, the model wants {latent_channels}")
         T = lat.shape[0]
-        if "chain_id" in m.files:
+        if tic_stride == 1:
+            if "is_decision" not in m.files:
+                raise ValueError(f"{mp}: no is_decision column; a tic-spaced rollout needs a per-tic corpus")
+            starts = tic_window_starts(m, L, H).tolist()
+        elif "chain_id" in m.files:
             cid = m["chain_id"]; starts = [s for s in range(T - L - H + 1) if cid[s] == cid[s + L + H - 1]]
         else:
             starts = list(range(max(0, T - L - H + 1)))
         if starts:
             eps.append((ep, lat, m, starts))
+    if not eps:
+        raise ValueError(f"no episode in {latents_dir} has a valid window of {L} seed + {H} future frames")
     rng = np.random.RandomState(seed)
     picks = []
     for _ in range(n):
@@ -52,6 +67,17 @@ def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_chan
         s = int(starts[rng.randint(len(starts))])
         picks.append((ep, int(m["map_id"][0]), s, lat, m))
     return picks
+
+
+def step_controls(meta_controls, s, L, h):
+    """The L executed button vectors conditioning rollout step `h`, oldest first.
+
+    Step h predicts row `s + L + h`, so its controls are rows `s + h .. s + L + h - 1` and the
+    newest is row `s + L + h - 1`: the control leaving the last frame in that step's context,
+    exactly as in a teacher-forced window. The frame buffer and the control buffer therefore shift
+    together by one row per step; letting only the frames shift is the stale-buffer bug.
+    """
+    return meta_controls[s + h:s + L + h]
 
 
 def backbone_source(args):
@@ -74,9 +100,13 @@ def do_rollout(args):
     dropout = ck.get("args", {}).get("action_dropout", 0.1)
     # the adaLN injection cell renames the adaln_single subtree, so the graph has to be rebuilt the way it was trained
     inject = (ck.get("args") or {}).get("action_inject") or "token"
+    from eval_tf import checkpoint_interface
+    trained = checkpoint_interface(ck, args)
+    tic_stride = trained["tic_stride"]
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets, grad_ckpt=False,
                         warm_start=backbone_source(args), cache_dir=args.hf_cache, action_dropout=dropout,
-                        latent_channels=C, action_inject=inject)
+                        latent_channels=C, action_inject=inject, phase_buckets=trained["phase_buckets"],
+                        action_history=trained["action_history"], control_bits=trained["control_bits"])
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     load_world_model_state(model, ck, args.use_ema)
@@ -84,38 +114,67 @@ def do_rollout(args):
     # the parameterization the checkpoint was trained in, so an epsilon cell rolls out as epsilon
     objective = checkpoint_objective(ck, args.objective)
     diffusion = VDiffusion(device=device, objective=objective)
-    print(f"rollout: step {ck.get('step', '?')}, objective {objective}")
+    print(f"rollout: step {ck.get('step', '?')}, objective {objective}, tic stride {tic_stride}, "
+          f"horizon {args.horizon} frame(s) = {args.horizon * tic_stride} tic(s) of game time")
     split = load_split(args.split)
     picks = collect_rollout_windows(args.latents_dir, split[args.subset], args.context_frames, args.horizon,
-                                    args.num_rollouts, args.seed, latent_channels=C)
+                                    args.num_rollouts, args.seed, latent_channels=C, tic_stride=tic_stride)
     L, H, B = args.context_frames, args.horizon, args.batch_size
     torch.manual_seed(args.seed)
-    pred_all, gt_all, act_all, meta = [], [], [], []
+    pred_all, gt_all, act_all, meta, dec_all = [], [], [], [], []
+    hist = trained["action_history"]
     t0 = time.time()
     for i in range(0, len(picks), B):
         chunk = picks[i:i + B]
         seed_lat = torch.stack([torch.from_numpy(np.asarray(lat[s:s + L], dtype=np.float32)) for _, _, s, lat, _ in chunk]).to(device)
         gt = np.stack([np.asarray(lat[s + L:s + L + H], dtype=np.float16) for _, _, s, lat, _ in chunk])
+        # the action of step h is the one on row s+L-1+h: the control leaving that step's last
+        # context frame, the same index a teacher-forced window reads
         acts = np.stack([m["action"][s + L - 1:s + L - 1 + H].astype(np.int64) for _, _, s, _, m in chunk])
+        ctl = None
+        if hist:
+            from doom_data import control_matrix
+            ctl = [control_matrix(m["buttons"]) for _, _, _, _, m in chunk]
         ctx = seed_lat.reshape(len(chunk), -1, *LATENT_HW)
         preds = []
         for h in range(H):
-            act = torch.from_numpy(acts[:, h]).to(device)
+            if hist:
+                act = torch.from_numpy(np.stack([step_controls(c, s, L, h) for c, (_, _, s, _, _)
+                                                 in zip(ctl, chunk)])).to(device)
+            else:
+                act = torch.from_numpy(acts[:, h]).to(device)
             ctx_in, bucket = (ctx, torch.zeros(len(chunk), dtype=torch.long, device=device))
             if args.infer_noise > 0:
                 ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max, args.noise_buckets)
+            ph = None
+            if trained["phase_buckets"]:
+                from doom_data import tics_since_decision
+                ph = torch.from_numpy(np.stack([tics_since_decision(m["is_decision"],
+                                                                    trained["phase_buckets"])[s + L + h]
+                                                for _, _, s, _, m in chunk])).to(device)
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket), (len(chunk), C, *LATENT_HW), steps=args.steps, eta=args.eta, device=device)
+                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), (len(chunk), C, *LATENT_HW), steps=args.steps, eta=args.eta, device=device)
             preds.append(x.half().cpu().numpy())
             ctx = torch.cat([ctx[:, C:], x.float()], dim=1)   # drop the oldest latent, append the prediction
         pred_all.append(np.stack(preds, axis=1)); gt_all.append(gt); act_all.append(acts)
+        if tic_stride == 1:
+            dec_all.append(np.stack([m["is_decision"][s + L:s + L + H].astype(bool) for _, _, s, _, m in chunk]))
         meta += [(ep, mp, s) for ep, mp, s, _, _ in chunk]
         print(f"  {i + len(chunk)}/{len(picks)} rollouts, {(time.time() - t0) / (i + len(chunk)):.1f} s each", flush=True)
+    extra = {}
+    if tic_stride == 1:
+        # which rolled-out tics are decision tics, so the IDM (trained at 4-tic spacing) can be
+        # given the subsequence it expects instead of frames 4x closer together than it ever saw
+        extra["decision"] = np.concatenate(dec_all)
+        extra["seed_decision"] = np.stack([np.asarray(m["is_decision"][s:s + L], dtype=bool)
+                                           for _, _, s, _, m in picks])
     np.savez(args.out, pred=np.concatenate(pred_all), gt=np.concatenate(gt_all), actions=np.concatenate(act_all),
              seed=np.stack([np.asarray(lat[s:s + L], dtype=np.float16) for _, _, s, lat, _ in picks]),
              episode=np.array([m[0] for m in meta]), map=np.array([m[1] for m in meta]), start=np.array([m[2] for m in meta]),
              config=json.dumps({**vars(args), "step": ck.get("step", "?"), "resolved_latent_channels": C,
-                                "resolved_objective": objective}))
+                                "resolved_objective": objective, "checkpoint_interface": trained,
+                                "tic_stride": tic_stride}),
+             **extra)
     print("DONE", args.out)
 
 
@@ -169,11 +228,21 @@ def do_score(args):
             clips_pred.append(np.concatenate(rp)); clips_gt.append(np.concatenate(rg))
         if (n + 1) % 32 == 0:
             print(f"  scored {n + 1}/{N}", flush=True)
+    cfg = json.loads(str(d["config"])) if "config" in d else {}
+    tic_stride = int(cfg.get("tic_stride", 4) or 4)
+    # Horizons the rollout is reported at. At tic spacing the defaults are 4, 32, 64, 128, 256 tics,
+    # which is the same game time as the stride-4 rows' 1, 8, 16, 32, 64 decision steps, so the two
+    # curves can be read off one axis.
+    default_at = (4, 32, 64, 128, 256) if tic_stride == 1 else (8, 16, 32, 64)
+    at = [int(x) for x in args.score_at.split(",")] if args.score_at else list(default_at)
     out = {"horizon": list(range(1, H + 1)), "psnr": (psnr_h / N).tolist(), "lpips": (lpips_h / N).tolist(),
-           "copy_seed_psnr": (copy_h / N).tolist(), "latent_mse": (lat_h / N).tolist(), "num_rollouts": int(N)}
-    for hh in (8, 16, 32, 64):
+           "copy_seed_psnr": (copy_h / N).tolist(), "latent_mse": (lat_h / N).tolist(), "num_rollouts": int(N),
+           "tic_stride": tic_stride, "game_time_tics": [h * tic_stride for h in range(1, H + 1)],
+           "scored_at": at}
+    for hh in at:
         if hh <= H:
             out[f"psnr@{hh}"] = float(psnr_h[hh - 1] / N); out[f"lpips@{hh}"] = float(lpips_h[hh - 1] / N)
+            out[f"copy_seed_psnr@{hh}"] = float(copy_h[hh - 1] / N)
 
     if args.idm:
         from train_idm import IDM, movement_probs
@@ -195,22 +264,52 @@ def do_score(args):
         elif channels != 4:
             raise SystemExit(f"the rollout carries {channels}-channel latents but the IDM reads 4-channel SD "
                              "latents; pass --idm-reencode-vae to decode with --vae-path and re-encode first")
-        acc_h = {k: np.zeros(H) for k in ("top1", "movement", "real_top1", "real_movement")}
+        # The IDM was trained on DECISION-frame latents four tics apart (`train_idm.WindowDataset`
+        # over the stride-4 corpus, windows inside one chain), and it has a learned positional table
+        # for that spacing. Handing it consecutive tics would show it a quarter of the motion it was
+        # trained on, so a per-tic rollout is subsampled to its decision tics first, and the label of
+        # each judged transition is the action stored at the position of the later decision frame --
+        # which, on the grid, is the action held over the whole interval.
+        idm_spacing = 4 if tic_stride == 1 else 1
+        if tic_stride == 1 and "decision" not in d.files:
+            raise SystemExit("this per-tic rollout carries no `decision` mask, so its decision tics cannot be "
+                             "identified; re-run --rollout with the current code")
+
+        def judged(n):
+            if tic_stride != 1:
+                return np.arange(H), seed[n, -(K - 1):]
+            k = np.flatnonzero(d["decision"][n])
+            sd_mask = np.flatnonzero(d["seed_decision"][n])
+            return k, seed[n, sd_mask[-(K - 1):]] if len(sd_mask) >= K - 1 else None
+        steps = None
+        skipped = 0
+        acc = None
         for n in range(N):
-            # the windowed IDM sees K-1 real seed frames before the first frame it judges, so every transition has
-            # bidirectional context; the real reference runs the identical procedure on the ground-truth continuation
-            y = torch.from_numpy(actions[n]).to(device)
-            for tag, frames in (("", pred[n]), ("real_", gt[n])):
+            k, seed_frames = judged(n)
+            if seed_frames is None or len(k) == 0 or (steps is not None and len(k) != steps):
+                skipped += 1
+                continue
+            steps = len(k)
+            if acc is None:
+                acc = {kk: np.zeros(steps) for kk in ("top1", "movement", "real_top1", "real_movement")}
+            y = torch.from_numpy(actions[n][k]).to(device)
+            for tag, frames in (("", pred[n][k]), ("real_", gt[n][k])):
                 if sd is None:
-                    seq = torch.from_numpy(np.concatenate([seed[n, -(K - 1):], frames], axis=0).astype(np.float32)).to(device)
+                    seq = torch.from_numpy(np.concatenate([seed_frames, frames], axis=0).astype(np.float32)).to(device)
                 else:
-                    seq = torch.cat([encode_for_idm(sd, dec_all(seed[n, -(K - 1):]), device, args.decode_batch),
+                    seq = torch.cat([encode_for_idm(sd, dec_all(seed_frames), device, args.decode_batch),
                                      encode_for_idm(sd, dec_all(frames), device, args.decode_batch)])
-                logits = idm.predict_sequence(seq)[-H:]
-                acc_h[tag + "top1"] += (logits.argmax(-1) == y).cpu().numpy()
-                acc_h[tag + "movement"] += (movement_probs(logits, mov, num_mov).argmax(-1) == mov[y]).cpu().numpy()
-        for k, v in acc_h.items():
-            out[f"idm_{k}"] = (v / N).tolist(); out[f"idm_{k}_mean"] = float(v.mean() / N)
+                logits = idm.predict_sequence(seq)[-steps:]
+                acc[tag + "top1"] += (logits.argmax(-1) == y).cpu().numpy()
+                acc[tag + "movement"] += (movement_probs(logits, mov, num_mov).argmax(-1) == mov[y]).cpu().numpy()
+        scored = N - skipped
+        out["idm_spacing_tics"] = idm_spacing * tic_stride if tic_stride != 1 else idm_spacing
+        out["idm_rollouts_scored"] = int(scored)
+        out["idm_rollouts_skipped"] = int(skipped)
+        if acc is None or scored == 0:
+            raise SystemExit("no rollout had a usable decision-tic subsequence for the IDM")
+        for k, v in acc.items():
+            out[f"idm_{k}"] = (v / scored).tolist(); out[f"idm_{k}_mean"] = float(v.mean() / scored)
         out["idm_val_top1"] = ck.get("val_top1"); out["idm_val_movement"] = ck.get("val_movement")
         out["idm_majority_baseline"] = ck.get("val_metrics", {}).get("majority_baseline")
         out["idm_reencode_vae"] = args.idm_reencode_vae or None
@@ -218,6 +317,13 @@ def do_score(args):
     json.dump(out, open(os.path.join(args.out_dir, "drift.json"), "w"), indent=1)
     if clips_pred:
         np.savez_compressed(os.path.join(args.out_dir, "clips_u8.npz"), pred=np.stack(clips_pred), gt=np.stack(clips_gt))
+        if tic_stride == 1:
+            # FVD at both spacings. A 16-frame clip of consecutive tics is 0.46 s of game time; a
+            # 16-frame clip of every fourth tic is 1.83 s, which is what a stride-4 row's 16-frame
+            # clip covers. Comparing FVD across rows needs clips of the same game duration, so both
+            # are written and `after_nexttic.sh` scores both.
+            np.savez_compressed(os.path.join(args.out_dir, "clips_u8_stride4.npz"),
+                                pred=np.stack(clips_pred)[:, 3::4], gt=np.stack(clips_gt)[:, 3::4])
     print(json.dumps({k: v for k, v in out.items() if not isinstance(v, list)}, indent=1))
 
 
@@ -231,7 +337,17 @@ def build_parser():
     p.add_argument("--context-frames", type=int, default=32); p.add_argument("--num-actions", type=int, default=29)
     p.add_argument("--noise-buckets", type=int, default=10); p.add_argument("--infer-noise", type=float, default=0.0); p.add_argument("--train-noise-max", type=float, default=0.7)
     p.add_argument("--latents-dir"); p.add_argument("--split"); p.add_argument("--subset", default="val")
-    p.add_argument("--num-rollouts", type=int, default=256); p.add_argument("--horizon", type=int, default=64)
+    p.add_argument("--num-rollouts", type=int, default=256)
+    p.add_argument("--horizon", type=int, default=64,
+                   help="frames to roll out, i.e. TICS for a next-tic model and decisions for a stride-4 one; "
+                        "256 tics is the same 7.31 s of game time as 64 decision steps")
+    p.add_argument("--tic-stride", type=int, choices=[1, 4], default=None,
+                   help="assert the checkpoint's frame spacing; read from the checkpoint otherwise")
+    p.add_argument("--action-history", type=int, default=None,
+                   help="assert the checkpoint's executed-control history length; read from the checkpoint otherwise")
+    p.add_argument("--score-at", default="",
+                   help="comma-separated horizons to report, in frames; the default is 4,32,64,128,256 for a "
+                        "per-tic rollout and 8,16,32,64 for a decision-spaced one")
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--steps", type=int, default=50); p.add_argument("--eta", type=float, default=0.0)
     p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4"); p.add_argument("--pixart-path", default=PIXART_DEFAULT)
     p.add_argument("--unidiffuser-path", default=UNIDIFFUSER_DEFAULT); p.add_argument("--sd35-path", default=SD35_DEFAULT)

@@ -1,7 +1,7 @@
 """
 The five world-model backbones behind one interface.
 
-    model(x_noisy, t, action, context, noise_bucket) -> v prediction, (B, C, 32, 40)
+    model(x_noisy, t, action, context, noise_bucket[, phase]) -> v prediction, (B, C, 32, 40)
 
 All five take the same C*(L+1)-channel input (L context latents channel-stacked, then the noisy
 target), the same discrete action, the same context-noise bucket, and predict the same
@@ -116,6 +116,123 @@ class AdaLNActionInjection(nn.Module):
         return out if self.extra is None else out + self.extra.to(out.dtype)
 
 
+def add_phase_embedder(module, phase_buckets, width, zero_init=False):
+    """Attach a `tics_since_decision` table next to the noise-bucket table, or nothing at all.
+
+    `phase_buckets == 0`, the default everywhere, attaches no module: no parameter, no state-dict
+    entry, and no draw from the RNG, so a model built without phase conditioning is bit-identical
+    to one built before this argument existed. When it is on, the table is created *after* every
+    other embedding in the constructor, so the other tables' initial values do not move either and
+    the only difference between the two models is the extra table.
+
+    The phase enters wherever the noise bucket already enters, because both are the same kind of
+    signal: a small discrete scalar the network has to read alongside the action.
+    """
+    if not phase_buckets:
+        return None
+    emb = nn.Embedding(int(phase_buckets), width)
+    if zero_init:
+        nn.init.zeros_(emb.weight)
+    else:
+        nn.init.normal_(emb.weight, std=0.02)
+    module.phase_embedder = emb
+    return emb
+
+
+def phase_vec(module, phase):
+    """This batch's phase embedding, or None when the model carries no phase table."""
+    emb = getattr(module, "phase_embedder", None)
+    if emb is None:
+        return None
+    if phase is None:
+        raise ValueError("this model was built with phase conditioning, so forward() needs the "
+                         "tics_since_decision tensor as its sixth argument")
+    return emb(phase)
+
+
+class ControlHistoryEmbedder(nn.Module):
+    """GameNGen's action conditioning: one token per context tic, from the EXECUTED button vector.
+
+    GameNGen "learn[s] an embedding A_emb from each action into a single token and replace[s] the
+    cross attention from the text into this encoded actions sequence", with one token per context
+    frame, so a held action appears on each of its four tics. Ours differs in one respect on
+    purpose: the token encodes the button vector the engine actually executed on that tic, not
+    Arnold's requested action id. A per-tic corpus keeps every tic, including the up-to-40-tic
+    anti-stuck overrides during which the executed vector is not the canonical vector of the
+    requested id, so the id would be a wrong label on exactly those tics.
+
+    A two-layer MLP lifts the `bits`-wide 0/1 vector to the backbone's conditioning width, and a
+    learned position embedding makes the order available to attention. The newest token is `u_t`,
+    the control applied from the last context frame into the frame being predicted.
+    """
+
+    def __init__(self, bits, width, length):
+        super().__init__()
+        self.bits, self.width, self.length = int(bits), int(width), int(length)
+        self.mlp = nn.Sequential(nn.Linear(self.bits, self.width), nn.SiLU(), nn.Linear(self.width, self.width))
+        self.pos = nn.Parameter(torch.zeros(1, self.length, self.width))
+        nn.init.normal_(self.pos, std=0.02)
+
+    def forward(self, controls):
+        """(B, L, bits) -> (B, L, width), oldest first."""
+        if controls.ndim != 3 or controls.shape[1] != self.length or controls.shape[2] != self.bits:
+            raise ValueError(f"expected controls of shape (B, {self.length}, {self.bits}), got "
+                             f"{tuple(controls.shape)}; --action-history must match the dataset's")
+        return self.mlp(controls.to(self.pos.dtype)) + self.pos
+
+
+def add_control_history(module, action_history, control_bits, width):
+    """Attach the executed-control token embedder, or nothing at all.
+
+    `action_history == 0`, the default, attaches no module and draws no RNG, so the single-action
+    path every finished row trained under is bit-identical.
+    """
+    if not action_history:
+        return None
+    if not control_bits:
+        raise ValueError("--action-history needs the button-vector width (--control-bits, or read "
+                         "from the corpus with doom_data.corpus_control_bits)")
+    module.control_history = ControlHistoryEmbedder(control_bits, width, action_history)
+    return module.control_history
+
+
+def token_conditioning(module, action, noise_bucket, phase=None):
+    """The conditioning token sequence for a backbone that feeds [action, bucket] through attention.
+
+    Order, oldest control first: the L executed-control tokens (or the single action token when
+    `--action-history 0`), then the noise-bucket token, then the phase token if there is one. The
+    bucket stays last of the non-phase tokens so the single-action layout is the L=1 case of this
+    one and nothing about the existing rows' token order changes.
+    """
+    ch = getattr(module, "control_history", None)
+    if ch is not None:
+        parts = [ch(action)]
+    else:
+        parts = [module.action_embedder(action).unsqueeze(1)]
+    parts.append(module.bucket_embedder(noise_bucket).unsqueeze(1))
+    pv = phase_vec(module, phase)
+    if pv is not None:
+        parts.append(pv.unsqueeze(1))
+    return torch.cat(parts, dim=1)
+
+
+def drop_actions(module, action):
+    """Classifier-free-guidance dropout of the action id, or a refusal when there is nothing to drop.
+
+    The null row is a row of the action *table*; an executed button vector has no null id, so
+    action dropout and `--action-history` are incompatible rather than silently a no-op.
+    """
+    if getattr(module, "control_history", None) is not None:
+        if module.action_dropout > 0:
+            raise ValueError("--action-dropout has no meaning with --action-history: the conditioning is "
+                             "a button vector, not an id with a null row. Set --action-dropout 0")
+        return action
+    if module.training and module.action_dropout > 0:
+        drop = torch.rand(action.shape[0], device=action.device) < module.action_dropout
+        return torch.where(drop, torch.full_like(action, module.num_actions), action)
+    return action
+
+
 def stacked_in_channels(latent_channels, context_frames):
     """Input channel count: L context latents channel-stacked, then the noisy target."""
     return latent_channels * (context_frames + 1)
@@ -143,10 +260,13 @@ def inflate_input_conv(old, in_channels, latent_channels):
 
 class DiTWorldModel(nn.Module):
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, model_name="DiT-XL/2",
-                 action_dropout=0.1, grad_ckpt=True, latent_channels=LATENT_CHANNELS):
+                 action_dropout=0.1, grad_ckpt=True, latent_channels=LATENT_CHANNELS, phase_buckets=0,
+                 action_history=0, control_bits=0):
         super().__init__()
         self.context_frames = context_frames
         self.latent_channels = latent_channels
+        self.num_actions = num_actions
+        self.action_dropout = action_dropout
         self.dit = DiT_models[model_name](input_size=LATENT_HW,
                                           in_channels=stacked_in_channels(latent_channels, context_frames),
                                           pred_channels=latent_channels, num_classes=num_actions,
@@ -155,11 +275,30 @@ class DiTWorldModel(nn.Module):
         hidden = self.dit.t_embedder.mlp[-1].out_features
         self.noise_embedder = nn.Embedding(noise_buckets, hidden)
         nn.init.normal_(self.noise_embedder.weight, std=0.02)
+        add_phase_embedder(self, phase_buckets, hidden)
+        # The DiT has no cross-attention pathway, so an action *sequence* cannot enter the way it
+        # does in the other four backbones; the position-embedded control tokens are averaged into
+        # the adaLN vector instead. That is NOT GameNGen's construction, and this backbone is here
+        # for fit checks rather than as a next-tic row.
+        add_control_history(self, action_history, control_bits, hidden)
+        if action_history:
+            # the DiT's class table is part of the pretrained DiT module and cannot be skipped, so
+            # it is frozen: an unused parameter that still requires grad makes DDP fail on the
+            # second iteration unless unused-parameter detection is on, which costs throughput
+            self.dit.y_embedder.requires_grad_(False)
 
-    def forward(self, x, t, action, context, noise_bucket):
+    def forward(self, x, t, action, context, noise_bucket, phase=None):
         d = self.dit
         h = d.x_embedder(torch.cat([context, x], dim=1)) + d.pos_embed
-        c = d.t_embedder(t) + d.y_embedder(action, self.training) + self.noise_embedder(noise_bucket)
+        ch = getattr(self, "control_history", None)
+        if ch is None:
+            act_c = d.y_embedder(action, self.training)   # the DiT table does its own CFG dropout
+        else:
+            act_c = ch(drop_actions(self, action)).mean(dim=1)
+        c = d.t_embedder(t) + act_c + self.noise_embedder(noise_bucket)
+        pv = phase_vec(self, phase)
+        if pv is not None:
+            c = c + pv                       # summed into adaLN, exactly as the noise bucket is
         for block in d.blocks:
             if d.use_grad_ckpt and self.training:
                 h = torch.utils.checkpoint.checkpoint(d.ckpt_wrapper(block), h, c, use_reentrant=False)
@@ -204,7 +343,8 @@ class DiTWorldModel(nn.Module):
 
 class UNetWorldModel(nn.Module):
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, sd_path="CompVis/stable-diffusion-v1-4",
-                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=LATENT_CHANNELS):
+                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=LATENT_CHANNELS,
+                 phase_buckets=0, action_history=0, control_bits=0):
         super().__init__()
         from diffusers import UNet2DConditionModel
         self.context_frames = context_frames
@@ -216,16 +356,28 @@ class UNetWorldModel(nn.Module):
                                                          num_class_embeds=noise_buckets, low_cpu_mem_usage=False)
         self.unet.conv_in = inflate_input_conv(self.unet.conv_in, in_channels, latent_channels)
         self.unet.register_to_config(in_channels=in_channels)
-        self.action_embedder = nn.Embedding(num_actions + 1, self.unet.config.cross_attention_dim)  # last id = null
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
+        if not action_history:
+            # skipped entirely under --action-history: the control tokens replace it, and a
+            # trainable-but-unused table would break DDP on iteration two
+            self.action_embedder = nn.Embedding(num_actions + 1, self.unet.config.cross_attention_dim)  # last id = null
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
+        # the U-Net's single class-embedding slot already carries the noise bucket, so the phase
+        # goes in the other conditioning pathway it has: a second cross-attention token
+        add_phase_embedder(self, phase_buckets, self.unet.config.cross_attention_dim)
+        # GameNGen's own backbone and its own construction: the cross-attention sequence that used to
+        # carry text carries one token per context tic. The noise bucket stays in the class-embedding
+        # slot, where it already is.
+        add_control_history(self, action_history, control_bits, self.unet.config.cross_attention_dim)
         if grad_ckpt:
             self.unet.enable_gradient_checkpointing()
 
-    def forward(self, x, t, action, context, noise_bucket):
-        if self.training and self.action_dropout > 0:
-            drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
-            action = torch.where(drop, torch.full_like(action, self.num_actions), action)
-        tokens = self.action_embedder(action).unsqueeze(1)          # (B, 1, 768)
+    def forward(self, x, t, action, context, noise_bucket, phase=None):
+        action = drop_actions(self, action)
+        ch = getattr(self, "control_history", None)
+        tokens = ch(action) if ch is not None else self.action_embedder(action).unsqueeze(1)   # (B, L or 1, 768)
+        pv = phase_vec(self, phase)
+        if pv is not None:
+            tokens = torch.cat([tokens, pv.unsqueeze(1)], dim=1)
         return self.unet(torch.cat([context, x], dim=1), t, encoder_hidden_states=tokens,
                          class_labels=noise_bucket).sample
 
@@ -238,7 +390,8 @@ class PixArtWorldModel(nn.Module):
 
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, pixart_path=PIXART_DEFAULT,
                  action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=LATENT_CHANNELS,
-                 scratch=False, action_inject="token", transformer=None):
+                 scratch=False, action_inject="token", transformer=None, phase_buckets=0,
+                 action_history=0, control_bits=0):
         super().__init__()
         from diffusers import PixArtTransformer2DModel
         from diffusers.models.embeddings import get_2d_sincos_pos_embed as diffusers_pos_embed
@@ -285,9 +438,10 @@ class PixArtWorldModel(nn.Module):
 
         caption_channels = self.transformer.config.caption_channels
         if action_inject == "token":
-            self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
+            if not action_history:      # the control tokens replace it; see UNetWorldModel
+                self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
+                nn.init.normal_(self.action_embedder.weight, std=0.02)
             self.bucket_embedder = nn.Embedding(noise_buckets, caption_channels)
-            nn.init.normal_(self.action_embedder.weight, std=0.02)
             nn.init.normal_(self.bucket_embedder.weight, std=0.02)
         else:
             inner = self.transformer.config.num_attention_heads * self.transformer.config.attention_head_dim
@@ -301,18 +455,27 @@ class PixArtWorldModel(nn.Module):
             # cross-attention stays alive but action-free: one learned caption token, zero at init
             self.null_caption = nn.Parameter(torch.zeros(1, 1, caption_channels))
             self.transformer.adaln_single.emb = AdaLNActionInjection(self.transformer.adaln_single.emb)
+        # the phase follows the bucket into whichever pathway this cell puts it: a third caption
+        # token under "token", a third summand into adaLN-single (zero-initialised) under "adaln"
+        add_phase_embedder(self, phase_buckets,
+                           caption_channels if action_inject == "token" else self.bucket_embedder.embedding_dim,
+                           zero_init=(action_inject != "token"))
+        if action_history and action_inject != "token":
+            raise NotImplementedError("--action-history feeds a token sequence through cross-attention, which "
+                                      "is exactly the pathway --action-inject adaln removes")
+        add_control_history(self, action_history, control_bits, caption_channels)
         if grad_ckpt:
             self.transformer.enable_gradient_checkpointing()
 
-    def forward(self, x, t, action, context, noise_bucket):
-        if self.training and self.action_dropout > 0:
-            drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
-            action = torch.where(drop, torch.full_like(action, self.num_actions), action)
+    def forward(self, x, t, action, context, noise_bucket, phase=None):
+        action = drop_actions(self, action)
         if self.action_inject == "token":
-            tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
+            tokens = token_conditioning(self, action, noise_bucket, phase)
         else:
+            pv = phase_vec(self, phase)
             # adaln_single runs once, before any checkpointed block, so the stash is read before a recompute
-            self.transformer.adaln_single.emb.extra = self.action_embedder(action) + self.bucket_embedder(noise_bucket)
+            extra = self.action_embedder(action) + self.bucket_embedder(noise_bucket)
+            self.transformer.adaln_single.emb.extra = extra if pv is None else extra + pv
             tokens = self.null_caption.expand(x.shape[0], -1, -1)
         try:
             # older diffusers unpack added_cond_kwargs unconditionally; both keys are ignored with use_additional_conditions=False
@@ -401,7 +564,7 @@ class UniDiffuserWorldModel(nn.Module):
 
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, unidiffuser_path=UNIDIFFUSER_DEFAULT,
                  action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_hw=LATENT_HW, cond_tokens=2,
-                 latent_channels=LATENT_CHANNELS):
+                 latent_channels=LATENT_CHANNELS, phase_buckets=0, action_history=0, control_bits=0):
         super().__init__()
         from diffusers import UniDiffuserModel
         self.context_frames = context_frames
@@ -423,6 +586,12 @@ class UniDiffuserWorldModel(nn.Module):
         p = cfg.patch_size
         native = cfg.sample_size // p
         self.grid = (latent_hw[0] // p, latent_hw[1] // p)
+        # the phase is a third conditioning token in the joint sequence, so it takes one more row of
+        # the pretrained text positional table (77 are available) than the action/bucket pair does
+        cond_tokens = int(cond_tokens) + (1 if phase_buckets else 0) + max(0, int(action_history) - 1)
+        if cond_tokens > cfg.num_text_tokens:
+            raise ValueError(f"{cond_tokens} conditioning tokens exceed the pretrained text slots "
+                             f"({cfg.num_text_tokens}); shorten --action-history")
         self.cond_tokens = cond_tokens
         n_text = cfg.num_text_tokens
         with torch.no_grad():
@@ -437,17 +606,18 @@ class UniDiffuserWorldModel(nn.Module):
         m.register_to_config(num_text_tokens=cond_tokens)
         m.clip_img_out = nn.Identity(); m.text_out = nn.Identity(); m.transformer.pos_embed = nn.Identity()
 
-        self.action_embedder = nn.Embedding(num_actions + 1, cfg.text_dim)   # last id = null
+        if not action_history:      # the control tokens replace it; see UNetWorldModel
+            self.action_embedder = nn.Embedding(num_actions + 1, cfg.text_dim)   # last id = null
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
         self.bucket_embedder = nn.Embedding(noise_buckets, cfg.text_dim)
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
         nn.init.normal_(self.bucket_embedder.weight, std=0.02)
         self.clip_token = nn.Parameter(torch.zeros(1, 1, cfg.clip_img_dim))
+        add_phase_embedder(self, phase_buckets, cfg.text_dim)
+        add_control_history(self, action_history, control_bits, cfg.text_dim)
 
-    def forward(self, x, t, action, context, noise_bucket):
-        if self.training and self.action_dropout > 0:
-            drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
-            action = torch.where(drop, torch.full_like(action, self.num_actions), action)
-        text = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)   # (B, 2, 64)
+    def forward(self, x, t, action, context, noise_bucket, phase=None):
+        action = drop_actions(self, action)
+        text = token_conditioning(self, action, noise_bucket, phase)     # (B, L+1 or 2 or 3, 64)
         clip = self.clip_token.expand(x.shape[0], -1, -1)
         return self.forward_uvit(torch.cat([context, x], dim=1), t, text, clip)
 
@@ -543,7 +713,8 @@ class SD35WorldModel(nn.Module):
     """
 
     def __init__(self, num_actions=29, context_frames=32, noise_buckets=10, sd35_path=SD35_DEFAULT,
-                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=16, transformer=None):
+                 action_dropout=0.1, grad_ckpt=True, cache_dir=None, latent_channels=16, transformer=None,
+                 phase_buckets=0, action_history=0, control_bits=0):
         super().__init__()
         self.context_frames = context_frames
         self.num_actions = num_actions
@@ -565,57 +736,80 @@ class SD35WorldModel(nn.Module):
         self.transformer.pos_embed.proj = inflate_input_conv(self.transformer.pos_embed.proj, in_channels, latent_channels)
         self.transformer.register_to_config(in_channels=in_channels)
 
-        self.action_embedder = nn.Embedding(num_actions + 1, cfg.joint_attention_dim)   # last id = null
+        if not action_history:      # both action tables are replaced by the control tokens
+            self.action_embedder = nn.Embedding(num_actions + 1, cfg.joint_attention_dim)   # last id = null
+            self.pooled_action = nn.Embedding(num_actions + 1, cfg.pooled_projection_dim)
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
+            nn.init.normal_(self.pooled_action.weight, std=0.02)
         self.bucket_embedder = nn.Embedding(noise_buckets, cfg.joint_attention_dim)
-        self.pooled_action = nn.Embedding(num_actions + 1, cfg.pooled_projection_dim)
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
         nn.init.normal_(self.bucket_embedder.weight, std=0.02)
-        nn.init.normal_(self.pooled_action.weight, std=0.02)
         self.pooled_base = nn.Parameter(torch.zeros(cfg.pooled_projection_dim))
+        add_phase_embedder(self, phase_buckets, cfg.joint_attention_dim)
+        add_control_history(self, action_history, control_bits, cfg.joint_attention_dim)
+        if action_history:
+            # the pooled slot has no text-free neutral value, so under control-history conditioning it
+            # carries the NEWEST control's embedding; zero-init keeps step 0 at text_embedder(0), the
+            # same property the single-action path gets from a zeroed pooled_base
+            self.pooled_control = nn.Linear(cfg.joint_attention_dim, cfg.pooled_projection_dim)
+            nn.init.zeros_(self.pooled_control.weight); nn.init.zeros_(self.pooled_control.bias)
         if grad_ckpt:
             self.transformer.enable_gradient_checkpointing()
 
-    def conditioning(self, action, noise_bucket):
-        """The two joint-attention context tokens and the pooled projection for one batch."""
-        tokens = torch.stack([self.action_embedder(action), self.bucket_embedder(noise_bucket)], dim=1)
+    def conditioning(self, action, noise_bucket, phase=None):
+        """The joint-attention context tokens and the pooled projection for one batch.
+
+        Two tokens by default (action, bucket), L+1 under `--action-history` (one executed control
+        per context tic, then the bucket), plus a phase token when the model carries one. The pooled
+        slot carries the action id's own vector, or the newest control's embedding when conditioning
+        on controls; it never carries the bucket or the phase.
+        """
+        tokens = token_conditioning(self, action, noise_bucket, phase)
+        if getattr(self, "control_history", None) is not None:
+            n = self.control_history.length
+            return tokens, self.pooled_control(tokens[:, n - 1]) + self.pooled_base
         return tokens, self.pooled_action(action) + self.pooled_base
 
-    def forward(self, x, t, action, context, noise_bucket):
-        if self.training and self.action_dropout > 0:
-            drop = torch.rand(action.shape[0], device=action.device) < self.action_dropout
-            action = torch.where(drop, torch.full_like(action, self.num_actions), action)
-        tokens, pooled = self.conditioning(action, noise_bucket)
+    def forward(self, x, t, action, context, noise_bucket, phase=None):
+        action = drop_actions(self, action)
+        tokens, pooled = self.conditioning(action, noise_bucket, phase)
         return self.transformer(torch.cat([context, x], dim=1), encoder_hidden_states=tokens,
                                 pooled_projections=pooled, timestep=t).sample
 
 
 def build_model(backbone, num_actions, context_frames, noise_buckets=10, grad_ckpt=True, warm_start=None,
-                cache_dir=None, action_dropout=0.1, latent_channels=None, action_inject="token"):
+                cache_dir=None, action_dropout=0.1, latent_channels=None, action_inject="token",
+                phase_buckets=0, action_history=0, control_bits=0):
     latent_channels = resolve_latent_channels(backbone, latent_channels)
     warm_start, scratch = resolve_warm_start(backbone, warm_start)
     if action_inject != "token" and backbone != "pixart":
         raise NotImplementedError(f"--action-inject {action_inject} is a PixArt knob, not a {backbone} one")
     if backbone == "dit":
         m = DiTWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
-                          latent_channels=latent_channels)
+                          latent_channels=latent_channels, phase_buckets=phase_buckets,
+                          action_history=action_history, control_bits=control_bits)
         if warm_start:
             n, skipped = m.load_imagenet_warm_start(warm_start)
             print(f"DiT warm start: {n} tensors loaded, skipped {skipped}")
     elif backbone == "unet":
         m = UNetWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
                            sd_path=warm_start or "CompVis/stable-diffusion-v1-4", cache_dir=cache_dir,
-                           latent_channels=latent_channels)
+                           latent_channels=latent_channels, phase_buckets=phase_buckets,
+                           action_history=action_history, control_bits=control_bits)
     elif backbone == "pixart":
         m = PixArtWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout,
                              grad_ckpt=grad_ckpt, pixart_path=warm_start or PIXART_DEFAULT, cache_dir=cache_dir,
-                             latent_channels=latent_channels, scratch=scratch, action_inject=action_inject)
+                             latent_channels=latent_channels, scratch=scratch, action_inject=action_inject,
+                             phase_buckets=phase_buckets, action_history=action_history,
+                             control_bits=control_bits)
     elif backbone == "unidiffuser":
         m = UniDiffuserWorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
                                   unidiffuser_path=warm_start or UNIDIFFUSER_DEFAULT, cache_dir=cache_dir,
-                                  latent_channels=latent_channels)
+                                  latent_channels=latent_channels, phase_buckets=phase_buckets,
+                                  action_history=action_history, control_bits=control_bits)
     elif backbone == "sd35":
         m = SD35WorldModel(num_actions, context_frames, noise_buckets, action_dropout=action_dropout, grad_ckpt=grad_ckpt,
-                           sd35_path=warm_start or SD35_DEFAULT, cache_dir=cache_dir, latent_channels=latent_channels)
+                           sd35_path=warm_start or SD35_DEFAULT, cache_dir=cache_dir, latent_channels=latent_channels,
+                           phase_buckets=phase_buckets, action_history=action_history, control_bits=control_bits)
     else:
         raise ValueError(backbone)
     return m

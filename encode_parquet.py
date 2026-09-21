@@ -37,6 +37,7 @@ import glob
 import io
 import json
 import os
+import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -56,6 +57,21 @@ META_COLS = ["action", "buttons", "health", "ammo", "kills", "deaths", "frags", 
 
 def decode(b):
     return np.asarray(Image.open(io.BytesIO(b)).convert("RGB"), dtype=np.uint8)
+
+
+def build_decode_pool(decode_threads, decode_workers=0):
+    """The pool `encode_episode` maps `decode` over: threads by default, processes on request.
+
+    PIL releases the GIL inside the PNG decoder itself but not around `Image.convert("RGB")` or the
+    `np.asarray` copy, so a thread pool saturates well below the core count on 320x240 frames.
+    `--decode-workers N` runs the same `decode` in N processes instead. Both pools' `map` preserves
+    order, and `decode` is a pure function of the PNG bytes, so the batch the encoder sees -- and
+    therefore every latent byte it writes -- is identical either way.
+    """
+    if decode_workers and decode_workers > 0:
+        from concurrent.futures import ProcessPoolExecutor
+        return ProcessPoolExecutor(max_workers=int(decode_workers))
+    return ThreadPoolExecutor(decode_threads)
 
 
 def to_input(frames_u8, device, legacy=False):
@@ -168,6 +184,60 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
 
 CANONICAL = None
 
+_EP_PARQUET = re.compile(r"ep_(\d+)\.parquet$")
+
+
+def episode_id_of(path):
+    """The episode id in `ep_XXXXX.parquet`, or None for a name that is not one."""
+    m = _EP_PARQUET.search(os.path.basename(path))
+    return None if m is None else int(m.group(1))
+
+
+def parse_shard(spec, num_shards):
+    """(shard, num_shards) from `--shard`, which takes either "i" or "i/n".
+
+    The "i/n" form keeps the two numbers on one launcher line, which matters when several cards
+    encode disjoint parts of one corpus and a mismatched `--num-shards` would silently make two of
+    them write the same episodes.
+    """
+    if spec in (None, ""):
+        return None, int(num_shards)
+    s = str(spec)
+    if "/" in s:
+        i, n = s.split("/", 1)
+        i, n = int(i), int(n)
+    else:
+        i, n = int(s), int(num_shards)
+    if n < 1 or not 0 <= i < n:
+        raise ValueError(f"--shard {spec!r} is not a shard of {n}: need 0 <= i < n")
+    return i, n
+
+
+def select_paths(in_dir, episode_ids="", max_episodes=0, shard=None, num_shards=1):
+    """The parquet files this process encodes, in a deterministic order.
+
+    Three filters, applied in this order and each documented on its flag:
+
+      * `--episode-ids A:B` keeps the episodes whose *id* falls in the half-open range, read from
+        the filename. This is what lets the dense corpus's held-out evaluation latents be encoded
+        straight out of the 8,000-episode directory, with no symlink farm and no second copy.
+      * `--max-episodes N` truncates what is left to the first N, for a smoke run.
+      * `--shard i/n` takes every n-th of what is left. Sharding *after* the id filter means shard
+        i of a range is a deterministic subset of that range, so several cards can fill one output
+        directory without overlapping.
+    """
+    from doom_data import parse_episode_ids
+    paths = sorted(glob.glob(os.path.join(in_dir, "ep_*.parquet")))
+    if episode_ids:
+        keep = set(parse_episode_ids(episode_ids))
+        paths = [p for p in paths if episode_id_of(p) in keep]
+    if max_episodes:
+        paths = paths[:int(max_episodes)]
+    shard, num_shards = parse_shard(shard, num_shards)
+    if shard is not None:
+        paths = paths[shard::num_shards]
+    return paths
+
 
 def write_meta(args, contract, scale, shift, check, stored=1):
     """Record what a consumer of this directory has to know: the latent contract and the encoder."""
@@ -215,11 +285,9 @@ def main(args):
     shift = args.shift_factor if args.shift_factor is not None else contract["shift_factor"]
     channels = contract["latent_channels"]
     print(f"latent contract: {json.dumps(contract)}; writing (z - {shift or 0}) * {scale}", flush=True)
-    paths = sorted(glob.glob(os.path.join(args.in_dir, "ep_*.parquet")))
-    if args.max_episodes:
-        paths = paths[:args.max_episodes]
-    if args.shard is not None:
-        paths = paths[args.shard::args.num_shards]
+    # normalise "i/n" to the pair before anything formats the shard index into a filename
+    args.shard, args.num_shards = parse_shard(args.shard, args.num_shards)
+    paths = select_paths(args.in_dir, args.episode_ids, args.max_episodes, args.shard, args.num_shards)
     stored = 1
     if paths:
         import pyarrow.parquet as pq
@@ -229,14 +297,14 @@ def main(args):
     if args.decode_check and paths:
         import pyarrow.parquet as pq
         t = pq.read_table(paths[0], columns=["frame"])
-        with ThreadPoolExecutor(args.decode_threads) as pool:
+        with build_decode_pool(args.decode_threads, args.decode_workers) as pool:
             frames = np.stack(list(pool.map(decode, [t["frame"][i].as_py() for i in range(min(args.decode_check, t.num_rows))])))
         check = decode_check(vae, frames, device, dtype, args.legacy, scale, shift)
         print(f"decode check on {os.path.basename(paths[0])}: {json.dumps(check)}", flush=True)
     write_meta(args, contract, scale, shift, check, stored)
     summary_path = os.path.join(args.out_dir, f"episodes_{args.shard or 0:02d}.jsonl")
     t0 = time.time(); n_frames = 0
-    with ThreadPoolExecutor(args.decode_threads) as pool:
+    with build_decode_pool(args.decode_threads, args.decode_workers) as pool:
         for k, p in enumerate(paths):
             r = encode_episode(p, args.out_dir, vae, device, dtype, args.stride, args.batch_size, pool, args.legacy,
                                args.align_decisions, channels, scale, shift, args.every_tic)
@@ -257,10 +325,20 @@ def build_parser():
     p.add_argument("--stride", type=int, default=4)
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--decode-threads", type=int, default=8)
+    p.add_argument("--decode-workers", type=int, default=0,
+                   help="decode PNG frames in N separate processes instead of the thread pool. The\n                        batch order and every output byte are identical; this only removes the GIL\n                        contention in Image.convert and the array copy (0 = the thread pool)")
     p.add_argument("--device", default="cuda:1")
     p.add_argument("--dtype", choices=["bf16", "fp32"], default="bf16")
-    p.add_argument("--shard", type=int, default=None)
+    p.add_argument("--shard", default=None,
+                   help="this process's share of the selected episodes, as \"i\" (with --num-shards) or \"i/n\". "
+                        "Sharding happens after --episode-ids, so shard i of a range is a deterministic subset "
+                        "of that range and several cards can fill one output directory safely")
     p.add_argument("--num-shards", type=int, default=1)
+    p.add_argument("--episode-ids", dest="episode_ids", default="",
+                   help="encode only these episode ids, as A:B (half-open, like a Python slice) or a comma list, "
+                        "read from the ep_XXXXX.parquet filename. This is how the dense corpus's held-out "
+                        "evaluation latents are built straight out of the 8,000-episode directory")
+    p.add_argument("--episode-range", dest="episode_ids", help=argparse.SUPPRESS)   # alias
     p.add_argument("--canonical", default=None, help="canonical_controls.json from the main corpus, used instead of recomputing")
     p.add_argument("--max-episodes", type=int, default=0)
     p.add_argument("--vae-id", default="", help="AutoencoderKL repo or path (default: sd-vae-ft-mse)")
