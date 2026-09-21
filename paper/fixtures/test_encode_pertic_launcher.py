@@ -67,8 +67,49 @@ def test_an_unknown_corpus_is_refused(text):
 def test_every_flag_it_passes_exists_in_the_encoder(text):
     from encode_parquet import build_parser
     known = {a.option_strings[0] for a in build_parser()._actions if a.option_strings}
-    used = set(re.findall(r"(--[a-z][a-z0-9-]+)", text.split("encode_parquet.py", 1)[1].split("echo", 1)[0]))
+    used = set(re.findall(r"(--[a-z][a-z0-9-]+)", text.split('nice -n 5 $PY "$ENC"', 1)[1].split("echo", 1)[0]))
     assert used <= known, f"launcher passes flags the encoder does not define: {sorted(used - known)}"
+
+
+def test_it_runs_the_encoder_from_its_own_checkout_not_a_scratch_copy(text):
+    """It used to hardcode one agent's scratch copy under $D/tmp/night, so every checkout that ran
+    this script executed that file; two agents doing it at once put two writers on one output
+    directory (Sep 21 2026)."""
+    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    assert "tmp/night" not in code, "an executable line still points at a scratch copy"
+    assert 'REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}' in text
+    assert "ENC=$REPO/encode_parquet.py" in text and 'nice -n 5 $PY "$ENC"' in text
+
+
+def test_a_missing_encoder_is_refused_with_a_way_out(text):
+    assert "set REPO=" in text and "exit 2" in text
+
+
+def test_one_writer_per_output_directory(text):
+    """Two concurrent encodes of the same corpus race on each episode's .tmp file."""
+    body = text.split("one() {", 1)[1]
+    assert 'mkdir "$2/.lock"' in body and "already being encoded" in body
+    assert "return 3" in body and 'rmdir "$2/.lock"' in body
+
+
+def test_the_lock_is_released_even_when_the_encode_fails(tmp_path):
+    """A lock left behind by a crash would block every later run, so it is released on return."""
+    out = tmp_path / "out"
+    script = f'''
+set -u
+one() {{
+  if ! mkdir "$1/.lock" 2>/dev/null; then echo LOCKED; return 3; fi
+  trap 'rmdir "$1/.lock" 2>/dev/null' RETURN
+  return 1
+}}
+mkdir -p {out}
+one {out}; echo "first exit $?"
+one {out}; echo "second exit $?"
+ls -a {out} | grep -c lock || true
+'''
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert "first exit 1" in r.stdout and "second exit 1" in r.stdout, r.stdout
+    assert "LOCKED" not in r.stdout, "the lock was not released after a failed run"
 
 
 def test_each_corpus_uses_the_batch_size_its_reference_was_built_with(text):

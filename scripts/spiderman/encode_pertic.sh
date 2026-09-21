@@ -42,6 +42,13 @@ BATCH_TRAIN=${BATCH_TRAIN:-64}
 BATCH_EVAL=${BATCH_EVAL:-16}
 PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}
 CANON=$D/latents_arnold_aligned/canonical_controls.json
+# Run the encoder from the checkout this script lives in. It used to point at a scratch copy under
+# $D/tmp/night, which meant anyone running this from any checkout silently executed one agent's
+# personal file -- and two agents doing so at once put two writers on one output directory
+# (Sep 21 2026). REPO can still override it for a machine whose repo cannot be updated.
+REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
+ENC=$REPO/encode_parquet.py
+[ -f "$ENC" ] || { echo "no encode_parquet.py at $ENC (set REPO=/path/to/checkout)" >&2; exit 2; }
 export TMPDIR=$D/tmp/tmpdir HF_HOME=$D/hf
 mkdir -p $TMPDIR $D/logs
 
@@ -50,8 +57,13 @@ mkdir -p $TMPDIR $D/logs
 one() {   # one <in-dir> <out-dir> <tag> <batch>
   [ -d "$1" ] || { echo "no such corpus directory: $1" >&2; return 2; }
   mkdir -p "$2"
-  echo "$(date -Iseconds) encode-pertic $3 in=$1 out=$2 gpu=$GPU batch=$4 threads=$THREADS git=$(cd $D/repo && git rev-parse --short HEAD)" | tee -a "$2/ENCODE_LOG.txt"
-  nice -n 5 $PY $D/tmp/night/repo_test/encode_parquet.py --in-dir "$1" --out-dir "$2" \
+  # one writer per output directory: two concurrent encodes of the same corpus race on each episode
+  if ! mkdir "$2/.lock" 2>/dev/null; then
+    echo "$2 is already being encoded (remove $2/.lock if that is stale)" >&2; return 3
+  fi
+  trap 'rmdir "$2/.lock" 2>/dev/null' RETURN
+  echo "$(date -Iseconds) encode-pertic $3 in=$1 out=$2 gpu=$GPU batch=$4 threads=$THREADS repo=$REPO git=$(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo '?')" | tee -a "$2/ENCODE_LOG.txt"
+  nice -n 5 $PY "$ENC" --in-dir "$1" --out-dir "$2" \
     --every-tic --stride 4 --canonical $CANON \
     --batch-size "$4" --decode-threads $THREADS --device cuda:$GPU --dtype bf16 \
     --cache-dir $D/hf/hub --decode-check 16
