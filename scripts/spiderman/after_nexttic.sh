@@ -6,8 +6,20 @@
 #   --horizon-tics 4    four tics rolled forward from real context, scored at the 4th frame, so the
 #                       number is at EQUAL GAME TIME with a stride-4 model's single step (114 ms)
 #
-#   usage: [PY=..] [NOWAIT=1] [CORPORA=".."] [RESCORE=1] [DRY=1] [DOOM_ROOT=..] \
-#          after_nexttic.sh <gpu> <unet | sd35 | pixart>
+#   usage: [PY=..] [NOWAIT=1] [CKPT=path] [STEP=n] [CORPORA=".."] [RESCORE=1] [BEST=0] \
+#          [DRY=1] [DOOM_ROOT=..] after_nexttic.sh <gpu> <unet | sd35 | pixart>
+#
+# Which weights. ONE checkpoint is chosen by its STORED step (pick_checkpoint.py) and BOTH the live
+# and the EMA number come from that file, so the comparison is paired. `best.pt` is scored too, as
+# the separately labelled `_best` variant, because it is a selection result on validation loss and
+# not the same weights; BEST=0 drops it.
+#
+# When to run. With no CKPT or STEP it waits for the trainer's `event=end` line. A manually stopped
+# run never writes one, so CKPT=<path> or STEP=<n> evaluates that snapshot immediately and does not
+# wait at all. NOWAIT=1 still means "the GPU is free, start now" on the latest checkpoint.
+#
+# RESCORE=1 reruns every stage whose output already exists; without it every stage with an output
+# is skipped. Both rules apply to the teacher-forced passes and to the rollout alike.
 #
 # Corpora, in the order they are scored. The first three are the dense corpus's own held-out sets
 # from release/dense_split.json; the last three are the original 17-map evaluation corpora, kept as
@@ -29,6 +41,16 @@ DRY=${DRY:-0}
 HORIZON=${HORIZON:-256}
 NUM_WINDOWS=${NUM_WINDOWS:-2048}
 CORPORA=${CORPORA:-"val test arenas_678 seen unseen unseen2"}
+CKPT=${CKPT:-}
+STEP=${STEP:-}
+BEST=${BEST:-1}
+RESCORE=${RESCORE:-0}
+RC=0
+fail() { RC=1; echo "AFTER_NEXTTIC_STAGE_FAILED $*" >&2; }
+# every stage runs when its output is absent, or when RESCORE=1 says to redo it. The old test was
+# `[ ! -f $NPZ ] || [ "$RESCORE" != 1 ]`, which is true whenever the file is missing AND true
+# whenever RESCORE is not 1: the default reran existing rollouts and RESCORE=1 skipped them.
+should_run() { [ ! -e "$1" ] || [ "$RESCORE" = 1 ]; }
 
 case $BACKBONE in
   unet)   RUN=040-unet-nexttic;   CH=4;  BB="--backbone unet --sd-path CompVis/stable-diffusion-v1-4" ;;
@@ -85,42 +107,65 @@ COMMON="$BB --latent-channels $CH $VAE $SCALE --hf-cache $D/hf/hub --tic-stride 
 
 if [ "$DRY" = 1 ]; then
   echo "DRY $RUN decoder: $USED"
-  for S in $CORPORA; do echo "DRY eval_tf $S $PY eval_tf.py $COMMON $(corpus_tf $S) --subset $SUBSET --ckpt $R/best.pt --horizon-tics 1 --out-dir $R/eval_tf_$S"; done
-  echo "DRY eval_tf_h4 $PY eval_tf.py $COMMON $(corpus_tf val) --subset $SUBSET --ckpt $R/best.pt --horizon-tics 4 --out-dir $R/eval_tf_val_h4"
-  echo "DRY rollout $PY rollout_eval.py --rollout $COMMON --ckpt $R/best.pt $(corpus_latents test) --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --out $R/rollouts_test.npz"
+  echo "DRY pick $PY pick_checkpoint.py --results-dir $R --require-ema ${STEP:+--step $STEP} ${CKPT:+--ckpt $CKPT}"
+  for S in $CORPORA; do
+    for VARIANT in "" "_ema" "_best"; do
+      echo "DRY eval_tf ${S}${VARIANT} $PY eval_tf.py $COMMON $(corpus_tf $S) --subset $SUBSET --ckpt PICKED --horizon-tics 1 --out-dir $R/eval_tf_${S}${VARIANT}"
+    done
+    echo "DRY eval_tf ${S}_h4 $PY eval_tf.py $COMMON $(corpus_tf $S) --subset $SUBSET --ckpt PICKED --horizon-tics 4 --out-dir $R/eval_tf_${S}_h4"
+  done
+  echo "DRY rollout $PY rollout_eval.py --rollout $COMMON --ckpt PICKED $(corpus_latents test) --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --out $R/rollouts_test.npz"
+  echo "DRY score $PY rollout_eval.py --score --rollouts $R/rollouts_test.npz --out-dir $R/rollout_metrics_test"
   exit 0
 fi
 
 export TMPDIR=$D/tmp/tmpdir; mkdir -p $TMPDIR $R $D/logs
 export CUDA_VISIBLE_DEVICES=$GPU HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
-[ "${NOWAIT:-0}" = 1 ] || until grep -q "\"event\": \"end\"" $R/log.jsonl 2>/dev/null; do sleep 300; done
+# A named checkpoint is an explicit "score this now": a manually stopped run never writes
+# `event=end`, and waiting for one hangs for ever.
+if [ -n "$CKPT" ] || [ -n "$STEP" ]; then
+  echo "$(date -Iseconds) evaluating a named checkpoint (${CKPT:-step $STEP}); not waiting for event=end"
+elif [ "${NOWAIT:-0}" != 1 ]; then
+  until grep -q "\"event\": \"end\"" $R/log.jsonl 2>/dev/null; do sleep 300; done
+fi
 cd $D/repo && git pull -q
 echo "$(date -Iseconds) decoder_used $USED" | tee -a $R/decoder_used.txt
 
-# newest snapshot or recovery checkpoint carries the EMA; best.pt never does
-LAST=$(ls $R/[0-9]*.pt $R/snap_*.pt 2>/dev/null | sort | tail -1)
+# ONE checkpoint, chosen by its STORED step, carrying both the live weights and the EMA. A
+# lexicographic `ls ... | sort | tail -1` put every snap_* ahead of every numbered recovery file.
+PICK_LINE=$("$PY" "$D/repo/pick_checkpoint.py" --results-dir "$R" --require-ema \
+  ${STEP:+--step "$STEP"} ${CKPT:+--ckpt "$CKPT"}) || {
+  echo "AFTER_NEXTTIC_FAILED $RUN: no checkpoint to score in $R" >&2; exit 3; }
+read -r PICK PICK_STEP PICK_EMA <<<"$PICK_LINE"
+echo "$(date -Iseconds) checkpoint $PICK step=$PICK_STEP ema=$PICK_EMA decoder=$USED" | tee -a $R/scored_checkpoint.txt
 
 TF="--subset $SUBSET --num-windows $NUM_WINDOWS --batch-size 16 --steps 50"
 for S in $CORPORA; do
   ARGS=$(corpus_tf $S)
   LAT=$LE/$S; case $S in seen|unseen|unseen2) LAT=$LO/$S ;; esac
   [ -d "$LAT" ] || { echo "$RUN skipping $S: no per-tic latents at $LAT" | tee -a $D/logs/${RUN}_eval.log; continue; }
-  for VARIANT in "" "_ema"; do
-    CK=$R/best.pt; EMA=""
-    [ -n "$VARIANT" ] && { CK=$LAST; EMA="--use-ema"; }
-    [ -n "$CK" ] || continue
+  for VARIANT in "" "_ema" "_best"; do
+    CK=$PICK; EMA=""
+    case $VARIANT in
+      _ema)  EMA="--use-ema" ;;
+      # a separately labelled SELECTION result, not the same weights: best.pt is the minimum of the
+      # noisy-context validation loss at whatever step reached it
+      _best) [ "$BEST" = 1 ] || continue; CK=$R/best.pt; [ -f "$CK" ] || continue ;;
+    esac
     OUT=$R/eval_tf_${S}${VARIANT}
-    [ -f "$OUT/metrics.json" ] && { echo "$RUN eval_tf ${S}${VARIANT} already scored" >> $D/logs/${RUN}_eval.log; continue; }
+    should_run "$OUT/metrics.json" || { echo "$RUN eval_tf ${S}${VARIANT} already scored (RESCORE=1 to redo)" >> $D/logs/${RUN}_eval.log; continue; }
     $PY eval_tf.py $COMMON $ARGS $TF --ckpt "$CK" $EMA --horizon-tics 1 --out-dir "$OUT" \
-      > $D/logs/${RUN}_eval_tf_${S}${VARIANT}.log 2>&1
-    echo "$RUN eval_tf ${S}${VARIANT} exit $?" >> $D/logs/${RUN}_eval.log
+      > $D/logs/${RUN}_eval_tf_${S}${VARIANT}.log 2>&1; E=$?
+    echo "$RUN eval_tf ${S}${VARIANT} ckpt=$CK exit $E" >> $D/logs/${RUN}_eval.log
+    [ $E -eq 0 ] || fail "eval_tf ${S}${VARIANT} exit $E"
   done
   # equal game time against the stride-4 rows' single decision step: four tics rolled forward
   OUT4=$R/eval_tf_${S}_h4
-  if [ ! -f "$OUT4/metrics.json" ]; then
-    $PY eval_tf.py $COMMON $ARGS $TF --ckpt $R/best.pt --horizon-tics 4 --out-dir "$OUT4" \
-      > $D/logs/${RUN}_eval_tf_${S}_h4.log 2>&1
-    echo "$RUN eval_tf ${S}_h4 exit $?" >> $D/logs/${RUN}_eval.log
+  if should_run "$OUT4/metrics.json"; then
+    $PY eval_tf.py $COMMON $ARGS $TF --ckpt "$PICK" --horizon-tics 4 --out-dir "$OUT4" \
+      > $D/logs/${RUN}_eval_tf_${S}_h4.log 2>&1; E=$?
+    echo "$RUN eval_tf ${S}_h4 ckpt=$PICK exit $E" >> $D/logs/${RUN}_eval.log
+    [ $E -eq 0 ] || fail "eval_tf ${S}_h4 exit $E"
   fi
 done
 
@@ -129,25 +174,36 @@ ROLL_ARGS=$(corpus_latents test)
 ROLL_LAT=$LE/test
 if [ -d "$ROLL_LAT" ]; then
   NPZ=$R/rollouts_test.npz
-  if [ ! -f "$NPZ" ] || [ "${RESCORE:-0}" != 1 ]; then
-    $PY rollout_eval.py --rollout $COMMON --ckpt $R/best.pt $ROLL_ARGS \
+  if should_run "$NPZ"; then
+    $PY rollout_eval.py --rollout $COMMON --ckpt "$PICK" $ROLL_ARGS \
       --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --batch-size 16 --steps 50 --out "$NPZ" \
-      > $D/logs/${RUN}_rollout.log 2>&1
-    echo "$RUN rollout exit $?" >> $D/logs/${RUN}_rollout_status.log
+      > $D/logs/${RUN}_rollout.log 2>&1; E=$?
+    echo "$RUN rollout ckpt=$PICK exit $E" >> $D/logs/${RUN}_rollout_status.log
+    [ $E -eq 0 ] || fail "rollout exit $E"
   fi
   IDM_ENC=""
   [ "$CH" = 16 ] && IDM_ENC="--idm-reencode-vae stabilityai/sd-vae-ft-mse"
-  $PY rollout_eval.py --score --rollouts "$NPZ" --idm $D/results_spiderman/idm_aligned/idm.pt $IDM_ENC \
-    $VAE $SCALE --hf-cache $D/hf/hub --out-dir $R/rollout_metrics_test --save-clips 256 \
-    >> $D/logs/${RUN}_rollout.log 2>&1
+  if should_run "$R/rollout_metrics_test/metrics.json"; then
+    $PY rollout_eval.py --score --rollouts "$NPZ" --idm $D/results_spiderman/idm_aligned/idm.pt $IDM_ENC \
+      $VAE $SCALE --hf-cache $D/hf/hub --out-dir $R/rollout_metrics_test --save-clips 256 \
+      >> $D/logs/${RUN}_rollout.log 2>&1 || fail "rollout score"
+  fi
   # FVD on both clip spacings: every tic, and every fourth tic so the clip covers the same game
   # time as a stride-4 row's clip of the same frame count
   for CLIPS in clips_u8.npz clips_u8_stride4.npz; do
     [ -f "$R/rollout_metrics_test/$CLIPS" ] || continue
     for F in 16 32; do
+      OUTF=$R/rollout_metrics_test/fvd${F}_${CLIPS%.npz}.json
+      should_run "$OUTF" || continue
       $PY fvd.py --clips $R/rollout_metrics_test/$CLIPS --frames $F --i3d $D/weights/i3d_torchscript.pt \
-        --out $R/rollout_metrics_test/fvd${F}_${CLIPS%.npz}.json >> $D/logs/${RUN}_rollout.log 2>&1
+        --out "$OUTF" >> $D/logs/${RUN}_rollout.log 2>&1 || fail "fvd${F} ${CLIPS}"
     done
   done
 fi
-echo "AFTER_NEXTTIC_DONE $RUN ($USED)" >> $D/logs/${RUN}_rollout.log
+# DONE means every stage that ran exited 0. It used to be printed unconditionally, so a failed
+# scoring pass still announced a finished evaluation.
+if [ $RC -ne 0 ]; then
+  echo "AFTER_NEXTTIC_FAILED $RUN rc=$RC ($USED)" | tee -a $D/logs/${RUN}_rollout.log >&2
+  exit $RC
+fi
+echo "AFTER_NEXTTIC_DONE $RUN step=$PICK_STEP ($USED)" | tee -a $D/logs/${RUN}_rollout.log

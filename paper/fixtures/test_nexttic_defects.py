@@ -143,6 +143,8 @@ def test_the_rollout_call_gets_no_parquet_dir():
 def test_one_subset_key_is_used_everywhere():
     out = _dry("after_nexttic.sh", ["3", "unet"])
     for ln in out.splitlines():
+        if "--score" in ln:
+            continue          # the scoring pass reads the saved rollouts, so it takes no corpus
         if "eval_tf.py" in ln or "rollout_eval.py" in ln:
             assert f"--subset {make_dense_eval_splits.SUBSET}" in ln, ln
 

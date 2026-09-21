@@ -1,0 +1,301 @@
+"""The evaluation launcher picks one checkpoint, honours RESCORE, and fails loudly.
+
+Four defects, all of which produce a number rather than a crash:
+
+  * `LAST=$(ls $R/[0-9]*.pt $R/snap_*.pt | sort | tail -1)` sorts lexicographically across two
+    families, so `snap_0290000.pt` beats `0300000.pt`: whenever any snapshot exists, every numbered
+    recovery checkpoint loses to it. Live came from `best.pt`, so the live/EMA pair was unpaired.
+  * `[ ! -f $NPZ ] || [ "${RESCORE:-0}" != 1 ]` is true when the file is missing AND true when
+    RESCORE is not 1, so the default reran existing rollouts and RESCORE=1 skipped them. The
+    teacher-forced passes ignored RESCORE entirely.
+  * the script waited for the trainer's `event=end`, which a manually stopped run never writes.
+  * `AFTER_NEXTTIC_DONE` was printed unconditionally, so a failed scoring pass announced a finished
+    evaluation.
+
+The launcher is run FOR REAL against a throwaway root with a stub python, as the other launcher
+tests do; the defects are in bash and the DRY path never reaches them.
+
+    python -m pytest paper/fixtures/test_after_nexttic_stages.py -q
+"""
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+import torch
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, REPO)
+sys.path.insert(0, HERE)
+
+import pick_checkpoint  # noqa: E402
+
+AFTER = os.path.join(REPO, "scripts", "spiderman", "after_nexttic.sh")
+RUN = "040-unet-nexttic"
+
+STUB_PY = '''#!/usr/bin/env python3
+"""Stands in for the real evaluation scripts: records its argv and writes the output file."""
+import json, os, sys
+script = os.path.basename(sys.argv[1])
+with open(os.environ["STUB_LOG"], "a") as f:
+    f.write(" ".join(sys.argv[1:]) + "\\n")
+if script == "pick_checkpoint.py":
+    print("%s 290000 1" % os.environ["STUB_PICK"])
+    sys.exit(int(os.environ.get("STUB_PICK_RC", "0")))
+if script == "eval_tf.py":
+    out = sys.argv[sys.argv.index("--out-dir") + 1]
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, "metrics.json"), "w") as f:
+        json.dump({"psnr": 21.0}, f)
+    sys.exit(int(os.environ.get("STUB_TF_RC", "0")))
+if script == "rollout_eval.py":
+    if "--rollout" in sys.argv:
+        with open(sys.argv[sys.argv.index("--out") + 1], "w") as f:
+            f.write("rollouts")
+    else:
+        out = sys.argv[sys.argv.index("--out-dir") + 1]
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, "metrics.json"), "w") as f:
+            json.dump({"idm": 0.5}, f)
+    sys.exit(int(os.environ.get("STUB_ROLL_RC", "0")))
+sys.exit(0)
+'''
+
+
+def _root(tmp_path, checkpoints=(("snap_0290000.pt", 290000, True),), best=True, end=False):
+    """A throwaway data root holding one run directory and the corpora the launcher looks for."""
+    root = tmp_path / "root"
+    r = root / "results_spiderman" / RUN
+    r.mkdir(parents=True)
+    (root / "repo").mkdir(parents=True)
+    for c in ("val", "test", "arenas_678"):
+        (root / "latents_arnold_dense_pertic_eval" / c).mkdir(parents=True)
+    for name, step, has_ema in checkpoints:
+        ck = {"model": {"w": torch.zeros(4)}, "step": step}
+        if has_ema:
+            ck["ema"] = {"w": torch.zeros(4)}
+        torch.save(ck, str(r / name))
+    if best:
+        torch.save({"model": {"w": torch.zeros(4)}, "step": 41000, "val_loss": 0.2}, str(r / "best.pt"))
+    if end:
+        (r / "log.jsonl").write_text('{"event": "end"}\n')
+    return root, r
+
+
+def _run(tmp_path, root, r, timeout=90, **env):
+    py = tmp_path / "stubpy"
+    py.write_text(STUB_PY)
+    py.chmod(0o755)
+    log = tmp_path / "stub.log"
+    if log.exists():
+        log.unlink()            # one log per run: the calls of the previous run are not this run's
+    e = {**os.environ, "DOOM_ROOT": str(root), "PY": str(py), "PY_SD35": str(py),
+         "STUB_LOG": str(log), "STUB_PICK": str(r / "snap_0290000.pt"),
+         "CORPORA": "val", "NUM_WINDOWS": "8", **env}
+    proc = subprocess.run(["bash", AFTER, "0", "unet"], capture_output=True, text=True,
+                          env=e, timeout=timeout)
+    calls = log.read_text().splitlines() if log.exists() else []
+    return proc, calls
+
+
+def _tf_calls(calls):
+    return [c for c in calls if os.path.basename(c.split()[0]) == "eval_tf.py"]
+
+
+def _calls_to(calls, script):
+    return [c for c in calls if os.path.basename(c.split()[0]) == script]
+
+
+# ---------------------------------------------------------------------------------------
+# one checkpoint, chosen by its stored step
+# ---------------------------------------------------------------------------------------
+
+def test_a_newer_recovery_checkpoint_beats_an_older_snapshot(tmp_path):
+    """The reproduction: lexicographically `snap_0290000.pt` sorts after `0300000.pt`."""
+    root, r = _root(tmp_path, checkpoints=(("snap_0290000.pt", 290000, True),
+                                           ("0300000.pt", 300000, True)))
+    names = sorted(os.path.basename(p) for p in pick_checkpoint.candidates(str(r)))
+    assert names[-1] == "snap_0290000.pt", "the old lexicographic order is not what it was"
+    got = pick_checkpoint.pick(str(r))
+    assert os.path.basename(got["path"]) == "0300000.pt" and got["step"] == 300000
+
+
+def test_the_step_is_read_from_the_file_not_the_name(tmp_path):
+    root, r = _root(tmp_path, checkpoints=(("snap_0000001.pt", 777000, True),))
+    assert pick_checkpoint.pick(str(r))["step"] == 777000
+
+
+def test_only_a_checkpoint_carrying_an_ema_can_serve_both_variants(tmp_path):
+    root, r = _root(tmp_path, checkpoints=(("snap_0290000.pt", 290000, False),))
+    with pytest.raises(SystemExit, match="carries an EMA"):
+        pick_checkpoint.pick(str(r), require_ema=True)
+    assert pick_checkpoint.pick(str(r))["has_ema"] is False
+
+
+def test_a_named_step_and_a_named_path_are_both_selectable(tmp_path):
+    root, r = _root(tmp_path, checkpoints=(("snap_0290000.pt", 290000, True),
+                                           ("0300000.pt", 300000, True)))
+    assert pick_checkpoint.pick(str(r), step=290000)["step"] == 290000
+    with pytest.raises(SystemExit, match="step 12345"):
+        pick_checkpoint.pick(str(r), step=12345)
+    named = str(r / "0300000.pt")
+    assert pick_checkpoint.pick(ckpt=named)["path"] == named
+    with pytest.raises(SystemExit, match="no checkpoint at"):
+        pick_checkpoint.pick(ckpt=str(r / "nope.pt"))
+
+
+def test_no_checkpoint_at_all_is_an_error(tmp_path):
+    root, r = _root(tmp_path, checkpoints=())
+    with pytest.raises(SystemExit, match="no numbered or snapshot checkpoint"):
+        pick_checkpoint.pick(str(r))
+
+
+def test_the_launcher_no_longer_sorts_checkpoint_names():
+    code = [ln for ln in open(AFTER).read().splitlines() if not ln.lstrip().startswith("#")]
+    assert not any("sort | tail -1" in ln for ln in code), "the lexicographic selection is back"
+    assert any("pick_checkpoint.py" in ln for ln in code)
+
+
+def test_live_and_ema_come_from_the_same_file(tmp_path):
+    root, r = _root(tmp_path)
+    proc, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert proc.returncode == 0, proc.stderr
+    by_out = {c.split("--out-dir")[1].split()[0]: c for c in _tf_calls(calls)}
+    live = by_out[str(r / "eval_tf_val")]
+    ema = by_out[str(r / "eval_tf_val_ema")]
+
+    def ckpt_of(c):
+        t = c.split()
+        return t[t.index("--ckpt") + 1]
+
+    assert ckpt_of(live) == ckpt_of(ema) == str(r / "snap_0290000.pt")
+    assert "--use-ema" in ema and "--use-ema" not in live
+
+
+def test_best_is_kept_as_a_separately_labelled_variant(tmp_path):
+    root, r = _root(tmp_path)
+    proc, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    best = [c for c in _tf_calls(calls) if c.endswith("eval_tf_val_best")]
+    assert best and str(r / "best.pt") in best[0]
+    proc, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), BEST="0", RESCORE="1")
+    assert not [c for c in _tf_calls(calls) if c.endswith("eval_tf_val_best")]
+
+
+def test_the_scored_checkpoint_is_recorded(tmp_path):
+    root, r = _root(tmp_path)
+    proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert proc.returncode == 0
+    text = (r / "scored_checkpoint.txt").read_text()
+    assert "step=290000" in text and "snap_0290000.pt" in text
+
+
+# ---------------------------------------------------------------------------------------
+# RESCORE, one rule for every stage
+# ---------------------------------------------------------------------------------------
+
+def test_by_default_an_existing_score_is_not_recomputed(tmp_path):
+    root, r = _root(tmp_path)
+    first, calls1 = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert first.returncode == 0 and _tf_calls(calls1)
+    second, calls2 = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert second.returncode == 0
+    assert _tf_calls(calls2) == [], _tf_calls(calls2)
+    assert _calls_to(calls2, "rollout_eval.py") == [], calls2
+
+
+def test_rescore_recomputes_every_stage(tmp_path):
+    """The inverted test: the DEFAULT reran existing rollouts and RESCORE=1 skipped them."""
+    root, r = _root(tmp_path)
+    _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    again, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), RESCORE="1")
+    assert again.returncode == 0
+    assert len(_tf_calls(calls)) == 4, _tf_calls(calls)        # live, ema, best, h4
+    roll = _calls_to(calls, "rollout_eval.py")
+    assert any("--rollout" in c for c in roll) and any("--score" in c for c in roll), roll
+
+
+def test_the_teacher_forced_pass_honours_rescore(tmp_path):
+    """`eval_tf` skipped on `[ -f metrics.json ]` alone and never looked at RESCORE."""
+    root, r = _root(tmp_path)
+    out = r / "eval_tf_val"
+    out.mkdir()
+    (out / "metrics.json").write_text("{}")
+    _, without = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert not [c for c in _tf_calls(without) if c.endswith("eval_tf_val")]
+    _, with_flag = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), RESCORE="1")
+    assert [c for c in _tf_calls(with_flag) if c.endswith("eval_tf_val")]
+
+
+def test_the_rescore_condition_is_the_intended_one():
+    text = open(AFTER).read()
+    assert 'should_run() { [ ! -e "$1" ] || [ "$RESCORE" = 1 ]; }' in text
+    assert '[ "${RESCORE:-0}" != 1 ]' not in text, "the inverted test is back"
+
+
+# ---------------------------------------------------------------------------------------
+# when to run, and what DONE means
+# ---------------------------------------------------------------------------------------
+
+def test_a_named_checkpoint_does_not_wait_for_an_end_event(tmp_path):
+    """A manually stopped run never writes `event=end`; the old script waited for ever."""
+    root, r = _root(tmp_path, end=False)
+    proc, calls = _run(tmp_path, root, r, timeout=60, CKPT=str(r / "snap_0290000.pt"))
+    assert proc.returncode == 0 and _tf_calls(calls)
+    assert "not waiting for event=end" in proc.stdout
+
+
+def test_a_named_step_also_does_not_wait(tmp_path):
+    root, r = _root(tmp_path, end=False)
+    proc, calls = _run(tmp_path, root, r, timeout=60, STEP="290000")
+    assert proc.returncode == 0 and _tf_calls(calls)
+    pick = _calls_to(calls, "pick_checkpoint.py")
+    assert pick and "--step 290000" in pick[0]
+
+
+def test_a_failed_scoring_stage_is_not_reported_as_done(tmp_path):
+    root, r = _root(tmp_path)
+    proc, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), STUB_TF_RC="1")
+    assert proc.returncode != 0
+    assert "AFTER_NEXTTIC_FAILED" in proc.stdout + proc.stderr
+    assert "AFTER_NEXTTIC_DONE" not in proc.stdout
+    assert "AFTER_NEXTTIC_STAGE_FAILED" in proc.stderr
+
+
+def test_a_failed_rollout_is_not_reported_as_done(tmp_path):
+    root, r = _root(tmp_path)
+    proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), STUB_ROLL_RC="1")
+    assert proc.returncode != 0 and "AFTER_NEXTTIC_DONE" not in proc.stdout
+
+
+def test_a_missing_checkpoint_stops_the_evaluation(tmp_path):
+    root, r = _root(tmp_path)
+    proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), STUB_PICK_RC="1")
+    assert proc.returncode == 3
+    assert "no checkpoint to score" in proc.stderr
+
+
+def test_a_clean_run_says_which_step_it_scored(tmp_path):
+    root, r = _root(tmp_path)
+    proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert "AFTER_NEXTTIC_DONE 040-unet-nexttic step=290000" in proc.stdout
+
+
+def test_the_dry_output_names_every_stage(tmp_path):
+    root, r = _root(tmp_path)
+    e = {**os.environ, "DRY": "1", "DOOM_ROOT": str(root)}
+    proc = subprocess.run(["bash", AFTER, "0", "unet"], capture_output=True, text=True, env=e)
+    assert proc.returncode == 0, proc.stderr
+    for tag in ("DRY pick", "DRY score"):
+        assert tag in proc.stdout, proc.stdout
+    for variant in ("val ", "val_ema ", "val_best ", "val_h4 "):
+        assert f"DRY eval_tf {variant}" in proc.stdout, variant
+
+
+def test_the_rollout_score_output_is_json_the_launcher_can_test_for(tmp_path):
+    root, r = _root(tmp_path)
+    proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert proc.returncode == 0
+    with open(r / "rollout_metrics_test" / "metrics.json") as f:
+        assert json.load(f)["idm"] == 0.5
