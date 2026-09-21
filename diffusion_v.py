@@ -6,7 +6,12 @@ By default the network predicts v = sqrt(abar_t) * eps - sqrt(1 - abar_t) * x0 (
 row was trained with. `objective="eps"` switches the loss target and the sampler's conversion to
 the classic noise prediction, which is one cell of the knob grid; the betas, the timestep
 distribution and the sampler itself are untouched, so the cell isolates the parameterization.
-Linear beta schedule with 1,000 steps, matching the April recipe and every warm start's schedule.
+Linear beta schedule 1e-4..0.02 with 1,000 steps, matching the April recipe. It does NOT match the
+warm starts: SD 1.4 was trained under LDM's scaled-linear 0.00085..0.012 (terminal alpha-bar 4.7e-3
+against 4.0e-5 here, so 273 of these timesteps lie below its terminal noise level) and SD 3.5 under
+rectified flow, which has no beta schedule at all. Kept because a near-zero terminal SNR is the
+right pairing for v-prediction with pure-noise DDIM initialisation, and because the schedule is
+shared by every trainer and evaluator and is not stored in checkpoints. No schedule ablation exists.
 Sampling is DDIM on the prediction; `eta=0` is deterministic given the noise, which is what the
 rollout metrics need.
 """
