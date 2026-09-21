@@ -577,6 +577,12 @@ class TicWindowDataset(Dataset):
             if "is_decision" not in meta.files:
                 raise ValueError(f"{meta_path}: no is_decision column; this is a stride-4 corpus, "
                                  "not one written by encode_parquet.py --every-tic")
+            if "deaths" not in meta.files:
+                # tic_window_starts treats `deaths` as optional for generic callers, but a training corpus
+                # without it would let windows cross a respawn silently (the tic counter keeps running
+                # through a death, so nothing else marks the boundary)
+                raise ValueError(f"{meta_path}: no deaths column, so a window could span a respawn "
+                                 "unnoticed; re-run the encoder (it copies deaths by default)")
             if len(meta["tic"]) != lat.shape[0]:
                 raise ValueError(f"{lat_path}: {lat.shape[0]} latents vs {len(meta['tic'])} metadata rows")
             candidates += max(0, lat.shape[0] - span + 1)
