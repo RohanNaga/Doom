@@ -18,6 +18,30 @@ STOCK_LABEL = "stock_sd"
 INCUMBENT = "tuned_sd_lpips"
 
 
+def merge_gates(gates):
+    """One gate result from several scoring passes over the same frames and baseline.
+
+    The ceilings are scored in two passes so that losing the second one to the card's hand-back
+    deadline costs only the hourly curve, not the headline. The passes share the baseline decoder,
+    so later passes must not overwrite the earlier reading of a decoder both of them scored.
+    """
+    if not gates:
+        raise SystemExit("no gate metrics given")
+    out = {"decoders": {}, "metrics": {}, "paired": {}, "baseline": gates[0].get("baseline", "")}
+    for g in gates:
+        for n, path in g.get("decoders", {}).items():
+            out["decoders"].setdefault(n, path)
+        for s, m in g.get("metrics", {}).items():
+            into = out["metrics"].setdefault(s, {})
+            for k, v in m.items():
+                into.setdefault(k, v)
+        for s, p in g.get("paired", {}).items():
+            into = out["paired"].setdefault(s, {})
+            for k, v in p.items():
+                into.setdefault(k, v)
+    return out
+
+
 def hour_of(name):
     """The hour a checkpoint name encodes: mse_h3 -> 3, mse_final -> the end of the run."""
     m = re.fullmatch(r"mse_h(\d+)", name)
@@ -105,12 +129,15 @@ def curve(gate, tune, path):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
-    p.add_argument("--gate", default=os.path.join(here, "metrics.json"))
+    p.add_argument("--gate", action="append", default=[],
+                   help="a scoring pass's metrics.json; repeat for the headline and the curve pass")
     p.add_argument("--tune", default=os.path.join(here, "tune_metrics.json"))
     p.add_argument("--out-table", default=os.path.join(here, "TABLE.md"))
     p.add_argument("--out-plot", default=os.path.join(here, "ceiling_vs_presentations.png"))
     a = p.parse_args()
-    gate = json.load(open(a.gate))
+    paths = a.gate or [os.path.join(here, "metrics.json"),
+                       os.path.join(here, os.pardir, "e2-decoder-curve", "metrics.json")]
+    gate = merge_gates([json.load(open(p)) for p in paths if os.path.exists(p)])
     tune = json.load(open(a.tune)) if os.path.exists(a.tune) else None
     t = table(gate, tune)
     open(a.out_table, "w").write(t + "\n")

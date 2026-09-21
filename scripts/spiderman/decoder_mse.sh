@@ -46,22 +46,36 @@ nice -n 15 $PY finetune_decoder.py \
 echo "=== tune exit $?"
 [ "${FIT:-0}" = 1 ] && { echo "=== FIT_DONE mb$MB"; exit 0; }
 
-# Ceiling of the stock decoder, the incumbent tuned one and every hourly checkpoint, on exactly the
-# frames the stored ceilings were measured on (vae_gate.sh's own arguments).
-DEC="--decoder stock_sd= --decoder tuned_sd_lpips=$D/vae_decoder_arnold_lpips/vae"
-for H in $OUT/vae_h*; do
-  [ -d "$H" ] && DEC="$DEC --decoder mse_$(basename $H | sed s/vae_//)=$H"
-done
-DEC="$DEC --decoder mse_final=$OUT/vae"
-
-echo "=== $(date -u) score the ceilings"
-nice -n 15 $PY vae_gate_score.py $DEC --baseline tuned_sd_lpips --cache-dir $D/hf/hub \
+# Ceilings, on exactly the frames the stored ceilings were measured on (vae_gate.sh's own
+# arguments), in TWO passes. `vae_gate_score.py` writes its metrics.json only when it has scored
+# every decoder it was given, so one pass over seven decoders that gets killed at the hand-back
+# deadline would leave nothing at all. The headline comparison -- stock, the incumbent, and the
+# finished tune -- therefore goes first and on its own, and the hourly curve follows as a second
+# pass that can be lost without costing the answer. Both passes carry the baseline so each has its
+# own paired bootstrap.
+R=$D/results_spiderman/levers_2026-09-20
+GATE="--baseline tuned_sd_lpips --cache-dir $D/hf/hub \
   --dev-in-dir $D/raw_arnold --dev-split $D/split_arnold.json --dev-frames 2000 \
   --frame-cache $D/frame_cache --stride 4 \
   --corpus seen=$D/latents_arnold_eval/seen,$D/raw_arnold_eval/seen,$D/latents_arnold_eval/split_seen.json \
   --corpus unseen=$D/latents_arnold_eval/unseen,$D/raw_arnold_eval/unseen,$D/latents_arnold_eval/split_unseen.json \
   --corpus unseen2=$D/latents_arnold_eval/unseen2,$D/raw_arnold_eval/unseen2,$D/latents_arnold_eval/split_unseen2.json \
   --subset val --num-windows 2048 --context-frames 32 --resamples 1000 --seed 0 \
-  --batch-size 32 --device cuda:0 --out-dir $D/results_spiderman/levers_2026-09-20/e2-decoder
-echo "=== score exit $?"
+  --batch-size 32 --device cuda:0"
+INCUMBENT="--decoder tuned_sd_lpips=$D/vae_decoder_arnold_lpips/vae"
+
+echo "=== $(date -u) score the headline ceilings"
+nice -n 15 $PY vae_gate_score.py --decoder stock_sd= $INCUMBENT --decoder mse_final=$OUT/vae \
+  $GATE --out-dir $R/e2-decoder
+echo "=== headline score exit $?"
+
+CURVE=""
+for H in $OUT/vae_h*; do
+  [ -d "$H" ] && CURVE="$CURVE --decoder mse_$(basename $H | sed s/vae_//)=$H"
+done
+if [ -n "$CURVE" ]; then
+  echo "=== $(date -u) score the hourly curve"
+  nice -n 15 $PY vae_gate_score.py $INCUMBENT $CURVE $GATE --out-dir $R/e2-decoder-curve
+  echo "=== curve score exit $?"
+fi
 echo "=== $(date -u) E2_DECODER_DONE"
