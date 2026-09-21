@@ -215,6 +215,145 @@ def test_sd35_gets_a_third_context_token_and_leaves_the_pooled_slot_alone():
 
 
 # ---------------------------------------------------------------------------------------
+# --action-history: GameNGen's executed-control token sequence
+# ---------------------------------------------------------------------------------------
+
+BITS, HIST = 6, 2        # the tiny models here use context_frames 2, so the history is 2
+
+
+def _controls(n=2, seed=0):
+    g = torch.Generator().manual_seed(seed)
+    return torch.randint(0, 2, (n, HIST, BITS), generator=g).float()
+
+
+def test_the_control_embedder_positions_the_tokens_and_checks_its_input_shape():
+    e = backbones.ControlHistoryEmbedder(BITS, 16, HIST)
+    out = e(_controls())
+    assert out.shape == (2, HIST, 16)
+    assert e.pos.shape == (1, HIST, 16) and e.pos.std() > 0      # learned positions, small init
+    with pytest.raises(ValueError, match="expected controls of shape"):
+        e(torch.zeros(2, HIST + 1, BITS))
+    with pytest.raises(ValueError, match="expected controls of shape"):
+        e(torch.zeros(2, BITS))
+
+
+def test_identical_controls_at_different_positions_give_different_tokens():
+    """Which is the whole point of the position table: order has to be recoverable."""
+    e = backbones.ControlHistoryEmbedder(BITS, 16, HIST)
+    same = torch.ones(1, HIST, BITS)
+    out = e(same)
+    assert not torch.allclose(out[0, 0], out[0, 1])
+
+
+def test_the_noise_bucket_token_carries_no_position():
+    """The position table spans the L control tokens only, so the bucket token is unpositioned."""
+    e = backbones.ControlHistoryEmbedder(BITS, 16, HIST)
+    assert e.pos.shape[1] == HIST
+
+
+def test_the_unet_keeps_the_bucket_in_class_labels_and_sends_only_controls(monkeypatch):
+    """Decision (Rohan, Sep 20): the bucket stays where it already is, so the sequence is L tokens."""
+    from diffusers import UNet2DConditionModel
+    tiny = dict(sample_size=8, block_out_channels=(8, 8), layers_per_block=1, in_channels=4,
+                out_channels=4, cross_attention_dim=16, attention_head_dim=2, norm_num_groups=8,
+                down_block_types=("DownBlock2D", "CrossAttnDownBlock2D"),
+                up_block_types=("CrossAttnUpBlock2D", "UpBlock2D"))
+    monkeypatch.setattr(UNet2DConditionModel, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: cls(**tiny, num_class_embeds=k.get("num_class_embeds", 4))))
+    m = backbones.UNetWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, action_dropout=0.0,
+                                 grad_ckpt=False, action_history=HIST, control_bits=BITS)
+    m.unet = TokenSpy(4)
+    kw = _inputs(m)
+    kw["action"] = _controls()
+    m(**kw)
+    assert m.unet.seen == (2, HIST, 16)
+
+
+def test_pixart_concatenates_the_controls_then_the_bucket():
+    from diffusers import PixArtTransformer2DModel
+    m = backbones.PixArtWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, action_dropout=0.0,
+                                   grad_ckpt=False, action_history=HIST, control_bits=BITS,
+                                   transformer=PixArtTransformer2DModel(**TINY_PIXART))
+    m.transformer = TokenSpy(8)
+    kw = _inputs(m)
+    kw["action"] = _controls()
+    m(**kw)
+    assert m.transformer.seen == (2, HIST + 1, TINY_PIXART["caption_channels"])
+
+
+def test_pixart_adaln_refuses_action_history():
+    """`adaln` removes the cross-attention pathway the token sequence needs."""
+    from diffusers import PixArtTransformer2DModel
+    with pytest.raises(NotImplementedError, match="action-history"):
+        backbones.PixArtWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, action_dropout=0.0,
+                                   grad_ckpt=False, action_inject="adaln", action_history=HIST,
+                                   control_bits=BITS, transformer=PixArtTransformer2DModel(**TINY_PIXART))
+
+
+def test_sd35_pools_only_the_newest_control():
+    S = pytest.importorskip("diffusers").SD3Transformer2DModel
+    tr = S(sample_size=8, patch_size=2, in_channels=16, num_layers=1, attention_head_dim=8,
+           num_attention_heads=2, joint_attention_dim=16, caption_projection_dim=16,
+           pooled_projection_dim=8, out_channels=16, pos_embed_max_size=32)
+    m = backbones.SD35WorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, action_dropout=0.0,
+                                 grad_ckpt=False, latent_channels=16, transformer=tr,
+                                 action_history=HIST, control_bits=BITS)
+    controls, bucket = _controls(), torch.tensor([0, 3])
+    tokens, pooled = m.conditioning(controls, bucket)
+    assert tokens.shape == (2, HIST + 1, 16)
+    assert torch.equal(tokens[:, HIST], m.bucket_embedder(bucket))          # bucket last
+    # the pooled slot is the NEWEST control's embedding, never an average of the sequence
+    newest = m.control_history(controls)[:, -1]
+    assert torch.equal(tokens[:, HIST - 1], newest)
+    assert torch.equal(pooled, m.pooled_control(newest) + m.pooled_base)
+    assert torch.equal(m.pooled_control.weight, torch.zeros_like(m.pooled_control.weight))
+
+
+def test_the_dit_documents_that_it_averages_because_it_has_no_cross_attention():
+    m = backbones.DiTWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, model_name="DiT-S/2",
+                                action_dropout=0.0, grad_ckpt=False, action_history=HIST, control_bits=BITS)
+    kw = _inputs(m)
+    kw["action"] = _controls()
+    with torch.no_grad():
+        assert torch.isfinite(_wake(m).eval()(**kw)).all()
+
+
+def test_action_dropout_is_refused_with_action_history():
+    """A `[B]` keep mask silently broadcasting onto `[B, L]` control tokens is the trap this closes."""
+    m = backbones.DiTWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, model_name="DiT-S/2",
+                                action_dropout=0.1, grad_ckpt=False, action_history=HIST, control_bits=BITS)
+    m.train()
+    kw = _inputs(m)
+    kw["action"] = _controls()
+    with pytest.raises(ValueError, match="action-dropout"):
+        m(**kw)
+
+
+def test_action_history_needs_the_control_width():
+    with pytest.raises(ValueError, match="button-vector width"):
+        backbones.DiTWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, model_name="DiT-S/2",
+                                action_dropout=0.0, grad_ckpt=False, action_history=HIST, control_bits=0)
+
+
+def test_action_history_zero_attaches_nothing():
+    off = backbones.DiTWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, model_name="DiT-S/2",
+                                  action_dropout=0.0, grad_ckpt=False)
+    assert not any("control_history" in k for k in off.state_dict())
+    assert backbones.phase_vec(off, None) is None
+
+
+def test_the_trainer_refuses_the_impossible_action_history_combinations():
+    for argv, match in ((["--tic-stride", "4", "--action-history", "32"], "tic-stride 1"),
+                        (["--tic-stride", "1", "--action-history", "16", "--context-frames", "32"],
+                         "equal --context-frames"),
+                        (["--tic-stride", "1", "--action-history", "32", "--action-dropout", "0.1"],
+                         "action-dropout")):
+        a = train_wm.build_parser().parse_args(["--backbone", "dit", "--fit-check", "1"] + argv)
+        with pytest.raises(SystemExit, match=match):
+            train_wm.main(a)
+
+
+# ---------------------------------------------------------------------------------------
 # --init-from
 # ---------------------------------------------------------------------------------------
 

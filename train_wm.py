@@ -30,18 +30,26 @@ from backbones import ACTION_INJECTIONS, BACKBONES, LATENT_HW, build_model, reso
 from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
 from doom_data import PHASE_BUCKETS
 
+FIT_CHECK_CONTROL_BITS = 15   # the Arnold deathmatch button list's width; only a fit check needs a guess
+
 
 class SyntheticWindows(Dataset):
-    def __init__(self, n, context_frames, num_actions, latent_channels=4):
+    def __init__(self, n, context_frames, num_actions, latent_channels=4, action_history=0, control_bits=0):
         self.n, self.L, self.A, self.C = n, context_frames, num_actions, latent_channels
+        self.action_history, self.control_bits = action_history, control_bits
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, i):
+        # the draw order is context, target, action, and it must stay that way: the fit-check
+        # windows are asserted bit-identical to the ones the finished rows' fit checks used
         g = torch.Generator().manual_seed(i)
-        return (torch.randn(self.C * self.L, *LATENT_HW, generator=g), torch.randn(self.C, *LATENT_HW, generator=g),
-                torch.randint(0, self.A, (1,), generator=g)[0])
+        ctx = torch.randn(self.C * self.L, *LATENT_HW, generator=g)
+        tgt = torch.randn(self.C, *LATENT_HW, generator=g)
+        act = (torch.randint(0, 2, (self.action_history, self.control_bits), generator=g).float()
+               if self.action_history else torch.randint(0, self.A, (1,), generator=g)[0])
+        return ctx, tgt, act
 
 
 class SeededCorruption(Dataset):
@@ -137,14 +145,16 @@ def build_loaders(args, latent_channels):
     moves, from 114 ms to 28.6 ms. `--tic-stride 4` is the default and takes the old path untouched.
     """
     if args.fit_check:
-        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels)
+        ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels,
+                              args.action_history, args.control_bits or FIT_CHECK_CONTROL_BITS)
         return ds, None, None
     from doom_data import LatentWindowDataset, TicWindowDataset
     train_ids, val_ids = select_episodes(args)
     if args.tic_stride == 1:
         def make(d, ids):
             return TicWindowDataset(d, ids, args.context_frames, latent_channels=latent_channels,
-                                    with_phase=args.phase_conditioning, phase_buckets=args.phase_buckets)
+                                    with_phase=args.phase_conditioning, phase_buckets=args.phase_buckets,
+                                    action_history=args.action_history)
     else:
         def make(d, ids):
             return LatentWindowDataset(d, ids, args.context_frames, latent_channels=latent_channels,
@@ -295,10 +305,27 @@ def main(args):
     if args.phase_conditioning and args.tic_stride != 1:
         raise SystemExit("--phase-conditioning needs per-tic windows (--tic-stride 1); at stride 4 every "
                          "target is a decision tic, so tics_since_decision is 0 for every sample")
+    if args.action_history:
+        if args.tic_stride != 1:
+            raise SystemExit("--action-history conditions on the executed control of each context TIC, so it "
+                             "needs --tic-stride 1")
+        if args.action_history != args.context_frames:
+            raise SystemExit(f"--action-history {args.action_history} must equal --context-frames "
+                             f"{args.context_frames}: one executed control per context tic")
+        if args.action_dropout > 0:
+            raise SystemExit("--action-dropout has no null row to drop to when the conditioning is a button "
+                             "vector; set --action-dropout 0")
+    # the control embedder's input width is a property of the corpus's button list, so it is read from
+    # the corpus rather than assumed (a fit check has no corpus and uses the recorded Arnold width)
+    control_bits = args.control_bits
+    if args.action_history and not control_bits:
+        from doom_data import corpus_control_bits
+        control_bits = FIT_CHECK_CONTROL_BITS if args.fit_check else corpus_control_bits(args.latents_dir)
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
                         action_dropout=args.action_dropout, latent_channels=latent_channels,
-                        action_inject=args.action_inject, phase_buckets=phase_buckets)
+                        action_inject=args.action_inject, phase_buckets=phase_buckets,
+                        action_history=args.action_history, control_bits=control_bits)
     start_step = 0
     if args.resume and args.init_from:
         raise SystemExit("--resume continues a run from its own checkpoint and --init-from starts a new run "
@@ -364,6 +391,8 @@ def main(args):
                        "tic_stride": args.tic_stride,
                        "dataset_class": type(train_ds).__name__,
                        "resolved_phase_buckets": phase_buckets,
+                       "resolved_control_bits": control_bits,
+                       "dataset_summary": getattr(train_ds, "summary", None),
                        "init_from": args.init_from or None, "init_from_step": init_step}, f, indent=1)
         if train_ids is not None:
             # which episodes this run actually trained on, so a data cell is reproducible from the
@@ -374,6 +403,10 @@ def main(args):
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
         per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum, objective=args.objective,
         tic_stride=args.tic_stride, dataset_class=type(train_ds).__name__, phase_buckets=phase_buckets,
+        action_history=args.action_history, control_bits=control_bits,
+        # the fraction of candidate windows the per-tic validity contract removed (deaths, tic gaps,
+        # map changes), so a "within-life simulation" claim can state it
+        dataset_summary=getattr(train_ds, "summary", None),
         init_from=args.init_from or None, init_from_step=init_step,
         train_fraction=args.train_fraction, train_episodes=None if train_ids is None else len(train_ids),
         # state-dict entries the EMA does not cover, i.e. persistent buffers: 0 for every backbone
@@ -556,6 +589,13 @@ def build_parser():
                         "one frame per agent decision, the spacing every finished row trained at; 1 selects "
                         "the per-tic dataset, GameNGen's spacing. Sample shapes are identical either way, so "
                         "the backbones and the whole recipe are unchanged")
+    p.add_argument("--action-history", type=int, default=0,
+                   help="GameNGen's action conditioning: one token per context tic carrying the EXECUTED button "
+                        "vector of that tic (the `buttons` column), oldest first, the newest being the control "
+                        "applied into the target. Must equal --context-frames. 0 (default) keeps the single "
+                        "action-id token every finished row trained with, bit-identically")
+    p.add_argument("--control-bits", type=int, default=0,
+                   help="width of the executed button vector; 0 reads it from the corpus's own metadata")
     p.add_argument("--phase-conditioning", action="store_true",
                    help="also condition on tics_since_decision, the target tic's position inside the held-action "
                         "run, through the same small-embedding mechanism the noise bucket uses; needs --tic-stride 1")

@@ -23,7 +23,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, REPO)
 sys.path.insert(0, HERE)
 
-pytest.importorskip("torch")
+torch = pytest.importorskip("torch")
 
 from pertic_fixtures import (STRIDE, frame_index_of, held_actions,  # noqa: E402
                              write_pertic_episode, write_stride4_episode)
@@ -239,6 +239,155 @@ def test_horizon_one_with_horizon_matches_the_training_contract(tmp_path):
     for i in range(len(plain)):
         assert frame_index_of(plain[i][1]) == frame_index_of(hor[i][1][0])
         assert int(plain[i][2]) == int(hor[i][2][0])
+
+
+# ---------------------------------------------------------------------------------------
+# executed-control action history (GameNGen's conditioning)
+# ---------------------------------------------------------------------------------------
+
+def _buttons(rows, bits=6):
+    """One 0/1 string per row, encoding the row index in binary so a test can read it back."""
+    return [format(r % (2 ** bits), f"0{bits}b") for r in rows]
+
+
+def test_control_matrix_reads_the_recorders_button_strings():
+    m = doom_data.control_matrix(["100000", "010101"])
+    assert m.shape == (2, 6) and m.dtype.name == "float32"
+    assert m[0].tolist() == [1, 0, 0, 0, 0, 0] and m[1].tolist() == [0, 1, 0, 1, 0, 1]
+
+
+def test_control_matrix_refuses_mixed_widths():
+    with pytest.raises(ValueError, match="differing width"):
+        doom_data.control_matrix(["1010", "101"])
+
+
+def test_the_history_is_one_control_per_context_tic_ending_at_the_row_before_the_target(tmp_path):
+    """The contract: controls = buttons[r-L:r] for target row r. buttons[r] is never included.
+
+    `record_arnold.py:264-273` stores the row and *then* calls `make_action`, so row i carries the
+    control leaving frame i. The control that produces the target at row r is therefore on row r-1,
+    the newest of the L tokens; row r's own control is chosen after the target is observed and would
+    leak the next decision into the conditioning.
+    """
+    T = 20
+    d = corpus(tmp_path, "hist", held_actions([1, 2, 3, 4, 5]), buttons=_buttons(range(T)))
+    ds = TicWindowDataset(d, context_frames=4, action_history=4)
+    for i in range(len(ds)):
+        _, s = ds.locate(i)
+        ctx, tgt, controls = ds[i]
+        r = s + 4                                        # the target row
+        assert controls.shape == (4, 6)
+        # each token is the binary encoding of its own source row, oldest first
+        rows = [int("".join(str(int(v)) for v in controls[k]), 2) for k in range(4)]
+        assert rows == [r - 4, r - 3, r - 2, r - 1]
+        assert rows[-1] == r - 1 != r                    # never buttons[r]
+        assert frame_index_of(tgt) == r
+
+
+def test_the_newest_control_token_comes_from_the_legacy_scalars_own_row(tmp_path):
+    """`--action-history` generalises `act[start + L - 1]`; the two must name the same row."""
+    T = 20
+    d = corpus(tmp_path, "same_row", held_actions([1, 2, 3, 4, 5]), buttons=_buttons(range(T)))
+    legacy = TicWindowDataset(d, context_frames=4)
+    hist = TicWindowDataset(d, context_frames=4, action_history=4)
+    for i in range(len(legacy)):
+        _, s = legacy.locate(i)
+        assert legacy.held_action_row(s) == s + 3
+        newest = int("".join(str(int(v)) for v in hist[i][2][-1]), 2)
+        assert newest == legacy.held_action_row(s), "the newest token is not the legacy scalar's row"
+
+
+def test_a_held_action_simply_repeats_on_every_tic(tmp_path):
+    """No phase flag: the four tics of one decision carry four identical control tokens."""
+    T = 16
+    btns = ["101000"] * 4 + ["010100"] * 4 + ["001010"] * 4 + ["000101"] * 4
+    d = corpus(tmp_path, "held_rep", held_actions([1, 2, 3, 4]), buttons=btns)
+    ds = TicWindowDataset(d, context_frames=4, action_history=4)
+    starts = [ds.locate(i)[1] for i in range(len(ds))]
+    ctrl = ds[starts.index(4)][2]                     # context rows 4..7, one whole decision
+    assert torch.equal(ctrl[0], ctrl[1]) and torch.equal(ctrl[1], ctrl[3])
+    assert ctrl[0].tolist() == [0, 1, 0, 1, 0, 0]
+    assert T == 16
+
+
+def test_the_history_is_the_executed_vector_not_the_requested_id(tmp_path):
+    """An anti-stuck override: the id says one thing and the executed buttons another."""
+    acts = held_actions([7, 7, 7, 7])                  # the same requested id throughout
+    btns = ["100000"] * 8 + ["000011"] * 8             # the engine executed something else halfway
+    d = corpus(tmp_path, "override", acts, buttons=btns)
+    ds = TicWindowDataset(d, context_frames=4, action_history=4)
+    seen = {tuple(ds[i][2][-1].tolist()) for i in range(len(ds))}
+    assert len(seen) == 2, "the action id alone could not distinguish these tics"
+    assert len({int(a) for a in acts}) == 1
+
+
+def test_action_history_must_equal_the_context_length(tmp_path):
+    d = corpus(tmp_path, "mismatch", held_actions([1, 2, 3, 4]), buttons=_buttons(range(16)))
+    with pytest.raises(ValueError, match="context length"):
+        TicWindowDataset(d, context_frames=4, action_history=8)
+
+
+def test_horizon_windows_shift_the_control_window_with_the_frame_window(tmp_path):
+    """Each rollout step's newest control is the one leaving that step's last context frame."""
+    T = 24
+    d = corpus(tmp_path, "horctl", held_actions([1, 2, 3, 4, 5, 6]), buttons=_buttons(range(T)))
+    ds = TicWindowDataset(d, context_frames=4, horizon=4, with_horizon=True, action_history=4)
+    _, s = ds.locate(0)
+    ctx, tgts, controls, ph = ds[0]
+    assert controls.shape == (4, 4, 6)                 # (steps, L, bits)
+    for k in range(4):
+        rows = [int("".join(str(int(v)) for v in controls[k, j]), 2) for j in range(4)]
+        assert rows == [s + k, s + k + 1, s + k + 2, s + k + 3]
+        assert rows[-1] == (s + 4 + k) - 1             # the control leaving step k's last context frame
+
+
+def test_the_corpus_reports_its_control_width(tmp_path):
+    d = corpus(tmp_path, "bits", held_actions([1, 2, 3, 4]), buttons=_buttons(range(16), bits=9))
+    assert doom_data.corpus_control_bits(d) == 9
+    assert TicWindowDataset(d, context_frames=4, action_history=4).control_bits == 9
+
+
+# ---------------------------------------------------------------------------------------
+# what the validity contract excluded
+# ---------------------------------------------------------------------------------------
+
+def test_the_dataset_reports_the_excluded_fraction(tmp_path):
+    """A "within-life simulation" claim has to be able to state what it threw away."""
+    deaths = np.array([0] * 8 + [1] * 8)
+    d = corpus(tmp_path, "excl", held_actions([1, 2, 3, 4]), deaths=deaths)
+    ds = TicWindowDataset(d, context_frames=4)
+    s = ds.summary
+    assert s["candidate_windows"] == 16 - 5 + 1 == 12
+    assert s["windows"] == len(ds) == 8                       # the four spanning the respawn are gone
+    assert s["excluded_windows"] == 4 and abs(s["excluded_fraction"] - 4 / 12) < 1e-9
+
+
+def test_a_respawn_is_excluded_even_when_both_chain_endpoints_are_minus_one(tmp_path):
+    """The hole the per-tic contract exists to close.
+
+    On a per-tic corpus `chain_id` is -1 on every non-decision tic, so the stride-4 endpoint test
+    `cid[s] == cid[s + L]` is satisfied by two -1 endpoints and would accept a window that spans a
+    death. The per-tic contract never looks at chain ids, so it rejects it.
+    """
+    deaths = np.array([0] * 8 + [1] * 8)
+    # no decision rows at all, so every chain_id is -1
+    d = corpus(tmp_path, "minus_one", held_actions([1, 2, 3, 4]), deaths=deaths,
+               decisions=np.zeros(16, dtype=bool))
+    meta = np.load(os.path.join(d, "ep_00000_meta.npz"))
+    cid = meta["chain_id"]
+    assert (cid == -1).all()
+    bad = 5
+    assert cid[bad] == cid[bad + 4], "the stride-4 endpoint test would accept this window"
+    assert deaths[bad] != deaths[bad + 4], "and it spans a respawn"
+    ds = TicWindowDataset(d, context_frames=4)
+    assert bad not in {ds.locate(i)[1] for i in range(len(ds))}
+
+
+def test_the_stride4_dataset_refuses_a_per_tic_corpus(tmp_path):
+    """Rather than sample it through a chain test that means nothing at tic spacing."""
+    d = corpus(tmp_path, "refuse", held_actions([1, 2, 3, 4]))
+    with pytest.raises(ValueError, match="per-tic corpus"):
+        LatentWindowDataset(d, context_frames=4)
 
 
 # ---------------------------------------------------------------------------------------

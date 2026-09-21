@@ -274,6 +274,14 @@ class LatentWindowDataset(Dataset):
                 assert len(meta["chain_id"]) == T == len(meta["action"]) == len(meta["tic"]), f"{ep}: metadata length mismatch"
                 same = meta["chain_id"][1:] == meta["chain_id"][:-1]
                 assert np.all(np.diff(meta["tic"])[same] == 4), f"{ep}: tic spacing inside a chain is not 4"
+            if "is_decision" in meta.files:
+                # A per-tic corpus marks its decision rows and leaves chain_id at -1 everywhere else,
+                # so the endpoint test below (cid[s] == cid[s + L]) would accept a window whose two
+                # ends are both -1 -- including one that spans a death. The chain contract only means
+                # anything at decision spacing, so refuse the corpus rather than silently mis-sample it.
+                raise ValueError(f"{meta_path} carries an is_decision column, so it is a per-tic corpus; "
+                                 "use TicWindowDataset (train_wm.py --tic-stride 1). The chain-id window "
+                                 "test is only valid at decision spacing.")
             if "chain_id" in meta.files:
                 # a window of L+1 frames must lie inside one chain of verified transitions
                 cid = meta["chain_id"]
@@ -478,15 +486,53 @@ def tic_window_starts(meta, context_frames, horizon=1):
     return np.flatnonzero(ok).astype(np.int64)
 
 
+def control_matrix(buttons):
+    """(T, bits) float32 of the EXECUTED button vector per row, from the recorder's 0/1 strings.
+
+    `record_arnold.py` stores `buttons` as "what is applied from this tic to the next" (its row
+    semantics), one character per entry of the game's `available_buttons`, weapon-selection bits
+    included. This is the control the engine actually executed, which is not always the canonical
+    vector of the requested `action` id: Arnold's anti-stuck override holds a different vector for
+    up to 40 tics. The stride-4 corpus hid that by keeping only transitions whose executed vector
+    matched the canonical one; a per-tic corpus keeps every tic, so conditioning on the action id
+    would mislabel exactly those tics. Hence the button vector, not the id.
+
+    The width is read from the data and checked constant, because it is a property of the WAD's
+    button list rather than a number to hardcode.
+    """
+    b = [str(x) for x in np.asarray(buttons).tolist()]
+    widths = {len(s) for s in b}
+    if len(widths) != 1:
+        raise ValueError(f"button strings of differing width in one episode: {sorted(widths)}")
+    return np.array([[float(c) for c in s] for s in b], dtype=np.float32)
+
+
+def corpus_control_bits(latents_dir):
+    """Width of the executed button vector in a per-tic corpus, from its first episode's metadata.
+
+    The model has to be built before the dataset is, and its control embedder needs this width, so
+    it is read here from one small `.npz` rather than guessed from `transitions.CONTROL_BITS` (which
+    is the movement subset, not the full button list).
+    """
+    _, _, meta_path = list_latent_episodes(latents_dir)[0]
+    meta = np.load(meta_path)
+    if "buttons" not in meta.files:
+        raise ValueError(f"{meta_path}: no buttons column, so there is no executed control per tic")
+    return int(control_matrix(meta["buttons"][:1]).shape[1])
+
+
 class TicWindowDataset(Dataset):
     """L consecutive tics -> the next tic, over `encode_parquet.py --every-tic` outputs.
 
     Sample contract, the same shapes `LatentWindowDataset` yields so every backbone is unmodified:
 
-        context (C*L, 32, 40) float32   tics start .. start+L-1, channel-stacked, oldest first
-        target  (C, 32, 40)   float32   tic start+L, one tic later
-        action  int64                   the action stored on row start+L-1
-        phase   int64                   `tics_since_decision` of the target row (only if with_phase)
+        context  (C*L, 32, 40) float32   tics start .. start+L-1, channel-stacked, oldest first
+        target   (C, 32, 40)   float32   tic start+L, one tic later
+        action   int64                   the action stored on row start+L-1
+                 OR (L, bits) float32    with `action_history=L`: the EXECUTED button vector of each
+                                         context tic, oldest first, the last row being the control
+                                         applied from the last context frame into the target
+        phase    int64                   `tics_since_decision` of the target row (only if with_phase)
 
     **Which action conditions which target.** `record_arnold.py` stores the action id and button
     vector of row t as the ones applied from row t to row t+1 (`transitions` module docstring), so
@@ -503,16 +549,24 @@ class TicWindowDataset(Dataset):
     """
 
     def __init__(self, latents_dir, episode_ids=None, context_frames=32, latent_channels=4,
-                 horizon=1, with_phase=False, with_horizon=False, phase_buckets=PHASE_BUCKETS):
+                 horizon=1, with_phase=False, with_horizon=False, phase_buckets=PHASE_BUCKETS,
+                 action_history=0):
         self.L = int(context_frames)
         self.horizon = int(horizon)
         self.latent_channels = latent_channels
         self.with_phase = bool(with_phase)
         self.with_horizon = bool(with_horizon)
         self.phase_buckets = int(phase_buckets)
+        self.action_history = int(action_history)
+        if self.action_history and self.action_history != self.L:
+            raise ValueError(f"action history {self.action_history} must equal the context length {self.L}: "
+                             "one executed control per context tic, as GameNGen conditions")
         want = latent_shape_v2(latent_channels)
         keep = None if episode_ids is None else set(int(e) for e in episode_ids)
         self.episodes, counts = [], []
+        self.control_bits = None
+        candidates = 0
+        span = self.L + self.horizon
         for ep, lat_path, meta_path in list_latent_episodes(latents_dir):
             if keep is not None and ep not in keep:
                 continue
@@ -525,16 +579,36 @@ class TicWindowDataset(Dataset):
                                  "not one written by encode_parquet.py --every-tic")
             if len(meta["tic"]) != lat.shape[0]:
                 raise ValueError(f"{lat_path}: {lat.shape[0]} latents vs {len(meta['tic'])} metadata rows")
+            candidates += max(0, lat.shape[0] - span + 1)
             starts = tic_window_starts(meta, self.L, self.horizon)
             if len(starts) == 0:
                 continue
             phase = tics_since_decision(meta["is_decision"], self.phase_buckets)
+            controls = None
+            if self.action_history:
+                if "buttons" not in meta.files:
+                    raise ValueError(f"{meta_path}: no buttons column, so the executed control per tic is "
+                                     "unavailable; re-run the encoder (it stores buttons by default)")
+                controls = control_matrix(meta["buttons"])
+                if self.control_bits is None:
+                    self.control_bits = controls.shape[1]
+                elif controls.shape[1] != self.control_bits:
+                    raise ValueError(f"{meta_path}: {controls.shape[1]} button bits, the corpus has "
+                                     f"{self.control_bits}; two WADs' button lists cannot be mixed")
             self.episodes.append((ep, lat, meta["action"].astype(np.int64), int(meta["map_id"][0]),
-                                  starts, np.asarray(meta["tic"]).astype(np.int64), phase))
+                                  starts, np.asarray(meta["tic"]).astype(np.int64), phase, controls))
             counts.append(len(starts))
         if not self.episodes:
             raise ValueError("no usable per-tic episodes")
         self.offsets = np.concatenate([[0], np.cumsum(counts)])
+        # what the validity contract threw away, so a claim about "within-life simulation" can state
+        # the fraction of candidate windows a death, a tic gap or a map change removed
+        kept = int(self.offsets[-1])
+        self.summary = {"episodes": len(self.episodes), "context_frames": self.L, "horizon": self.horizon,
+                        "candidate_windows": int(candidates), "windows": kept,
+                        "excluded_windows": int(candidates - kept),
+                        "excluded_fraction": (candidates - kept) / candidates if candidates else 0.0,
+                        "control_bits": self.control_bits}
 
     def __len__(self):
         return int(self.offsets[-1])
@@ -558,18 +632,33 @@ class TicWindowDataset(Dataset):
         """The row whose action conditions the target at `start + L`: the last context row."""
         return start + self.L - 1
 
+    def control_history(self, slot, start, offset=0):
+        """(L, bits) executed button vectors of the L tics ending at row `start + L - 1 + offset`.
+
+        Oldest first. The last row is the control applied from that step's last context frame into
+        the frame being predicted, which is what makes it `u_t` in GameNGen's ordering.
+        """
+        controls = self.episodes[slot][7]
+        return torch.from_numpy(controls[start + offset:start + offset + self.L].copy())
+
     def __getitem__(self, idx):
         slot, start = self.locate(idx)
-        _, lat, act, _, _, _, phase = self.episodes[slot]
+        _, lat, act, _, _, _, phase, _ = self.episodes[slot]
         L, H = self.L, self.horizon
         ctx = torch.from_numpy(np.asarray(lat[start:start + L], dtype=np.float32)).reshape(-1, *LATENT_HW_V2)
         if self.with_horizon:
             tgt = torch.from_numpy(np.asarray(lat[start + L:start + L + H], dtype=np.float32))
-            a = torch.from_numpy(act[self.held_action_row(start):self.held_action_row(start) + H].copy())
+            if self.action_history:
+                a = torch.stack([self.control_history(slot, start, k) for k in range(H)])
+            else:
+                a = torch.from_numpy(act[self.held_action_row(start):self.held_action_row(start) + H].copy())
             ph = torch.from_numpy(phase[start + L:start + L + H].copy())
             return ctx, tgt, a, ph
         tgt = torch.from_numpy(np.asarray(lat[start + L], dtype=np.float32))
-        a = torch.tensor(int(act[self.held_action_row(start)]), dtype=torch.long)
+        if self.action_history:
+            a = self.control_history(slot, start)
+        else:
+            a = torch.tensor(int(act[self.held_action_row(start)]), dtype=torch.long)
         if self.with_phase:
             return ctx, tgt, a, torch.tensor(int(phase[start + L]), dtype=torch.long)
         return ctx, tgt, a
