@@ -204,7 +204,10 @@ if [ -d "$ROLL_LAT" ]; then
   fi
   IDM_ENC=""
   [ "$CH" = 16 ] && IDM_ENC="--idm-reencode-vae stabilityai/sd-vae-ft-mse"
-  if should_run "$R/rollout_metrics_test/metrics.json"; then
+  # drift.json, not metrics.json: rollout_eval.py --score writes `rollout_eval.SCORE_FILE` and has
+  # never written metrics.json, so gating on that name made the test always true and reran the whole
+  # scoring pass (and its 256 decodes) on every invocation
+  if should_run "$R/rollout_metrics_test/drift.json"; then
     $PY rollout_eval.py --score --rollouts "$NPZ" --idm $D/results_spiderman/idm_aligned/idm.pt $IDM_ENC \
       $VAE $SCALE --hf-cache $D/hf/hub --parquet-dir "$(corpus_parquet test)" \
       --out-dir $R/rollout_metrics_test --save-clips 256 --clip-frames 128 \

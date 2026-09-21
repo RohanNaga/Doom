@@ -110,9 +110,86 @@ def test_the_manifest_names_the_episodes_and_fingerprints_them(tmp_path):
     d = _corpus(tmp_path / "lat", [0, 1, 2])
     m = train_wm.corpus_manifest(d, [2, 0])
     assert m["episodes"] == [0, 2], "the ids are sorted, so the list is order-independent"
-    assert m["dir"] == "lat"
+    assert m["path"] == d, "the path is recorded as information"
     assert len(m["fingerprint"]) == 32
     assert train_wm.corpus_manifest(d, [0, 2]) == m, "the fingerprint is not reproducible"
+
+
+def test_the_fingerprint_reaches_the_latent_VALUES(tmp_path):
+    """The defect: hashing only the 128-byte npy header plus the file size, so a re-encode with
+    another autoencoder -- same shape, same dtype, same byte count -- fingerprinted identically.
+    That is exactly the case the manifest exists to catch."""
+    d = _corpus(tmp_path / "lat", [0])
+    p = os.path.join(d, "ep_00000_latents.npy")
+    before = train_wm.corpus_manifest(d, [0])["fingerprint"]
+    lat = np.load(p)
+    head = open(p, "rb").read(train_wm.NPY_HEADER_BYTES)
+    lat[:] = lat + 1.0                      # every value changes; shape, dtype and size do not
+    np.save(p, lat)
+    assert open(p, "rb").read(train_wm.NPY_HEADER_BYTES) == head
+    assert os.path.getsize(p) == len(head) + lat.nbytes
+    assert train_wm.corpus_manifest(d, [0])["fingerprint"] != before
+
+
+def test_a_change_in_any_sampled_window_is_caught(tmp_path):
+    d = _corpus(tmp_path / "lat", [0], rows=400)
+    p = os.path.join(d, "ep_00000_latents.npy")
+    base = train_wm.corpus_manifest(d, [0])["fingerprint"]
+    raw = bytearray(open(p, "rb").read())
+    offsets = train_wm.latent_sample_offsets(len(raw))
+    assert len(offsets) == train_wm.LATENT_SAMPLE_WINDOWS and offsets == sorted(offsets)
+    for off in offsets:
+        edited = bytearray(raw)
+        edited[off] ^= 0xFF
+        with open(p, "wb") as f:
+            f.write(edited)
+        assert train_wm.corpus_manifest(d, [0])["fingerprint"] != base, off
+    with open(p, "wb") as f:
+        f.write(raw)
+    assert train_wm.corpus_manifest(d, [0])["fingerprint"] == base
+
+
+def test_the_sampled_offsets_are_a_function_of_the_size_alone():
+    """Deterministic, so the same bytes are read on every machine and in every run."""
+    for size in (1 << 12, 1 << 20, 50 << 20):
+        a = train_wm.latent_sample_offsets(size)
+        assert a == train_wm.latent_sample_offsets(size)
+        assert all(train_wm.NPY_HEADER_BYTES <= o < size for o in a), (size, a)
+        # a file smaller than one window gets a single offset and a short read
+        want = 1 if size - train_wm.NPY_HEADER_BYTES <= train_wm.LATENT_SAMPLE_BYTES \
+            else train_wm.LATENT_SAMPLE_WINDOWS
+        assert len(a) == want, (size, a)
+    big = train_wm.latent_sample_offsets(50 << 20)
+    assert all(o + train_wm.LATENT_SAMPLE_BYTES <= (50 << 20) for o in big), big
+    assert train_wm.latent_sample_offsets(0) == []
+    assert train_wm.latent_sample_offsets(train_wm.NPY_HEADER_BYTES) == []
+    tiny = train_wm.latent_sample_offsets(train_wm.NPY_HEADER_BYTES + 16)
+    assert tiny == [train_wm.NPY_HEADER_BYTES]
+
+
+def test_the_startup_cost_is_bounded_per_episode(tmp_path):
+    """The bound the docstring states, measured: reads per episode are one sidecar plus the header
+    plus 3 x 64 KB of latent, whatever the latent file's size. At 2,000 episodes that is ~0.4 GB."""
+    d = _corpus(tmp_path / "lat", [0], rows=400)
+    lat_bytes = train_wm.LATENT_SAMPLE_WINDOWS * train_wm.LATENT_SAMPLE_BYTES + train_wm.NPY_HEADER_BYTES
+    assert lat_bytes == 196736
+    import builtins
+    reads = []
+    orig = builtins.open
+
+    def spy(path, mode="r", *a, **k):
+        if str(path).endswith("_latents.npy"):
+            reads.append(str(path))
+        return orig(path, mode, *a, **k)
+
+    builtins.open = spy
+    try:
+        train_wm.corpus_manifest(d, [0])
+    finally:
+        builtins.open = orig
+    assert len(reads) == 1, "more than one pass over each latent file"
+    # 2,000 episodes at this per-episode bound, in GB
+    assert (lat_bytes * 2000) / 1e9 < 0.5
 
 
 def test_the_fingerprint_survives_a_byte_for_byte_copy(tmp_path):
@@ -187,8 +264,8 @@ def test_a_resume_on_a_grown_corpus_is_refused(tmp_path):
 
 
 def test_the_same_corpus_at_another_mount_is_allowed(tmp_path):
-    """The basename check exists because the corpus is legitimately mounted elsewhere; the manifest
-    must agree with that and reject only a change of CONTENTS."""
+    """The corpus is legitimately mounted elsewhere; the manifest must reject only a change of
+    CONTENTS."""
     import shutil
     a = _corpus(tmp_path / "machine1" / "arenas", [0, 1])
     b = str(tmp_path / "machine2" / "arenas")
@@ -197,6 +274,24 @@ def test_the_same_corpus_at_another_mount_is_allowed(tmp_path):
     old = train_wm.corpus_identity(_ns(a), [0, 1], [0, 1])
     now = train_wm.corpus_identity(_ns(b), [0, 1], [0, 1])
     assert train_wm.check_corpus_identity({train_wm.CORPUS_KEY: old}, now) == old
+
+
+def test_a_renamed_directory_holding_identical_data_is_allowed(tmp_path):
+    """The defect: the manifest keyed on `os.path.basename(latents_dir)`, so `arenas` renamed to
+    `arenas_dense` -- or moved one level up -- refused byte-identical latents."""
+    a = _corpus(tmp_path / "arenas", [0, 1])
+    old = train_wm.corpus_identity(_ns(a), [0, 1], [0, 1])       # the manifest the checkpoint carries
+    b = str(tmp_path / "arenas_dense_pertic")
+    os.rename(a, b)
+    now = train_wm.corpus_identity(_ns(b), [0, 1], [0, 1])
+    assert old["train"]["path"] != now["train"]["path"]
+    assert old["train"]["fingerprint"] == now["train"]["fingerprint"]
+    assert train_wm.check_corpus_identity({train_wm.CORPUS_KEY: old}, now) == old
+
+
+def test_the_path_is_not_part_of_the_identity():
+    src = open(os.path.join(REPO, "train_wm.py")).read()
+    assert 'os.path.basename(str(latents_dir)' not in src, "the basename is back in the manifest"
 
 
 def test_a_checkpoint_without_a_manifest_says_so_and_continues(tmp_path, capsys):

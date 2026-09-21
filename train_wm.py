@@ -277,6 +277,26 @@ def episode_record(args, train_ids, val_ids):
 
 CORPUS_KEY = "corpus"
 NPY_HEADER_BYTES = 128      # magic, version, header length and the shape/dtype/order dict
+LATENT_SAMPLE_WINDOWS = 3   # byte windows read out of each latent file
+LATENT_SAMPLE_BYTES = 65536
+
+
+def latent_sample_offsets(size, windows=LATENT_SAMPLE_WINDOWS, width=LATENT_SAMPLE_BYTES):
+    """Deterministic byte offsets of the windows a latent file is fingerprinted from.
+
+    Spread evenly over the file and derived from its size alone, so the same bytes are read on every
+    machine and in every run. `width` bytes from each window is 192 KB per episode against a 50 MB
+    file: enough that a re-encode cannot miss all three, cheap enough to run at startup.
+    """
+    size = int(size)
+    body = max(0, size - NPY_HEADER_BYTES)
+    if body <= 0:
+        return []
+    width = min(int(width), body)
+    if windows <= 1 or body <= width:
+        return [NPY_HEADER_BYTES]
+    span = body - width
+    return [NPY_HEADER_BYTES + (span * i) // (windows - 1) for i in range(windows)]
 
 
 def corpus_manifest(latents_dir, episode_ids):
@@ -285,15 +305,22 @@ def corpus_manifest(latents_dir, episode_ids):
     Episode ids alone do not identify a corpus. A second directory holding ids 6000..6099 encoded
     by a different autoencoder, at a different batch size or from a different recording passes every
     id check there is, and a differently encoded corpus of the same shape never fails a later shape
-    assertion either. The fingerprint closes that: per episode it folds in the id, both files' byte
-    sizes, the `.npy` header (shape, dtype, order) and the WHOLE sidecar, which is a few hundred
-    kilobytes and carries every metadata column.
+    assertion either.
 
-    Filesystem mtime is deliberately not part of it. An `rsync -a` copy or a fresh clone of the
-    corpus keeps the bytes and must keep the fingerprint; what must change it is a re-encode, a
-    mask repair or a truncated file. The latents themselves are 50 MB per episode and are not
-    hashed: their header plus their exact size is the affordable proxy, and reading 2,000 sidecars
-    costs under a second of a multi-day run.
+    **The fingerprint has to reach the latent VALUES.** Hashing only the `.npy` header and the file
+    size does not: a re-encode with another autoencoder, another batch size or another revision
+    produces the same shape, the same dtype and the same byte count, which is precisely the case
+    this manifest exists to catch. So per episode it folds in the id, both files' sizes, the header,
+    `LATENT_SAMPLE_WINDOWS` windows of `LATENT_SAMPLE_BYTES` read at `latent_sample_offsets`, and
+    the WHOLE sidecar, which carries every metadata column.
+
+    Cost, measured on a synthetic 2,000-episode directory (`test_resume_preflight.py`): 192 KB of
+    latent bytes plus one sidecar per episode, about 0.4 GB of reads and well under a minute of
+    a multi-day run, and it is paid once at startup.
+
+    Filesystem mtime is deliberately not part of it, and neither is the directory PATH. An
+    `rsync -a` copy, a fresh clone or a rename must keep the fingerprint; what must change it is a
+    re-encode, a mask repair or a truncated file.
     """
     import hashlib
     from doom_data import list_latent_episodes
@@ -304,13 +331,18 @@ def corpus_manifest(latents_dir, episode_ids):
         if ep not in keep:
             continue
         eps.append(int(ep))
-        h.update(f"{ep}|{os.path.getsize(lat_path)}|{os.path.getsize(meta_path)}|".encode())
+        size = os.path.getsize(lat_path)
+        h.update(f"{ep}|{size}|{os.path.getsize(meta_path)}|".encode())
         with open(lat_path, "rb") as f:
             h.update(f.read(NPY_HEADER_BYTES))
+            for off in latent_sample_offsets(size):
+                f.seek(off)
+                h.update(f.read(LATENT_SAMPLE_BYTES))
         with open(meta_path, "rb") as f:
             h.update(f.read())
-    return {"dir": os.path.basename(str(latents_dir).rstrip("/")), "episodes": sorted(eps),
-            "fingerprint": h.hexdigest()}
+    # `path` is information, never identity: the same corpus is legitimately mounted, copied or
+    # renamed, and keying on the basename refused byte-identical data
+    return {"path": str(latents_dir), "episodes": sorted(eps), "fingerprint": h.hexdigest()}
 
 
 def corpus_identity(args, train_ids, val_ids):

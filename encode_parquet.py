@@ -205,6 +205,41 @@ def load_canonical(path):
         return {int(k): v for k, v in json.load(f).items()}
 
 
+def write_canonical(table, out_dir, supplied=None, dry_run=False):
+    """Record the table this run filtered with, atomically, and only when there is something to write.
+
+    Three rules, each one a way the plain `open(..., "w")` went wrong:
+
+      * a temporary name plus `os.replace`, because a reader that opens the file while a writer is
+        still inside `json.dump` sees a truncated table. Two shards auto-building their own table
+        into one output directory do exactly that.
+      * nothing is written under `--dry-run`: a mode whose whole promise is to change no file must
+        not leave a canonical table behind.
+      * a supplied `--canonical` that already IS the output path is left alone. Rewriting the shared
+        table from itself is at best a no-op and at worst the truncation above, on the one file
+        every other shard is reading.
+
+    Returns the path written, or None.
+    """
+    path = os.path.join(out_dir, CANONICAL_FILE)
+    if dry_run:
+        return None
+    if supplied and os.path.exists(supplied) and os.path.exists(path) and os.path.samefile(supplied, path):
+        return None
+    tmp = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(table, f, indent=1)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return path
+
+
 def build_canonical(paths, progress_every=0):
     """The canonical control table of `paths`, streamed one episode at a time.
 
@@ -251,6 +286,22 @@ def resolve_canonical(args, paths):
     return build_canonical(table_paths, progress_every=200), where
 
 
+# the columns the mask repair reads from raw and copies from the sidecar: both sources must agree,
+# or the output is masks from one recording beside controls from another
+REPAIR_COLUMNS = ("action", "buttons", "deaths")
+
+
+def _columns_agree(cols, table, name):
+    """Is the sidecar's `name` column the raw recording's, after dtype conversion?"""
+    if name not in cols or name not in table.schema.names:
+        return False
+    side = np.asarray(cols[name])
+    if name == "buttons":
+        return np.array_equal(side.astype(str), np.array(table["buttons"].to_pylist(), dtype=str))
+    return np.array_equal(side.astype(np.int64),
+                          table[name].to_numpy(zero_copy_only=False).astype(np.int64))
+
+
 def rebuild_sidecar_masks(paths, out_dir, canonical, stride=4, dry_run=False):
     """Recompute `is_decision` / `chain_id` in sidecars that already exist, from the raw parquet.
 
@@ -260,8 +311,12 @@ def rebuild_sidecar_masks(paths, out_dir, canonical, stride=4, dry_run=False):
     single frame. Every other sidecar column is copied through unchanged, and the file is replaced
     atomically.
 
-    Only an `--every-tic` sidecar can be repaired this way, so the row count and the recorded tics
-    must match the raw file exactly; anything else is refused rather than silently realigned.
+    Only an `--every-tic` sidecar can be repaired this way, and every column the repair DEPENDS on
+    is checked against the raw recording first. The masks are recomputed from raw `action`,
+    `buttons` and `deaths` while those same columns are copied through from the old sidecar, so a
+    sidecar that disagrees with the recording would come out self-inconsistent: masks derived from
+    one recording beside controls from another. Row count, recorded tics and those three columns
+    must all match, and the episode is listed as refused rather than silently realigned.
     """
     import pyarrow.parquet as pq
     out = {"episodes": 0, "changed": 0, "unchanged": 0, "missing": [], "refused": []}
@@ -284,6 +339,11 @@ def rebuild_sidecar_masks(paths, out_dir, canonical, stride=4, dry_run=False):
         if not np.array_equal(np.asarray(cols["tic"]).astype(np.int64),
                               t["tic"].to_numpy(zero_copy_only=False).astype(np.int64)):
             out["refused"].append(f"{ep}: sidecar tics differ from the raw tics")
+            continue
+        disagree = [c for c in REPAIR_COLUMNS if not _columns_agree(cols, t, c)]
+        if disagree:
+            out["refused"].append(f"{ep}: sidecar {disagree} differ from the raw recording, so the repaired "
+                                  "masks would not describe the controls beside them")
             continue
         dec, dec_chain = decision_rows(t["action"].to_numpy(zero_copy_only=False),
                                        np.array(t["buttons"].to_pylist()),
@@ -393,8 +453,7 @@ def main(args):
     if args.align_decisions or args.every_tic or args.canonical_only or args.rebuild_sidecar_masks:
         CANONICAL, where = resolve_canonical(args, paths)
         print(f"canonical table: {len(CANONICAL)} action ids, {where}", flush=True)
-        with open(os.path.join(args.out_dir, CANONICAL_FILE), "w") as f:
-            json.dump(CANONICAL, f, indent=1)
+        write_canonical(CANONICAL, args.out_dir, args.canonical, dry_run=args.dry_run)
     if args.canonical_only:
         print(f"wrote {os.path.join(args.out_dir, CANONICAL_FILE)}; pass it to every shard as --canonical")
         print("DONE", flush=True)
