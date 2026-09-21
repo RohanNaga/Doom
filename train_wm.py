@@ -168,9 +168,15 @@ EPISODES_FILE = "train_episodes.json"
 # a different recipe while keeping its step count, its loss curve and its checkpoint name, so the
 # result is a row nobody can describe: a v-prediction checkpoint resumed under `--objective eps`
 # trains as eps and saves an eps-labelled checkpoint whose first N steps were velocity.
+# The optimization half is here too: a resume that quietly changes the clip threshold, the EMA
+# cadence or the spike guard produces one checkpoint whose first N updates followed one recipe and
+# the rest another, under one step count and one loss curve. Local execution of the old function
+# accepted clip 1.0 -> 999 and EMA decay 0.9999 -> 0.9 without a word.
 RESUME_IDENTITY = ("backbone", "latent_channels", "context_frames", "tic_stride", "action_history",
                    "control_bits", "objective", "noise_buckets", "noise_aug_max", "global_batch",
-                   "lr", "warm_start", "phase_buckets", "phase_conditioning")
+                   "lr", "warm_start", "phase_buckets", "phase_conditioning",
+                   "optim", "wd", "warmup", "clip", "ema_every", "ema_decay", "seed",
+                   "skip_grad_norm", "skip_grad_after")
 # `lr` is the one key a resume is allowed to change, because a diagnosed loss excursion is fixed by
 # lowering it; the trainer already rewrites `initial_lr` and logs it as a recipe deviation. It now
 # has to be asked for by name, so it cannot happen by forgetting to repeat a flag.
@@ -195,7 +201,9 @@ def check_resume_identity(ck, args, overrides):
     """Refuse a resume whose recipe-identity args differ from the checkpoint's.
 
     `latents_dir` is compared by basename only: the same corpus is mounted at different paths on
-    different machines, and a run is legitimately resumed from another checkout.
+    different machines, and a run is legitimately resumed from another checkout. The basename says
+    nothing about the CONTENTS of that directory, so it is a cheap early rejection and not the
+    corpus check; `check_corpus_identity` compares the manifest once the episode lists are resolved.
     """
     old = ck.get("args") or {}
     if not old:
@@ -265,6 +273,79 @@ def episode_record(args, train_ids, val_ids):
     """The pin, as it is written to the results directory AND carried in every checkpoint."""
     return {"train_fraction": args.train_fraction, "seed": args.seed,
             "num_episodes": len(train_ids), "episodes": list(train_ids), "val_episodes": list(val_ids)}
+
+
+CORPUS_KEY = "corpus"
+NPY_HEADER_BYTES = 128      # magic, version, header length and the shape/dtype/order dict
+
+
+def corpus_manifest(latents_dir, episode_ids):
+    """Identity of one latent corpus: its episode ids and a fingerprint of their contents.
+
+    Episode ids alone do not identify a corpus. A second directory holding ids 6000..6099 encoded
+    by a different autoencoder, at a different batch size or from a different recording passes every
+    id check there is, and a differently encoded corpus of the same shape never fails a later shape
+    assertion either. The fingerprint closes that: per episode it folds in the id, both files' byte
+    sizes, the `.npy` header (shape, dtype, order) and the WHOLE sidecar, which is a few hundred
+    kilobytes and carries every metadata column.
+
+    Filesystem mtime is deliberately not part of it. An `rsync -a` copy or a fresh clone of the
+    corpus keeps the bytes and must keep the fingerprint; what must change it is a re-encode, a
+    mask repair or a truncated file. The latents themselves are 50 MB per episode and are not
+    hashed: their header plus their exact size is the affordable proxy, and reading 2,000 sidecars
+    costs under a second of a multi-day run.
+    """
+    import hashlib
+    from doom_data import list_latent_episodes
+    keep = {int(e) for e in episode_ids}
+    h = hashlib.blake2b(digest_size=16)
+    eps = []
+    for ep, lat_path, meta_path in list_latent_episodes(latents_dir):
+        if ep not in keep:
+            continue
+        eps.append(int(ep))
+        h.update(f"{ep}|{os.path.getsize(lat_path)}|{os.path.getsize(meta_path)}|".encode())
+        with open(lat_path, "rb") as f:
+            h.update(f.read(NPY_HEADER_BYTES))
+        with open(meta_path, "rb") as f:
+            h.update(f.read())
+    return {"dir": os.path.basename(str(latents_dir).rstrip("/")), "episodes": sorted(eps),
+            "fingerprint": h.hexdigest()}
+
+
+def corpus_identity(args, train_ids, val_ids):
+    """The manifest pair stored in every checkpoint, for train and for validation."""
+    return {"train": corpus_manifest(args.latents_dir, train_ids),
+            "val": corpus_manifest(args.val_latents_dir or args.latents_dir, val_ids)}
+
+
+def check_corpus_identity(ck, corpus):
+    """Refuse a resume whose latent corpus is not the one the checkpoint trained on.
+
+    This is the second half of the resume gate. `check_resume_identity` compares the recipe args and
+    `pin_episodes` compares the episode ids; neither notices that the directory behind those ids now
+    holds different latents. Nothing here is restored: the manifest is only compared.
+    """
+    old = (ck or {}).get(CORPUS_KEY)
+    if not old:
+        print("resume: this checkpoint carries no corpus manifest, so only its episode ids are pinned "
+              "and the CONTENTS of the latent directories are unverified", flush=True)
+        return {}
+    differ = {}
+    for split in ("train", "val"):
+        a, b = old.get(split) or {}, corpus.get(split) or {}
+        if a.get("episodes") != b.get("episodes"):
+            differ[f"{split} episode ids"] = (f"{len(a.get('episodes') or [])} episodes",
+                                              f"{len(b.get('episodes') or [])} episodes")
+        elif a.get("fingerprint") != b.get("fingerprint"):
+            differ[f"{split} corpus contents"] = (a.get("fingerprint"), b.get("fingerprint"))
+    if differ:
+        lines = "\n".join(f"  {k}: checkpoint {v[0]}, now {v[1]}" for k, v in sorted(differ.items()))
+        raise SystemExit(f"--resume: the latent corpus is not the one this run trained on:\n{lines}\n"
+                         "Resuming would continue one experiment on another corpus under the same step "
+                         "count and loss curve. Point --latents-dir / --val-latents-dir at the original "
+                         "corpus, or start a new run.")
+    return old
 
 
 def build_loaders(args, latent_channels, checkpoint=None):
@@ -545,6 +626,11 @@ def main(args):
     # the pin travels with the weights: a resume into a NEW results directory finds no
     # train_episodes.json there and would otherwise re-resolve the episode list
     pin = None if episode_lists is None else episode_record(args, *episode_lists)
+    # the corpus manifest travels with the weights too, and a resume is refused if the directories
+    # behind the pinned ids no longer hold the latents this run trained on
+    corpus = None if episode_lists is None else corpus_identity(args, *episode_lists)
+    if args.resume and corpus is not None:
+        check_corpus_identity(ck, corpus)
     # more workers than the stride-4 rows used: a per-tic corpus is 125 GB (4-channel) or 410 GB
     # (16-channel), so random window reads miss the page cache and the loader is seek-bound
     extra = {"prefetch_factor": args.prefetch_factor} if args.num_workers > 0 else {}
@@ -718,20 +804,23 @@ def main(args):
                     # compact bf16 weights at every validation so an excursion can be located afterwards; never pruned
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
                                      "ema": {k: t.to(torch.bfloat16) for k, t in zip(ema_keys(raw), ema)} if ema is not None else None,
-                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin},
+                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin, CORPUS_KEY: corpus},
                                     os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=args.local_snapshots)
                 if is_main and v < best_val:
                     best_val = v
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
-                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin},
+                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin, CORPUS_KEY: corpus},
                                     os.path.join(args.results_dir, "best.pt"), args.remote_results, keep_local=True)
             if not args.fit_check and is_main and step % args.ckpt_every == 0:
                 # prune before writing so the disk never holds keep_last + 1 rolling checkpoints
                 olds = sorted(p for p in os.listdir(args.results_dir) if p.endswith(".pt") and p[0].isdigit())
                 for p in olds[:-max(0, args.keep_last - 1)] if args.keep_last > 0 else olds:
                     os.remove(os.path.join(args.results_dir, p))
-                # recovery checkpoint: fp32 master weights and EMA, optimizer, scheduler, RNG, so --resume reproduces the run
-                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args), "episodes": pin,
+                # recovery checkpoint: fp32 master weights and EMA, optimizer, scheduler, and the RNG state as a
+                # RECORD. `rng` is written and never read back: resume reseeds from (seed, rank, step) instead, and
+                # restoring these tensors would not restore the sampler's position in the epoch anyway, so a resume
+                # is a documented reshuffle rather than a state-exact continuation (see --resume)
+                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args), "episodes": pin, CORPUS_KEY: corpus,
                       "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val, "micro": micro, "skipped": skipped,
                       "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
                               "numpy": np.random.get_state()}}
@@ -858,7 +947,15 @@ def build_parser():
     p.add_argument("--require-verified-transitions", action="store_true", help="refuse latents without chain ids and 4-tic spacing")
     p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
-    p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")
+    p.add_argument("--resume", default="",
+                   help="recovery checkpoint to continue from: weights, step, optimizer, scheduler and EMA. "
+                        "What is NOT continued: the saved RNG state is stored in the checkpoint but never "
+                        "restored, and neither is the sampler's position in the epoch. Every rank reseeds from "
+                        "(seed, rank, step) and the DataLoader draws a fresh permutation, so a resume at half "
+                        "an epoch re-presents windows already seen that epoch. Presentations are therefore not "
+                        "unique targets after a restart; count restarts when reporting exposure. The recipe args, "
+                        "the pinned episode ids and the corpus manifest must all match, and only "
+                        "--resume-override lr= may differ")
     p.add_argument("--resume-override", action="append", default=[],
                    help="permit one recipe-identity arg to differ across a resume, as key=value; only lr is "
                         "accepted, for a diagnosed loss excursion, and the change is logged as a deviation")
