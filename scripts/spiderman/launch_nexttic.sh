@@ -2,8 +2,19 @@
 # NEXT-TIC rows on the dense corpus: the model predicts the frame 1 tic (28.6 ms) ahead instead of
 # 1 agent decision (4 tics, 114 ms) ahead. GameNGen's spacing, on 2,000 dense episodes.
 #
-#   usage: [MB=..] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] [PHASE=1] \
-#          [DRY=1] [DOOM_ROOT=..] launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
+#          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [DRY=1] [DOOM_ROOT=..] \
+#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#
+# FILL THE CARD (CLAUDE.md, Rohan Sep 17 2026). Every job uses the whole card it holds: the micro-batch
+# IS the global batch of 32 and there is no gradient accumulation. The launcher refuses MB * cards != 32
+# rather than quietly accumulating; ALLOW_ACCUM=1 overrides it and says so in the resume log. The SD 3.5
+# row measured 36.4 GB at micro-batch 32 with --grad-ckpt, so 32 is known to fit there; GRAD_CKPT=1 turns
+# checkpointing on for the U-Net or PixArt if a fit check says 32 does not fit without it.
+#
+# FIT=<steps> runs `--fit-check <steps>` with these exact arguments instead of launching, and prints
+# updates/s and peak allocated and reserved memory. Run it before every multi-hour launch; that is the
+# throughput sweep the fill-the-card rule asks for.
 #
 # What differs from the stride-4 rows (030-035) and what does not:
 #
@@ -55,6 +66,8 @@ TRAIN_IDS=${TRAIN_IDS:-0:2000}
 VAL_IDS=${VAL_IDS:-6000:6100}
 CTX=${CTX:-32}
 ACTION_HISTORY=${ACTION_HISTORY:-32}
+MB=${MB:-32}                    # fill the card: the micro-batch IS the global batch
+WORKERS=${WORKERS:-12}          # a per-tic corpus does not fit the page cache; the loader is seek-bound
 GLOBAL=32
 L=$D/latents_arnold_dense_pertic/arenas
 LVAL=$D/latents_arnold_dense_pertic_eval/val
@@ -64,14 +77,14 @@ NP=$(( $(echo "$GPU" | tr -cd , | wc -c) + 1 ))
 case $BACKBONE in
   unet)
     RUN=040-unet-nexttic; WARM=CompVis/stable-diffusion-v1-4; CH=4
-    MB=${MB:-16}; PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="" ;;
+    PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="" ;;
   pixart)
     RUN=041-pixart-nexttic; WARM=PixArt-alpha/PixArt-XL-2-512x512; CH=4
-    MB=${MB:-32}; PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="--action-inject token" ;;
+    PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="--action-inject token" ;;
   sd35)
     # the 16-channel corpus, its own latent directory, and the two deviations this row already carries
     RUN=042-sd35-nexttic; WARM=stabilityai/stable-diffusion-3.5-medium; CH=16
-    MB=${MB:-16}; PY=${PY:-$HOME/wanenc/bin/python}
+    PY=${PY:-$HOME/wanenc/bin/python}
     BB_FLAGS="--grad-ckpt --skip-grad-norm 5 --skip-grad-after 3000"
     L=$D/latents_arnold_dense_pertic_sd35/arenas
     LVAL=$D/latents_arnold_dense_pertic_eval_sd35/val ;;
@@ -81,6 +94,13 @@ R=$D/results_spiderman/$RUN
 
 if [ $(( GLOBAL % (MB * NP) )) -ne 0 ]; then
   echo "per-GPU batch $MB on $NP card(s) cannot reach the global batch of $GLOBAL" >&2; exit 1
+fi
+if [ $(( MB * NP )) -ne "$GLOBAL" ] && [ "${ALLOW_ACCUM:-0}" != 1 ]; then
+  echo "MB=$MB on $NP card(s) is a global batch of $(( MB * NP )), so reaching $GLOBAL needs gradient" >&2
+  echo "accumulation of $(( GLOBAL / (MB * NP) )). The fill-the-card rule (CLAUDE.md) forbids accumulation:" >&2
+  echo "use the largest micro-batch that fits, with GRAD_CKPT=1 if it does not fit otherwise. Measure it" >&2
+  echo "with FIT=20 first. Set ALLOW_ACCUM=1 to override deliberately." >&2
+  exit 1
 fi
 ACCELERATE=${ACCELERATE:-"$PY -m accelerate.commands.launch"}
 if [ "$NP" -gt 1 ]; then
@@ -96,6 +116,10 @@ INITF=""
 [ -n "${INIT:-}" ] && [ -z "$RES" ] && INITF="--init-from $INIT"
 PHASEF=""
 [ "${PHASE:-0}" = 1 ] && PHASEF="--phase-conditioning"
+CKPTF=""
+[ "${GRAD_CKPT:-0}" = 1 ] && [ "$BACKBONE" != sd35 ] && CKPTF="--grad-ckpt"
+PARTIALF=""
+[ "${ALLOW_PARTIAL:-0}" = 1 ] && PARTIALF="--allow-partial"
 if [ "$ACTION_HISTORY" != 0 ] && [ "$ACTION_HISTORY" != "$CTX" ]; then
   echo "ACTION_HISTORY=$ACTION_HISTORY must be 0 or equal CTX=$CTX (one control per context tic)" >&2; exit 1
 fi
@@ -105,11 +129,22 @@ COMMON="--tic-stride 1 --action-history $ACTION_HISTORY --context-frames $CTX --
  --objective v --action-dropout 0.0 --ema-every 8 --ema-decay 0.9999 --seed 0 \
  --latents-dir $L --val-latents-dir $LVAL --episode-ids $TRAIN_IDS --val-episode-ids $VAL_IDS \
  --dense-segment arenas --val-every 1000 --val-windows 1024 --ckpt-every 5000 \
- --snapshot-every 10000 --local-snapshots --keep-last 2 --num-workers 4 \
- $BB_FLAGS $PHASEF ${EXTRA:-}"
+ --snapshot-every 10000 --local-snapshots --keep-last 2 --num-workers $WORKERS \
+ $BB_FLAGS $PHASEF $CKPTF $PARTIALF ${EXTRA:-}"
 CMD="cd $D/repo && TMPDIR=$D/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU $LAUNCHER train_wm.py \
  --backbone $BACKBONE --latent-channels $CH --warm-start $WARM --hf-cache $D/hf/hub \
  --results-dir $R $COMMON $INITF $RES >> $D/logs/train_${RUN}.log 2>&1"
+
+# FIT replaces the launch with a throughput and memory measurement of this exact configuration
+if [ -n "${FIT:-}" ]; then
+  FITCMD="cd $D/repo && TMPDIR=$D/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU $PY train_wm.py \
+ --backbone $BACKBONE --latent-channels $CH --warm-start $WARM --hf-cache $D/hf/hub \
+ --results-dir $R/fitcheck --fit-check $FIT $COMMON"
+  [ "$DRY" = 1 ] && { echo "DRY $RUN fit $FITCMD"; exit 0; }
+  mkdir -p $D/tmp/tmpdir $R/fitcheck
+  eval "$FITCMD"
+  exit $?
+fi
 
 [ "$DRY" = 1 ] && { echo "DRY $RUN $CMD"; exit 0; }
 

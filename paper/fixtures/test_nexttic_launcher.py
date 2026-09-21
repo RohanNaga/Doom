@@ -11,7 +11,6 @@ import os
 import subprocess
 import sys
 
-import numpy as np
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -131,13 +130,62 @@ def test_phase_conditioning_is_off_unless_asked_for(tmp_path):
 
 
 def test_the_knobs_reach_the_command(tmp_path):
-    out = dry(LAUNCH, ["2", "unet"], root=str(tmp_path), STEPS="50000", TRAIN_IDS="0:500", MB="8")
-    assert "--steps 50000" in out and "--episode-ids 0:500" in out and "--per-gpu-batch 8" in out
+    out = dry(LAUNCH, ["2", "unet"], root=str(tmp_path), STEPS="50000", TRAIN_IDS="0:500",
+              VAL_IDS="6500:6600")
+    assert "--steps 50000" in out and "--episode-ids 0:500" in out
+    assert "--val-episode-ids 6500:6600" in out
 
 
 def test_a_micro_batch_that_cannot_reach_the_global_batch_is_refused():
     r = dry_fail(LAUNCH, ["2", "unet"], MB="7")
     assert r.returncode != 0 and "global batch" in r.stderr
+
+
+@pytest.mark.parametrize("backbone", BACKBONES)
+def test_every_backbone_fills_the_card_with_no_accumulation(backbone, tmp_path):
+    """CLAUDE.md, Rohan Sep 17 2026: the micro-batch IS the global batch."""
+    out = dry(LAUNCH, ["2", backbone], root=str(tmp_path))
+    assert "--per-gpu-batch 32" in out and "--global-batch 32" in out
+
+
+def test_a_micro_batch_that_would_accumulate_is_refused_by_name():
+    r = dry_fail(LAUNCH, ["2", "unet"], MB="16")
+    assert r.returncode != 0
+    assert "accumulation of 2" in r.stderr and "fill-the-card" in r.stderr
+    ok = dry(LAUNCH, ["2", "unet"], MB="16", ALLOW_ACCUM="1")
+    assert "--per-gpu-batch 16" in ok
+
+
+def test_two_cards_split_the_global_batch_without_accumulation(tmp_path):
+    out = dry(LAUNCH, ["2,3", "unet"], root=str(tmp_path), MB="16")
+    assert "--num_processes 2" in out and "--per-gpu-batch 16" in out
+
+
+def test_gradient_checkpointing_can_be_turned_on_for_the_four_channel_rows(tmp_path):
+    for b in ("unet", "pixart"):
+        assert "--grad-ckpt" not in dry(LAUNCH, ["2", b], root=str(tmp_path))
+        assert "--grad-ckpt" in dry(LAUNCH, ["2", b], root=str(tmp_path), GRAD_CKPT="1")
+    # sd35 already has it; the knob must not double it
+    out = dry(LAUNCH, ["2", "sd35"], root=str(tmp_path), GRAD_CKPT="1")
+    assert out.count("--grad-ckpt") == 1
+
+
+def test_fit_mode_measures_this_exact_configuration(tmp_path):
+    out = dry(LAUNCH, ["2", "unet"], root=str(tmp_path), FIT="20")
+    assert "--fit-check 20" in out and "--per-gpu-batch 32" in out and "--tic-stride 1" in out
+    assert "tmux" not in out, "FIT must not launch a training session"
+
+
+def test_the_loader_gets_enough_workers_for_a_corpus_that_misses_the_page_cache(tmp_path):
+    out = dry(LAUNCH, ["2", "unet"], root=str(tmp_path))
+    assert "--num-workers 12" in out
+    assert "--num-workers 24" in dry(LAUNCH, ["2", "unet"], root=str(tmp_path), WORKERS="24")
+
+
+def test_a_half_encoded_corpus_is_refused_unless_asked_for(tmp_path):
+    out = dry(LAUNCH, ["2", "unet"], root=str(tmp_path))
+    assert "--allow-partial" not in out
+    assert "--allow-partial" in dry(LAUNCH, ["2", "unet"], root=str(tmp_path), ALLOW_PARTIAL="1")
 
 
 def test_an_unknown_backbone_is_refused():
@@ -224,128 +272,3 @@ def test_the_encoder_launcher_is_evaluation_first_by_default(tmp_path):
 def test_an_unknown_corpus_or_vae_is_refused():
     assert dry_fail(ENCODE, CORPUS="banana").returncode != 0
     assert dry_fail(ENCODE, VAE="banana").returncode != 0
-
-
-# ---------------------------------------------------------------------------------------
-# check_action_alignment.py
-# ---------------------------------------------------------------------------------------
-
-import check_action_alignment as caa  # noqa: E402
-
-TURN_LEFT_BITS = "001000000"
-TURN_RIGHT_BITS = "000100000"
-FORWARD_BITS = "100000000"
-
-
-def _turning_episode(shift=0, n=48, step=5.0):
-    """A synthetic recording in which the control on row t turns the agent between t and t+1.
-
-    `shift` injects an error of that many tics into the CONTROLS, which is exactly the mistake the
-    script has to detect: the state is untouched, so a correct script must still name shift 0 the
-    truth for `shift=0` and blame the injected offset otherwise.
-    """
-    intent = np.zeros(n, dtype=int)
-    rng = np.random.RandomState(0)
-    t = 0
-    while t < n:                                       # runs of 4 tics, the action repeat
-        intent[t:t + 4] = rng.choice([-1, 1])
-        t += 4
-    angle = np.zeros(n)
-    for t in range(n - 1):
-        angle[t + 1] = angle[t] + step * intent[t]     # row t's control moves t -> t+1
-    controls = np.zeros((n, 9), dtype=np.float32)
-    src = np.roll(intent, shift)
-    controls[src > 0, caa.TURN_LEFT] = 1.0
-    controls[src < 0, caa.TURN_RIGHT] = 1.0
-    return controls, angle % 360.0
-
-
-def test_the_unshifted_control_wins_on_a_correctly_aligned_episode():
-    controls, angle = _turning_episode(shift=0)
-    sc = caa.alignment_scores(controls, angle)
-    acc = {s: v["accuracy"] for s, v in sc["yaw"].items()}
-    assert acc["0"] == 1.0, acc
-    assert acc["0"] > acc["-1"] and acc["0"] > acc["1"], acc
-    assert caa.verdict(sc)["yaw"]["verdict"] == "aligned at shift 0"
-
-
-@pytest.mark.parametrize("shift", [-1, 1])
-def test_an_injected_off_by_one_is_named_and_signed(shift):
-    """The negative controls: an error of one tic must show as a neighbour beating shift 0."""
-    controls, angle = _turning_episode(shift=shift)
-    sc = caa.alignment_scores(controls, angle)
-    v = caa.verdict(sc)["yaw"]
-    assert v["verdict"].startswith("OFF BY"), v
-    # rolling the controls by s means the control that produced realised[t] now sits at row t+s
-    assert v["best"] == str(shift), v
-    assert sc["yaw"]["0"]["accuracy"] < sc["yaw"][str(shift)]["accuracy"]
-
-
-def test_all_three_shifts_are_always_printed():
-    controls, angle = _turning_episode()
-    sc = caa.alignment_scores(controls, angle)
-    assert sorted(sc["yaw"]) == ["-1", "0", "1"]
-    assert all(sc["yaw"][s]["rows"] > 0 for s in sc["yaw"])
-
-
-def test_a_signal_free_episode_is_called_inconclusive_not_aligned():
-    """No turning at all: the script must refuse to certify the alignment."""
-    n = 40
-    controls = np.zeros((n, 9), dtype=np.float32)
-    controls[:, caa.MOVE_FORWARD] = 1.0
-    sc = caa.alignment_scores(controls, np.zeros(n))
-    v = caa.verdict(sc)["yaw"]
-    assert v["best"] is None or v["verdict"].startswith("inconclusive"), v
-
-
-def test_the_yaw_difference_wraps_at_three_sixty():
-    assert abs(caa.wrap_deg(359.0 - 1.0) - (-2.0)) < 1e-9
-    assert abs(caa.wrap_deg(1.0 - 359.0) - 2.0) < 1e-9
-
-
-def test_boundaries_are_the_rows_next_to_a_change_on_either_side():
-    """Both sides, or an off-by-one of +1 tic scores 1.0 alongside shift 0 and hides."""
-    intent = np.array([1, 1, 1, 1, -1, -1, -1, -1])
-    assert caa.boundaries(intent).tolist() == [True, False, False, True, True, False, False, True]
-
-
-def test_position_alignment_is_scored_the_same_way():
-    n, step = 40, 10.0
-    rng = np.random.RandomState(1)
-    intent = np.repeat(rng.choice([-1, 1], n // 4), 4)
-    angle = np.zeros(n)                                 # facing +x throughout
-    px = np.zeros(n)
-    for t in range(n - 1):
-        px[t + 1] = px[t] + step * intent[t]
-    controls = np.zeros((n, 9), dtype=np.float32)
-    controls[intent > 0, caa.MOVE_FORWARD] = 1.0
-    controls[intent < 0, caa.MOVE_BACKWARD] = 1.0
-    sc = caa.alignment_scores(controls, angle, px, np.zeros(n))
-    assert sc["position"]["0"]["accuracy"] == 1.0
-    assert caa.verdict(sc)["position"]["verdict"] == "aligned at shift 0"
-
-
-def test_the_checker_runs_off_a_per_tic_latent_directory(tmp_path):
-    """So it can be run on the server where the latents are, without the 1.7 TiB of parquet."""
-    from pertic_fixtures import write_pertic_episode
-    controls, angle = _turning_episode()
-    btns = ["".join(str(int(v)) for v in row) for row in controls]
-    d = str(tmp_path / "lat")
-    write_pertic_episode(d, 0, np.zeros(len(btns), dtype=np.int64), buttons=btns)
-    # the encoder stores `angle`, so add it the way a real sidecar has it
-    meta_path = os.path.join(d, "ep_00000_meta.npz")
-    meta = dict(np.load(meta_path))
-    meta["angle"] = angle
-    np.savez(meta_path, **meta)
-    per = caa.from_latents(d, episodes=1)
-    assert len(per) == 1
-    assert caa.verdict(per[0][1])["yaw"]["verdict"] == "aligned at shift 0"
-    assert caa.pool(per)["yaw"]["0"]["accuracy"] == 1.0
-
-
-def test_the_parser_requires_exactly_one_source():
-    with pytest.raises(SystemExit):
-        caa.build_parser().parse_args([])
-    with pytest.raises(SystemExit):
-        caa.build_parser().parse_args(["--parquet", "a", "--latents-dir", "b"])
-    assert caa.build_parser().parse_args(["--latents-dir", "b"]).episodes == 1

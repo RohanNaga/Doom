@@ -30,13 +30,29 @@ from backbones import ACTION_INJECTIONS, BACKBONES, LATENT_HW, build_model, reso
 from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
 from doom_data import PHASE_BUCKETS
 
-FIT_CHECK_CONTROL_BITS = 15   # the Arnold deathmatch button list's width; only a fit check needs a guess
+ARNOLD_BUTTONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "cards", "arnold", "buttons.json")
+
+
+def fit_check_control_bits(path=ARNOLD_BUTTONS):
+    """Width of the Arnold button vector, read from the recorded card rather than hardcoded.
+
+    A fit check has no corpus to read the width from, and guessing it wrong changes the control
+    embedder's input layer and therefore the memory and throughput the check reports. The card says
+    19 (9 movement/attack/speed/crouch bits plus 10 weapon-selection bits).
+    """
+    try:
+        with open(path) as f:
+            return len(json.load(f)["available_buttons"])
+    except (OSError, KeyError):
+        return 19
 
 
 class SyntheticWindows(Dataset):
-    def __init__(self, n, context_frames, num_actions, latent_channels=4, action_history=0, control_bits=0):
+    def __init__(self, n, context_frames, num_actions, latent_channels=4, action_history=0, control_bits=0,
+                 phase_buckets=0):
         self.n, self.L, self.A, self.C = n, context_frames, num_actions, latent_channels
         self.action_history, self.control_bits = action_history, control_bits
+        self.phase_buckets = phase_buckets
 
     def __len__(self):
         return self.n
@@ -49,6 +65,10 @@ class SyntheticWindows(Dataset):
         tgt = torch.randn(self.C, *LATENT_HW, generator=g)
         act = (torch.randint(0, 2, (self.action_history, self.control_bits), generator=g).float()
                if self.action_history else torch.randint(0, self.A, (1,), generator=g)[0])
+        if self.phase_buckets:
+            # a fit check under --phase-conditioning has to supply the fourth column, or the model
+            # refuses the batch and the check crashes instead of measuring anything
+            return ctx, tgt, act, torch.randint(0, self.phase_buckets, (1,), generator=g)[0]
         return ctx, tgt, act
 
 
@@ -121,6 +141,7 @@ def select_episodes(args):
     assert_disjoint(train_ids, val_ids, "training and validation episode ids")
     if not (args.max_episodes or args.episode_ids):
         return train_ids, val_ids      # the split route as it has always been: the dataset filters
+    requested = (len(train_ids), len(val_ids))
     train_ids = limit_to_encoded(args.latents_dir, train_ids, args.max_episodes)
     val_ids = limit_to_encoded(args.val_latents_dir or args.latents_dir, val_ids,
                                args.max_episodes if not args.val_latents_dir else 0)
@@ -129,6 +150,46 @@ def select_episodes(args):
     if not val_ids:
         raise SystemExit("no encoded validation episodes for the requested ids; with --max-episodes the "
                          "validation range may lie entirely past the encoded prefix")
+    print(f"episodes: {len(train_ids)}/{requested[0]} requested training and {len(val_ids)}/{requested[1]} "
+          f"validation episodes are encoded")
+    short = (len(train_ids), len(val_ids)) != requested
+    if short and not (args.max_episodes or args.allow_partial):
+        raise SystemExit(
+            f"only {len(train_ids)}/{requested[0]} training and {len(val_ids)}/{requested[1]} validation "
+            "episodes of the requested ranges are encoded. A multi-day run must not start on a corpus that "
+            "is still being written: the episode set would then depend on when the run happened to start. "
+            "Wait for the encode, or pass --allow-partial (or --max-episodes N to fix the prefix on purpose).")
+    return train_ids, val_ids
+
+
+EPISODES_FILE = "train_episodes.json"
+
+
+def pin_episodes(args, train_ids, val_ids):
+    """Write the resolved episode lists, or on a resume read back the ones the run started with.
+
+    `limit_to_encoded` resolves the id ranges against what is encoded *now*, so a run resumed after
+    more episodes finished encoding would silently train on a larger set than it started with, and
+    its own `train_episodes.json` would no longer describe it. The first launch writes both lists;
+    every resume reads them and refuses if any of those episodes has since disappeared.
+    """
+    path = os.path.join(args.results_dir, EPISODES_FILE)
+    if args.resume and os.path.exists(path):
+        with open(path) as f:
+            rec = json.load(f)
+        if "val_episodes" not in rec:
+            return train_ids, val_ids       # an old-format file from the split route; nothing to pin
+        from doom_data import limit_to_encoded
+        pinned_train, pinned_val = rec["episodes"], rec["val_episodes"]
+        have_t = set(limit_to_encoded(args.latents_dir, pinned_train))
+        have_v = set(limit_to_encoded(args.val_latents_dir or args.latents_dir, pinned_val))
+        gone = sorted((set(pinned_train) - have_t) | (set(pinned_val) - have_v))
+        if gone:
+            raise SystemExit(f"this run trained on {len(pinned_train)} + {len(pinned_val)} episodes, and "
+                             f"{len(gone)} of them are no longer in the latent directories: {gone[:8]}. "
+                             "Resuming would change the training set.")
+        print(f"resume pinned to the original {len(pinned_train)} training and {len(pinned_val)} validation episodes")
+        return pinned_train, pinned_val
     return train_ids, val_ids
 
 
@@ -146,10 +207,11 @@ def build_loaders(args, latent_channels):
     """
     if args.fit_check:
         ds = SyntheticWindows(args.per_gpu_batch * 64, args.context_frames, args.num_actions, latent_channels,
-                              args.action_history, args.control_bits or FIT_CHECK_CONTROL_BITS)
+                              args.action_history, args.control_bits or fit_check_control_bits(),
+                              args.phase_buckets if args.phase_conditioning else 0)
         return ds, None, None
     from doom_data import LatentWindowDataset, TicWindowDataset
-    train_ids, val_ids = select_episodes(args)
+    train_ids, val_ids = pin_episodes(args, *select_episodes(args))
     if args.tic_stride == 1:
         def make(d, ids):
             return TicWindowDataset(d, ids, args.context_frames, latent_channels=latent_channels,
@@ -163,7 +225,7 @@ def build_loaders(args, latent_channels):
     val = make(args.val_latents_dir or args.latents_dir, val_ids)
     rng = np.random.RandomState(0)
     val_idx = np.sort(rng.choice(len(val), size=min(args.val_windows, len(val)), replace=False))
-    return train, Subset(val, val_idx.tolist()), train_ids
+    return train, Subset(val, val_idx.tolist()), (train_ids, val_ids)
 
 
 @torch.no_grad()
@@ -320,7 +382,7 @@ def main(args):
     control_bits = args.control_bits
     if args.action_history and not control_bits:
         from doom_data import corpus_control_bits
-        control_bits = FIT_CHECK_CONTROL_BITS if args.fit_check else corpus_control_bits(args.latents_dir)
+        control_bits = fit_check_control_bits() if args.fit_check else corpus_control_bits(args.latents_dir)
     model = build_model(args.backbone, args.num_actions, args.context_frames, args.noise_buckets,
                         grad_ckpt=args.grad_ckpt, warm_start=args.warm_start, cache_dir=args.hf_cache,
                         action_dropout=args.action_dropout, latent_channels=latent_channels,
@@ -349,9 +411,13 @@ def main(args):
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
 
-    train_ds, val_ds, train_ids = build_loaders(args, latent_channels)
+    train_ds, val_ds, episode_lists = build_loaders(args, latent_channels)
+    train_ids = None if episode_lists is None else episode_lists[0]
+    # more workers than the stride-4 rows used: a per-tic corpus is 125 GB (4-channel) or 410 GB
+    # (16-channel), so random window reads miss the page cache and the loader is seek-bound
+    extra = {"prefetch_factor": args.prefetch_factor} if args.num_workers > 0 else {}
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
-                        pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0)
+                        pin_memory=True, drop_last=True, persistent_workers=args.num_workers > 0, **extra)
     model, opt, loader = acc.prepare(model, opt, loader)   # scheduler stays unwrapped: one step per optimizer update
     diffusion = VDiffusion(device=device, objective=args.objective)
     raw = acc.unwrap_model(model)
@@ -394,12 +460,14 @@ def main(args):
                        "resolved_control_bits": control_bits,
                        "dataset_summary": getattr(train_ds, "summary", None),
                        "init_from": args.init_from or None, "init_from_step": init_step}, f, indent=1)
-        if train_ids is not None:
+        if train_ids is not None and not (args.resume and os.path.exists(os.path.join(args.results_dir, EPISODES_FILE))):
             # which episodes this run actually trained on, so a data cell is reproducible from the
-            # results directory alone and not only from (split, fraction, seed)
-            with open(os.path.join(args.results_dir, "train_episodes.json"), "w") as f:
+            # results directory alone and not only from (split, fraction, seed) -- and so a resume
+            # can be pinned to the same set even after more of the corpus finishes encoding
+            with open(os.path.join(args.results_dir, EPISODES_FILE), "w") as f:
                 json.dump({"train_fraction": args.train_fraction, "seed": args.seed,
-                           "num_episodes": len(train_ids), "episodes": train_ids}, f, indent=1)
+                           "num_episodes": len(train_ids), "episodes": train_ids,
+                           "val_episodes": episode_lists[1]}, f, indent=1)
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
         per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum, objective=args.objective,
         tic_stride=args.tic_stride, dataset_class=type(train_ds).__name__, phase_buckets=phase_buckets,
@@ -639,6 +707,12 @@ def build_parser():
     p.add_argument("--grad-ckpt", action="store_true", help="recompute activations in the backward pass (about 30%% slower); needed on 16 GB cards, off by default on the A6000s")
     p.add_argument("--no-grad-ckpt", action="store_true", help=argparse.SUPPRESS)   # former default; kept so old launch lines still parse
     p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--prefetch-factor", type=int, default=4,
+                   help="batches each loader worker reads ahead; a per-tic corpus does not fit the page cache, "
+                        "so the loader is seek-bound and this matters more than it did at stride 4")
+    p.add_argument("--allow-partial", action="store_true",
+                   help="start even though some requested episodes are not encoded yet. Off by default: the "
+                        "episode set would otherwise depend on when the run happened to start")
     p.add_argument("--log-every", type=int, default=50)
     p.add_argument("--val-every", type=int, default=5000)
     p.add_argument("--val-windows", type=int, default=1024)

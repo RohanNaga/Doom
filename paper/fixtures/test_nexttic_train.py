@@ -342,6 +342,86 @@ def test_action_history_zero_attaches_nothing():
     assert backbones.phase_vec(off, None) is None
 
 
+def test_the_legacy_action_table_is_not_created_when_history_is_on(monkeypatch):
+    """A trainable-but-unused parameter makes DDP fail on the second iteration unless unused-parameter
+    detection is on, which costs throughput; so the replaced tables are never built."""
+    from diffusers import PixArtTransformer2DModel, UNet2DConditionModel
+    tiny_unet = dict(sample_size=8, block_out_channels=(8, 8), layers_per_block=1, in_channels=4,
+                     out_channels=4, cross_attention_dim=16, attention_head_dim=2, norm_num_groups=8,
+                     down_block_types=("DownBlock2D", "CrossAttnDownBlock2D"),
+                     up_block_types=("CrossAttnUpBlock2D", "UpBlock2D"))
+    monkeypatch.setattr(UNet2DConditionModel, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: cls(**tiny_unet, num_class_embeds=k.get("num_class_embeds", 4))))
+    S = pytest.importorskip("diffusers").SD3Transformer2DModel
+
+    def sd3():
+        return S(sample_size=8, patch_size=2, in_channels=16, num_layers=1, attention_head_dim=8,
+                 num_attention_heads=2, joint_attention_dim=16, caption_projection_dim=16,
+                 pooled_projection_dim=8, out_channels=16, pos_embed_max_size=32)
+    common = dict(num_actions=3, context_frames=HIST, noise_buckets=4, action_dropout=0.0, grad_ckpt=False)
+    builders = {
+        "unet": lambda h: backbones.UNetWorldModel(**common, action_history=h, control_bits=BITS if h else 0),
+        "pixart": lambda h: backbones.PixArtWorldModel(**common, action_history=h, control_bits=BITS if h else 0,
+                                                       transformer=PixArtTransformer2DModel(**TINY_PIXART)),
+        "sd35": lambda h: backbones.SD35WorldModel(**common, latent_channels=16, transformer=sd3(),
+                                                   action_history=h, control_bits=BITS if h else 0),
+    }
+    for name, build in builders.items():
+        off, on = build(0), build(HIST)
+        assert any("action_embedder" in k for k in off.state_dict()), name
+        assert not any("action_embedder" in k for k in on.state_dict()), f"{name} kept an unused action table"
+        assert any("control_history" in k for k in on.state_dict()), name
+        if name == "sd35":
+            assert not any("pooled_action" in k for k in on.state_dict())
+            assert any("pooled_control" in k for k in on.state_dict())
+        # the default path still has every table it always had
+        assert all(p.requires_grad for p in off.parameters())
+
+
+def test_the_dit_freezes_its_own_class_table_instead(monkeypatch):
+    """The DiT's table belongs to the pretrained DiT module and cannot be skipped, so it is frozen."""
+    on = backbones.DiTWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, model_name="DiT-S/2",
+                                 action_dropout=0.0, grad_ckpt=False, action_history=HIST, control_bits=BITS)
+    assert not any(p.requires_grad for p in on.dit.y_embedder.parameters())
+    off = backbones.DiTWorldModel(num_actions=3, context_frames=HIST, noise_buckets=4, model_name="DiT-S/2",
+                                  action_dropout=0.0, grad_ckpt=False)
+    assert all(p.requires_grad for p in off.dit.y_embedder.parameters())
+
+
+def test_the_fit_check_control_width_comes_from_the_recorded_button_card():
+    card = json.load(open(os.path.join(REPO, "docs", "cards", "arnold", "buttons.json")))
+    assert train_wm.fit_check_control_bits() == len(card["available_buttons"]) == 19
+
+
+def test_the_fit_check_windows_supply_every_column_the_model_needs():
+    """A fit check under --phase-conditioning used to crash: `SyntheticWindows` always returned
+    three tensors, so the phase-conditioned model refused the batch and nothing was measured."""
+    plain = train_wm.SyntheticWindows(4, 2, 3, 4)
+    assert len(plain[0]) == 3
+    phase = train_wm.SyntheticWindows(4, 2, 3, 4, phase_buckets=PHASE_BUCKETS)
+    ctx, tgt, act, ph = phase[0]
+    assert 0 <= int(ph) < PHASE_BUCKETS
+    assert train_wm.unpack_batch(phase[0])[3] is not None
+    hist = train_wm.SyntheticWindows(4, 2, 3, 4, action_history=2, control_bits=19)
+    assert hist[0][2].shape == (2, 19) and hist[0][2].dtype == torch.float32
+    both = train_wm.SyntheticWindows(4, 2, 3, 4, action_history=2, control_bits=19,
+                                     phase_buckets=PHASE_BUCKETS)
+    assert len(both[0]) == 4 and both[0][2].shape == (2, 19)
+    # the first two draws are unchanged, so an existing fit check's windows do not move
+    assert torch.equal(plain[3][0], phase[3][0]) and torch.equal(plain[3][1], phase[3][1])
+
+
+def test_the_fit_check_builds_a_phase_conditioned_model_from_the_flags():
+    a = train_wm.build_parser().parse_args(
+        ["--backbone", "dit", "--fit-check", "2", "--tic-stride", "1", "--phase-conditioning"])
+    ds, val, ids = train_wm.build_loaders(a, 4)
+    assert val is None and ids is None
+    assert len(ds[0]) == 4, "the fit-check dataset must supply the phase column"
+    b = train_wm.build_parser().parse_args(
+        ["--backbone", "dit", "--fit-check", "2", "--tic-stride", "1", "--action-history", "32"])
+    assert train_wm.build_loaders(b, 4)[0][0][2].shape == (32, train_wm.fit_check_control_bits())
+
+
 def test_the_trainer_refuses_the_impossible_action_history_combinations():
     for argv, match in ((["--tic-stride", "4", "--action-history", "32"], "tic-stride 1"),
                         (["--tic-stride", "1", "--action-history", "16", "--context-frames", "32"],
@@ -492,6 +572,68 @@ def test_max_episodes_takes_the_encoded_prefix(tmp_path):
                                           max_episodes=5)) == ([0, 1, 2, 3], [4])
     assert train_wm.select_episodes(_args(episode_ids="0:4", val_episode_ids="4:6",
                                           latents_dir=d)) == ([0, 1, 2, 3], [4, 5])
+
+
+def test_a_partly_encoded_corpus_is_refused_without_the_flag(tmp_path):
+    """A multi-day run must not start on a corpus still being written: the episode set would then
+    depend on when the run happened to start."""
+    d = str(tmp_path / "half")
+    for ep in range(3):
+        write_pertic_episode(d, ep, held_actions([1] * 10))
+    # episodes 0, 1, 2 are encoded: the training range is complete, the validation range is not
+    with pytest.raises(SystemExit, match="still being written"):
+        train_wm.select_episodes(_args(episode_ids="0:2", val_episode_ids="2:5", latents_dir=d))
+    got = train_wm.select_episodes(_args(episode_ids="0:2", val_episode_ids="2:5", latents_dir=d,
+                                         allow_partial=True))
+    assert got == ([0, 1], [2])
+
+
+def test_max_episodes_is_itself_a_deliberate_prefix(tmp_path):
+    """--max-episodes says "use the prefix" on purpose, so it does not also need --allow-partial."""
+    d = str(tmp_path / "prefix2")
+    for ep in range(6):
+        write_pertic_episode(d, ep, held_actions([1] * 10))
+    assert train_wm.select_episodes(_args(episode_ids="0:4", val_episode_ids="4:6", latents_dir=d,
+                                          max_episodes=5)) == ([0, 1, 2, 3], [4])
+
+
+def test_a_resume_is_pinned_to_the_episodes_the_run_started_with(tmp_path):
+    """`limit_to_encoded` resolves against what is encoded NOW, so a resume after more episodes
+    finished encoding would silently train on a larger set."""
+    d = str(tmp_path / "grow")
+    for ep in range(3):
+        write_pertic_episode(d, ep, held_actions([1] * 10))
+    out = str(tmp_path / "run")
+    os.makedirs(out)
+    json.dump({"episodes": [0, 1], "val_episodes": [2], "num_episodes": 2},
+              open(os.path.join(out, train_wm.EPISODES_FILE), "w"))
+    a = _args(episode_ids="0:2", val_episode_ids="2:3", latents_dir=d, results_dir=out, resume="x.pt")
+    assert train_wm.pin_episodes(a, [0, 1, 2], [2]) == ([0, 1], [2])
+    # a first launch (no --resume) writes nothing and passes the resolved lists through
+    b = _args(episode_ids="0:2", val_episode_ids="2:3", latents_dir=d, results_dir=str(tmp_path / "fresh"))
+    assert train_wm.pin_episodes(b, [0, 1], [2]) == ([0, 1], [2])
+
+
+def test_a_resume_refuses_when_a_pinned_episode_has_disappeared(tmp_path):
+    d = str(tmp_path / "shrunk")
+    write_pertic_episode(d, 0, held_actions([1] * 10))
+    out = str(tmp_path / "run2")
+    os.makedirs(out)
+    json.dump({"episodes": [0, 1], "val_episodes": [2]},
+              open(os.path.join(out, train_wm.EPISODES_FILE), "w"))
+    a = _args(episode_ids="0:2", val_episode_ids="2:3", latents_dir=d, results_dir=out, resume="x.pt")
+    with pytest.raises(SystemExit, match="no longer in the latent directories"):
+        train_wm.pin_episodes(a, [0], [])
+
+
+def test_an_old_format_episodes_file_is_left_alone(tmp_path):
+    """The stride-4 rows' `train_episodes.json` has no val list; a resume there must not change."""
+    out = str(tmp_path / "old")
+    os.makedirs(out)
+    json.dump({"episodes": [0, 1], "num_episodes": 2, "train_fraction": 1.0},
+              open(os.path.join(out, train_wm.EPISODES_FILE), "w"))
+    a = _args(results_dir=out, resume="x.pt")
+    assert train_wm.pin_episodes(a, [5, 6], [7]) == ([5, 6], [7])
 
 
 # ---------------------------------------------------------------------------------------

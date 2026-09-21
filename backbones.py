@@ -281,6 +281,11 @@ class DiTWorldModel(nn.Module):
         # the adaLN vector instead. That is NOT GameNGen's construction, and this backbone is here
         # for fit checks rather than as a next-tic row.
         add_control_history(self, action_history, control_bits, hidden)
+        if action_history:
+            # the DiT's class table is part of the pretrained DiT module and cannot be skipped, so
+            # it is frozen: an unused parameter that still requires grad makes DDP fail on the
+            # second iteration unless unused-parameter detection is on, which costs throughput
+            self.dit.y_embedder.requires_grad_(False)
 
     def forward(self, x, t, action, context, noise_bucket, phase=None):
         d = self.dit
@@ -351,8 +356,11 @@ class UNetWorldModel(nn.Module):
                                                          num_class_embeds=noise_buckets, low_cpu_mem_usage=False)
         self.unet.conv_in = inflate_input_conv(self.unet.conv_in, in_channels, latent_channels)
         self.unet.register_to_config(in_channels=in_channels)
-        self.action_embedder = nn.Embedding(num_actions + 1, self.unet.config.cross_attention_dim)  # last id = null
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
+        if not action_history:
+            # skipped entirely under --action-history: the control tokens replace it, and a
+            # trainable-but-unused table would break DDP on iteration two
+            self.action_embedder = nn.Embedding(num_actions + 1, self.unet.config.cross_attention_dim)  # last id = null
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
         # the U-Net's single class-embedding slot already carries the noise bucket, so the phase
         # goes in the other conditioning pathway it has: a second cross-attention token
         add_phase_embedder(self, phase_buckets, self.unet.config.cross_attention_dim)
@@ -430,9 +438,10 @@ class PixArtWorldModel(nn.Module):
 
         caption_channels = self.transformer.config.caption_channels
         if action_inject == "token":
-            self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
+            if not action_history:      # the control tokens replace it; see UNetWorldModel
+                self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
+                nn.init.normal_(self.action_embedder.weight, std=0.02)
             self.bucket_embedder = nn.Embedding(noise_buckets, caption_channels)
-            nn.init.normal_(self.action_embedder.weight, std=0.02)
             nn.init.normal_(self.bucket_embedder.weight, std=0.02)
         else:
             inner = self.transformer.config.num_attention_heads * self.transformer.config.attention_head_dim
@@ -597,9 +606,10 @@ class UniDiffuserWorldModel(nn.Module):
         m.register_to_config(num_text_tokens=cond_tokens)
         m.clip_img_out = nn.Identity(); m.text_out = nn.Identity(); m.transformer.pos_embed = nn.Identity()
 
-        self.action_embedder = nn.Embedding(num_actions + 1, cfg.text_dim)   # last id = null
+        if not action_history:      # the control tokens replace it; see UNetWorldModel
+            self.action_embedder = nn.Embedding(num_actions + 1, cfg.text_dim)   # last id = null
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
         self.bucket_embedder = nn.Embedding(noise_buckets, cfg.text_dim)
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
         nn.init.normal_(self.bucket_embedder.weight, std=0.02)
         self.clip_token = nn.Parameter(torch.zeros(1, 1, cfg.clip_img_dim))
         add_phase_embedder(self, phase_buckets, cfg.text_dim)
@@ -726,12 +736,13 @@ class SD35WorldModel(nn.Module):
         self.transformer.pos_embed.proj = inflate_input_conv(self.transformer.pos_embed.proj, in_channels, latent_channels)
         self.transformer.register_to_config(in_channels=in_channels)
 
-        self.action_embedder = nn.Embedding(num_actions + 1, cfg.joint_attention_dim)   # last id = null
+        if not action_history:      # both action tables are replaced by the control tokens
+            self.action_embedder = nn.Embedding(num_actions + 1, cfg.joint_attention_dim)   # last id = null
+            self.pooled_action = nn.Embedding(num_actions + 1, cfg.pooled_projection_dim)
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
+            nn.init.normal_(self.pooled_action.weight, std=0.02)
         self.bucket_embedder = nn.Embedding(noise_buckets, cfg.joint_attention_dim)
-        self.pooled_action = nn.Embedding(num_actions + 1, cfg.pooled_projection_dim)
-        nn.init.normal_(self.action_embedder.weight, std=0.02)
         nn.init.normal_(self.bucket_embedder.weight, std=0.02)
-        nn.init.normal_(self.pooled_action.weight, std=0.02)
         self.pooled_base = nn.Parameter(torch.zeros(cfg.pooled_projection_dim))
         add_phase_embedder(self, phase_buckets, cfg.joint_attention_dim)
         add_control_history(self, action_history, control_bits, cfg.joint_attention_dim)
