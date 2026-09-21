@@ -235,12 +235,24 @@ of four autoregressive steps where a stride-4 model's is one. `idm_top1` is ther
 like comparison even after subsampling; it compares action fidelity at equal game time under
 different numbers of model calls. Worth saying in the paper rather than fixing.
 
-**f. The alignment gate's thresholds are not calibrated on real data.** 1,000 boundary rows, 0.95
-balanced accuracy and a 0.20 margin are defensible defaults, and the bootstrap interval guards
-against a lucky margin, but the deadbands (1 degree of yaw, 1 map unit) have only been exercised on
-synthetic episodes. Run it on a real encoded corpus and read the row counts and per-class balance
-before trusting the verdict; if the yaw deadband is wrong the gate will say "inconclusive", which is a
-refusal rather than a false pass.
+**f. The alignment gate's thresholds are now tightened, but still uncalibrated on real data.** As of
+Sep 21 the gate needs, on the YAW axis only: at least 1,000 scored boundary rows, at least 20
+episodes, at least 100 rows in each motion class that occurs, at least two classes occurring,
+balanced accuracy at shift 0 of at least 0.95, a lead of at least 0.20 over *both* neighbours, and a
+95% bootstrap interval on that lead — resampling EPISODES, not rows — that excludes zero. The yaw
+deadband is 0.25 degrees, a seventh of the engine's smallest turn (about 1.758 degrees per tic), so
+a real turn is never filtered out as noise.
+
+Translation is a printed diagnostic and never a veto. Displacement between t and t+1 reflects
+momentum built before t, so the control one tic earlier legitimately explains it better; a correct
+system scores about 0.83 at shift −1 against 0.50 at shift 0 on that axis, and letting it vote would
+report a correctly aligned corpus as misaligned. A missing yaw score is `EXIT_INCONCLUSIVE`, never 0.
+
+What is still uncalibrated: every threshold above was chosen by argument, not measured, and the
+numbers have only been exercised on synthetic episodes. Run the gate on a real encoded corpus and
+read `rows`, `episodes` and `per_class` before trusting the verdict. If a threshold is wrong the gate
+says "inconclusive", which is a refusal rather than a false pass — but an inconclusive verdict on
+good data would block a launch for no reason, so read the numbers rather than only the exit code.
 
 **g. `--init-from` is available but unused by default.** Rohan's decision is the public pretrained
 weights for every next-tic row, for purity of the warm-start comparison. Astra's estimate is that

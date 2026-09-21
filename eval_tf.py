@@ -11,6 +11,7 @@ MSE, HUD-crop PSNR, the copy-last-frame baseline, and the VAE ceiling.
 """
 import argparse
 import csv
+import hashlib
 import io
 import json
 import os
@@ -120,15 +121,46 @@ class HorizonOne(torch.utils.data.Dataset):
         return ctx, tgt.unsqueeze(0), act, torch.zeros(1, dtype=torch.long)
 
 
-def window_noise(shape, seeds):
-    """Per-window initial noise from a per-window seed.
+def window_seed(purpose, *parts):
+    """A 63-bit seed from a purpose tag and a tuple of integers, by hashing rather than arithmetic.
+
+    An arithmetic key collides. `seed*1_000_003 + ep*7919 + start*97 + step` gives 87,206 for both
+    (ep 11, start 0, step 97) and (ep 11, start 1, step 0), so two different windows would be
+    sampled from the same noise and a paired comparison would silently compare a window with
+    itself. Hashing the packed tuple cannot alias for any values we use, and the purpose tag keeps
+    the initial noise and the sampler's stochastic noise on separate streams.
+    """
+    h = hashlib.blake2b(str(purpose).encode() + b"|" + b"|".join(str(int(p)).encode() for p in parts),
+                        digest_size=8)
+    return int.from_bytes(h.digest(), "big") >> 1        # torch seeds must be non-negative
+
+
+def window_noise(shape, keys, purpose="init"):
+    """Per-window noise, one generator per window, keyed by `keys[i]` (an int or a tuple).
 
     A single global seed does not give paired samples once two runs consume different numbers of
-    random values -- a different step count, a guidance branch, a different batch size -- so the
-    noise of window i is drawn from a generator seeded by i alone. Comparisons across checkpoints,
-    step counts and samplers are then paired window by window.
+    random values -- a different step count, a guidance branch, a different batch size -- so each
+    window's noise comes from its own generator. Comparisons across checkpoints, step counts and
+    samplers are then paired window by window.
     """
-    return torch.stack([torch.randn(shape[1:], generator=torch.Generator().manual_seed(int(s))) for s in seeds])
+    out = []
+    for k in keys:
+        parts = k if isinstance(k, (tuple, list)) else (k,)
+        g = torch.Generator().manual_seed(window_seed(purpose, *parts))
+        out.append(torch.randn(shape[1:], generator=g))
+    return torch.stack(out)
+
+
+def eta_noise_fn(shape, keys, device):
+    """A per-step, per-window noise source for the sampler's stochastic term.
+
+    With `eta > 0` the sampler adds fresh noise at every step, and `torch.randn_like` takes it from
+    the global generator, so an eta > 0 comparison is unpaired however carefully the initial noise
+    was keyed. This hands the sampler a callback instead, on its own purpose tag.
+    """
+    def fn(step):
+        return window_noise(shape, [tuple(k) + (step,) for k in keys], purpose="eta").to(device)
+    return fn
 
 
 class RawFrames:
@@ -209,11 +241,14 @@ def main(args):
                 run_in = (1.0 - lvl) ** 0.5 * run + lvl ** 0.5 * torch.randn_like(run)
             act = acts[:, k]
             ph = phases[:, k] if trained["phase_buckets"] else None
-            noise = window_noise((B, latent_channels) + tuple(tgts.shape[-2:]),
-                                 [args.seed * 1_000_003 + g * 97 + k for g in gis]).to(device)
+            keys = [(args.seed, g, k) for g in gis]
+            shape = (B, latent_channels) + tuple(tgts.shape[-2:])
+            noise = window_noise(shape, keys).to(device)
+            nfn = eta_noise_fn(shape, keys, device) if args.eta > 0 else None
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 pred = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, run_in, bucket, ph), noise.shape,
-                                             steps=args.steps, eta=args.eta, noise=noise, device=device)
+                                             steps=args.steps, eta=args.eta, noise=noise, device=device,
+                                             noise_fn=nfn)
             if k < K - 1:
                 run = torch.cat([run[:, latent_channels:], pred.float()], dim=1)
         torch.cuda.synchronize() if device == "cuda" else None

@@ -65,10 +65,42 @@ def base_module(tmp_path_factory):
     return mod
 
 
+def _tiny_unidiffuser():
+    """A small UniDiffuserModel of the config class the wrapper asserts against, or a skip.
+
+    The wrapper checks `use_data_type_embedding`, `use_timestep_embedding` and
+    `cross_attention_dim` on the config, so a stand-in has to carry those; if this diffusers cannot
+    build one from kwargs the parity check for this backbone skips rather than passing vacuously.
+    """
+    diffusers = pytest.importorskip("diffusers")
+    cls = getattr(diffusers, "UniDiffuserModel", None)
+    if cls is None:
+        pytest.skip("this diffusers has no UniDiffuserModel")
+    try:
+        return cls(text_dim=8, clip_img_dim=12, num_text_tokens=77, num_attention_heads=2,
+                   attention_head_dim=8, in_channels=4, out_channels=4, num_layers=2,
+                   dropout=0.0, norm_num_groups=2, patch_size=2, sample_size=8,
+                   use_data_type_embedding=True, use_timestep_embedding=False,
+                   pre_layer_norm=False, use_patch_pos_embed=False, norm_type="layer_norm",
+                   block_type="unidiffuser")
+    except Exception as e:                       # pragma: no cover - config surface varies by version
+        pytest.skip(f"cannot build a small UniDiffuserModel here: {type(e).__name__}: {e}")
+
+
 def _build(module, name, **extra):
     """One wrapper from `module`, under a fixed seed, on the default (no-history, no-phase) path."""
     from diffusers import PixArtTransformer2DModel, SD3Transformer2DModel, UNet2DConditionModel
     common = dict(num_actions=3, context_frames=2, noise_buckets=4, action_dropout=0.0, grad_ckpt=False)
+    if name == "unidiffuser":
+        tiny = _tiny_unidiffuser()
+        import diffusers
+        real = diffusers.UniDiffuserModel.from_pretrained
+        diffusers.UniDiffuserModel.from_pretrained = classmethod(lambda cls, *a, **k: tiny)
+        try:
+            torch.manual_seed(SEED)
+            return module.UniDiffuserWorldModel(**common, **extra)
+        finally:
+            diffusers.UniDiffuserModel.from_pretrained = real
     torch.manual_seed(SEED)
     if name == "pixart":
         return module.PixArtWorldModel(**common, transformer=PixArtTransformer2DModel(**TINY_PIXART),
@@ -88,6 +120,9 @@ def _build(module, name, **extra):
     raise ValueError(name)
 
 
+BACKBONE_NAMES = ["unet", "pixart", "sd35", "unidiffuser"]
+
+
 def _digest(model):
     h = hashlib.sha256()
     for k, v in sorted(model.state_dict().items()):
@@ -96,7 +131,7 @@ def _digest(model):
     return h.hexdigest()
 
 
-@pytest.mark.parametrize("name", ["unet", "pixart", "sd35"])
+@pytest.mark.parametrize("name", BACKBONE_NAMES)
 def test_the_default_path_is_bit_identical_to_the_merge_base(name, base_module):
     """Every tensor, not just the ones the change was about."""
     mine, base = _build(backbones, name), _build(base_module, name)
@@ -109,7 +144,7 @@ def test_the_default_path_is_bit_identical_to_the_merge_base(name, base_module):
     assert _digest(mine) == _digest(base), name
 
 
-@pytest.mark.parametrize("name", ["pixart", "sd35"])
+@pytest.mark.parametrize("name", ["pixart", "sd35", "unidiffuser"])
 def test_the_regression_this_pins_was_real(name, base_module):
     """Build the wrapper with the two `normal_` calls interleaved, as the first version did, and
     show the default action table really does move. Without this, the test above could pass for the
@@ -131,13 +166,31 @@ def test_the_regression_this_pins_was_real(name, base_module):
     assert (a1.weight - a2.weight).abs().max() > 1e-3
 
 
-@pytest.mark.parametrize("name", ["unet", "pixart", "sd35"])
+@pytest.mark.parametrize("name", BACKBONE_NAMES)
 def test_action_history_is_the_only_thing_that_changes_the_state_dict(name):
-    """The new flag adds and removes tables; it must not perturb what it leaves in place."""
+    """The new flag adds and removes tables; every tensor it LEAVES in place must be untouched.
+
+    Checking key presence alone would have missed the init-order regression entirely: the keys were
+    all still there, and only their values had moved. So this compares values on the shared keys.
+    """
     off = _build(backbones, name)
     on = _build(backbones, name, action_history=2, control_bits=9)
     assert not any("action_embedder" in k for k in on.state_dict()), name
     assert any("control_history" in k for k in on.state_dict()), name
-    shared = set(off.state_dict()) & set(on.state_dict())
-    # the bucket table is built at the same point in the draw sequence either way, so it is shared
-    assert any("bucket_embedder" in k for k in shared) or name == "unet", name
+    if name == "sd35":
+        assert not any("pooled_action" in k for k in on.state_dict())
+        assert any("pooled_control" in k for k in on.state_dict())
+    shared = sorted(set(off.state_dict()) & set(on.state_dict()))
+    assert shared, name
+    moved = [k for k in shared if not torch.equal(off.state_dict()[k], on.state_dict()[k])]
+    assert not moved, f"{name}: turning --action-history on moved {moved[:6]}"
+
+
+@pytest.mark.parametrize("name", BACKBONE_NAMES)
+@pytest.mark.parametrize("seed", [0, 7, 1234])
+def test_parity_holds_across_seeds(name, seed, base_module, monkeypatch):
+    """One seed could be a coincidence; the draw order has to match at every seed."""
+    monkeypatch.setattr(sys.modules[__name__], "SEED", seed)
+    mine, base = _build(backbones, name), _build(base_module, name)
+    for k in sorted(base.state_dict()):
+        assert torch.equal(mine.state_dict()[k], base.state_dict()[k]), f"{name}.{k} at seed {seed}"

@@ -77,19 +77,30 @@ one() {   # one <in-dir> <out-dir> <tag> <episode-ids>
   if ! mkdir "$LOCK" 2>/dev/null; then
     echo "$LOCK exists: this shard is already being encoded (remove it if that encode died)" >&2; return 3
   fi
-  trap 'rmdir "$LOCK" 2>/dev/null' RETURN
-  echo "$(date -Iseconds) encode-nexttic $3 in=$1 out=$2 ids=$4 vae=$VAE gpu=$GPU batch=$BATCH threads=$THREADS workers=$WORKERS shard=${SHARD:-none} repo=$REPO git=$(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo '?')" | tee -a "$2/ENCODE_LOG.txt"
-  # capture the ENCODER's status: `$?` after an `echo | tee` is the pipeline's, so a failed encode
-  # would have been logged as exit 0 and the caller would have gone on to the next corpus
-  nice -n 5 "${CMD[@]}"
+  # The lock cleanup runs in a SUBSHELL with an EXIT trap, not in a RETURN trap on this function.
+  # A RETURN trap is not cleared when the function returns, so it fired again when the caller
+  # (`val`, `train`, ...) returned -- by which time `LOCK` was out of scope, and under `set -u`
+  # that killed the shell with exit 127 after a SUCCESSFUL encode, before ENCODE_NEXTTIC_DONE and
+  # before the remaining corpora were touched.
+  (
+    trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+    echo "$(date -Iseconds) encode-nexttic $3 in=$1 out=$2 ids=$4 vae=$VAE gpu=$GPU batch=$BATCH threads=$THREADS workers=$WORKERS shard=${SHARD:-none} repo=$REPO git=$(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo '?')" | tee -a "$2/ENCODE_LOG.txt"
+    # capture the ENCODER's status: `$?` after an `echo | tee` is the pipeline's, so a failed encode
+    # would have been logged as exit 0 and the caller would have gone on to the next corpus
+    nice -n 5 "${CMD[@]}"
+    RC=$?
+    echo "$(date -Iseconds) done $3 exit=$RC files=$(ls "$2"/ep_*_latents.npy 2>/dev/null | wc -l)" | tee -a "$2/ENCODE_LOG.txt"
+    [ $RC -eq 0 ] || exit $RC
+    # the evaluation corpora need their split file before after_nexttic.sh can score them; the path
+    # is derived by make_dense_eval_splits.py from the latents directory, so the writer and the
+    # reader cannot disagree about where it goes
+    [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" || exit $?
+  )
   local RC=$?
-  echo "$(date -Iseconds) done $3 exit=$RC files=$(ls "$2"/ep_*_latents.npy 2>/dev/null | wc -l)" | tee -a "$2/ENCODE_LOG.txt"
   if [ $RC -ne 0 ]; then
     echo "ENCODE_NEXTTIC_FAILED $3 $RC" >&2
     return $RC
   fi
-  # the evaluation corpora need a split file before after_nexttic.sh can score them
-  [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" --name "$3" || return $?
 }
 
 A=$D/raw_arnold_dense/arenas

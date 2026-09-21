@@ -20,9 +20,31 @@ import os
 SUBSET = "val"          # the one key every evaluator is pointed at
 
 
-def build(latents_dir, name, split_path=None):
-    """Write `split_<name>.json` next to the latents and return what was written."""
+def corpus_name(latents_dir):
+    """The corpus's name IS its directory basename, so a caller cannot pass a different one.
+
+    The encoder's internal tag for the unseen corpus is `unseen` while its directory is
+    `arenas_678`; naming the file after the tag wrote `.../arenas_678/split_unseen.json` while
+    `after_nexttic.sh` looked for `.../split_arenas_678.json`. Deriving both from the directory is
+    what makes the writer and the reader agree by construction.
+    """
+    return os.path.basename(os.path.normpath(latents_dir))
+
+
+def split_path(latents_dir):
+    """THE canonical location: `split_<corpus>.json` in the PARENT of the corpus directory.
+
+    The parent, because `after_nexttic.sh` holds one evaluation root (`$LE`) and reads
+    `$LE/split_<corpus>.json` for every corpus; one directory of split files beside the corpora.
+    """
+    return os.path.join(os.path.dirname(os.path.normpath(latents_dir)),
+                        f"split_{corpus_name(latents_dir)}.json")
+
+
+def build(latents_dir, name=None, out=None):
+    """Write the canonical split file for an encoded corpus and return (path, contents)."""
     from doom_data import list_latent_episodes
+    name = name or corpus_name(latents_dir)
     eps = sorted(ep for ep, _, _ in list_latent_episodes(latents_dir))
     split = {SUBSET: eps, "meta": {"corpus": name, "latents_dir": latents_dir,
                                    "num_episodes": len(eps),
@@ -30,7 +52,7 @@ def build(latents_dir, name, split_path=None):
                                    "subset_key": SUBSET,
                                    "note": "every encoded episode of a held-out dense range; the key is "
                                            "'val' for every corpus so the evaluators take one --subset"}}
-    path = split_path or os.path.join(latents_dir, f"split_{name}.json")
+    path = out or split_path(latents_dir)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(split, f, indent=1)
@@ -39,7 +61,7 @@ def build(latents_dir, name, split_path=None):
 
 
 def main(args):
-    path, split = build(args.latents_dir, args.name, args.out)
+    path, split = build(args.latents_dir, args.name or None, args.out or None)
     print(json.dumps({"wrote": path, "num_episodes": split["meta"]["num_episodes"],
                       "episode_range": split["meta"]["episode_range"], "subset_key": SUBSET}))
     return 0
@@ -48,8 +70,10 @@ def main(args):
 def build_parser():
     p = argparse.ArgumentParser()
     p.add_argument("--latents-dir", required=True, help="an encoded per-tic evaluation corpus")
-    p.add_argument("--name", required=True, help="the corpus's name, used in the filename (val | test | arenas_678)")
-    p.add_argument("--out", default="", help="write here instead of <latents-dir>/split_<name>.json")
+    p.add_argument("--name", default="",
+                   help="override the corpus name; by default it is the latents directory's basename, which is "
+                        "what keeps the writer's filename and the evaluation script's identical")
+    p.add_argument("--out", default="", help="write here instead of the canonical <parent>/split_<corpus>.json")
     return p
 
 

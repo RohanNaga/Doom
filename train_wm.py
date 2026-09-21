@@ -164,21 +164,89 @@ def select_episodes(args):
 
 EPISODES_FILE = "train_episodes.json"
 
+# Args that define WHICH EXPERIMENT this is. A resume that changes any of them continues a run under
+# a different recipe while keeping its step count, its loss curve and its checkpoint name, so the
+# result is a row nobody can describe: a v-prediction checkpoint resumed under `--objective eps`
+# trains as eps and saves an eps-labelled checkpoint whose first N steps were velocity.
+RESUME_IDENTITY = ("backbone", "latent_channels", "context_frames", "tic_stride", "action_history",
+                   "control_bits", "objective", "noise_buckets", "noise_aug_max", "global_batch",
+                   "lr", "warm_start", "phase_buckets", "phase_conditioning")
+# `lr` is the one key a resume is allowed to change, because a diagnosed loss excursion is fixed by
+# lowering it; the trainer already rewrites `initial_lr` and logs it as a recipe deviation. It now
+# has to be asked for by name, so it cannot happen by forgetting to repeat a flag.
+RESUME_OVERRIDABLE = ("lr",)
 
-def pin_episodes(args, train_ids, val_ids):
-    """Write the resolved episode lists, or on a resume read back the ones the run started with.
+
+def parse_resume_override(values):
+    """`--resume-override lr=2.5e-5` -> {"lr": 2.5e-5}. Only `lr` is accepted."""
+    out = {}
+    for item in values or []:
+        if "=" not in item:
+            raise SystemExit(f"--resume-override takes key=value, got {item!r}")
+        k, v = item.split("=", 1)
+        if k not in RESUME_OVERRIDABLE:
+            raise SystemExit(f"--resume-override {k} is not allowed; only {list(RESUME_OVERRIDABLE)} may differ "
+                             "across a resume, because everything else changes what the run is")
+        out[k] = float(v)
+    return out
+
+
+def check_resume_identity(ck, args, overrides):
+    """Refuse a resume whose recipe-identity args differ from the checkpoint's.
+
+    `latents_dir` is compared by basename only: the same corpus is mounted at different paths on
+    different machines, and a run is legitimately resumed from another checkout.
+    """
+    old = ck.get("args") or {}
+    if not old:
+        return {}
+    now = vars(args)
+    differ = {}
+    for key in RESUME_IDENTITY:
+        if key not in old:
+            continue                       # a checkpoint from before this flag existed
+        a, b = old[key], now.get(key)
+        if isinstance(a, float) or isinstance(b, float):
+            same = a is not None and b is not None and abs(float(a) - float(b)) < 1e-12
+        else:
+            same = a == b
+        if not same:
+            differ[key] = (a, b)
+    ao, bo = os.path.basename(str(old.get("latents_dir", "")).rstrip("/")), \
+        os.path.basename(str(now.get("latents_dir", "")).rstrip("/"))
+    if old.get("latents_dir") is not None and ao != bo:
+        differ["latents_dir"] = (ao, bo)
+    allowed = {k: v for k, v in differ.items() if k in overrides and abs(overrides[k] - float(v[1])) < 1e-12}
+    blocked = {k: v for k, v in differ.items() if k not in allowed}
+    if blocked:
+        lines = "\n".join(f"  {k}: checkpoint {v[0]!r}, now {v[1]!r}" for k, v in sorted(blocked.items()))
+        raise SystemExit(f"--resume {args.resume} was trained under a different recipe:\n{lines}\n"
+                         f"Resuming would continue one experiment as another. Only "
+                         f"{list(RESUME_OVERRIDABLE)} may differ, and only with --resume-override key=value.")
+    for k, (a, b) in allowed.items():
+        print(f"resume override {k}: {a!r} -> {b!r} (recipe deviation, stated by --resume-override)")
+    return allowed
+
+
+def pin_episodes(args, train_ids, val_ids, checkpoint=None):
+    """Read the episode lists the run started with, or return the freshly resolved ones.
 
     `limit_to_encoded` resolves the id ranges against what is encoded *now*, so a run resumed after
-    more episodes finished encoding would silently train on a larger set than it started with, and
-    its own `train_episodes.json` would no longer describe it. The first launch writes both lists;
-    every resume reads them and refuses if any of those episodes has since disappeared.
+    more episodes finished encoding would silently train on a larger set than it started with.
+
+    The pin is read from the CHECKPOINT first and only then from the destination results directory:
+    a resume into a new directory (a rerun, a copied tree, a different machine) finds no
+    `train_episodes.json` there and would re-resolve the list, which is exactly the case the pin
+    exists to prevent. Every checkpoint carries `episodes`, so the pin travels with the weights.
     """
+    rec = (checkpoint or {}).get("episodes")
     path = os.path.join(args.results_dir, EPISODES_FILE)
-    if args.resume and os.path.exists(path):
+    if args.resume and rec is None and os.path.exists(path):
         with open(path) as f:
             rec = json.load(f)
+    if args.resume and rec:
         if "val_episodes" not in rec:
-            return train_ids, val_ids       # an old-format file from the split route; nothing to pin
+            return train_ids, val_ids       # an old-format record from the split route; nothing to pin
         from doom_data import limit_to_encoded
         pinned_train, pinned_val = rec["episodes"], rec["val_episodes"]
         have_t = set(limit_to_encoded(args.latents_dir, pinned_train))
@@ -193,7 +261,13 @@ def pin_episodes(args, train_ids, val_ids):
     return train_ids, val_ids
 
 
-def build_loaders(args, latent_channels):
+def episode_record(args, train_ids, val_ids):
+    """The pin, as it is written to the results directory AND carried in every checkpoint."""
+    return {"train_fraction": args.train_fraction, "seed": args.seed,
+            "num_episodes": len(train_ids), "episodes": list(train_ids), "val_episodes": list(val_ids)}
+
+
+def build_loaders(args, latent_channels, checkpoint=None):
     """(train dataset, validation subset, training episode ids). The ids are None for a fit check.
 
     `--train-fraction` thins the *training* episode list only; the validation list and the fixed
@@ -211,7 +285,7 @@ def build_loaders(args, latent_channels):
                               args.phase_buckets if args.phase_conditioning else 0)
         return ds, None, None
     from doom_data import LatentWindowDataset, TicWindowDataset
-    train_ids, val_ids = pin_episodes(args, *select_episodes(args))
+    train_ids, val_ids = pin_episodes(args, *select_episodes(args), checkpoint=checkpoint)
     if args.tic_stride == 1:
         def make(d, ids):
             return TicWindowDataset(d, ids, args.context_frames, latent_channels=latent_channels,
@@ -400,6 +474,7 @@ def main(args):
         init_step, init_ema = load_init_weights(model, args.init_from)
     if args.resume:
         ck = torch.load(args.resume, map_location="cpu", weights_only=False)
+        check_resume_identity(ck, args, parse_resume_override(args.resume_override))
         model.load_state_dict({k: v.float() for k, v in ck["model"].items()}, strict=True)
         start_step = int(ck.get("step", 0))
         print(f"resumed weights from {args.resume} at step {start_step}" + (" with optimizer, scheduler, EMA, and RNG state" if "optimizer" in ck else " (optimizer state reset, warmup restarts)"))
@@ -414,8 +489,11 @@ def main(args):
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
 
-    train_ds, val_ds, episode_lists = build_loaders(args, latent_channels)
+    train_ds, val_ds, episode_lists = build_loaders(args, latent_channels, ck if args.resume else None)
     train_ids = None if episode_lists is None else episode_lists[0]
+    # the pin travels with the weights: a resume into a NEW results directory finds no
+    # train_episodes.json there and would otherwise re-resolve the episode list
+    pin = None if episode_lists is None else episode_record(args, *episode_lists)
     # more workers than the stride-4 rows used: a per-tic corpus is 125 GB (4-channel) or 410 GB
     # (16-channel), so random window reads miss the page cache and the loader is seek-bound
     extra = {"prefetch_factor": args.prefetch_factor} if args.num_workers > 0 else {}
@@ -468,9 +546,7 @@ def main(args):
             # results directory alone and not only from (split, fraction, seed) -- and so a resume
             # can be pinned to the same set even after more of the corpus finishes encoding
             with open(os.path.join(args.results_dir, EPISODES_FILE), "w") as f:
-                json.dump({"train_fraction": args.train_fraction, "seed": args.seed,
-                           "num_episodes": len(train_ids), "episodes": train_ids,
-                           "val_episodes": episode_lists[1]}, f, indent=1)
+                json.dump(episode_record(args, train_ids, episode_lists[1]), f, indent=1)
     log(event="start", backbone=args.backbone, params=n_params, world=world, accum=accum, latent_channels=latent_channels,
         per_gpu_batch=args.per_gpu_batch, global_batch=args.per_gpu_batch * world * accum, objective=args.objective,
         tic_stride=args.tic_stride, dataset_class=type(train_ds).__name__, phase_buckets=phase_buckets,
@@ -591,12 +667,12 @@ def main(args):
                     # compact bf16 weights at every validation so an excursion can be located afterwards; never pruned
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
                                      "ema": {k: t.to(torch.bfloat16) for k, t in zip(ema_keys(raw), ema)} if ema is not None else None,
-                                     "step": step, "val_loss": v, "args": vars(args)},
+                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin},
                                     os.path.join(args.results_dir, f"snap_{step:07d}.pt"), args.remote_results, keep_local=args.local_snapshots)
                 if is_main and v < best_val:
                     best_val = v
                     save_checkpoint({"model": {k: t.detach().cpu().to(torch.bfloat16) for k, t in raw.state_dict().items()},
-                                     "step": step, "val_loss": v, "args": vars(args)},
+                                     "step": step, "val_loss": v, "args": vars(args), "episodes": pin},
                                     os.path.join(args.results_dir, "best.pt"), args.remote_results, keep_local=True)
             if not args.fit_check and is_main and step % args.ckpt_every == 0:
                 # prune before writing so the disk never holds keep_last + 1 rolling checkpoints
@@ -604,7 +680,7 @@ def main(args):
                 for p in olds[:-max(0, args.keep_last - 1)] if args.keep_last > 0 else olds:
                     os.remove(os.path.join(args.results_dir, p))
                 # recovery checkpoint: fp32 master weights and EMA, optimizer, scheduler, RNG, so --resume reproduces the run
-                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args),
+                ck = {"model": {k: t.detach().cpu().float() for k, t in raw.state_dict().items()}, "step": step, "args": vars(args), "episodes": pin,
                       "optimizer": opt.state_dict(), "scheduler": sched.state_dict(), "best_val": best_val, "micro": micro, "skipped": skipped,
                       "rng": {"cpu": torch.get_rng_state(), "cuda": torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
                               "numpy": np.random.get_state()}}
@@ -732,6 +808,9 @@ def build_parser():
     p.add_argument("--remote-results", default=None, help="user@host:/dir that receives every checkpoint and log as the copy of record")
     p.add_argument("--fit-check", type=int, default=0, help="run N synthetic steps, report steps/s and memory, exit")
     p.add_argument("--resume", default="", help="checkpoint to resume weights and step from (optimizer state restarts)")
+    p.add_argument("--resume-override", action="append", default=[],
+                   help="permit one recipe-identity arg to differ across a resume, as key=value; only lr is "
+                        "accepted, for a diagnosed loss excursion, and the change is logged as a deviation")
     p.add_argument("--init-from", default="",
                    help="start a NEW run from one of our own checkpoints' weights (best.pt, a recovery "
                         "NNNNNNN.pt or a snap_*.pt): weights and EMA only, fresh optimizer, step 0, warmup "
