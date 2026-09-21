@@ -412,3 +412,49 @@ History mode leaves the old scalar action tables allocated and trainable but unu
 Audit 10,000 windows including control changes and anti-stuck overrides (raw vs encoded buttons identical, newest control from `r-1`, unit tic spacing and unchanged life on every context and horizon transition, zero mismatches); the corrected yaw test over validation ids 6000-6099 needing 1,000 control-change boundaries, balanced accuracy >= 0.95 and a >= 0.20 lead over both neighbours with bootstrap CIs excluding zero; stale and future injections that must select shift +1 and -1 respectively; and verification of the real button width and order, episode-map counts, and a short real-batch train *and* validation smoke per backbone confirming finite losses and nonzero gradients into the history MLP and position table.
 
 Astra ran 57 launcher and alignment fixtures, reproduced the scorer failures in NumPy, and checked 100 randomised validity cases and 64 horizon slices through the real dataset methods with a NumPy shim. No files edited. Thread open for the evaluator pass.
+
+---
+
+# Astra round 5: gate fix and evaluator review
+
+Same thread, turn 5. Reviewed clean HEAD `e2f067d` (`22d9222` gate rebuild + fixes, `e2f067d` design record) in the worker's worktree. Astra ran 193 CPU fixtures, all passing, plus its own adversarial cases.
+
+> **The indexing fixes pass, but I would not launch evaluation yet.**
+
+## Confirmed defects (each re-verified by the supervising session)
+
+1. **Resolved control width never reaches the checkpoint.** `train_wm.py:382-385` resolves the corpus width into a *local* `control_bits`, but the saves at `train_wm.py:591/596/604` serialize `vars(args)`, where `args.control_bits` is still 0. `eval_tf.py:66` reads that 0, so both evaluators build a history embedder of input width 0. Fixtures pass a nonzero width by hand and miss it. Fix: write the resolved width into the saved args (and recover old checkpoints from the MLP input width).
+2. **`after_nexttic.sh:119` cannot parse.** `ROLL_ARGS=$(corpus_args test)` includes `--parquet-dir` (line 48) and `rollout_eval.py` has no such argument — grep confirms zero occurrences, so argparse exits 2. Fix: separate TF and rollout corpus arguments.
+3. **Nothing creates the split manifests.** `after_nexttic.sh:48-49` requires `split_val.json`, `split_test.json`, `split_arenas_678.json`; neither encoder script nor `encode_parquet.py` writes them (grep finds only the reference). Note the rollout call also passes `--subset val` against `split_test.json`, so that file needs its ids under a `val` key. Fix: generate them from `dense_split.json`.
+4. **Rollouts still have no per-window RNG streams.** `rollout_eval.py:156` calls `ddim_sample` with no generator or explicit noise. Astra's CPU reproduction: after changing batch size 1 to 2 only 2/8 initial noises matched; after changing steps 2 to 3, 1/8. Fix: streams keyed by episode, start, step and noise purpose.
+5. **IDM masks admit non-four-tic transitions.** `rollout_eval.py:281` takes `np.flatnonzero(d["decision"][n])` with no spacing or chain check; with a noncanonical override Astra produced an accepted 48 to 56 pair (eight tics). Fix: score only IDM windows whose every interval is exactly four tics inside one chain.
+6. **Position scoring can veto the gate on momentum alone.** `check_action_alignment.py:215` scores the translation axis with the same `score_axis` as yaw, and `main` at 343-347 lets any axis verdict decide, so a correctly aligned acceleration/friction system scored 0.833 at shift -1 against 0.500 at 0 and reported misaligned; a yaw-perfect recording with no translation exits 3. Fix: make yaw the gate, keep translation diagnostic or restrict it to onsets from rest.
+7. **`--episodes 0` certifies alignment.** `check_action_alignment.py:329` merges an empty `from_latents` list, so `verdicts` is `{}` and both `any(...)` checks at 344-347 are False, returning `EXIT_ALIGNED`. Fix: require a positive episode count and reject empty scores.
+8. **The unused-table fix changed default-path initialization.** `backbones.py:441-443`, 609-611 and ~739 moved `nn.init.normal_` between the two `nn.Embedding` constructions. Because `nn.Embedding.__init__` itself draws from the global generator, the draw order changes and the default (non-history) action table no longer matches: an equivalent NumPy draw sequence gives max abs difference 0.088 on the action table with the bucket table unchanged. So seeded re-runs of existing PixArt/UniDiffuser/SD 3.5 cells are no longer bit-identical, which was a verified-untouched property last round. The U-Net is unaffected (its order inside the new branch is preserved). Fix: keep the original construct/init order inside the non-history branch.
+9. **Encoder failures return success.** `encode_nexttic.sh:83-84` runs `nice -n 5 "${CMD[@]}"` and then `echo ... exit=$? ... | tee -a`, so `one()` returns the pipeline status, not the encoder's, and the script still prints `ENCODE_NEXTTIC_DONE`. Predates these commits. Fix: capture and propagate the encoder status.
+
+## Alignment attacks: all four original breaks closed
+
+Exercised through the real parquet entrypoint with four-tic holds at 1.758 degrees per turning tic:
+
+| Attack | Result |
+|---|---|
+| no-turn / left / no-turn / right cycle | shift 0 **1.000**, neighbours about 0.500, exit 0 |
+| stale `C[i] = buttons[i-1]` | best **+1**, misaligned, exit 2 |
+| future `C[i] = buttons[i+1]` | best **-1**, misaligned, exit 2 |
+| single-row recording | inconclusive, exit 3 |
+| respawn with a 137 degree teleport | crossing rows excluded, remaining evidence passes |
+
+**Thresholds.** The 1 degree yaw deadband does not discard ordinary Doom turns: ViZDoom's engine constants imply about 1.758, 3.516 and 7.031 degrees per tic for the standard keyboard turn stages (reference source, not the server's configuration), and the implementation classifies subthreshold motion as zero rather than dropping it. Astra would still tighten to **yaw 0.25 degrees** and **movement 0.05 map units** (diagnostic only), keep 1,000 scored boundary rows, 0.95 balanced accuracy and the 0.20 margin, add **20 episodes and 100 rows per class**, and **bootstrap episodes rather than rows** as `check_action_alignment.py:151` currently does, since adjacent boundary rows are correlated.
+
+## Verified correct
+
+- **TF arithmetic**: at step `k` the controls are `buttons[r+k-32:r+k]` and the frame buffer advances with predictions, checked with a spy model at K = 1, 4 and 8.
+- **Scored target**: raw frame `r+K-1`, matching `tgts[:, K-1]`.
+- **Persistence**: raw `r-1` against raw `r+K-1`, decoder-independent, checked against known synthetic pixel differences. The K-tics-earlier frame is the last context frame, not the first seed frame.
+- **Rollout indexing and validity**: controls match the TF slices; full context-plus-horizon validity excludes deaths and tic gaps; reported 4/32/64/128/256 index the right generated tics.
+- **Checkpoint guards**: explicit `tic_stride` and `action_history` mismatches are refused (`eval_tf.py:67-70`); control width is blocked only by defect 1.
+- **Scripts**: encoding selects 6000:6100, 7000:7100 and 0:60 from the right segments; SD 3.5 uses separate 16-channel directories with scale 1.5305 and shift 0.0609 (`after_nexttic.sh:65`, `encode_nexttic.sh:54`); the tuned-decoder check is `[ -f a ] || [ -f b ]` at `after_nexttic.sh:59`.
+- **Previous round's fixes**: synthetic phase conditioning, the 19-bit fit-check width, and removal or freezing of the obsolete history-mode action tables are covered by passing fixtures.
+
+Astra did not touch real recordings or GPUs, so motion distributions, memory and server behaviour stay unverified. Thread open.
