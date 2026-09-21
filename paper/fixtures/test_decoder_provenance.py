@@ -135,8 +135,10 @@ def _run_launcher(tmp_path, tuned=False, **env):
     py.write_text(STUB_PY)
     py.chmod(0o755)
     log = tmp_path / "stub.log"
+    import rollout_eval
     e = {**os.environ, "DOOM_ROOT": str(root), "PY": str(py), "PY_SD35": str(py),
          "STUB_LOG": str(log), "STUB_PICK": str(r / "snap_0290000.pt"),
+         "STUB_SCORE_FILE": rollout_eval.SCORE_FILE,
          "CORPORA": "val", "CKPT": str(r / "snap_0290000.pt"), **env}
     proc = subprocess.run(["bash", AFTER, "0", "unet"], capture_output=True, text=True, env=e,
                           timeout=90)

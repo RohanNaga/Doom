@@ -227,6 +227,12 @@ def psnr(a, b):
     return 10 * torch.log10(1.0 / mse)
 
 
+# The file `--score` writes into `--out-dir`. Named here because a launcher has to skip a scoring
+# pass whose output already exists, and `after_nexttic.sh` gated on `metrics.json`, which this stage
+# has never written: the test was always true and the whole pass reran on every invocation.
+SCORE_FILE = "drift.json"
+
+
 class ClipStore:
     """uint8 clips streamed to memmapped `.npy` staging files, then packed into one `.npz`.
 
@@ -509,7 +515,7 @@ def do_score(args):
             out["idm_val_top1"] = ck.get("val_top1"); out["idm_val_movement"] = ck.get("val_movement")
             out["idm_majority_baseline"] = ck.get("val_metrics", {}).get("majority_baseline")
         out["idm_reencode_vae"] = args.idm_reencode_vae or None
-    with open(os.path.join(args.out_dir, "drift.json"), "w") as f:
+    with open(os.path.join(args.out_dir, SCORE_FILE), "w") as f:
         json.dump(out, f, indent=1)
     if clips is not None:
         # FVD at both spacings. A 16-frame clip of consecutive tics is 0.46 s of game time; a

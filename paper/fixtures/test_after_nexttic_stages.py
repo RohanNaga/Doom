@@ -57,7 +57,9 @@ if script == "rollout_eval.py":
     else:
         out = sys.argv[sys.argv.index("--out-dir") + 1]
         os.makedirs(out, exist_ok=True)
-        with open(os.path.join(out, "metrics.json"), "w") as f:
+        # the real scoring pass writes rollout_eval.SCORE_FILE, which the harness passes in; the
+        # launcher has to gate on that name and not on one the stage never produces
+        with open(os.path.join(out, os.environ["STUB_SCORE_FILE"]), "w") as f:
             json.dump({"idm": 0.5}, f)
     sys.exit(int(os.environ.get("STUB_ROLL_RC", "0")))
 sys.exit(0)
@@ -91,8 +93,10 @@ def _run(tmp_path, root, r, timeout=90, **env):
     log = tmp_path / "stub.log"
     if log.exists():
         log.unlink()            # one log per run: the calls of the previous run are not this run's
+    import rollout_eval
     e = {**os.environ, "DOOM_ROOT": str(root), "PY": str(py), "PY_SD35": str(py),
          "STUB_LOG": str(log), "STUB_PICK": str(r / "snap_0290000.pt"),
+         "STUB_SCORE_FILE": rollout_eval.SCORE_FILE,
          "CORPORA": "val", "NUM_WINDOWS": "8", **env}
     proc = subprocess.run(["bash", AFTER, "0", "unet"], capture_output=True, text=True,
                           env=e, timeout=timeout)
@@ -228,6 +232,40 @@ def test_the_teacher_forced_pass_honours_rescore(tmp_path):
     assert [c for c in _tf_calls(with_flag) if c.endswith("eval_tf_val")]
 
 
+def _score_output_name():
+    """The file `rollout_eval.py --score` writes, read out of that module rather than hardcoded."""
+    import rollout_eval
+    src = open(os.path.join(REPO, "rollout_eval.py")).read()
+    assert "os.path.join(args.out_dir, SCORE_FILE)" in src, \
+        "the scoring pass no longer names its output through SCORE_FILE"
+    return rollout_eval.SCORE_FILE
+
+
+def test_the_score_stage_is_gated_on_the_file_it_actually_writes(tmp_path):
+    """The defect: the gate tested `rollout_metrics_test/metrics.json`, which this stage has never
+    written, so `should_run` was always true and the whole scoring pass -- 256 decodes -- reran on
+    every invocation, RESCORE or not."""
+    name = _score_output_name()
+    text = open(AFTER).read()
+    assert f'should_run "$R/rollout_metrics_test/{name}"' in text, name
+    assert 'rollout_metrics_test/metrics.json' not in text, "the wrong filename is back"
+    root, r = _root(tmp_path)
+    first, calls1 = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert first.returncode == 0
+    assert (r / "rollout_metrics_test" / name).is_file(), "the stub wrote a different name"
+    second, calls2 = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert [c for c in _calls_to(calls2, "rollout_eval.py") if "--score" in c] == []
+
+
+def test_the_score_stage_reruns_under_rescore(tmp_path):
+    name = _score_output_name()
+    root, r = _root(tmp_path)
+    _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert (r / "rollout_metrics_test" / name).is_file()
+    again, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), RESCORE="1")
+    assert [c for c in _calls_to(calls, "rollout_eval.py") if "--score" in c]
+
+
 def test_the_rescore_condition_is_the_intended_one():
     text = open(AFTER).read()
     assert 'should_run() { [ ! -e "$1" ] || [ "$RESCORE" = 1 ]; }' in text
@@ -297,5 +335,5 @@ def test_the_rollout_score_output_is_json_the_launcher_can_test_for(tmp_path):
     root, r = _root(tmp_path)
     proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
     assert proc.returncode == 0
-    with open(r / "rollout_metrics_test" / "metrics.json") as f:
+    with open(r / "rollout_metrics_test" / _score_output_name()) as f:
         assert json.load(f)["idm"] == 0.5
