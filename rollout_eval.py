@@ -143,9 +143,13 @@ def do_rollout(args):
                                                  in zip(ctl, chunk)])).to(device)
             else:
                 act = torch.from_numpy(acts[:, h]).to(device)
+            # one key tuple per rollout and step, shared by the initial noise, the context
+            # corruption and the sampler's stochastic term, each on its own purpose tag
+            noise_keys = [(args.seed, ep, s, h) for ep, _, s, _, _ in chunk]
             ctx_in, bucket = (ctx, torch.zeros(len(chunk), dtype=torch.long, device=device))
             if args.infer_noise > 0:
-                ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max, args.noise_buckets)
+                ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max,
+                                             args.noise_buckets, noise_keys)
             ph = None
             if trained["phase_buckets"]:
                 from doom_data import tics_since_decision
@@ -157,10 +161,9 @@ def do_rollout(args):
             # depends on the batch size and the step count: changing the batch from 1 to 2 left only
             # 2 of 8 rollouts matching. An arithmetic key is not enough either -- it collides.
             from eval_tf import eta_noise_fn, window_noise
-            keys = [(args.seed, ep, s, h) for ep, _, s, _, _ in chunk]
             shape = (len(chunk), C, *LATENT_HW)
-            noise = window_noise(shape, keys).to(device)
-            nfn = eta_noise_fn(shape, keys, device) if args.eta > 0 else None
+            noise = window_noise(shape, noise_keys).to(device)
+            nfn = eta_noise_fn(shape, noise_keys, device) if args.eta > 0 else None
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), noise.shape, steps=args.steps, eta=args.eta, noise=noise, device=device, noise_fn=nfn)
             preds.append(x.half().cpu().numpy())
@@ -193,11 +196,22 @@ def do_rollout(args):
     print("DONE", args.out)
 
 
-def fixed_noise(ctx, level, train_max, buckets):
-    """Corrupt context at one fixed level, with the bucket id defined on the training scale."""
+def fixed_noise(ctx, level, train_max, buckets, keys=None):
+    """Corrupt context at one fixed level, with the bucket id defined on the training scale.
+
+    `keys` are the same (seed, episode, start, step) tuples the initial noise is keyed by, on the
+    "context" purpose tag. Without them the corruption came from `torch.randn_like`, i.e. the global
+    generator, so with `--infer-noise > 0` which values a rollout got depended on the batch size and
+    the number of sampler steps: the initial noise was paired and the context noise was not.
+    """
     b = ctx.shape[0]
     bucket = torch.full((b,), min(int(level / train_max * buckets), buckets - 1), dtype=torch.long, device=ctx.device)
-    return (1.0 - level) ** 0.5 * ctx + level ** 0.5 * torch.randn_like(ctx), bucket
+    if keys is None:
+        eps = torch.randn_like(ctx)
+    else:
+        from eval_tf import window_noise
+        eps = window_noise(ctx.shape, keys, purpose="context").to(ctx.device)
+    return (1.0 - level) ** 0.5 * ctx + level ** 0.5 * eps, bucket
 
 
 def psnr(a, b):
