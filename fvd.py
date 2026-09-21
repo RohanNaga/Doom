@@ -67,8 +67,13 @@ def main(args):
         json.dump(res, open(args.out, "w"), indent=1)
 
 
-if __name__ == "__main__":
+def build_parser():
+    """Every flag in one place, so a launcher test can check what is passed against what exists."""
     p = argparse.ArgumentParser()
     p.add_argument("--clips", required=True); p.add_argument("--frames", type=int, default=16)
     p.add_argument("--i3d", default="weights/i3d_torchscript.pt"); p.add_argument("--out", default="")
-    main(p.parse_args())
+    return p
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())

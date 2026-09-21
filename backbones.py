@@ -438,10 +438,15 @@ class PixArtWorldModel(nn.Module):
 
         caption_channels = self.transformer.config.caption_channels
         if action_inject == "token":
+            # CONSTRUCT, then initialise, in exactly the merge base's order. `nn.Embedding.__init__`
+            # draws from the global generator, so interleaving the two `nn.init.normal_` calls between
+            # the constructions changes the default path's initial values under a fixed seed and a
+            # seeded re-run of a finished cell stops being bit-identical.
             if not action_history:      # the control tokens replace it; see UNetWorldModel
                 self.action_embedder = nn.Embedding(num_actions + 1, caption_channels)   # last id = null
-                nn.init.normal_(self.action_embedder.weight, std=0.02)
             self.bucket_embedder = nn.Embedding(noise_buckets, caption_channels)
+            if not action_history:
+                nn.init.normal_(self.action_embedder.weight, std=0.02)
             nn.init.normal_(self.bucket_embedder.weight, std=0.02)
         else:
             inner = self.transformer.config.num_attention_heads * self.transformer.config.attention_head_dim
@@ -606,10 +611,12 @@ class UniDiffuserWorldModel(nn.Module):
         m.register_to_config(num_text_tokens=cond_tokens)
         m.clip_img_out = nn.Identity(); m.text_out = nn.Identity(); m.transformer.pos_embed = nn.Identity()
 
+        # construct, then initialise, in the merge base's order (see PixArtWorldModel)
         if not action_history:      # the control tokens replace it; see UNetWorldModel
             self.action_embedder = nn.Embedding(num_actions + 1, cfg.text_dim)   # last id = null
-            nn.init.normal_(self.action_embedder.weight, std=0.02)
         self.bucket_embedder = nn.Embedding(noise_buckets, cfg.text_dim)
+        if not action_history:
+            nn.init.normal_(self.action_embedder.weight, std=0.02)
         nn.init.normal_(self.bucket_embedder.weight, std=0.02)
         self.clip_token = nn.Parameter(torch.zeros(1, 1, cfg.clip_img_dim))
         add_phase_embedder(self, phase_buckets, cfg.text_dim)
@@ -736,13 +743,16 @@ class SD35WorldModel(nn.Module):
         self.transformer.pos_embed.proj = inflate_input_conv(self.transformer.pos_embed.proj, in_channels, latent_channels)
         self.transformer.register_to_config(in_channels=in_channels)
 
+        # construct, then initialise, in the merge base's order (see PixArtWorldModel)
         if not action_history:      # both action tables are replaced by the control tokens
             self.action_embedder = nn.Embedding(num_actions + 1, cfg.joint_attention_dim)   # last id = null
+        self.bucket_embedder = nn.Embedding(noise_buckets, cfg.joint_attention_dim)
+        if not action_history:
             self.pooled_action = nn.Embedding(num_actions + 1, cfg.pooled_projection_dim)
             nn.init.normal_(self.action_embedder.weight, std=0.02)
-            nn.init.normal_(self.pooled_action.weight, std=0.02)
-        self.bucket_embedder = nn.Embedding(noise_buckets, cfg.joint_attention_dim)
         nn.init.normal_(self.bucket_embedder.weight, std=0.02)
+        if not action_history:
+            nn.init.normal_(self.pooled_action.weight, std=0.02)
         self.pooled_base = nn.Parameter(torch.zeros(cfg.pooled_projection_dim))
         add_phase_embedder(self, phase_buckets, cfg.joint_attention_dim)
         add_control_history(self, action_history, control_bits, cfg.joint_attention_dim)

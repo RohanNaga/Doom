@@ -90,13 +90,13 @@ def test_phase_buckets_are_zero_when_phase_conditioning_was_off():
 
 @pytest.mark.parametrize("flag,value", [("tic_stride", 4), ("action_history", 0)])
 def test_an_asserted_interface_that_disagrees_with_the_checkpoint_is_refused(flag, value):
-    ck = {"args": {"tic_stride": 1, "action_history": 32}}
+    ck = {"args": {"tic_stride": 1, "action_history": 32, "resolved_control_bits": 19}}
     with pytest.raises(SystemExit, match="disagrees with the checkpoint"):
         eval_tf.checkpoint_interface(ck, _args(**{flag: value}))
 
 
 def test_an_asserted_interface_that_agrees_is_accepted():
-    ck = {"args": {"tic_stride": 1, "action_history": 32}}
+    ck = {"args": {"tic_stride": 1, "action_history": 32, "resolved_control_bits": 19}}
     assert eval_tf.checkpoint_interface(ck, _args(tic_stride=1, action_history=32))["tic_stride"] == 1
 
 

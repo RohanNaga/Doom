@@ -79,8 +79,17 @@ one() {   # one <in-dir> <out-dir> <tag> <episode-ids>
   fi
   trap 'rmdir "$LOCK" 2>/dev/null' RETURN
   echo "$(date -Iseconds) encode-nexttic $3 in=$1 out=$2 ids=$4 vae=$VAE gpu=$GPU batch=$BATCH threads=$THREADS workers=$WORKERS shard=${SHARD:-none} repo=$REPO git=$(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo '?')" | tee -a "$2/ENCODE_LOG.txt"
+  # capture the ENCODER's status: `$?` after an `echo | tee` is the pipeline's, so a failed encode
+  # would have been logged as exit 0 and the caller would have gone on to the next corpus
   nice -n 5 "${CMD[@]}"
-  echo "$(date -Iseconds) done $3 exit=$? files=$(ls "$2"/ep_*_latents.npy 2>/dev/null | wc -l)" | tee -a "$2/ENCODE_LOG.txt"
+  local RC=$?
+  echo "$(date -Iseconds) done $3 exit=$RC files=$(ls "$2"/ep_*_latents.npy 2>/dev/null | wc -l)" | tee -a "$2/ENCODE_LOG.txt"
+  if [ $RC -ne 0 ]; then
+    echo "ENCODE_NEXTTIC_FAILED $3 $RC" >&2
+    return $RC
+  fi
+  # the evaluation corpora need a split file before after_nexttic.sh can score them
+  [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" --name "$3" || return $?
 }
 
 A=$D/raw_arnold_dense/arenas
@@ -93,14 +102,20 @@ val()    { one $A $OE/val val "${VAL_IDS:-6000:6100}"; }
 test_()  { one $A $OE/test test "${TEST_IDS:-7000:7100}"; }
 unseen() { one $B $OE/arenas_678 unseen "${UNSEEN_IDS:-0:60}"; }
 
+RC=0
+run() { "$@" || RC=$?; }      # keep going through the other corpora, but remember the failure
 case $CORPUS in
-  train)  train ;;
-  val)    val ;;
-  test)   test_ ;;
-  unseen) unseen ;;
+  train)  run train ;;
+  val)    run val ;;
+  test)   run test_ ;;
+  unseen) run unseen ;;
   # the evaluation corpora first: 260 episodes against 2,000, and the launch gate needs them
-  evals)  val; test_; unseen ;;
-  all)    val; test_; unseen; train ;;
+  evals)  run val; run test_; run unseen ;;
+  all)    run val; run test_; run unseen; run train ;;
   *) echo "unknown CORPUS=$CORPUS (train|val|test|unseen|evals|all)" >&2; exit 2 ;;
 esac
+if [ $RC -ne 0 ]; then
+  echo "ENCODE_NEXTTIC_FAILED $RC $(date -Iseconds)" >&2
+  exit $RC
+fi
 echo "ENCODE_NEXTTIC_DONE $(date -Iseconds)"
