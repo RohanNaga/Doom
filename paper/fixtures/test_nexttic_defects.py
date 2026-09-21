@@ -133,9 +133,13 @@ def test_every_flag_after_nexttic_passes_exists_in_the_target_parser(backbone):
 
 
 def test_the_rollout_call_gets_no_parquet_dir():
+    """The ROLLOUT phase reads latents only. The SCORE phase does take the raw recordings: they are
+    the primary reference for the drift curve and for FVD."""
     out = _dry("after_nexttic.sh", ["3", "unet"])
-    roll = [ln for ln in out.splitlines() if "rollout_eval.py" in ln]
+    roll = [ln for ln in out.splitlines() if "rollout_eval.py" in ln and "--score" not in ln]
     assert roll and all("--parquet-dir" not in ln for ln in roll)
+    score = [ln for ln in out.splitlines() if "rollout_eval.py" in ln and "--score" in ln]
+    assert score and all("--parquet-dir" in ln for ln in score)
     tf = [ln for ln in out.splitlines() if "eval_tf.py" in ln]
     assert tf and all("--parquet-dir" in ln for ln in tf), "eval_tf still needs the raw frames"
 

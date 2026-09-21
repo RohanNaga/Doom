@@ -66,9 +66,10 @@ PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}
 if [ "$CH" = 16 ]; then LE=$D/latents_arnold_dense_pertic_eval_sd35; LO=$D/latents_arnold_eval_pertic_sd35
 else LE=$D/latents_arnold_dense_pertic_eval; LO=$D/latents_arnold_eval_pertic; fi
 #
-# Two argument sets per corpus, because the two scripts take different flags: eval_tf.py reads raw
-# frames (`--parquet-dir`) and rollout_eval.py has no such flag and exits 2 on it. `corpus_latents`
-# is the intersection both accept; `corpus_tf` adds what only eval_tf takes.
+# Two argument sets per corpus, because the two scripts take different flags. `corpus_latents` is
+# the intersection both accept; `corpus_tf` adds `--parquet-dir`, which eval_tf.py takes and
+# `rollout_eval.py --rollout` does not (it reads latents only). `rollout_eval.py --score` takes it
+# too, and needs it: the raw frames are the primary reference for the drift curve and for FVD.
 corpus_latents() {
   case $1 in
     val|test)            echo "--latents-dir $LE/$1 --split $LE/split_$1.json" ;;
@@ -115,7 +116,7 @@ if [ "$DRY" = 1 ]; then
     echo "DRY eval_tf ${S}_h4 $PY eval_tf.py $COMMON $(corpus_tf $S) --subset $SUBSET --ckpt PICKED --horizon-tics 4 --out-dir $R/eval_tf_${S}_h4"
   done
   echo "DRY rollout $PY rollout_eval.py --rollout $COMMON --ckpt PICKED $(corpus_latents test) --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --out $R/rollouts_test.npz"
-  echo "DRY score $PY rollout_eval.py --score --rollouts $R/rollouts_test.npz --out-dir $R/rollout_metrics_test"
+  echo "DRY score $PY rollout_eval.py --score --rollouts $R/rollouts_test.npz --parquet-dir $(corpus_parquet test) --clip-frames 128 --out-dir $R/rollout_metrics_test"
   exit 0
 fi
 
@@ -185,12 +186,15 @@ if [ -d "$ROLL_LAT" ]; then
   [ "$CH" = 16 ] && IDM_ENC="--idm-reencode-vae stabilityai/sd-vae-ft-mse"
   if should_run "$R/rollout_metrics_test/metrics.json"; then
     $PY rollout_eval.py --score --rollouts "$NPZ" --idm $D/results_spiderman/idm_aligned/idm.pt $IDM_ENC \
-      $VAE $SCALE --hf-cache $D/hf/hub --out-dir $R/rollout_metrics_test --save-clips 256 \
+      $VAE $SCALE --hf-cache $D/hf/hub --parquet-dir "$(corpus_parquet test)" \
+      --out-dir $R/rollout_metrics_test --save-clips 256 --clip-frames 128 \
       >> $D/logs/${RUN}_rollout.log 2>&1 || fail "rollout score"
   fi
   # FVD on both clip spacings: every tic, and every fourth tic so the clip covers the same game
   # time as a stride-4 row's clip of the same frame count
-  for CLIPS in clips_u8.npz clips_u8_stride4.npz; do
+  # the raw-reference clips first: those are the FVD numbers to report, and the decoded-ground-truth
+  # ones are kept for continuity with the stride-4 rows
+  for CLIPS in clips_u8_raw.npz clips_u8_raw_stride4.npz clips_u8.npz clips_u8_stride4.npz; do
     [ -f "$R/rollout_metrics_test/$CLIPS" ] || continue
     for F in 16 32; do
       OUTF=$R/rollout_metrics_test/fvd${F}_${CLIPS%.npz}.json
