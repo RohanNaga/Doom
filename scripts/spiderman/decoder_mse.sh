@@ -36,7 +36,7 @@ EPS=2000; VAL=2000; HRS="--max-hours $HOURS --ckpt-every-hours 1"
 [ "${FIT:-0}" = 1 ] && { EPS=40; VAL=64; HRS=""; OUT=$D/tmp/levers/fit_mb$MB; mkdir -p $OUT; }
 
 echo "=== $(date -u) mse decoder tune, micro $MB, $STEPS steps, ${HOURS}h, out $OUT"
-nice -n 10 $PY finetune_decoder.py \
+nice -n 15 $PY finetune_decoder.py \
   --in-dir $D/raw_arnold --split $D/split_arnold.json --frame-cache $D/frame_cache \
   --val-frames $VAL --stride 4 --out-dir $OUT \
   --stream-dir $D/raw_arnold_dense/arenas --stream-frames 400000 --stream-episodes $EPS \
@@ -55,7 +55,7 @@ done
 DEC="$DEC --decoder mse_final=$OUT/vae"
 
 echo "=== $(date -u) score the ceilings"
-nice -n 10 $PY vae_gate_score.py $DEC --baseline tuned_sd_lpips --cache-dir $D/hf/hub \
+nice -n 15 $PY vae_gate_score.py $DEC --baseline tuned_sd_lpips --cache-dir $D/hf/hub \
   --dev-in-dir $D/raw_arnold --dev-split $D/split_arnold.json --dev-frames 2000 \
   --frame-cache $D/frame_cache --stride 4 \
   --corpus seen=$D/latents_arnold_eval/seen,$D/raw_arnold_eval/seen,$D/latents_arnold_eval/split_seen.json \

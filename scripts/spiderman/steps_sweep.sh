@@ -11,7 +11,10 @@
 # runs first on every row and corpus so the reproduction against the stored 2,048-window numbers is
 # the first thing on disk.
 #
-#   usage: steps_sweep.sh <gpu>
+# E1_DEADLINE, a UTC epoch second, stops the sweep between runs rather than in the middle of one,
+# so the card is free for the tune behind it even if the sweep started late.
+#
+#   usage: [E1_DEADLINE=<epoch>] steps_sweep.sh <gpu>
 set -u
 GPU=${1:?gpu}
 D=/sata2/data/rnagabhi/doom
@@ -30,7 +33,11 @@ for ROW in unet:031-unet-l32-aligned pixart:033-pixart-l32-aligned; do
     for N in 50 4 8 2 16 1; do
       O=$OUT/${BB}_${S}_s${N}
       if [ -f $O/metrics.json ]; then echo "$(date -u) skip $BB $S steps=$N"; continue; fi
-      nice -n 10 $PY eval_tf.py --backbone $BB --ckpt $D/results_spiderman/$RUN/best.pt $COMMON \
+      if [ -n "${E1_DEADLINE:-}" ] && [ "$(date +%s)" -ge "${E1_DEADLINE}" ]; then
+        echo "$(date -u) E1 deadline reached, stopping before $BB $S steps=$N"
+        echo E1_STEPS_DEADLINE; exit 0
+      fi
+      nice -n 15 $PY eval_tf.py --backbone $BB --ckpt $D/results_spiderman/$RUN/best.pt $COMMON \
         --latents-dir $D/latents_arnold_eval/$S --parquet-dir $D/raw_arnold_eval/$S \
         --split $D/latents_arnold_eval/split_$S.json --subset val \
         --num-windows 512 --batch-size 16 --steps $N --seed 0 --save-images 0 \
