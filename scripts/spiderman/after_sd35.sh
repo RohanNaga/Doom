@@ -49,7 +49,7 @@ cd $D/repo && git pull -q
 
 # the tuned decoder the VAE gate produced, or the stock one; whichever ran is written down next to the numbers
 TUNED=$D/vae_decoder_sd35_lpips/vae
-if ls $TUNED/diffusion_pytorch_model.safetensors $TUNED/diffusion_pytorch_model.bin >/dev/null 2>&1; then
+if [ -f $TUNED/diffusion_pytorch_model.safetensors ] || [ -f $TUNED/diffusion_pytorch_model.bin ]; then
   VAE="--vae-path $TUNED"; USED="tuned: $TUNED"
 else
   VAE="--vae-path $SD35 --vae-subfolder vae"; USED="stock fallback: $SD35#vae (the tuned decoder at $TUNED has no weights)"
@@ -76,6 +76,9 @@ for S in seen unseen unseen2; do
   echo "$RUN eval_tf ${S}_ema exit $?" >> $D/logs/${RUN}_eval.log
 done
 
+# RESCORE=1 reuses an existing rollouts_seen.npz (rollouts live in latent space, so a decoder change
+# only affects the scoring below)
+[ "${RESCORE:-0}" = 1 ] && [ -f $R/rollouts_seen.npz ] || \
 $PY rollout_eval.py --rollout $COMMON --ckpt $R/best.pt --latents-dir $L/seen --split $L/split_seen.json \
   --subset val --num-rollouts 256 --horizon 64 --batch-size 16 --steps 50 \
   --out $R/rollouts_seen.npz > $D/logs/${RUN}_rollout.log 2>&1
