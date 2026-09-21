@@ -458,3 +458,43 @@ Exercised through the real parquet entrypoint with four-tic holds at 1.758 degre
 - **Previous round's fixes**: synthetic phase conditioning, the 19-bit fit-check width, and removal or freezing of the obsolete history-mode action tables are covered by passing fixtures.
 
 Astra did not touch real recordings or GPUs, so motion distributions, memory and server behaviour stay unverified. Thread open.
+
+---
+
+# Astra round 6: verification of the nine fixes, and the training audit
+
+Same thread, turn 6. Reviewed `df9a4b4` "restore the merge base embedding init order and fix eight next-tic defects", clean HEAD. 228 fixtures pass.
+
+> **228 fixtures passed, but several fixes remain incomplete. The fresh training path passed my independent checks; resume has a remaining provenance gap.**
+
+## Remaining defects (each re-verified by the supervising session)
+
+1. **The encoder's RETURN trap aborts the script on SUCCESS.** `encode_nexttic.sh:80` sets `trap 'rmdir "$LOCK" ...' RETURN` where `LOCK` is `local` to `one()`. The RETURN trap is not cleared, so it fires again when the wrapper (`train()`, `val()`, ...) returns, at which point `LOCK` is out of scope; the script sets `set -u` at line 36, so that is a fatal unbound-variable error. Reproduced with the script's exact flags: a **successful** stub encode kills the shell at exit 127 before `ENCODE_NEXTTIC_DONE` and before the remaining corpora are encoded (Astra saw exit 1 on its bash; either way the success path dies). Fix: clear the RETURN trap before leaving `one()`, or do the cleanup in a subshell with an EXIT trap.
+2. **The generated split files land where evaluation does not look.** `encode_nexttic.sh:92` calls `make_dense_eval_splits.py --latents-dir "$2" --name "$3"` with no `--out`, so `make_dense_eval_splits.py:33` writes `<latents_dir>/split_<name>.json`: `$LE/val/split_val.json` for val, and `$LE/arenas_678/split_unseen.json` for unseen. `after_nexttic.sh:52-53` reads `$LE/split_val.json` and `$LE/split_arenas_678.json`. Every evaluation corpus is wrong by one directory level, and unseen is also wrong by name. Fix: pass an explicit `--out` matching the evaluator, and the canonical corpus name.
+3. **Resume does not check the recipe or the episode provenance.** `train_wm.py:401-406` loads weights `strict=True` and the step but never compares `ck["args"]` with the current args: Astra actually resumed a v-prediction checkpoint with `--objective eps` and training continued, saving an epsilon-labelled checkpoint without a warning. Separately `train_wm.py:176` reads the episode manifest from `args.results_dir`, the destination, so a resume into a different results directory silently re-resolves the episode list against whatever is encoded by then (the docstring at 170-175 shows the pin was intended; it holds only for same-directory resume). Fix: store the resolved episode list in the checkpoint and validate objective, conditioning and data identity before resume, with an explicit override flag.
+4. **The rollout noise key collides.** `rollout_eval.py:161` uses `args.seed * 1_000_003 + ep * 7919 + s * 97 + h`, so `s` and `h` share a range: `(ep=11, start=0, step=97)` and `(ep=11, start=1, step=0)` both give 87206 (verified numerically). Horizons run to 256, so this happens routinely. Initial noise is now correctly paired across batch sizes and step counts (8/8 both ways), but at `eta=1` stochastic sampler noise still comes from the global generator and 0/8 matched. Fix: hash the full tuple and use separate keyed generators for initial, context and stochastic noise.
+5. **Four-tic spacing is not the same as a verified transition.** `rollout_eval.py:300` now keeps the longest run of exactly-4-tic steps, which rejects the old eight-tic attack, but it never checks chain membership; with a noncanonical override on rows 48-51 Astra got both 48 and 52 flagged and the four-tic interval accepted although its requested-action label does not describe that interval. Fix: keep the chain metadata and require every judged transition to be both four tics and verified.
+
+## Fix verification
+
+- **(8) init parity is real.** The supplied `test_backbone_init_parity.py` compares the complete state dictionary against `d870ef9:backbones.py` loaded from git, but it **omits UniDiffuser** and its history-on test checks key presence rather than tensor equality. Astra independently compared every tensor for PixArt, UniDiffuser and SD 3.5 across three seeds: default paths match `d870ef9`, history-on paths match `e2f067d` exactly. Tiny models, not the downloaded pretrained weights.
+- **(1) control width**: fixed for new checkpoints (a real training checkpoint saved width 19); old history checkpoints carrying 0 are refused; history-off 0 is accepted; a saved 19 against nine-bit inputs fails loudly at the embedder rather than truncating.
+- **(6)/(7) the gate**, re-attacked at production thresholds over 20 episodes: no-turn cycle aligned exit 0; stale +1 exit 2; future -1 exit 2; correct yaw with a misleading momentum diagnostic exit 0; `--episodes 0` exit 3; single-class evidence inconclusive. The 0.25 degree deadband, 20-episode and 100-rows-per-class floors and the episode bootstrap are all implemented.
+- **(2) flags**: every emitted TF and rollout dry-run command parses for all three backbones.
+- **(9)**: the encoder status is now captured correctly; only the trap of defect 1 breaks its propagation.
+- **(3)**: the common `val` subset key works; only the paths are wrong.
+- **(5)**: the original eight-tic attack is rejected.
+
+## Training audit (the question that mattered)
+
+No silent corruption found in the fresh-run path:
+
+- **Data and workers**: 192 windows over two epochs at 0, 2 and 4 workers with explicit fork. Controls, contexts and targets stayed aligned, each epoch covered every sampled index once, successive epochs shuffled differently, and the memory maps stayed read-only. `TicWindowDataset` sampling uses no worker RNG; training corruption is drawn in the main process, so fork does not duplicate noise streams.
+- **Shuffle reproducibility**: persistent-worker configurations match each other. Switching between persistent workers and zero workers can change later shuffle order through ordinary DataLoader seed consumption, without affecting sample correctness.
+- **EMA**: the control MLP and the position table are in `parameters()` and in the named EMA serialization, updates match the fp32 EMA formula exactly, and a real 2-to-4-update resume restored every EMA tensor exactly.
+- **Resume with unchanged run identity**: width 19 and the original resolved episode lists survive even when more episodes have since been encoded. Resume reshuffles and reseeds; it does not reproduce uninterrupted sample order.
+- **bf16**: under CPU bf16 autocast the control MLP autocasts, adding the fp32 position table yields fp32 tokens, and all control parameters get finite nonzero fp32 gradients, with both the MLP weights and the positions updating. CUDA untested here.
+
+> **GO for launching the decided fresh training runs on the completed, audited corpus.** I found no reason to hold those runs for the remaining evaluation fixes. Until the resume guard is added, recover using the **same recipe, corpus and results directory**; changed-directory or changed-recipe resume is not protected.
+
+No repository files changed by Astra. Synthetic data and temporary CPU environments only; no real recordings, no GPUs.
