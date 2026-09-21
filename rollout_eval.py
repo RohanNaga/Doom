@@ -152,16 +152,17 @@ def do_rollout(args):
                 ph = torch.from_numpy(np.stack([tics_since_decision(m["is_decision"],
                                                                     trained["phase_buckets"])[s + L + h]
                                                 for _, _, s, _, m in chunk])).to(device)
-            # per-window initial noise, keyed by (episode, start, step). Without it the noise comes
-            # from the global generator, so which values a window gets depends on the batch size and
-            # the step count and two runs are not paired: changing the batch from 1 to 2 left only
-            # 2 of 8 rollouts matching.
-            from eval_tf import window_noise
-            noise = window_noise((len(chunk), C, *LATENT_HW),
-                                 [args.seed * 1_000_003 + ep * 7919 + s * 97 + h
-                                  for ep, _, s, _, _ in chunk]).to(device)
+            # Per-window initial noise, keyed by (seed, episode, start, step) and HASHED. Without
+            # keying, the noise comes from the global generator, so which values a window gets
+            # depends on the batch size and the step count: changing the batch from 1 to 2 left only
+            # 2 of 8 rollouts matching. An arithmetic key is not enough either -- it collides.
+            from eval_tf import eta_noise_fn, window_noise
+            keys = [(args.seed, ep, s, h) for ep, _, s, _, _ in chunk]
+            shape = (len(chunk), C, *LATENT_HW)
+            noise = window_noise(shape, keys).to(device)
+            nfn = eta_noise_fn(shape, keys, device) if args.eta > 0 else None
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), noise.shape, steps=args.steps, eta=args.eta, noise=noise, device=device)
+                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), noise.shape, steps=args.steps, eta=args.eta, noise=noise, device=device, noise_fn=nfn)
             preds.append(x.half().cpu().numpy())
             ctx = torch.cat([ctx[:, C:], x.float()], dim=1)   # drop the oldest latent, append the prediction
         pred_all.append(np.stack(preds, axis=1)); gt_all.append(gt); act_all.append(acts)
@@ -176,6 +177,12 @@ def do_rollout(args):
         extra["decision"] = np.concatenate(dec_all)
         extra["seed_decision"] = np.stack([np.asarray(m["is_decision"][s:s + L], dtype=bool)
                                            for _, _, s, _, m in picks])
+        # the chain id of each frame too: a four-tic interval can still span a chain boundary, and
+        # the transitions either side of that boundary were never verified
+        extra["chain"] = np.stack([np.asarray(m["chain_id"][s + L:s + L + H], dtype=np.int64)
+                                   for _, _, s, _, m in picks])
+        extra["seed_chain"] = np.stack([np.asarray(m["chain_id"][s:s + L], dtype=np.int64)
+                                        for _, _, s, _, m in picks])
     np.savez(args.out, pred=np.concatenate(pred_all), gt=np.concatenate(gt_all), actions=np.concatenate(act_all),
              seed=np.stack([np.asarray(lat[s:s + L], dtype=np.float16) for _, _, s, lat, _ in picks]),
              episode=np.array([m[0] for m in meta]), map=np.array([m[1] for m in meta]), start=np.array([m[2] for m in meta]),
@@ -295,9 +302,16 @@ def do_score(args):
             if tic_stride != 1:
                 return np.arange(H), seed[n, -(K - 1):]
             k = np.flatnonzero(d["decision"][n])
-            # keep the longest run of exactly-4-tic steps, so the sequence the IDM sees is uniform
+            chain = d["chain"][n] if "chain" in d.files else None
+            # keep the longest run of steps that are BOTH exactly four tics apart AND inside one
+            # verified chain. Four tics alone is not enough: an anti-stuck override invalidates the
+            # transitions around it, and the two accepted decisions either side of the invalidated
+            # stretch can still land four tics apart in different chains.
             if len(k) > 1:
                 step_ok = np.diff(k) == 4
+                if chain is not None:
+                    same = (chain[k[1:]] == chain[k[:-1]]) & (chain[k[:-1]] >= 0)
+                    step_ok = step_ok & same
                 runs, start = [], 0
                 for i, ok in enumerate(list(step_ok) + [False]):
                     if not ok:
@@ -309,6 +323,10 @@ def do_score(args):
                 tail = sd_mask[-(K - 1):]
                 if not np.all(np.diff(tail) == 4) or (len(k) and k[0] + len(seed[n]) - tail[-1] != 4):
                     return k, None       # the seed's own decision tics are off the grid
+                if "seed_chain" in d.files and chain is not None and len(k):
+                    sc = d["seed_chain"][n][tail]
+                    if not (np.all(sc == sc[0]) and sc[0] >= 0 and sc[0] == chain[k[0]]):
+                        return k, None   # the seed and the judged frames are not one verified chain
                 return k, seed[n, tail]
             return k, None
         steps = None

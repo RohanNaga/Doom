@@ -96,8 +96,14 @@ class VDiffusion:
         return err.flatten(1).mean(1) if per_sample else err.mean()
 
     @torch.no_grad()
-    def ddim_sample(self, model_fn, shape, steps=50, eta=0.0, noise=None, device=None, clip=None):
-        """DDIM over `steps` respaced timesteps. Returns x0 estimate at the final step."""
+    def ddim_sample(self, model_fn, shape, steps=50, eta=0.0, noise=None, device=None, clip=None,
+                    noise_fn=None):
+        """DDIM over `steps` respaced timesteps. Returns x0 estimate at the final step.
+
+        `noise_fn(step)` supplies the stochastic term's noise when `eta > 0`; without it that noise
+        comes from the global generator, so an eta > 0 comparison is unpaired however carefully the
+        initial `noise` was keyed. `None` is the old behaviour exactly.
+        """
         device = device or self.sqrt_abar.device
         x = torch.randn(shape, device=device) if noise is None else noise.to(device)
         ts = torch.linspace(self.num_steps - 1, 0, steps, device=device).round().long()
@@ -116,7 +122,8 @@ class VDiffusion:
             a_t, s_t = self._coef(tb, x.ndim)
             sigma = eta * torch.sqrt((s_prev ** 2 / s_t ** 2) * (1 - a_t ** 2 / a_prev ** 2))
             dir_xt = torch.sqrt(torch.clamp(s_prev ** 2 - sigma ** 2, min=0.0)) * eps
-            x = a_prev * x0 + dir_xt + sigma * torch.randn_like(x)
+            extra = torch.randn_like(x) if noise_fn is None else noise_fn(i).to(x.dtype)
+            x = a_prev * x0 + dir_xt + sigma * extra
         return x
 
 
