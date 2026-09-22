@@ -20,11 +20,14 @@ import glob
 import json
 import os
 import re
+from collections import namedtuple
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+
+from transitions import EXECUTED_BUTTONS, button_width_report, normalize_button_column
 
 CONTEXT_FRAMES = 4
 LATENT_SHAPE = (4, 15, 20)
@@ -510,59 +513,75 @@ def tic_window_starts(meta, context_frames, horizon=1, strict=True):
     return np.flatnonzero(ok).astype(np.int64)
 
 
+ControlWidths = namedtuple("ControlWidths", "width raw_max_width rows_over_executed fraction_over_executed")
+
+
 def control_matrix(buttons):
-    """(T, bits) float32 of the EXECUTED button vector per row, from the recorder's 0/1 strings.
+    """(T, 19) float32 of the EXECUTED button vector per row, from the recorder's 0/1 strings.
 
     `record_arnold.py` stores `buttons` as "what is applied from this tic to the next" (its row
-    semantics), one character per entry of the game's `available_buttons`, weapon-selection bits
-    included. This is the control the engine actually executed, which is not always the canonical
-    vector of the requested `action` id: Arnold's anti-stuck override holds a different vector for
-    up to 40 tics. The stride-4 corpus hid that by keeping only transitions whose executed vector
-    matched the canonical one; a per-tic corpus keeps every tic, so conditioning on the action id
-    would mislabel exactly those tics. Hence the button vector, not the id.
+    semantics), rendering Arnold's REQUESTED control list. That list is nine entries on most rows
+    and longer when Arnold's preamble appends a weapon-select press, but the engine reads only its
+    first `EXECUTED_BUTTONS` entries, so the executed control is `normalize_buttons` of the stored
+    string and the width is fixed at 19 rather than read from the data.
 
-    The width is read from the data and checked constant, because it is a property of the WAD's
-    button list rather than a number to hardcode.
+    This is the control the engine actually executed, which is not always the canonical vector of
+    the requested `action` id: Arnold's anti-stuck override holds a different vector for up to 40
+    tics. The stride-4 corpus hid that by keeping only transitions whose executed vector matched the
+    canonical one; a per-tic corpus keeps every tic, so conditioning on the action id would mislabel
+    exactly those tics. Hence the button vector, not the id.
     """
-    b = [str(x) for x in np.asarray(buttons).tolist()]
-    check_control_strings(b)
-    return np.array([[float(c) for c in s] for s in b], dtype=np.float32)
+    b = normalize_button_column(buttons)        # validates the alphabet and fixes the width at 19
+    return np.array([[float(c) for c in s] for s in b.tolist()], dtype=np.float32)
 
 
 def check_control_strings(buttons):
-    """Constant-width binary control strings, or a refusal. Returns the width.
+    """Validate the NORMALISED control strings and report the raw widths. Returns `ControlWidths`.
 
     `float(c)` in `control_matrix` accepts any digit, so a '2' or a '-' from a mis-imported column
-    would become a control value of 2.0 or raise deep inside a DataLoader worker. The width and the
-    alphabet are checked once per episode instead, at corpus construction time, where the message
-    can name the file.
+    would become a control value of 2.0 or raise deep inside a DataLoader worker. The alphabet is
+    checked once per episode instead, at corpus construction time, where the message can name the
+    file.
+
+    This used to also demand one constant RAW width, which refused every real episode: the recorder
+    writes 9 characters on about 95% of rows, 12 to 17 when a weapon-select press lands inside the
+    engine's 19 buttons, and 112 to 2,506 when Arnold's shared button list has grown past them. The
+    raw widths are a property of Arnold's bookkeeping, not of the WAD, so they are reported rather
+    than refused; the executed width is `EXECUTED_BUTTONS` on every row by construction.
     """
-    b = [str(x) for x in np.asarray(buttons).tolist()]
-    widths = {len(s) for s in b}
-    if len(widths) != 1:
-        raise ValueError(f"button strings of differing width in one episode: {sorted(widths)}")
-    (width,) = widths
-    if width == 0:
-        raise ValueError("empty button strings: this column holds no executed control")
-    seen = set("".join(b))                      # one C-level pass; the alphabet is two characters
-    if not seen <= {"0", "1"}:
-        raise ValueError(f"button strings are not binary: {sorted(seen - {'0', '1'})[:4]} appear in them, "
-                         "so these are not the recorder's per-button 0/1 flags")
-    return width
+    normalize_button_column(buttons)            # the alphabet check, on what actually reaches the model
+    r = button_width_report(buttons)
+    return ControlWidths(r["width"], r["raw_max_width"], r["rows_over_executed"],
+                         r["fraction_over_executed"])
+
+
+def check_sidecar_buttons_dtype(buttons, meta_path):
+    """Refuse a sidecar whose `buttons` column is wider than the executed control, naming the repair.
+
+    An un-normalised sidecar carries a `<U2506` column, which is a 38 to 49 MB `.npz` per episode
+    (about 76 GB over the 2,000-episode corpus) and 76 bytes per row of array the reader has to
+    page in to compare 19 characters. The fix needs no re-encoding, so the message names it.
+    """
+    dtype = np.asarray(buttons).dtype
+    if dtype.kind == "U" and dtype.itemsize // 4 > EXECUTED_BUTTONS:
+        raise ValueError(f"{meta_path}: buttons column is {dtype.str} , wider than the executed control "
+                         f"<U{EXECUTED_BUTTONS}; this sidecar stores Arnold's raw request strings. Shrink it "
+                         f"in place with `encode_parquet.py --normalize-sidecars --out-dir <this directory>`")
 
 
 def corpus_control_bits(latents_dir):
-    """Width of the executed button vector in a per-tic corpus, from its first episode's metadata.
+    """Width of the executed button vector in a per-tic corpus: `EXECUTED_BUTTONS`, always.
 
-    The model has to be built before the dataset is, and its control embedder needs this width, so
-    it is read here from one small `.npz` rather than guessed from `transitions.CONTROL_BITS` (which
-    is the movement subset, not the full button list).
+    The model has to be built before the dataset is, and its control embedder needs this width. The
+    first episode's sidecar is still opened, because a corpus with no `buttons` column, or with an
+    un-normalised one, must fail here rather than at the first batch.
     """
     _, _, meta_path = list_latent_episodes(latents_dir)[0]
     meta = np.load(meta_path)
     if "buttons" not in meta.files:
         raise ValueError(f"{meta_path}: no buttons column, so there is no executed control per tic")
-    return int(control_matrix(meta["buttons"][:1]).shape[1])
+    check_sidecar_buttons_dtype(meta["buttons"], meta_path)
+    return EXECUTED_BUTTONS
 
 
 class TicWindowDataset(Dataset):
@@ -641,7 +660,11 @@ class TicWindowDataset(Dataset):
                     raise ValueError(f"{meta_path}: {lat.shape[0]} latents vs {len(meta[c])} rows of {c!r}; "
                                      "the sidecar does not describe these latents")
             candidates += max(0, lat.shape[0] - span + 1)
-            width = check_control_strings(meta["buttons"])
+            # the raw widths differ from row to row and from episode to episode (Arnold's shared
+            # button list grows per `Game.start()`); the EXECUTED width does not, so that is what
+            # the mixing guard compares. A column too wide to be executed control is refused above.
+            check_sidecar_buttons_dtype(meta["buttons"], meta_path)
+            width = check_control_strings(meta["buttons"]).width
             if widths and width not in widths:
                 raise ValueError(f"{meta_path}: {width} button bits, the corpus has {sorted(widths)[0]}; "
                                  "two WADs' button lists cannot be mixed")

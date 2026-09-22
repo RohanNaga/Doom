@@ -325,6 +325,12 @@ def audit_sidecar(latents_dir, parquet_dir, episodes=4, rows=2000, seed=0, canon
     (and a duplicate in the recording makes the join ambiguous), `deaths` is the only respawn signal
     the window rules have, and `map_id` decides which arena a score is attributed to.
 
+    `buttons` is compared as EXECUTED control on both sides. The sidecar stores the normalised
+    19-character vector and the recording stores Arnold's raw request, which runs past index 18 on
+    about 5% of rows, so a literal string comparison would call every correctly encoded sidecar a
+    mismatch. The raw widths are reported instead, as `buttons_raw_max_width`,
+    `buttons_fraction_over_executed` and `unexecuted_switch_rows`.
+
     Also counts how many sampled rows are anti-stuck overrides -- rows whose executed vector is not
     the canonical vector of the requested action id -- because those are exactly the rows on which
     conditioning on the action id instead of the button vector would be wrong.
@@ -343,9 +349,11 @@ def audit_sidecar(latents_dir, parquet_dir, episodes=4, rows=2000, seed=0, canon
                 canon = {int(k): v for k, v in json.load(f).items()}
         except OSError:
             canon = None
+    from transitions import EXECUTED_BUTTONS, button_width_report, normalize_buttons
     rng = np.random.RandomState(seed)
     checked = mismatch = overrides = 0
     problems = []
+    raw_max_width, raw_rows, raw_over, unexecuted = 0, 0, 0, 0
     eps = list_latent_episodes(latents_dir)[:episodes]
     for ep, _, meta_path in eps:
         m = np.load(meta_path)
@@ -363,6 +371,14 @@ def audit_sidecar(latents_dir, parquet_dir, episodes=4, rows=2000, seed=0, canon
         raw = {c: (np.array(t["buttons"].to_pylist()) if c == "buttons"
                    else t[c].to_numpy(zero_copy_only=False))
                for c in AUDIT_COLUMNS if c in t.schema.names}
+        if "buttons" in raw:
+            # over the WHOLE raw column, not the sampled rows: the widths are what says how often
+            # Arnold asked for a weapon switch the engine could not reach
+            w = button_width_report(raw["buttons"])
+            raw_max_width = max(raw_max_width, w["raw_max_width"])
+            raw_rows += w["rows"]
+            raw_over += w["rows_over_executed"]
+            unexecuted += w["unexecuted_switch_rows"]
         raw_tic = np.asarray(raw["tic"]).astype(np.int64)
         by_tic = {}
         for i, x in enumerate(raw_tic.tolist()):
@@ -380,12 +396,12 @@ def audit_sidecar(latents_dir, parquet_dir, episodes=4, rows=2000, seed=0, canon
                 mismatch += 1
                 continue
             checked += 1
-            bits = str(side["buttons"][i])
+            bits = normalize_buttons(side["buttons"][i])
             for c in AUDIT_COLUMNS:
                 if c == "tic" or c not in raw:
                     continue
-                a = str(side[c][i]) if c == "buttons" else int(side[c][i])
-                b = str(raw[c][j]) if c == "buttons" else int(raw[c][j])
+                a = normalize_buttons(side[c][i]) if c == "buttons" else int(side[c][i])
+                b = normalize_buttons(raw[c][j]) if c == "buttons" else int(raw[c][j])
                 if a != b:
                     mismatch += 1
                     if len(problems) < 8:
@@ -397,6 +413,11 @@ def audit_sidecar(latents_dir, parquet_dir, episodes=4, rows=2000, seed=0, canon
     return {"episodes": len(eps), "rows_checked": checked, "columns": list(AUDIT_COLUMNS),
             "mismatches": mismatch, "anti_stuck_override_rows": overrides,
             "override_fraction": overrides / checked if checked else 0.0,
+            "executed_buttons": EXECUTED_BUTTONS,
+            "buttons_raw_max_width": raw_max_width,
+            "buttons_rows_over_executed": raw_over,
+            "buttons_fraction_over_executed": raw_over / raw_rows if raw_rows else 0.0,
+            "unexecuted_switch_rows": unexecuted,
             "canonical_table": canon is not None, "problems": problems[:32],
             "ok": mismatch == 0 and checked > 0}
 

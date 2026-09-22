@@ -101,19 +101,24 @@ def test_a_non_binary_control_string_is_refused(tmp_path):
         check_control_strings(["101", "1-1"])
 
 
-def test_control_strings_of_two_widths_are_refused(tmp_path):
-    b = np.array(["100000000"] * 39 + ["1000000000"])
+def test_control_strings_of_two_raw_widths_are_normalised_not_refused(tmp_path):
+    """Arnold appends a weapon-select press on some rows only, so one episode holds two raw widths.
+
+    The old rule demanded one constant raw width and therefore refused every real episode; the
+    executed control is 19 entries on all of them.
+    """
+    b = np.array(["100000000"] * 39 + ["1000000001"])
     d = _corpus(tmp_path, "widths", buttons=b)
-    with pytest.raises(ValueError, match="differing width"):
-        TicWindowDataset(d, None, context_frames=4, action_history=4)
+    ds = TicWindowDataset(d, None, context_frames=4, action_history=4)
+    assert ds.control_bits == 19
 
 
-def test_two_episodes_of_different_widths_are_refused(tmp_path):
+def test_two_episodes_of_different_raw_widths_are_accepted(tmp_path):
+    """The raw width is Arnold's bookkeeping, not the WAD's button list, so it cannot mix corpora."""
     d = str(tmp_path / "mixedwads")
     write_pertic_episode(d, 0, held_actions([1] * 10))
-    write_pertic_episode(d, 1, held_actions([1] * 10), buttons=np.array(["1000000000"] * 40))
-    with pytest.raises(ValueError, match="button bits"):
-        TicWindowDataset(d, None, context_frames=4, action_history=4)
+    write_pertic_episode(d, 1, held_actions([1] * 10), buttons=np.array(["1000000001"] * 40))
+    assert TicWindowDataset(d, None, context_frames=4, action_history=4).control_bits == 19
 
 
 def test_the_control_check_runs_without_action_history(tmp_path):
@@ -128,5 +133,5 @@ def test_a_healthy_corpus_still_loads_unchanged(tmp_path):
     d = _corpus(tmp_path, "healthy")
     ds = TicWindowDataset(d, None, context_frames=4, action_history=4)
     assert len(ds) == 40 - 4
-    assert ds.control_bits == 9
-    assert check_control_strings(["100000000"]) == 9
+    assert ds.control_bits == 19
+    assert check_control_strings(["100000000"]).width == 19

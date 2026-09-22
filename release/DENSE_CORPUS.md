@@ -24,10 +24,16 @@ One parquet per episode, `ep_XXXXX.parquet`, 150 game-seconds, about 5,100 tics 
 |---|---|---|
 | `episode_id`, `map_id` | int32, int8 | constant down the episode; `map_id` 101 is `deathmatch_simple` MAP01 |
 | `tic` | int32 | strictly increasing, one row per tic |
-| `action`, `buttons` | int16, string | Arnold's action id, and the 0/1 button vector actually applied, from this tic to the next |
+| `action`, `buttons` | int16, string | Arnold's action id, and its **requested** control list rendered as 0/1, from this tic to the next. 9 characters normally, longer when Arnold appends a weapon-select press; the engine executes only the first 19 entries, so the executed control is `buttons[:19]` right-padded with 0 (see below) |
 | `health`, `ammo`, `kills`, `deaths`, `frags` | int16 | read at the same tic; `deaths` increments on the respawn row, which is what cuts a life |
 | `pos_x`, `pos_y`, `angle` | float32 | same tic |
 | `frame` | binary | lossless PNG, 320x240 RGB, HUD, weapon and crosshair on |
+
+**The `buttons` column is variable width.** It is Arnold's requested control list, not a fixed vector: 9 characters on about 95% of rows, 12 to 17 when its favourite-weapon block appends a weapon-select press that still lands inside the engine's 19 buttons, and 112 to 2,506 on about 5% of rows, with a single extra `1` far past index 18. ViZDoom's `setAction` reads `actions[i]` only for `i < availableButtons.size()` (19) and zero-fills the rest (ViZDoom 1.2.4 `src/lib/ViZDoomGame.cpp:147-178`), so the executed control is `buttons[:19].ljust(19, "0")` and a trailing `1` beyond index 18 was never executed.
+
+The cause is in Arnold: `add_buttons` re-appends the ten `SELECT_WEAPON%i` names to the shared `available_buttons` list on every `Game.start()` (`src/doom/actions.py:197-199`, `game.py:485`) while ViZDoom deduplicates its own list, so `SELECT_WEAPONj` maps to `9 + 10*k + j` after k starts. `record_arnold.py:167` starts the game once per recorded episode, so k is the worker's running episode count and only a worker's first episode can execute a requested switch. This is a behaviour artefact of the recorded agent, not of the world-model data. `release/DATASET_CARD.md` has the full account, including the engine and Arnold references and the bounded negative finding that nobody has reported it before.
+
+`encode_parquet.py` stores the normalised 19-character executed vector in the sidecar, plus `buttons_raw_len` and `switch_requested_index` so the request is recoverable; the parquet is never altered. `encode_parquet.py --normalize-sidecars` repairs an already-encoded corpus in place. `buttons_report.py` prints the per-episode width distribution and the executed/unexecuted switch counts.
 
 **Seeds.** Every RNG stream (python, numpy, torch, vizdoom) is seeded from a SHA-256 of `(scheme, corpus id, episode id, stream)` — no worker id, no pid, no clock — so the corpus is reproducible from the corpus id alone and is independent of the worker count. Each segment has its own corpus id, so no two segments and no evaluation episode ever share a seed.
 

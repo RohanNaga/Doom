@@ -35,6 +35,7 @@ from pertic_fixtures import held_actions, write_pertic_episode  # noqa: E402
 import backbones  # noqa: E402
 import eval_tf  # noqa: E402
 import rollout_eval  # noqa: E402
+import doom_data  # noqa: E402
 from doom_data import TicWindowDataset, control_matrix  # noqa: E402
 
 
@@ -133,7 +134,7 @@ def test_the_horizon_one_shim_presents_a_three_tuple_dataset_as_one_step(tmp_pat
 # eval_tf end to end on a per-tic corpus
 # ---------------------------------------------------------------------------------------
 
-CTX, BITS = 4, 9
+CTX, BITS = 4, doom_data.EXECUTED_BUTTONS      # a control vector is the engine's 19 buttons
 
 
 def _png(rgb):

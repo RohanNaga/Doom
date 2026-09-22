@@ -11,8 +11,16 @@ For every episode: take one frame per agent decision (tic % stride == 0), pad 32
 320x256 at the image level (GameNGen), encode with a frozen `AutoencoderKL` encoder (posterior
 mean), normalise the latent the way that autoencoder's own pipeline does, and write
     ep_XXXXX_latents.npy   (T, C, 32, 40) float16
-    ep_XXXXX_meta.npz      action, buttons, health, ammo, kills, deaths, frags, pos_x, pos_y,
-                           angle, tic, map_id, episode_id[, chain_id]   (all length T)
+    ep_XXXXX_meta.npz      action, buttons, buttons_raw_len, switch_requested_index, health, ammo,
+                           kills, deaths, frags, pos_x, pos_y, angle, tic, map_id,
+                           episode_id[, chain_id]   (all length T)
+
+`buttons` is the EXECUTED control: the recorder stores Arnold's requested button list, which is 9
+characters on most rows and longer when its preamble appends a weapon-select press, while the engine
+reads only the first 19 entries (its whole `available_buttons` list). The sidecar therefore stores
+`buttons[:19]` right-padded with 0, at a fixed `<U19`, and keeps the request in `buttons_raw_len`
+and `switch_requested_index`. A corpus encoded before that is repaired in place, with no VAE and no
+re-encoding, by `--normalize-sidecars`.
 plus `episodes_NN.jsonl` with per-episode counts and map ids, `canonical_controls.json` under
 `--align-decisions`, and `encode_meta_NN.json` recording the latent contract the corpus was
 written under. Restartable: existing outputs skip.
@@ -59,12 +67,30 @@ import torch
 from PIL import Image
 
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, latent_contract, normalize_latents
-from transitions import decision_rows, stored_tic_stride
+from transitions import (EXECUTED_BUTTONS, button_width_report, decision_rows, normalize_button_column,
+                         raw_button_lengths, stored_tic_stride, switch_request_indices)
 
 PAD_TO = 256
 LEGACY_HW = (120, 160)      # April pipeline: frames resized to 160x120, latents (4, 15, 20), no padding
 FRAME_ROWS = 240            # rows of real picture inside the 256-row padded frame
 META_COLS = ["action", "buttons", "health", "ammo", "kills", "deaths", "frags", "pos_x", "pos_y", "angle", "tic", "map_id", "episode_id"]
+# derived beside `buttons`, so the request the engine did not execute stays readable from the
+# sidecar alone: the raw string's length and the index of its weapon-select press (-1 for none)
+BUTTON_PROVENANCE_COLS = ("buttons_raw_len", "switch_requested_index")
+
+
+def button_columns(raw):
+    """The sidecar's control columns from one episode's RAW `buttons`: executed vector plus provenance.
+
+    `buttons` is the 19-character vector the engine executed (`transitions.normalize_buttons`), at a
+    fixed `<U19` so the whole column is 76 bytes per row. Writing `np.array(raw)` instead made a
+    `<U2506` column out of the widest row, which is a 38 to 49 MB `.npz` per episode and about 76 GB
+    over the 2,000-episode corpus. Nothing is lost: `buttons_raw_len` and `switch_requested_index`
+    record what Arnold asked for on every row.
+    """
+    return {"buttons": normalize_button_column(raw),
+            "buttons_raw_len": raw_button_lengths(raw),
+            "switch_requested_index": switch_request_indices(raw)}
 
 
 def decode(b):
@@ -205,10 +231,17 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
     else:
         keep = np.flatnonzero(tic % stride == 0)
     cols = {}
+    widths = None
     for c in META_COLS:
-        if c in t.schema.names:
-            arr = t[c].to_numpy(zero_copy_only=False) if c != "buttons" else np.array(t["buttons"].to_pylist())
-            cols[c] = arr[keep]
+        if c not in t.schema.names:
+            continue
+        if c == "buttons":
+            # the raw column feeds `decision_rows` above unchanged; only what is STORED is normalised
+            raw = np.array(t["buttons"].to_pylist())[keep]
+            widths = button_width_report(raw)
+            cols.update(button_columns(raw))
+        else:
+            cols[c] = t[c].to_numpy(zero_copy_only=False)[keep]
     if chain_id is not None:
         cols["chain_id"] = chain_id
     if is_decision is not None:
@@ -226,7 +259,16 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
         np.save(os.path.join(out_dir, f"{ep}_actions.npy"), cols["action"].astype(np.int64))
     else:
         np.savez(os.path.join(out_dir, f"{ep}_meta.npz"), **cols)
-    return dict(episode=ep, frames=int(len(keep)), map_id=int(cols["map_id"][0]) if "map_id" in cols else -1)
+    out = dict(episode=ep, frames=int(len(keep)), map_id=int(cols["map_id"][0]) if "map_id" in cols else -1)
+    if widths is not None:
+        # what Arnold asked for beyond the engine's button list, per episode: the widest raw string,
+        # how many rows ran past index 18, and how many of those were weapon switches never executed
+        out.update(buttons_raw_max_width=widths["raw_max_width"],
+                   buttons_rows_over_executed=widths["rows_over_executed"],
+                   unexecuted_switch_rows=widths["unexecuted_switch_rows"],
+                   executed_switch_rows=widths["executed_switch_rows"],
+                   buttons_inferred_starts=widths["inferred_starts"])
+    return out
 
 
 CANONICAL = None
@@ -329,12 +371,21 @@ REPAIR_COLUMNS = ("action", "buttons", "deaths")
 
 
 def _columns_agree(cols, table, name):
-    """Is the sidecar's `name` column the raw recording's, after dtype conversion?"""
+    """Is the sidecar's `name` column the raw recording's, after dtype conversion?
+
+    `buttons` is compared as EXECUTED control on both sides: the sidecar holds the normalised
+    19-character vector and the recording holds Arnold's raw request, so a literal string comparison
+    would call every correctly written sidecar a disagreement and refuse the repair.
+    """
     if name not in cols or name not in table.schema.names:
         return False
     side = np.asarray(cols[name])
     if name == "buttons":
-        return np.array_equal(side.astype(str), np.array(table["buttons"].to_pylist(), dtype=str))
+        try:
+            return np.array_equal(normalize_button_column(side),
+                                  normalize_button_column(table["buttons"].to_pylist()))
+        except ValueError:
+            return False
     return np.array_equal(side.astype(np.int64),
                           table[name].to_numpy(zero_copy_only=False).astype(np.int64))
 
@@ -400,9 +451,69 @@ def rebuild_sidecar_masks(paths, out_dir, canonical, stride=4, dry_run=False):
             continue
         cols["is_decision"] = is_decision
         cols["chain_id"] = chain_id
-        tmp = meta_path + ".tmp.npz"       # np.savez appends .npz to a name without one
+        # the file is being rewritten anyway, so an un-normalised `buttons` column is shrunk here too
+        cols.update(button_columns(np.array(t["buttons"].to_pylist())))
+        _replace_npz(meta_path, cols)
+    return out
+
+
+def _replace_npz(path, cols):
+    """Rewrite one sidecar atomically: a reader must never see a half-written `.npz`."""
+    tmp = f"{path}.tmp.{os.getpid()}.npz"      # the .npz suffix stops np.savez appending its own
+    try:
         np.savez(tmp, **cols)
-        os.replace(tmp, meta_path)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def normalize_sidecars(out_dir, dry_run=False):
+    """Rewrite every `_meta.npz` in `out_dir` with the EXECUTED 19-button control column.
+
+    The cheap half of `rebuild_sidecar_masks`: no parquet, no canonical table, no VAE, no latent
+    touched. It exists because the already-encoded corpus carries Arnold's raw request strings, so
+    each sidecar is 38 to 49 MB of `<U2506` column instead of about 200 KB, and re-encoding 2,000
+    episodes to fix 19 characters per row would cost days of GPU time for nothing.
+
+    Every other column is copied through, `buttons_raw_len` and `switch_requested_index` are added
+    (or refreshed) from whatever string width the file holds, and the file is replaced atomically.
+    An episode whose column is not binary within its first 19 characters is listed as refused and
+    left exactly as it was: that is a corrupted column, not a wide one.
+    """
+    out = {"episodes": 0, "normalized": 0, "unchanged": 0, "refused": []}
+    for meta_path in sorted(glob.glob(os.path.join(out_dir, "ep_*_meta.npz"))):
+        ep = os.path.basename(meta_path).replace("_meta.npz", "")
+        with np.load(meta_path) as z:
+            cols = {k: z[k] for k in z.files}
+        if "buttons" not in cols:
+            out["refused"].append(f"{ep}: no buttons column, so there is no control to normalise")
+            continue
+        out["episodes"] += 1
+        raw = np.asarray(cols["buttons"])
+        try:
+            fixed = button_columns(raw)
+        except ValueError as e:
+            out["refused"].append(f"{ep}: {e}")
+            continue
+        # a sidecar normalised by an earlier pass no longer holds the raw widths, so its recorded
+        # provenance is the truth and must not be recomputed from the 19-character column
+        for c in BUTTON_PROVENANCE_COLS:
+            if c in cols and len(cols[c]) == len(raw):
+                fixed[c] = cols[c]
+        already = (raw.dtype == fixed["buttons"].dtype and np.array_equal(raw, fixed["buttons"])
+                   and all(c in cols for c in BUTTON_PROVENANCE_COLS))
+        if already:
+            out["unchanged"] += 1
+            continue
+        out["normalized"] += 1
+        if dry_run:
+            continue
+        cols.update(fixed)
+        _replace_npz(meta_path, cols)
     return out
 
 
@@ -464,7 +575,14 @@ def write_meta(args, contract, scale, shift, check, stored=1):
         git = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except Exception:
         git = "?"
+    buttons_doc = (f"buttons[:{EXECUTED_BUTTONS}] right-padded with 0: the EXECUTED control vector over the "
+                   "game's available_buttons (MOVE_FORWARD, MOVE_BACKWARD, TURN_LEFT, TURN_RIGHT, MOVE_LEFT, "
+                   "MOVE_RIGHT, ATTACK, SPEED, CROUCH, SELECT_WEAPON0..9). The recorder stores Arnold's "
+                   "REQUESTED list, which runs past index 18 on about 5% of rows; the engine reads only the "
+                   f"first {EXECUTED_BUTTONS} entries, so anything beyond was never executed. buttons_raw_len "
+                   "and switch_requested_index keep the request per row.")
     meta = {"vae_id": args.vae_id or "stabilityai/sd-vae-ft-mse", "vae_subfolder": args.vae_subfolder,
+            "executed_buttons": EXECUTED_BUTTONS, "buttons_column": buttons_doc,
             "latent_contract": contract, "scaling_factor_applied": scale, "shift_factor_applied": shift,
             "pad_to": PAD_TO, "legacy": bool(args.legacy), "stride": args.stride, "source_stored_tic_stride": stored,
             "align_decisions": bool(args.align_decisions), "every_tic": bool(args.every_tic),
@@ -478,9 +596,21 @@ def write_meta(args, contract, scale, shift, check, stored=1):
 def main(args):
     global CANONICAL
     os.makedirs(args.out_dir, exist_ok=True)
+    if args.normalize_sidecars:
+        # The sidecar-only repair. It runs before --in-dir is even required and before the CUDA probe
+        # below, because it reads no recording and must not take a share of a card the training run
+        # is holding: it is the one mode that can be run on a busy machine.
+        r = normalize_sidecars(args.out_dir, args.dry_run)
+        print(f"normalized sidecars: {json.dumps(r)}", flush=True)
+        if r["refused"]:
+            raise SystemExit(f"{len(r['refused'])} sidecar(s) refused: {r['refused'][:4]}")
+        print("DONE", flush=True)
+        return
     device = args.device if torch.cuda.is_available() else "cpu"
     if args.every_tic and args.align_decisions:
         raise SystemExit("--every-tic keeps every row and --align-decisions selects a subset; pick one")
+    if not args.in_dir:
+        raise SystemExit("--in-dir is required for everything but --normalize-sidecars")
     # normalise "i/n" to the pair before anything formats the shard index into a filename
     args.shard, args.num_shards = parse_shard(args.shard, args.num_shards)
     paths = select_paths(args.in_dir, args.episode_ids, args.max_episodes, args.shard, args.num_shards)
@@ -544,7 +674,8 @@ def main(args):
 
 def build_parser():
     p = argparse.ArgumentParser()
-    p.add_argument("--in-dir", required=True)
+    # not required: --normalize-sidecars works off --out-dir alone and reads no recording at all
+    p.add_argument("--in-dir", default="")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--stride", type=int, default=4)
     p.add_argument("--batch-size", type=int, default=64)
@@ -578,8 +709,14 @@ def build_parser():
                    help="recompute is_decision and chain_id in sidecars that already exist, from the raw parquet "
                         "and --canonical, leaving the latents alone. This is the repair for a corpus encoded "
                         "under a per-shard table")
+    p.add_argument("--normalize-sidecars", dest="normalize_sidecars", action="store_true",
+                   help="rewrite every sidecar in --out-dir with the executed 19-button control column and "
+                        "stop. No parquet, no canonical table, no VAE, no latent touched: this is the repair "
+                        "for a corpus whose buttons column holds Arnold's raw request strings, which makes "
+                        "each .npz 38 to 49 MB instead of about 200 KB. --in-dir is not needed")
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
-                   help="with --rebuild-sidecar-masks: report what would change and write nothing")
+                   help="with --rebuild-sidecar-masks or --normalize-sidecars: report what would change "
+                        "and write nothing")
     p.add_argument("--max-episodes", type=int, default=0)
     p.add_argument("--vae-id", default="", help="AutoencoderKL repo or path (default: sd-vae-ft-mse)")
     p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-id (e.g. vae for a full pipeline repo)")

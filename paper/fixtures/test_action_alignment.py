@@ -345,3 +345,52 @@ def test_a_failing_audit_fails_the_gate(tmp_path, capsys):
         ["--latents-dir", lat, "--audit-parquet-dir", rawdir] + CLI_FLOOR))
     assert code == caa.EXIT_MISALIGNED
     assert json.loads(capsys.readouterr().out)["sidecar_audit"]["ok"] is False
+
+
+# ---------------------------------------------------------------------------------------
+# the audit compares the EXECUTED control, not the recorder's raw request string
+# ---------------------------------------------------------------------------------------
+
+SWITCH_OUT = "100000000" + "0" * 2493 + "1"        # 2503 chars: a switch the engine never saw
+
+
+def test_the_audit_compares_the_normalised_control_on_both_sides(tmp_path):
+    """The sidecar holds 19 characters and the recording holds up to 2,506; they are the same control."""
+    pytest.importorskip("pyarrow")
+    raw = ["100000000"] * 8 + [SWITCH_OUT] * 8
+    side = [s[:19].ljust(19, "0") for s in raw]
+    lat, rawdir = _write_pair(tmp_path, side, raw)
+    r = caa.audit_sidecar(lat, rawdir, episodes=1, rows=16)
+    assert r["ok"] and r["mismatches"] == 0
+
+
+def test_the_audit_still_catches_a_difference_inside_the_executed_prefix(tmp_path):
+    pytest.importorskip("pyarrow")
+    raw = ["100000000"] * 8 + [SWITCH_OUT] * 8
+    side = ["100000000".ljust(19, "0")] * 8 + ["000100000".ljust(19, "0")] * 8
+    lat, rawdir = _write_pair(tmp_path, side, raw)
+    r = caa.audit_sidecar(lat, rawdir, episodes=1, rows=16)
+    assert not r["ok"] and r["mismatches"] == 8
+
+
+def test_the_audit_summary_reports_the_raw_widths(tmp_path):
+    pytest.importorskip("pyarrow")
+    raw = ["100000000"] * 19 + [SWITCH_OUT]
+    side = [s[:19].ljust(19, "0") for s in raw]
+    lat, rawdir = _write_pair(tmp_path, side, raw)
+    r = caa.audit_sidecar(lat, rawdir, episodes=1, rows=20)
+    assert r["buttons_raw_max_width"] == 2503
+    assert r["buttons_rows_over_executed"] == 1
+    assert r["buttons_fraction_over_executed"] == pytest.approx(0.05)
+    assert r["unexecuted_switch_rows"] == 1
+
+
+def test_the_override_count_is_unchanged_by_the_normalisation(tmp_path):
+    """`anti_stuck_override_rows` still matches the canonical 9-bit prefix, as it always did."""
+    pytest.importorskip("pyarrow")
+    raw = ["100000000"] * 12 + ["000011000" + "0" * 100 + "1"] * 4
+    side = [s[:19].ljust(19, "0") for s in raw]
+    lat, rawdir = _write_pair(tmp_path, side, raw, actions=np.zeros(16, dtype=np.int64))
+    json.dump({"0": "100000000"}, open(os.path.join(lat, "canonical_controls.json"), "w"))
+    r = caa.audit_sidecar(lat, rawdir, episodes=1, rows=16)
+    assert r["ok"] and r["anti_stuck_override_rows"] == 4
