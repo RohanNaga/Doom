@@ -26,7 +26,7 @@ GATES = os.path.join(CLUSTER, "gates.sh")
 LAUNCH = os.path.join(CLUSTER, "launch_runs.sh")
 STATUS = os.path.join(CLUSTER, "status.sh")
 REQUIREMENTS = os.path.join(CLUSTER, "requirements.txt")
-SCRIPTS = [SETUP, FETCH, ENCODE]
+SCRIPTS = [SETUP, FETCH, ENCODE, GATES]
 
 
 def dry(script, args=(), **env):
@@ -333,3 +333,107 @@ def test_preflight_refuses_when_the_canonical_table_is_not_there(tmp_path):
     assert r.returncode != 0
     assert "canonical" in (r.stdout + r.stderr).lower(), r.stdout + r.stderr
     assert list(tmp_path.iterdir()) == [], "the preflight wrote under the data root"
+
+
+# ---------------------------------------------------------------------------------------
+# gates.sh
+# ---------------------------------------------------------------------------------------
+
+def first_index(lines, needle):
+    return min(i for i, ln in enumerate(lines) if needle in ln)
+
+
+def test_the_gates_run_in_the_order_the_launch_protocol_sets(tmp_path):
+    lines = dry(GATES, root=str(tmp_path)).splitlines()
+    audit = first_index(lines, "--audit-only")
+    align = first_index(lines, "--min-accuracy")
+    fit = first_index(lines, "--fit-check")
+    smoke = first_index(lines, "--steps 300")
+    readback = first_index(lines, "eval_tf.py")
+    assert audit < align < fit < smoke < readback, "\n".join(lines)
+
+
+def test_the_sidecar_audit_is_gate_one_and_covers_both_spaces(tmp_path):
+    out = dry(GATES, root=str(tmp_path), VAES="sd15,sd35")
+    audits = [ln for ln in out.splitlines() if "--audit-only" in ln]
+    assert len(audits) == 2, audits
+    assert any("latents_arnold_dense_pertic_eval/val" in ln for ln in audits)
+    assert any("latents_arnold_dense_pertic_eval_sd35/val" in ln for ln in audits)
+    for ln in audits:
+        assert f"--audit-parquet-dir {tmp_path}/raw_arnold_dense/arenas" in ln
+
+
+def test_the_alignment_gate_carries_the_protocols_thresholds(tmp_path):
+    out = dry(GATES, root=str(tmp_path))
+    line = [ln for ln in out.splitlines() if "--min-accuracy" in ln][0]
+    for flag in ("--min-yaw 0.25", "--min-move 0.05", "--min-rows 1000", "--min-episodes 20",
+                 "--min-per-class 100", "--min-accuracy 0.95", "--margin 0.20",
+                 "--bootstrap 1000", "--episodes 100", "--seed 0"):
+        assert flag in line, f"{flag} missing from the alignment gate"
+    assert "latents_arnold_dense_pertic_eval/val" in line, "the gate must score the val corpus"
+
+
+def test_the_alignment_exit_codes_are_read_the_way_the_scorer_means_them(tmp_path):
+    aligned = dry(GATES, root=str(tmp_path), EXPLAIN="0")
+    assert "aligned" in aligned and "misaligned" not in aligned
+    assert "misaligned" in dry(GATES, root=str(tmp_path), EXPLAIN="2")
+    inconclusive = dry(GATES, root=str(tmp_path), EXPLAIN="3")
+    assert "inconclusive" in inconclusive
+    assert "not approval" in inconclusive, "exit 3 must never read as a pass"
+
+
+def test_both_backbones_are_fit_checked_at_the_launch_configuration(tmp_path):
+    out = dry(GATES, root=str(tmp_path))
+    fits = [ln for ln in out.splitlines() if "--fit-check" in ln]
+    assert len(fits) == 2, fits
+    assert any("--backbone unet" in ln for ln in fits)
+    assert any("--backbone sd35" in ln for ln in fits)
+    for ln in fits:
+        assert "--fit-check 20" in ln, "FIT=20 is what the plan asks for"
+        assert "--per-gpu-batch 32" in ln and "--global-batch 32" in ln, "the fit must be the launch batch"
+    assert "peak_mem_gb" in out and "steps_per_s" in out, "the fit numbers are never recorded"
+
+
+def test_the_smoke_writes_to_a_throwaway_results_dir(tmp_path):
+    out = dry(GATES, root=str(tmp_path))
+    smoke = [ln for ln in out.splitlines() if "--steps 300" in ln]
+    assert smoke, out
+    for ln in smoke:
+        # the launcher names the production directory first; the override has to be the last word
+        last = ln.rsplit("--results-dir ", 1)[1].split()[0]
+        assert last.startswith(f"{tmp_path}/results_smoke"), last
+        assert "results_spiderman" not in last
+        for flag in ("--val-every 100", "--ckpt-every 300", "--snapshot-every 300", "--local-snapshots"):
+            assert flag in ln, flag
+
+
+def test_the_smoke_must_leave_a_recovery_checkpoint_and_a_snapshot(tmp_path):
+    out = dry(GATES, root=str(tmp_path))
+    assert "0000300.pt" in out and "snap_0000300.pt" in out
+
+
+def test_the_readback_scores_64_val_windows_at_tic_spacing(tmp_path):
+    out = dry(GATES, root=str(tmp_path))
+    evals = [ln for ln in out.splitlines() if "eval_tf.py" in ln]
+    assert evals, out
+    for ln in evals:
+        assert "--tic-stride 1" in ln and "--num-windows 64" in ln
+        assert "snap_0000300.pt" in ln, "the readback must load the snapshot the smoke wrote"
+        assert f"--split {tmp_path}/latents_arnold_dense_pertic_eval" in ln
+        assert f"--parquet-dir {tmp_path}/raw_arnold_dense/arenas" in ln, "no raw reference, no honest PSNR"
+
+
+def test_the_sd35_readback_carries_its_own_latent_contract(tmp_path):
+    out = dry(GATES, root=str(tmp_path))
+    ln = [l for l in out.splitlines() if "eval_tf.py" in l and "--backbone sd35" in l][0]
+    assert "--latent-channels 16" in ln
+    assert "--latent-scale 1.5305" in ln and "--latent-shift 0.0609" in ln
+
+
+def test_every_gate_can_stop_the_run(tmp_path):
+    src = source_of(GATES)
+    assert "GATE_FAILED" in src, "a failure is never announced"
+    for gate in ("1 sidecar audit", "2 alignment", "3 fit check", "4 smoke", "5 readback"):
+        assert f'gate_fail "{gate}' in src, f"gate {gate} cannot stop the run"
+    assert "GATES_GO" in src, "there is no GO summary"
+    assert "DRY summary" in dry(GATES, root=str(tmp_path))
