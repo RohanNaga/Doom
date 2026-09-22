@@ -45,11 +45,13 @@ Usage:
 import argparse
 import glob
 import io
+import itertools
 import json
 import os
 import re
 import subprocess
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -82,6 +84,42 @@ def build_decode_pool(decode_threads, decode_workers=0):
         from concurrent.futures import ProcessPoolExecutor
         return ProcessPoolExecutor(max_workers=int(decode_workers))
     return ThreadPoolExecutor(decode_threads)
+
+
+PREFETCH_BATCHES = 2        # batches of frames kept ready ahead of the encoder
+
+
+def batch_stream(frames_col, keep, batch_size, pool, prefetch=PREFETCH_BATCHES):
+    """Yield the uint8 frame batches of rows `keep`, prepared `prefetch` batches ahead of the caller.
+
+    Pulling the PNG bytes out of the parquet column, decoding them and stacking them is host work;
+    encoding them is GPU work. Run in lockstep the card idles through every batch's decode, and on
+    an A6000 that is the whole gap between the 83 frames/s the per-tic encode measured and the 95
+    frames/s the VAE forward alone sustains. One producer thread runs the same three steps, in the
+    same order, on the same row indices, so the array handed to `encode_batch` -- its rows, their
+    order, their bytes -- is exactly the array the serial loop built.
+
+    Batch BOUNDARIES are deliberately untouched. Under bf16 autocast cuDNN picks its convolution
+    algorithm from the batch shape, so the same frame encodes slightly differently in a batch of 32
+    than in a batch of 64. A corpus is only reproducible against what is already written if every
+    batch keeps its size, so this function changes *when* a batch is built and never *what* is in it.
+    """
+    prefetch = max(1, int(prefetch))
+
+    def build(i):
+        idx = keep[i:i + batch_size]
+        raw = [frames_col[int(j)].as_py() for j in idx]
+        return np.stack(list(pool.map(decode, raw)))
+
+    starts = iter(range(0, len(keep), batch_size))
+    with ThreadPoolExecutor(1) as producer:
+        pending = deque(producer.submit(build, i) for i in itertools.islice(starts, prefetch))
+        for i in starts:
+            ready = pending.popleft()
+            pending.append(producer.submit(build, i))   # queued BEFORE the caller blocks on the GPU
+            yield ready.result()
+        while pending:
+            yield pending.popleft().result()
 
 
 def to_input(frames_u8, device, legacy=False):
@@ -171,13 +209,8 @@ def encode_episode(path, out_dir, vae, device, dtype, stride, batch_size, pool, 
         cols["chain_id"] = chain_id
     if is_decision is not None:
         cols["is_decision"] = is_decision
-    frames_col = t["frame"]
-    lat = []
-    for i in range(0, len(keep), batch_size):
-        idx = keep[i:i + batch_size]
-        raw = [frames_col[int(j)].as_py() for j in idx]
-        frames = np.stack(list(pool.map(decode, raw)))
-        lat.append(encode_batch(vae, frames, device, dtype, legacy, scale, shift))
+    lat = [encode_batch(vae, frames, device, dtype, legacy, scale, shift)
+           for frames in batch_stream(t["frame"], keep, batch_size, pool)]
     lat = np.concatenate(lat)
     want = (latent_channels, 15, 20) if legacy else (latent_channels, 32, 40)
     assert lat.shape[1:] == want, (lat.shape, want)
