@@ -1,0 +1,41 @@
+# Pinned environment for a rented 8x H100 node. One virtualenv serves every row: the SD 1.4 U-Net
+# (4-channel latents) and SD 3.5 Medium (16-channel latents) are trained and evaluated from the same
+# interpreter here, where on Spiderman they were split across the `doom` conda env (diffusers 0.31)
+# and `~/wanenc` (diffusers 0.40). That split was an accident of how the two envs grew, not a
+# requirement: SD3Transformer2DModel needs diffusers >= 0.29 and 0.31 satisfies it
+# (`scripts/spiderman/launch_sd35.sh:21`). The SD 3.5 numbers already in the paper were measured
+# under 0.40, so if bit-comparability with those rows ever matters, move both pins together and
+# rerun the gates; do not mix.
+#
+# Python 3.10 or 3.11. The wheels below exist for both; 3.12+ is untested for this set.
+# CUDA: cu124 wheels, which cover H100 (sm90). The node needs driver >= 550 for cu124.
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+torch==2.4.1
+torchvision==0.19.1
+
+# numpy 2 changes dtype promotion under the encoder's sidecar columns; the repo was written and
+# every finished row measured under numpy 1.26.
+numpy==1.26.4
+scipy==1.14.1
+
+diffusers==0.31.0
+transformers==4.44.2
+accelerate==0.34.2
+safetensors==0.4.5
+timm==1.0.9
+
+# pyarrow reads the recorded parquet episodes; pillow decodes the stored PNG frames.
+pyarrow==17.0.0
+pillow==10.4.0
+
+# lpips is the perceptual metric in eval_tf.py and eval_metrics.py.
+lpips==0.1.4
+
+# hf_xet is the chunked transfer backend: the dense corpus is thousands of parquet files and the
+# plain HTTP path is several times slower. huggingface_hub >= 0.34 is also what ships the `hf` CLI
+# that fetch_dataset.sh calls.
+huggingface_hub==0.34.4
+hf_xet==1.1.5
+
+tqdm==4.66.5
