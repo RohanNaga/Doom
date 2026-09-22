@@ -5,7 +5,7 @@ encodes, because `test_encode_pertic_launcher.py` executed `scripts/spiderman/en
 no environment override. Off the server the launcher exits early for want of `/sata2`, so the test
 looked harmless everywhere it had ever been run; on the server it was a launch button.
 
-The rule this file enforces: a test may run a `scripts/spiderman/*.sh` launcher for real only with
+The rule this file enforces: a test may run a `scripts/*/*.sh` launcher for real only with
 `DRY=1` (print the command, touch nothing) **and** a data root pointed somewhere disposable
 (`DOOM_ROOT`). Parsing it with `bash -n`, or asking a Python script for `--help`, is always fine.
 
@@ -23,7 +23,10 @@ import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-LAUNCHERS = sorted(glob.glob(os.path.join(REPO, "scripts", "spiderman", "*.sh")))
+# every launcher in the repo, whichever machine it targets: `scripts/cluster/*.sh` drives a rented
+# node the same way `scripts/spiderman/*.sh` drives the lab server, and a test that ran one of them
+# for real would start work on whatever box pytest happens to be on.
+LAUNCHERS = sorted(glob.glob(os.path.join(REPO, "scripts", "*", "*.sh")))
 TEST_FILES = sorted(glob.glob(os.path.join(HERE, "test_*.py")))
 
 # A launcher that only prints or parses cannot start work, so these need no DRY knob.
@@ -90,7 +93,9 @@ def test_every_launcher_parses(path):
 @pytest.mark.parametrize(
     "path",
     [p for p in LAUNCHERS if os.path.basename(p) in
-     {"encode_pertic.sh", "encode_dense.sh", "record_dense.sh", "launch_sd35.sh"}],
+     {"encode_pertic.sh", "encode_dense.sh", "record_dense.sh", "launch_sd35.sh",
+      "setup_node.sh", "fetch_dataset.sh", "encode_all.sh", "gates.sh", "launch_runs.sh",
+      "status.sh"}],
     ids=lambda p: os.path.basename(p))
 def test_the_launchers_a_test_touches_have_a_dry_knob(path):
     with open(path) as f:
@@ -100,7 +105,9 @@ def test_the_launchers_a_test_touches_have_a_dry_knob(path):
 
 
 @pytest.mark.parametrize("path", [p for p in LAUNCHERS if os.path.basename(p) in
-                                  {"encode_pertic.sh", "encode_dense.sh", "record_dense.sh"}],
+                                  {"encode_pertic.sh", "encode_dense.sh", "record_dense.sh",
+                                   "setup_node.sh", "fetch_dataset.sh", "encode_all.sh",
+                                   "gates.sh", "launch_runs.sh", "status.sh"}],
                          ids=lambda p: os.path.basename(p))
 def test_dry_touches_nothing_and_prints_a_command(path, tmp_path):
     """The knob has to actually work, not merely be mentioned."""
