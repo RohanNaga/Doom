@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 import pytest
 
@@ -25,7 +26,7 @@ GATES = os.path.join(CLUSTER, "gates.sh")
 LAUNCH = os.path.join(CLUSTER, "launch_runs.sh")
 STATUS = os.path.join(CLUSTER, "status.sh")
 REQUIREMENTS = os.path.join(CLUSTER, "requirements.txt")
-SCRIPTS = [SETUP, FETCH]
+SCRIPTS = [SETUP, FETCH, ENCODE]
 
 
 def dry(script, args=(), **env):
@@ -234,3 +235,101 @@ def test_the_rest_of_the_corpus_is_opt_in(tmp_path):
 def test_fetch_reports_bytes_elapsed_and_rate(tmp_path):
     out = dry(FETCH, root=str(tmp_path))
     assert "DRY report bytes" in out and "mb_per_s" in out
+
+
+# ---------------------------------------------------------------------------------------
+# encode_all.sh
+# ---------------------------------------------------------------------------------------
+
+def encoder_commands(out):
+    """The `encode_parquet.py` commands `encode_nexttic.sh` itself emits under DRY."""
+    return [ln for ln in out.splitlines() if "encode_parquet.py" in ln and "--canonical-only" not in ln]
+
+
+def test_every_encode_uses_the_datasets_canonical_table(tmp_path):
+    """The table is a property of the recording, not of the autoencoder: one file, shipped with the
+    dataset, passed to every shard and every corpus in both latent spaces. Rebuilding it per shard
+    is what the Sep 20 host-memory outage looks like."""
+    out = dry(ENCODE, root=str(tmp_path))
+    cmds = encoder_commands(out)
+    assert cmds, out
+    canon = f"--canonical {tmp_path}/raw_arnold_dense/canonical_controls.json"
+    for c in cmds:
+        assert canon in c, c
+    assert "never rebuilt" in out
+
+
+def test_the_training_corpus_is_sharded_across_the_named_gpus(tmp_path):
+    out = dry(ENCODE, root=str(tmp_path), GPUS="0,1,2,3", VAES="sd15")
+    train = [c for c in encoder_commands(out) if "--episode-ids 0:2000" in c]
+    assert len(train) == 4, train
+    for i in range(4):
+        assert any(f"--shard {i}/4" in c and f"--device cuda:{i}" in c for c in train), i
+
+
+def test_the_evaluation_corpora_are_encoded_on_one_card(tmp_path):
+    out = dry(ENCODE, root=str(tmp_path), GPUS="0,1,2,3", VAES="sd15", EVAL_GPU="3")
+    evals = [c for c in encoder_commands(out) if "--episode-ids 0:2000" not in c]
+    assert {"6000:6100", "7000:7100", "0:60"} <= {c.split("--episode-ids ")[1].split()[0] for c in evals}
+    assert all("--device cuda:3" in c for c in evals), evals
+    assert all("--shard" not in c for c in evals), "an evaluation corpus was sharded"
+
+
+def test_both_latent_spaces_are_encoded_from_the_same_recording(tmp_path):
+    out = dry(ENCODE, root=str(tmp_path), GPUS="0,1", VAES="sd15,sd35")
+    cmds = encoder_commands(out)
+    sd35 = [c for c in cmds if "stable-diffusion-3.5-medium" in c]
+    assert sd35, "no 16-channel encode"
+    for c in sd35:
+        assert "--latent-channels 16" in c and "--scaling-factor 1.5305" in c and "--shift-factor 0.0609" in c
+        assert "latents_arnold_dense_pertic_sd35" in c or "latents_arnold_dense_pertic_eval_sd35" in c
+    sd15 = [c for c in cmds if c not in sd35]
+    assert sd15 and all("_sd35" not in c for c in sd15)
+
+
+def test_every_encode_keeps_every_tic(tmp_path):
+    for c in encoder_commands(dry(ENCODE, root=str(tmp_path))):
+        assert "--every-tic" in c, c
+
+
+def test_the_node_venv_is_the_interpreter_for_both_spaces(tmp_path):
+    for c in encoder_commands(dry(ENCODE, root=str(tmp_path))):
+        assert f"{tmp_path}/env/bin/python" in c, c
+
+
+def test_the_audit_and_the_split_publish_come_after_the_encodes(tmp_path):
+    out = dry(ENCODE, root=str(tmp_path), GPUS="0,1", VAES="sd15")
+    lines = out.splitlines()
+    last_encode = max(i for i, ln in enumerate(lines) if "encode_parquet.py" in ln)
+    audit = min(i for i, ln in enumerate(lines) if "check_action_alignment.py" in ln)
+    splits = min(i for i, ln in enumerate(lines) if "make_dense_eval_splits.py" in ln)
+    assert last_encode < audit < splits, out
+    assert "--audit-only" in out
+    for ids in ("6000:6100", "7000:7100", "0:60"):
+        assert any("make_dense_eval_splits.py" in ln and f"--expect-ids {ids}" in ln for ln in lines), ids
+
+
+def test_each_shard_gets_its_own_log(tmp_path):
+    out = dry(ENCODE, root=str(tmp_path), GPUS="0,1", VAES="sd15")
+    for i in range(2):
+        assert f"{tmp_path}/logs/encode_sd15_train_shard{i}.log" in out, i
+    assert f"{tmp_path}/logs/encode_sd15_evals.log" in out
+
+
+def test_the_inventory_counts_every_corpus_in_both_spaces(tmp_path):
+    out = dry(ENCODE, root=str(tmp_path), VAES="sd15,sd35")
+    assert "DRY inventory" in out
+    for d in ("latents_arnold_dense_pertic/arenas", "latents_arnold_dense_pertic_eval/val",
+              "latents_arnold_dense_pertic_eval/test", "latents_arnold_dense_pertic_eval/arenas_678",
+              "latents_arnold_dense_pertic_sd35/arenas", "latents_arnold_dense_pertic_eval_sd35/val"):
+        assert f"{tmp_path}/{d}" in out, d
+
+
+def test_preflight_refuses_when_the_canonical_table_is_not_there(tmp_path):
+    """CHECK=1 is the read-only preflight: it must stop rather than let the encoder rebuild a
+    per-shard table of its own."""
+    e = {**os.environ, "DOOM_ROOT": str(tmp_path), "CHECK": "1", "PY": sys.executable}
+    r = subprocess.run(["bash", ENCODE], capture_output=True, text=True, env=e)
+    assert r.returncode != 0
+    assert "canonical" in (r.stdout + r.stderr).lower(), r.stdout + r.stderr
+    assert list(tmp_path.iterdir()) == [], "the preflight wrote under the data root"
