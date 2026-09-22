@@ -385,6 +385,18 @@ def test_the_audit_summary_reports_the_raw_widths(tmp_path):
     assert r["unexecuted_switch_rows"] == 1
 
 
+def test_the_audit_separates_an_oversized_row_from_a_lost_switch(tmp_path):
+    """An anti-stuck row 2,503 characters long with no switch bit lost no control."""
+    pytest.importorskip("pyarrow")
+    raw = ["100000000"] * 18 + ["100100010" + "0" * 2494, SWITCH_OUT]
+    side = [s[:19].ljust(19, "0") for s in raw]
+    lat, rawdir = _write_pair(tmp_path, side, raw)
+    r = caa.audit_sidecar(lat, rawdir, episodes=1, rows=20)
+    assert r["ok"]
+    assert r["buttons_rows_over_executed"] == 2, "both raw strings ran past the engine"
+    assert r["unexecuted_switch_rows"] == 1, "but only one of them asked for a switch out there"
+
+
 def test_the_override_count_is_unchanged_by_the_normalisation(tmp_path):
     """`anti_stuck_override_rows` still matches the canonical 9-bit prefix, as it always did."""
     pytest.importorskip("pyarrow")

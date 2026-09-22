@@ -44,6 +44,9 @@ def inferred_starts(width):
     A press of `SELECT_WEAPONj` after k starts sits at index `CONTROL_BITS + WEAPON_SLOTS*k + j`
     with `0 <= j < WEAPON_SLOTS`, so the string is that long plus one and integer division recovers
     k whichever weapon was asked for.
+
+    k is ZERO-BASED: k = 0 is the first episode of a recorder worker, whose `Game.start()` has
+    already run. The number of starts behind a row is therefore `k + 1`.
     """
     return (width - 1 - CONTROL_BITS) // WEAPON_SLOTS if width > CONTROL_BITS else None
 
@@ -58,6 +61,12 @@ def normalize_buttons(s):
 
     Only the first `EXECUTED_BUTTONS` characters are validated, because only they become control
     values; a stray character further out cannot reach the model.
+
+    **The empty string is refused, not padded.** The contract `s[:19].ljust(19, "0")` is for a
+    non-empty string. An empty one is not "the agent pressed nothing": the recorder always renders
+    at least Arnold's nine entries (`record_arnold.py:255`), so an empty cell means this row stored
+    no control at all, which is a broken column and must be seen rather than silently become a
+    19-zero vector the model would train on as a real observation.
     """
     s = str(s)
     if not s:
@@ -102,8 +111,18 @@ def switch_request_indices(buttons):
 def button_width_report(buttons):
     """What the raw widths of one episode's column say, without refusing any of them.
 
-    `rows_over_executed` is the share of rows whose request ran past the engine's button list;
-    `inferred_starts` is the k those widths imply.
+    Two different things are counted separately, because one does not imply the other:
+
+      * `rows_over_executed` is rows whose RAW STRING is longer than `EXECUTED_BUTTONS`, whatever it
+        holds out there. An anti-stuck row can be 2,503 characters of zeros past index 18.
+      * `unexecuted_switch_rows` is rows whose weapon-select PRESS sits at index 19 or beyond, which
+        is the switch the engine never performed.
+
+    A row can be over-long with no switch bit (nothing was lost) or, on a short string, carry a
+    switch the engine did perform, so reporting one number for both hid whichever case came second.
+
+    `inferred_starts` is the k those widths imply. It is zero-based, so the recorder had made
+    `inferred_starts + 1` `Game.start()` calls when the row was written.
 
     `within_episode_growth` is True when one episode's rows imply two different k. The width itself
     is NOT constant inside an episode -- it moves with the weapon id j, which changes from row to
@@ -113,16 +132,17 @@ def button_width_report(buttons):
     raw = [str(s) for s in np.asarray(buttons).tolist()]
     lens = [len(s) for s in raw]
     idx = switch_request_indices(raw).tolist()
-    over = [i for i in idx if i >= EXECUTED_BUTTONS]
+    over = sum(1 for n in lens if n > EXECUTED_BUTTONS)         # the string ran past the engine
+    lost = sum(1 for i in idx if i >= EXECUTED_BUTTONS)         # and a switch press was out there
     tails = sorted({n for n in lens if n > CONTROL_BITS})
     starts = sorted({inferred_starts(n) for n in tails})
     widest = max(lens) if lens else 0
     return {"rows": len(raw), "width": EXECUTED_BUTTONS,
             "raw_max_width": widest, "raw_min_width": min(lens) if lens else 0,
-            "rows_over_executed": len(over),
-            "fraction_over_executed": len(over) / len(raw) if raw else 0.0,
+            "rows_over_executed": over,
+            "fraction_over_executed": over / len(raw) if raw else 0.0,
             "executed_switch_rows": sum(1 for i in idx if 0 <= i < EXECUTED_BUTTONS),
-            "unexecuted_switch_rows": len(over),
+            "unexecuted_switch_rows": lost,
             "raw_widths_over_control_bits": tails,
             "inferred_starts_seen": starts,
             "within_episode_growth": len(starts) > 1,
