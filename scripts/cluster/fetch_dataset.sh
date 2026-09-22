@@ -5,7 +5,10 @@
 #          [DRY=1] fetch_dataset.sh
 #
 # `RohanNaga/doom-dense-arnold` holds 8,000 episodes of arenas 2 to 5 under `arenas/` and 3,000 of
-# arenas 6 to 8 under `arenas_678/`, about 480 GB in all. The two next-tic runs need 2,260 of them:
+# arenas 6 to 8 under `arenas_678/`. An episode is about 5,000 tics of 320x240 PNG at roughly 48 KB
+# a frame, so budget about 240 MB per episode: the 2,260-episode subset below is roughly 540 GB and
+# the whole dataset roughly 2.6 TB (estimates from the recorder measurement, not from the repo
+# listing; check the dataset card before sizing the disk). The two next-tic runs need 2,260:
 #
 #   train   arenas      0:2000     2,000 episodes, 500 per arena
 #   val     arenas      6000:6100    100 episodes,  25 per arena
@@ -29,7 +32,7 @@
 # becomes a silently wrong latent, and nothing downstream would catch it.
 #
 # FULL=1 adds the rest of both segments after the subset is verified, for the multi-pass training
-# budget the workshop runs do not reach. Budget about 480 GB and hours of transfer.
+# budget the workshop runs do not reach. Budget roughly 2.1 TB more and many hours of transfer.
 #
 # DRY=1 prints what would run and touches nothing; LIST=1 additionally prints every file in the
 # download list, which is the auditable form of the ranges above.
@@ -89,7 +92,7 @@ if [ "$DRY" = 1 ]; then
   if [ "$FULL" = 1 ]; then
     echo "DRY full $HF download $HF_REPO --repo-type dataset --local-dir $OUT --include arenas/*.parquet --include arenas_678/*.parquet"
   else
-    echo "DRY full skipped (FULL=1 also fetches the remaining ~8,740 episodes, about 480 GB)"
+    echo "DRY full skipped (FULL=1 also fetches the remaining ~8,740 episodes, roughly 2.1 TB)"
   fi
   echo "DRY report bytes/elapsed/mb_per_s of $OUT"
   exit 0

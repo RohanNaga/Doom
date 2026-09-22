@@ -119,6 +119,7 @@ if [ "$DRY" = 1 ]; then
     echo "DRY gate4 smoke $BB"
     launcher "$BB" STEPS="$STEPS" EXTRA="$(smoke_extra "$BB")"
     echo "DRY gate4 expect $SMOKE_DIR/$BB/$(printf '%07d' "$STEPS").pt and $SMOKE_DIR/$BB/snap_$(printf '%07d' "$STEPS").pt"
+    echo "DRY gate4 refuse if $D/results_spiderman/$(run_name "$BB")/log.jsonl exists: the launcher resumes the newest recovery checkpoint of the production run, and the smoke would continue it into the smoke directory"
   done
   for BB in $SMOKE_BBS; do echo "DRY gate5 readback $BB $(readback_cmd "$BB")"; done
   echo "DRY summary GATES_GO with the fit rates, the smoke checkpoints and the readback PSNR"
@@ -173,6 +174,11 @@ done
 for BB in $SMOKE_BBS; do
   SD=$SMOKE_DIR/$BB
   SESSION=train-$BB-nexttic
+  PROD=$D/results_spiderman/$(run_name "$BB")
+  # the launcher derives --resume from the PRODUCTION directory, so a smoke run after a launch
+  # would carry that run's weights and optimizer into the smoke: gate before launching
+  [ -f "$PROD/log.jsonl" ] \
+    && gate_fail "4 smoke ($BB)" "$PROD has already trained; the smoke would resume it. Stop and archive that run, or skip this gate deliberately."
   tmux has-session -t "$SESSION" 2>/dev/null \
     && gate_fail "4 smoke ($BB)" "tmux session $SESSION is already alive; stop it with tmux kill-session -t $SESSION"
   rm -rf "$SD"; mkdir -p "$SD"

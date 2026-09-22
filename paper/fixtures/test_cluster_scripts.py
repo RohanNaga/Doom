@@ -26,6 +26,7 @@ GATES = os.path.join(CLUSTER, "gates.sh")
 LAUNCH = os.path.join(CLUSTER, "launch_runs.sh")
 STATUS = os.path.join(CLUSTER, "status.sh")
 REQUIREMENTS = os.path.join(CLUSTER, "requirements.txt")
+README = os.path.join(CLUSTER, "README.md")
 SCRIPTS = [SETUP, FETCH, ENCODE, GATES, LAUNCH, STATUS]
 
 
@@ -412,6 +413,15 @@ def test_the_smoke_must_leave_a_recovery_checkpoint_and_a_snapshot(tmp_path):
     assert "0000300.pt" in out and "snap_0000300.pt" in out
 
 
+def test_the_smoke_refuses_to_resume_a_production_run(tmp_path):
+    """`launch_nexttic.sh` derives --resume from the production directory, so a smoke run started
+    after a launch would continue that run's weights into the throwaway directory."""
+    out = dry(GATES, root=str(tmp_path))
+    assert f"{tmp_path}/results_spiderman/040-unet-nexttic/log.jsonl" in out
+    assert "resume" in out
+    assert 'gate_fail "4 smoke' in source_of(GATES)
+
+
 def test_the_readback_scores_64_val_windows_at_tic_spacing(tmp_path):
     out = dry(GATES, root=str(tmp_path))
     evals = [ln for ln in out.splitlines() if "eval_tf.py" in ln]
@@ -539,3 +549,36 @@ def test_status_reports_disk_and_gpu_memory(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "disk" in r.stdout.lower()
     assert "gpu" in r.stdout.lower()
+
+
+# ---------------------------------------------------------------------------------------
+# README.md
+# ---------------------------------------------------------------------------------------
+
+def test_the_readme_gives_the_sequence_in_order():
+    text = source_of(README)
+    order = [text.index(f"scripts/cluster/{n}")
+             for n in ("setup_node.sh", "fetch_dataset.sh", "encode_all.sh", "gates.sh",
+                       "launch_runs.sh", "status.sh")]
+    assert order == sorted(order), "the command sequence is out of order"
+
+
+def test_the_readme_marks_the_h100_durations_as_estimates():
+    text = source_of(README)
+    assert "estimate" in text.lower()
+    assert "A6000" in text and "H100" in text
+    assert "0.455" in text, "the SD 3.5 A6000 rate the estimates multiply is not stated"
+
+
+def test_the_readme_says_how_to_stop_resume_and_copy_back():
+    text = source_of(README)
+    assert "tmux kill-session -t train-unet-nexttic" in text
+    assert "pkill" in text, "the pkill warning is missing"
+    assert "rsync" in text and "128.2.204.110" in text
+    assert "ONLY=unet" in text, "no way to resume one row"
+
+
+def test_the_readme_states_what_a_human_must_confirm_about_the_node():
+    text = source_of(README)
+    for claim in ("driver", "3.10", "NVMe", "cores"):
+        assert claim in text, f"the node assumption about {claim} is not stated"
