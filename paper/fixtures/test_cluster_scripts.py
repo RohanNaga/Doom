@@ -26,7 +26,7 @@ GATES = os.path.join(CLUSTER, "gates.sh")
 LAUNCH = os.path.join(CLUSTER, "launch_runs.sh")
 STATUS = os.path.join(CLUSTER, "status.sh")
 REQUIREMENTS = os.path.join(CLUSTER, "requirements.txt")
-SCRIPTS = [SETUP, FETCH, ENCODE, GATES]
+SCRIPTS = [SETUP, FETCH, ENCODE, GATES, LAUNCH, STATUS]
 
 
 def dry(script, args=(), **env):
@@ -437,3 +437,105 @@ def test_every_gate_can_stop_the_run(tmp_path):
         assert f'gate_fail "{gate}' in src, f"gate {gate} cannot stop the run"
     assert "GATES_GO" in src, "there is no GO summary"
     assert "DRY summary" in dry(GATES, root=str(tmp_path))
+
+
+# ---------------------------------------------------------------------------------------
+# launch_runs.sh
+# ---------------------------------------------------------------------------------------
+
+def test_both_rows_launch_on_their_own_card(tmp_path):
+    out = dry(LAUNCH, root=str(tmp_path), UNET_GPU="0", SD35_GPU="1")
+    cmds = [ln for ln in out.splitlines() if "train_wm.py" in ln]
+    assert len(cmds) == 2, cmds
+    unet = [c for c in cmds if "--backbone unet" in c][0]
+    sd35 = [c for c in cmds if "--backbone sd35" in c][0]
+    assert "CUDA_VISIBLE_DEVICES=0" in unet and "CUDA_VISIBLE_DEVICES=1" in sd35
+    assert "040-unet-nexttic" in unet and "042-sd35-nexttic" in sd35
+    assert "latents_arnold_dense_pertic/arenas" in unet
+    assert "latents_arnold_dense_pertic_sd35/arenas" in sd35
+
+
+def test_the_recipe_is_untouched_and_nothing_accumulates(tmp_path):
+    out = dry(LAUNCH, root=str(tmp_path))
+    for c in [ln for ln in out.splitlines() if "train_wm.py" in ln]:
+        assert "--global-batch 32" in c and "--per-gpu-batch 32" in c
+        assert "--tic-stride 1" in c and "--action-history 32" in c
+        assert "--lr 5e-5" in c and "--warmup 2000" in c and "--ema-decay 0.9999" in c
+        assert "--episode-ids 0:2000" in c and "--val-episode-ids 6000:6100" in c
+    assert "ALLOW_ACCUM" not in out, "the launcher's accumulation override must not be set"
+
+
+def test_a_single_card_per_row_is_explained_not_assumed(tmp_path):
+    """GLOBAL=32 with no accumulation means MB * cards = 32: a second card per row halves the
+    micro-batch instead of filling both, so the box's spare cards need a recipe decision."""
+    out = dry(LAUNCH, root=str(tmp_path))
+    assert "DRY note" in out
+    note = " ".join(ln for ln in out.splitlines() if ln.startswith("DRY note"))
+    assert "32" in note and ("one card" in note or "single card" in note)
+
+
+def test_the_tmux_sessions_are_named(tmp_path):
+    out = dry(LAUNCH, root=str(tmp_path))
+    assert "train-unet-nexttic" in out and "train-sd35-nexttic" in out
+
+
+def test_overlapping_gpu_sets_are_refused(tmp_path):
+    r = dry_fail(LAUNCH, root=str(tmp_path), UNET_GPU="2", SD35_GPU="2")
+    assert r.returncode != 0
+    assert "same" in (r.stdout + r.stderr).lower() or "overlap" in (r.stdout + r.stderr).lower()
+
+
+def test_workers_follow_the_node(tmp_path):
+    assert "--num-workers 7" in dry(LAUNCH, root=str(tmp_path), WORKERS="7")
+    default = dry(LAUNCH, root=str(tmp_path))
+    n = int(re.search(r"--num-workers (\d+)", default).group(1))
+    assert 4 <= n <= 16, f"default worker count {n} is not a sane per-run share of the cores"
+
+
+# ---------------------------------------------------------------------------------------
+# status.sh
+# ---------------------------------------------------------------------------------------
+
+def test_status_reads_both_run_logs(tmp_path):
+    out = dry(STATUS, root=str(tmp_path))
+    assert f"{tmp_path}/results_spiderman/040-unet-nexttic/log.jsonl" in out
+    assert f"{tmp_path}/results_spiderman/042-sd35-nexttic/log.jsonl" in out
+
+
+def write_log(root, run, rows):
+    d = root / "results_spiderman" / run
+    d.mkdir(parents=True)
+    with open(d / "log.jsonl", "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    return d
+
+
+def test_status_reports_step_rate_loss_and_the_last_validation(tmp_path):
+    """The real parse, against a log written here: DOOM_ROOT is a throwaway directory and the
+    script only reads."""
+    write_log(tmp_path, "040-unet-nexttic", [
+        {"event": "train", "step": 1000, "loss": 0.31, "steps_per_s": 1.2, "peak_mem_gb": 40.1,
+         "lr": 5e-05, "skipped_updates": 0},
+        {"event": "val", "step": 1000, "val_loss": 0.3005},
+        {"event": "train", "step": 2000, "loss": 0.2712, "steps_per_s": 1.05, "peak_mem_gb": 41.6,
+         "lr": 5e-05, "skipped_updates": 2},
+    ])
+    e = {**os.environ, "DOOM_ROOT": str(tmp_path)}
+    r = subprocess.run(["bash", STATUS], capture_output=True, text=True, env=e)
+    assert r.returncode == 0, r.stderr
+    line = [ln for ln in r.stdout.splitlines() if "040-unet-nexttic" in ln][0]
+    assert "step=2000" in line
+    assert "loss=0.2712" in line
+    assert "1.05" in line, "no updates/s"
+    assert "val=0.3005@1000" in line or "val_loss=0.3005" in line
+    assert "skipped=2" in line
+    assert "042-sd35-nexttic" in r.stdout, "a run that has not started must still be reported"
+
+
+def test_status_reports_disk_and_gpu_memory(tmp_path):
+    e = {**os.environ, "DOOM_ROOT": str(tmp_path)}
+    r = subprocess.run(["bash", STATUS], capture_output=True, text=True, env=e)
+    assert r.returncode == 0, r.stderr
+    assert "disk" in r.stdout.lower()
+    assert "gpu" in r.stdout.lower()
