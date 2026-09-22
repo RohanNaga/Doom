@@ -93,11 +93,15 @@ def batch_stream(frames_col, keep, batch_size, pool, prefetch=PREFETCH_BATCHES):
     """Yield the uint8 frame batches of rows `keep`, prepared `prefetch` batches ahead of the caller.
 
     Pulling the PNG bytes out of the parquet column, decoding them and stacking them is host work;
-    encoding them is GPU work. Run in lockstep the card idles through every batch's decode, and on
-    an A6000 that is the whole gap between the 83 frames/s the per-tic encode measured and the 95
-    frames/s the VAE forward alone sustains. One producer thread runs the same three steps, in the
-    same order, on the same row indices, so the array handed to `encode_batch` -- its rows, their
-    order, their bytes -- is exactly the array the serial loop built.
+    encoding them is GPU work, and done in lockstep the card idles through every batch's decode.
+    One producer thread runs the same three steps, in the same order, on the same row indices, so
+    the array handed to `encode_batch` -- its rows, their order, their bytes -- is exactly the array
+    the serial loop built.
+
+    Measured on an idle A6000 over two 5,000-tic episodes at batch 64, `--every-tic`, bf16: 86 to
+    93 frames/s in steady state against a 96 frames/s ceiling set by the VAE forward alone, which
+    holds the card 99.7% busy. What is left is the per-episode parquet read and sidecar write, not
+    the per-batch decode, so there is nothing further to hide behind the GPU here.
 
     Batch BOUNDARIES are deliberately untouched. Under bf16 autocast cuDNN picks its convolution
     algorithm from the batch shape, so the same frame encodes slightly differently in a batch of 32
