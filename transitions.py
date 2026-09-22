@@ -25,6 +25,93 @@ import numpy as np
 CONTROL_BITS = 9   # MOVE_FORWARD, MOVE_BACKWARD, TURN_LEFT, TURN_RIGHT, MOVE_LEFT, MOVE_RIGHT, ATTACK, SPEED, CROUCH; weapon-select bits ignored
 EPISODE_META_KEY = b"doomdit_episode"
 
+# The engine's whole button list: the nine above plus SELECT_WEAPON0..9. ViZDoom's `setAction` loops
+# over `availableButtons.size()` and reads `actions[i]` only for `i < 19`, zero-filling what is
+# missing and never looking at what is beyond (ViZDoom 1.2.4 `src/lib/ViZDoomGame.cpp:151-158`), so
+# the EXECUTED control of a recorded row is exactly its first 19 characters, right-padded with 0.
+EXECUTED_BUTTONS = 19
+
+# `SELECT_WEAPONj` sits at index CONTROL_BITS + 10*k + j after k `Game.start()` calls in one
+# recorder process (Arnold `src/doom/actions.py:197-199` re-appends the ten names to the SHARED
+# `available_buttons` list on every start, while ViZDoom deduplicates its own list). The widest
+# string in an episode therefore pins k, which is why the report can infer it.
+WEAPON_SLOTS = 10
+
+
+def normalize_buttons(s):
+    """One recorded button string as the EXECUTED control: 19 characters, binary, 0-padded.
+
+    `record_arnold.py:255` renders Arnold's requested control list and line 273 hands the SAME list
+    to `make_action`, so nothing is lost by truncating at what the engine reads. A 1 beyond index 18
+    is a weapon-select press the engine never executed, not a control input: it is dropped, and
+    `switch_request_indices` keeps its index so the request stays recoverable from the sidecar.
+
+    Only the first `EXECUTED_BUTTONS` characters are validated, because only they become control
+    values; a stray character further out cannot reach the model.
+    """
+    s = str(s)
+    if not s:
+        raise ValueError("empty button string: this row holds no executed control")
+    head = s[:EXECUTED_BUTTONS]
+    bad = sorted(set(head) - {"0", "1"})
+    if bad:
+        raise ValueError(f"button string {s[:24]!r} is not binary: {bad[:4]} appear within its first "
+                         f"{EXECUTED_BUTTONS} characters, so it is not the recorder's per-button 0/1 flags")
+    return head.ljust(EXECUTED_BUTTONS, "0")
+
+
+def normalize_button_column(buttons):
+    """A whole recorded column as a fixed `<U19` array of executed control vectors.
+
+    Fixed width is the point: `np.array(raw)` over a corpus whose widest row is 2,506 characters
+    makes a `<U2506` column, which is a 38 to 49 MB sidecar per episode instead of about 200 KB.
+    """
+    return np.array([normalize_buttons(s) for s in np.asarray(buttons).tolist()],
+                    dtype=f"<U{EXECUTED_BUTTONS}")
+
+
+def raw_button_lengths(buttons):
+    """Per-row length of the RAW recorded string, so the sidecar records what was requested."""
+    return np.array([len(str(s)) for s in np.asarray(buttons).tolist()], dtype=np.int16)
+
+
+def switch_request_indices(buttons):
+    """Per-row index of the highest 1 beyond the nine control bits, or -1 when there is none.
+
+    Below `EXECUTED_BUTTONS` this is a weapon switch the engine performed; at or above it, one it
+    was asked for and never performed. Keeping the index means the unexecuted requests are
+    recoverable from the sidecar alone, without the raw parquet.
+    """
+    out = []
+    for s in np.asarray(buttons).tolist():
+        s = str(s)
+        out.append(s.rfind("1", CONTROL_BITS))
+    return np.array(out, dtype=np.int32)
+
+
+def button_width_report(buttons):
+    """What the raw widths of one episode's column say, without refusing any of them.
+
+    `rows_over_executed` is the share of rows whose request ran past the engine's button list;
+    `inferred_starts` is the k those widths imply; `within_episode_growth` is True when one episode
+    holds two different tail widths, which would contradict "the list grows once per `Game.start()`".
+    """
+    raw = [str(s) for s in np.asarray(buttons).tolist()]
+    lens = [len(s) for s in raw]
+    idx = switch_request_indices(raw).tolist()
+    over = [i for i in idx if i >= EXECUTED_BUTTONS]
+    tails = sorted({n for n in lens if n > CONTROL_BITS})
+    widest = max(lens) if lens else 0
+    return {"rows": len(raw), "width": EXECUTED_BUTTONS,
+            "raw_max_width": widest, "raw_min_width": min(lens) if lens else 0,
+            "rows_over_executed": len(over),
+            "fraction_over_executed": len(over) / len(raw) if raw else 0.0,
+            "executed_switch_rows": sum(1 for i in idx if 0 <= i < EXECUTED_BUTTONS),
+            "unexecuted_switch_rows": len(over),
+            "raw_widths_over_control_bits": tails,
+            "within_episode_growth": len(tails) > 1,
+            "inferred_starts": (widest - 1 - CONTROL_BITS) // WEAPON_SLOTS if widest > CONTROL_BITS else None}
+
 
 def stored_tic_stride(schema_metadata):
     """Tics between consecutive stored rows, read from the parquet schema metadata.
