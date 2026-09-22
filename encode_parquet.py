@@ -596,17 +596,19 @@ def write_meta(args, contract, scale, shift, check, stored=1):
 def main(args):
     global CANONICAL
     os.makedirs(args.out_dir, exist_ok=True)
-    device = args.device if torch.cuda.is_available() else "cpu"
-    if args.every_tic and args.align_decisions:
-        raise SystemExit("--every-tic keeps every row and --align-decisions selects a subset; pick one")
     if args.normalize_sidecars:
-        # the sidecar-only repair: it reads no recording, so it runs before --in-dir is even required
+        # The sidecar-only repair. It runs before --in-dir is even required and before the CUDA probe
+        # below, because it reads no recording and must not take a share of a card the training run
+        # is holding: it is the one mode that can be run on a busy machine.
         r = normalize_sidecars(args.out_dir, args.dry_run)
         print(f"normalized sidecars: {json.dumps(r)}", flush=True)
         if r["refused"]:
             raise SystemExit(f"{len(r['refused'])} sidecar(s) refused: {r['refused'][:4]}")
         print("DONE", flush=True)
         return
+    device = args.device if torch.cuda.is_available() else "cpu"
+    if args.every_tic and args.align_decisions:
+        raise SystemExit("--every-tic keeps every row and --align-decisions selects a subset; pick one")
     if not args.in_dir:
         raise SystemExit("--in-dir is required for everything but --normalize-sidecars")
     # normalise "i/n" to the pair before anything formats the shard index into a filename

@@ -200,6 +200,25 @@ def test_the_mask_repair_compares_the_executed_control_not_the_raw_string(tmp_pa
     assert not encode_parquet._columns_agree(cols, t, "buttons")
 
 
+def test_the_cli_repairs_a_directory_with_no_in_dir_and_no_gpu(tmp_path, monkeypatch, capsys):
+    """The repair must run on a busy machine: no recording, no --in-dir, and no CUDA probe."""
+    import torch
+    d, p = _wide_sidecar(tmp_path, "cli", MIXED)
+    os.remove(os.path.join(d, "ep_00000.parquet"))
+    monkeypatch.setattr(torch.cuda, "is_available",
+                        lambda: pytest.fail("--normalize-sidecars must not touch a GPU"))
+    encode_parquet.main(encode_parquet.build_parser().parse_args(["--normalize-sidecars", "--out-dir", d]))
+    assert "DONE" in capsys.readouterr().out
+    assert np.load(p)["buttons"].dtype == np.dtype(f"<U{EXECUTED_BUTTONS}")
+
+
+def test_the_cli_exits_nonzero_when_a_sidecar_is_refused(tmp_path):
+    d, _ = _wide_sidecar(tmp_path, "clibad", [FORWARD] * 20,
+                         stored=[FORWARD + "00000"] * 19 + ["12000000000000"])
+    with pytest.raises(SystemExit, match="refused"):
+        encode_parquet.main(encode_parquet.build_parser().parse_args(["--normalize-sidecars", "--out-dir", d]))
+
+
 def test_a_recording_with_no_sidecar_is_reported_not_crashed(tmp_path):
     d = str(tmp_path / "empty")
     os.makedirs(d)
