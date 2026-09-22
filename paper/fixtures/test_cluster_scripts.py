@@ -25,7 +25,7 @@ GATES = os.path.join(CLUSTER, "gates.sh")
 LAUNCH = os.path.join(CLUSTER, "launch_runs.sh")
 STATUS = os.path.join(CLUSTER, "status.sh")
 REQUIREMENTS = os.path.join(CLUSTER, "requirements.txt")
-SCRIPTS = [SETUP]
+SCRIPTS = [SETUP, FETCH]
 
 
 def dry(script, args=(), **env):
@@ -141,3 +141,96 @@ def test_requirements_cover_everything_the_repo_imports():
 def test_requirements_take_torch_from_a_cuda_wheel_index():
     """A default-index torch on this node would be the CPU build on some platforms."""
     assert "download.pytorch.org/whl/cu" in source_of(REQUIREMENTS)
+
+
+# ---------------------------------------------------------------------------------------
+# fetch_dataset.sh
+# ---------------------------------------------------------------------------------------
+
+def plan(out):
+    """The `DRY plan <corpus> <dir> <lo:hi> files=N first=.. last=..` lines, by corpus."""
+    rows = {}
+    for ln in out.splitlines():
+        m = re.match(r"DRY plan (\S+) (\S+) (\S+) files=(\d+) first=(\S+) last=(\S+)", ln)
+        if m:
+            rows[m.group(1)] = dict(dir=m.group(2), ids=m.group(3), files=int(m.group(4)),
+                                    first=m.group(5), last=m.group(6))
+    return rows
+
+
+def test_fetch_takes_exactly_the_id_ranges_the_two_runs_need(tmp_path):
+    rows = plan(dry(FETCH, root=str(tmp_path)))
+    assert set(rows) == {"train", "val", "test", "unseen"}, rows
+    assert rows["train"] == dict(dir="arenas", ids="0:2000", files=2000,
+                                 first="arenas/ep_00000.parquet", last="arenas/ep_01999.parquet")
+    assert rows["val"] == dict(dir="arenas", ids="6000:6100", files=100,
+                               first="arenas/ep_06000.parquet", last="arenas/ep_06099.parquet")
+    assert rows["test"] == dict(dir="arenas", ids="7000:7100", files=100,
+                                first="arenas/ep_07000.parquet", last="arenas/ep_07099.parquet")
+    assert rows["unseen"] == dict(dir="arenas_678", ids="0:60", files=60,
+                                  first="arenas_678/ep_00000.parquet",
+                                  last="arenas_678/ep_00059.parquet")
+
+
+def test_the_file_list_stops_at_every_range_boundary(tmp_path):
+    """A prefix glob would have pulled 100 unseen episodes for the 60 the corpus is; these are
+    exact names, so the boundary is the boundary."""
+    files = [ln.split(None, 2)[2] for ln in dry(FETCH, root=str(tmp_path), LIST="1").splitlines()
+             if ln.startswith("DRY file ")]
+    assert len(files) == 2260, len(files)
+    assert len(set(files)) == 2260, "the download list repeats a file"
+    for present in ("arenas/ep_00000.parquet", "arenas/ep_01999.parquet",
+                    "arenas/ep_06000.parquet", "arenas/ep_06099.parquet",
+                    "arenas/ep_07000.parquet", "arenas/ep_07099.parquet",
+                    "arenas_678/ep_00000.parquet", "arenas_678/ep_00059.parquet"):
+        assert present in files, present
+    for absent in ("arenas/ep_02000.parquet", "arenas/ep_05999.parquet",
+                   "arenas/ep_06100.parquet", "arenas/ep_07100.parquet",
+                   "arenas_678/ep_00060.parquet"):
+        assert absent not in files, f"{absent} is outside the ranges the runs use"
+
+
+def test_fetch_downloads_the_metadata_the_encode_depends_on(tmp_path):
+    out = dry(FETCH, root=str(tmp_path))
+    for name in ("dense_split.json", "canonical_controls.json", "md5_arenas.txt",
+                 "md5_arenas_678.txt", "README.md"):
+        assert name in out, f"{name} is never fetched"
+
+
+def test_fetch_writes_where_the_encoder_reads(tmp_path):
+    out = dry(FETCH, root=str(tmp_path))
+    assert f"--local-dir {tmp_path}/raw_arnold_dense" in out
+    assert "--repo-type dataset" in out
+    assert "RohanNaga/doom-dense-arnold" in out
+    assert "--force" not in out, "a forced re-download is not resumable"
+
+
+def test_fetch_uses_the_nodes_own_hf_client(tmp_path):
+    assert f"{tmp_path}/env/bin/hf " in dry(FETCH, root=str(tmp_path))
+
+
+def test_every_downloaded_file_is_md5_checked_against_its_manifest(tmp_path):
+    out = dry(FETCH, root=str(tmp_path))
+    assert f"DRY verify arenas 2200 file(s) against {tmp_path}/raw_arnold_dense/md5_arenas.txt" in out
+    assert f"DRY verify arenas_678 60 file(s) against {tmp_path}/raw_arnold_dense/md5_arenas_678.txt" in out
+    assert "jobs=" in out, "the md5 pass is not parallel"
+
+
+def test_a_mismatch_is_loud_and_fatal():
+    src = source_of(FETCH)
+    assert "FETCH_DATASET_FAILED" in src
+    assert "md5sum" in src and "--quiet" in src, "no md5 check at all"
+    assert re.search(r"grep -E .*FAILED", src), "mismatches are never listed"
+
+
+def test_the_rest_of_the_corpus_is_opt_in(tmp_path):
+    off = dry(FETCH, root=str(tmp_path))
+    assert "FULL=1" in off, "the script never says how to get the rest"
+    assert "arenas/*.parquet" not in off
+    on = dry(FETCH, root=str(tmp_path), FULL="1")
+    assert "arenas/*.parquet" in on and "arenas_678/*.parquet" in on
+
+
+def test_fetch_reports_bytes_elapsed_and_rate(tmp_path):
+    out = dry(FETCH, root=str(tmp_path))
+    assert "DRY report bytes" in out and "mb_per_s" in out
