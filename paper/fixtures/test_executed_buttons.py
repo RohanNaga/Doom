@@ -123,12 +123,23 @@ def test_the_width_report_infers_the_recorder_start_count():
 
 
 def test_the_width_report_flags_a_within_episode_growth():
-    """Arnold's list grows per `Game.start()`, so inside one episode the tail width is constant."""
+    """Arnold's list grows per `Game.start()`, so inside one episode k is constant up to the weapon id."""
     ok = button_width_report([FORWARD] * 5 + [SWITCH_IN_RANGE, "1" + "0" * 12 + "1"])
     assert ok["within_episode_growth"] is False
     bad = button_width_report([SWITCH_IN_RANGE, SWITCH_BEYOND])
     assert bad["within_episode_growth"] is True
     assert sorted(bad["raw_widths_over_control_bits"]) == [14, 2503]
+    assert bad["inferred_starts_seen"] == [0, 249]
+
+
+def test_two_weapons_of_the_same_start_block_are_not_growth():
+    """The width moves with the weapon id j from row to row; only k changing would be the defect."""
+    from transitions import WEAPON_SLOTS
+    k = 3
+    rows = [FORWARD + "0" * (WEAPON_SLOTS * k + j) + "1" for j in range(WEAPON_SLOTS)]
+    r = button_width_report(rows)
+    assert len({len(s) for s in rows}) == WEAPON_SLOTS, "ten different raw widths"
+    assert r["inferred_starts_seen"] == [k] and r["within_episode_growth"] is False
 
 
 def test_the_canonical_prefix_of_every_row_is_unchanged_by_normalisation():

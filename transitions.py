@@ -38,6 +38,16 @@ EXECUTED_BUTTONS = 19
 WEAPON_SLOTS = 10
 
 
+def inferred_starts(width):
+    """How many `Game.start()` calls a raw string of this width implies, or None for a plain row.
+
+    A press of `SELECT_WEAPONj` after k starts sits at index `CONTROL_BITS + WEAPON_SLOTS*k + j`
+    with `0 <= j < WEAPON_SLOTS`, so the string is that long plus one and integer division recovers
+    k whichever weapon was asked for.
+    """
+    return (width - 1 - CONTROL_BITS) // WEAPON_SLOTS if width > CONTROL_BITS else None
+
+
 def normalize_buttons(s):
     """One recorded button string as the EXECUTED control: 19 characters, binary, 0-padded.
 
@@ -93,14 +103,19 @@ def button_width_report(buttons):
     """What the raw widths of one episode's column say, without refusing any of them.
 
     `rows_over_executed` is the share of rows whose request ran past the engine's button list;
-    `inferred_starts` is the k those widths imply; `within_episode_growth` is True when one episode
-    holds two different tail widths, which would contradict "the list grows once per `Game.start()`".
+    `inferred_starts` is the k those widths imply.
+
+    `within_episode_growth` is True when one episode's rows imply two different k. The width itself
+    is NOT constant inside an episode -- it moves with the weapon id j, which changes from row to
+    row -- so the invariant is the start count, constant up to j. A True here would contradict "the
+    list grows once per `Game.start()`" and means the explanation is wrong.
     """
     raw = [str(s) for s in np.asarray(buttons).tolist()]
     lens = [len(s) for s in raw]
     idx = switch_request_indices(raw).tolist()
     over = [i for i in idx if i >= EXECUTED_BUTTONS]
     tails = sorted({n for n in lens if n > CONTROL_BITS})
+    starts = sorted({inferred_starts(n) for n in tails})
     widest = max(lens) if lens else 0
     return {"rows": len(raw), "width": EXECUTED_BUTTONS,
             "raw_max_width": widest, "raw_min_width": min(lens) if lens else 0,
@@ -109,8 +124,9 @@ def button_width_report(buttons):
             "executed_switch_rows": sum(1 for i in idx if 0 <= i < EXECUTED_BUTTONS),
             "unexecuted_switch_rows": len(over),
             "raw_widths_over_control_bits": tails,
-            "within_episode_growth": len(tails) > 1,
-            "inferred_starts": (widest - 1 - CONTROL_BITS) // WEAPON_SLOTS if widest > CONTROL_BITS else None}
+            "inferred_starts_seen": starts,
+            "within_episode_growth": len(starts) > 1,
+            "inferred_starts": inferred_starts(widest)}
 
 
 def stored_tic_stride(schema_metadata):
