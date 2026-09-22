@@ -121,6 +121,21 @@ def test_a_decode_failure_surfaces_instead_of_hanging(episode, monkeypatch):
             list(encode_parquet.batch_stream(table["frame"], np.arange(table.num_rows), 8, pool))
 
 
+def test_a_process_decode_pool_still_produces_the_serial_batches(episode):
+    """`--decode-workers N` swaps in a ProcessPoolExecutor.
+
+    Prefetching drives that pool from the producer thread instead of the main one, so the path the
+    flag documents as byte-identical to the thread pool has to be exercised, not assumed.
+    """
+    _, table = episode
+    keep = np.arange(table.num_rows)
+    with ThreadPoolExecutor(3) as threads:
+        want = list(serial_batches(table["frame"], keep, 16, threads))
+    with encode_parquet.build_decode_pool(0, 2) as procs:
+        got = list(encode_parquet.batch_stream(table["frame"], keep, 16, procs))
+    assert b"".join(b.tobytes() for b in got) == b"".join(b.tobytes() for b in want)
+
+
 def encode_one(tmp_path, name, rows, canon, stream=None):
     """Encode one synthetic per-tic episode with the stub encoder; `stream` overrides `batch_stream`."""
     import torch
