@@ -51,14 +51,83 @@ that never changes the split. Split by episode, never by frame.
 ## Columns (one row per tic)
 
 `tic` (int, engine tic inside the episode), `action` (int, Arnold's requested action id, 0 to 28), `buttons` (string of
-0/1, the EXECUTED button vector, one character per entry of `buttons.json`; this can differ from the canonical
-vector of `action` during Arnold's anti-stuck overrides, so it is the ground-truth control), `health`, `ammo`,
+0/1, Arnold's REQUESTED control list, one character per entry in `buttons.json` order; **9 characters normally,
+longer when Arnold appends a weapon-select press**, and the engine executes only the first 19 entries, so the
+executed control is `buttons[:19]` right-padded with 0 — see the next section), `health`, `ammo`,
 `kills`, `deaths`, `frags`, `pos_x`, `pos_y`, `angle`, `frame` (PNG bytes, 320x240 RGB, HUD on, lossless).
+
+The executed control can differ from the canonical vector of `action` during Arnold's anti-stuck overrides, so it,
+not the action id, is the ground-truth control.
 
 Row semantics: row `i` holds the frame at tic `i` and the control applied FROM tic `i` TO tic `i+1`
 (the recorder stores, then steps). A world model predicting frame `i+1` from frames up to `i` is conditioned on
 `buttons[i]`. Arnold chooses a new action every 4 tics and holds it, so controls repeat in runs of 4;
 a new life starts wherever `deaths` increments (the tic counter keeps running through a death).
+
+## Variable-width `buttons`, and the weapon switches Arnold asked for but never got
+
+`buttons` is what Arnold **requested**, not a fixed-width vector. `record_arnold.py:255` renders the control list its
+`decision_buttons` built and hands the *same list* to `make_action` at line 273, so the string is exactly the
+submitted control and nothing about it is lost or reordered.
+
+**Widths.** About 95% of rows are 9 characters (MOVE_FORWARD, MOVE_BACKWARD, TURN_LEFT, TURN_RIGHT, MOVE_LEFT,
+MOVE_RIGHT, ATTACK, SPEED, CROUCH). 12 to 17 characters appear when Arnold's favourite-weapon block appends
+`[False] * mapping["SELECT_WEAPON%i"] + [True]` and the resulting index still falls inside the engine's 19 buttons.
+About 5% of rows are 112 to 2,506 characters, with a single extra `1` far past index 18.
+
+**Executed control.** ViZDoom's `setAction` loops over `availableButtons.size()`, which is 19
+(the nine above plus SELECT_WEAPON0 to SELECT_WEAPON9), reads `actions[i]` only for `i < 19`, zero-fills anything
+missing, and never reads anything beyond; no error is raised (ViZDoom 1.2.4, `src/lib/ViZDoomGame.cpp:147-178`).
+`advance_action` takes no vector. So the control the engine applied at a tic is exactly
+
+    executed = buttons[:19].ljust(19, "0")
+
+for a non-empty string (an empty `buttons` cell is refused rather than padded: the recorder always renders at least
+Arnold's nine entries, so an empty one means the row stored no control at all). A trailing `1` beyond index 18 is
+**not** a weapon switch: it was never executed. `buttons.json` is read out of the engine itself
+(`record_arnold.py:319-350`) and lists exactly those 19 buttons; no `_vizdoom.cfg` exists in the recorder's
+directories that could change the list.
+
+**Two statistics, not one.** A row longer than 19 characters and a row that lost a weapon switch are different
+things, and reporting either as the other hides cases. An anti-stuck row can be 2,503 characters with no `1` past
+index 18, so nothing was requested out there and nothing was lost; a 14-character row can carry a switch at index
+13 that the engine *did* perform. `buttons_report.py` and the encoder's per-episode summary therefore count
+`rows_over_executed` (raw length > 19) and `unexecuted_switch_rows` (the highest `1` past index 8 sits at 19 or
+beyond) separately, alongside `executed_switch_rows`.
+
+**Mechanism.** Arnold's `add_buttons` appends the ten `SELECT_WEAPON%i` names to the *shared* `available_buttons`
+list on **every** `Game.start()` (`src/doom/actions.py:197-199`, `game.py:485`) and its mapping keeps the last index,
+while ViZDoom deduplicates its own button list (`ViZDoomGame.cpp:367-372`) and therefore still has 19. After k starts
+in one recorder process, `SELECT_WEAPONj` maps to `9 + 10*k + j`, where **k is zero-based: `k = starts - 1`**, so
+the 250th `Game.start()` is k = 249 and puts `SELECT_WEAPON0` at index 2,499 and `SELECT_WEAPON9` at 2,508.
+`record_arnold.py:167` calls `game.start(...)` once per recorded episode, so **k is that worker's episode count so
+far**: only a worker's first episode (k = 0, one start behind it) can put a switch inside the engine's 19 buttons
+— `9 + 0 + j <= 18` for every weapon — and in every later episode the requested
+switch was silently dropped. Consequence, and it is a property of the **recorded agent's behaviour**, not of the
+world-model data: in those episodes Arnold did not switch weapons on request. It still fires, and weapon changes
+from pickups still happen. `buttons_report.py` measures this per episode, including a check that k is constant
+inside one episode (the growth is per `Game.start()`, so a within-episode change would falsify the explanation).
+
+**Published Arnold has the same defect.** Its own weapon block (`game.py:625-680`) builds the same oversized list
+and passes it to ViZDoom. Its published evaluation calls `start()` once per map (`deathmatch.py:148-153`), so k
+stays small there and the effect is mostly invisible.
+
+**No prior report was found in the searched sources.** Searched on 2026-09-22:
+
+- all 19 issues and pull requests on the Arnold repository, and their 40 comments;
+- the helper code of its 106 forks;
+- the ViZDoom issue tracker for reports about action-vector length;
+- MultiGen, which used Arnold as its data collector.
+
+None of them mentions this. That is a bounded negative finding over those four sources, not a proof that nobody
+has hit it: mailing lists, private forks, papers that did not publish collection code, and anything after that
+date were not searched.
+
+**What the encoder stores.** `encode_parquet.py` writes the normalised 19-character executed vector into
+`ep_XXXXX_meta.npz` as a fixed `<U19` column, and keeps the request beside it as `buttons_raw_len` (the raw
+string's length) and `switch_requested_index` (the index of the highest `1` past index 8, or -1), so an unexecuted
+switch stays recoverable from the sidecar without the parquet. **The raw parquet column is never altered.** A corpus
+encoded before this is repaired in place, with no re-encoding, by `encode_parquet.py --normalize-sidecars`.
 
 ## Files
 

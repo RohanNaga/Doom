@@ -31,7 +31,7 @@ import rollout_eval  # noqa: E402
 import train_wm  # noqa: E402
 
 SCRIPTS = os.path.join(REPO, "scripts", "spiderman")
-BITS = 9
+BITS = 19       # the executed control width: every entry of the engine's `available_buttons`
 
 
 # ---------------------------------------------------------------------------------------

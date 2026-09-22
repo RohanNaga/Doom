@@ -245,20 +245,36 @@ def test_horizon_one_with_horizon_matches_the_training_contract(tmp_path):
 # executed-control action history (GameNGen's conditioning)
 # ---------------------------------------------------------------------------------------
 
+BITS = doom_data.EXECUTED_BUTTONS        # every control vector is the engine's 19 buttons
+
+
 def _buttons(rows, bits=6):
-    """One 0/1 string per row, encoding the row index in binary so a test can read it back."""
+    """One 0/1 string per row, encoding the row index in binary so a test can read it back.
+
+    `control_matrix` right-pads every string to the executed 19, so the row index lives in the
+    LEADING `bits` entries of the vector and `_row_of` reads it back from there.
+    """
     return [format(r % (2 ** bits), f"0{bits}b") for r in rows]
+
+
+def _row_of(vec, bits=6):
+    """The row index `_buttons` encoded, out of a (19,) control vector."""
+    assert len(vec) == BITS, f"a control vector is {BITS} wide, got {len(vec)}"
+    return int("".join(str(int(v)) for v in vec[:bits]), 2)
 
 
 def test_control_matrix_reads_the_recorders_button_strings():
     m = doom_data.control_matrix(["100000", "010101"])
-    assert m.shape == (2, 6) and m.dtype.name == "float32"
-    assert m[0].tolist() == [1, 0, 0, 0, 0, 0] and m[1].tolist() == [0, 1, 0, 1, 0, 1]
+    assert m.shape == (2, BITS) and m.dtype.name == "float32"
+    assert m[0].tolist() == [1, 0, 0, 0, 0, 0] + [0] * 13
+    assert m[1].tolist() == [0, 1, 0, 1, 0, 1] + [0] * 13
 
 
-def test_control_matrix_refuses_mixed_widths():
-    with pytest.raises(ValueError, match="differing width"):
-        doom_data.control_matrix(["1010", "101"])
+def test_control_matrix_normalises_mixed_raw_widths_to_the_executed_width():
+    """The recorder's raw width varies row to row; the executed control never does."""
+    m = doom_data.control_matrix(["1010", "101"])
+    assert m.shape == (2, BITS)
+    assert m[0].tolist()[:4] == [1, 0, 1, 0] and m[1].tolist()[:4] == [1, 0, 1, 0]
 
 
 def test_the_history_is_one_control_per_context_tic_ending_at_the_row_before_the_target(tmp_path):
@@ -276,9 +292,9 @@ def test_the_history_is_one_control_per_context_tic_ending_at_the_row_before_the
         _, s = ds.locate(i)
         ctx, tgt, controls = ds[i]
         r = s + 4                                        # the target row
-        assert controls.shape == (4, 6)
+        assert controls.shape == (4, BITS)
         # each token is the binary encoding of its own source row, oldest first
-        rows = [int("".join(str(int(v)) for v in controls[k]), 2) for k in range(4)]
+        rows = [_row_of(controls[k]) for k in range(4)]
         assert rows == [r - 4, r - 3, r - 2, r - 1]
         assert rows[-1] == r - 1 != r                    # never buttons[r]
         assert frame_index_of(tgt) == r
@@ -293,7 +309,7 @@ def test_the_newest_control_token_comes_from_the_legacy_scalars_own_row(tmp_path
     for i in range(len(legacy)):
         _, s = legacy.locate(i)
         assert legacy.held_action_row(s) == s + 3
-        newest = int("".join(str(int(v)) for v in hist[i][2][-1]), 2)
+        newest = _row_of(hist[i][2][-1])
         assert newest == legacy.held_action_row(s), "the newest token is not the legacy scalar's row"
 
 
@@ -306,7 +322,7 @@ def test_a_held_action_simply_repeats_on_every_tic(tmp_path):
     starts = [ds.locate(i)[1] for i in range(len(ds))]
     ctrl = ds[starts.index(4)][2]                     # context rows 4..7, one whole decision
     assert torch.equal(ctrl[0], ctrl[1]) and torch.equal(ctrl[1], ctrl[3])
-    assert ctrl[0].tolist() == [0, 1, 0, 1, 0, 0]
+    assert ctrl[0].tolist() == [0, 1, 0, 1, 0, 0] + [0] * 13
     assert T == 16
 
 
@@ -334,17 +350,18 @@ def test_horizon_windows_shift_the_control_window_with_the_frame_window(tmp_path
     ds = TicWindowDataset(d, context_frames=4, horizon=4, with_horizon=True, action_history=4)
     _, s = ds.locate(0)
     ctx, tgts, controls, ph = ds[0]
-    assert controls.shape == (4, 4, 6)                 # (steps, L, bits)
+    assert controls.shape == (4, 4, BITS)              # (steps, L, bits)
     for k in range(4):
-        rows = [int("".join(str(int(v)) for v in controls[k, j]), 2) for j in range(4)]
+        rows = [_row_of(controls[k, j]) for j in range(4)]
         assert rows == [s + k, s + k + 1, s + k + 2, s + k + 3]
         assert rows[-1] == (s + 4 + k) - 1             # the control leaving step k's last context frame
 
 
-def test_the_corpus_reports_its_control_width(tmp_path):
+def test_the_corpus_reports_the_executed_control_width(tmp_path):
+    """The width is the engine's button count, not the recorder's raw string length."""
     d = corpus(tmp_path, "bits", held_actions([1, 2, 3, 4]), buttons=_buttons(range(16), bits=9))
-    assert doom_data.corpus_control_bits(d) == 9
-    assert TicWindowDataset(d, context_frames=4, action_history=4).control_bits == 9
+    assert doom_data.corpus_control_bits(d) == BITS
+    assert TicWindowDataset(d, context_frames=4, action_history=4).control_bits == BITS
 
 
 # ---------------------------------------------------------------------------------------
