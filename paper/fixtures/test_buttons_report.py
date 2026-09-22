@@ -73,6 +73,39 @@ def test_the_report_counts_a_switch_the_engine_never_saw(tmp_path):
     assert ep["fraction_over_executed"] == pytest.approx(0.05)
 
 
+def test_an_oversized_row_with_no_switch_bit_is_reported_separately(tmp_path):
+    """An anti-stuck row can be 2,503 characters with nothing out there; it lost no control."""
+    d = str(tmp_path / "raw")
+    _write(d, 0, [FORWARD] * 19 + ["100100010" + "0" * 2494])
+    ep = buttons_report.report(d)["episodes"][0]
+    assert ep["raw_max_width"] == 2503
+    assert ep["rows_over_executed"] == 1 and ep["unexecuted_switch_rows"] == 0
+
+
+def test_the_two_statistics_agree_between_the_parquet_and_the_sidecar(tmp_path):
+    """`from_sidecar` rebuilds the numbers from the provenance columns; they must be identical."""
+    pytest.importorskip("torch")
+    from pertic_fixtures import held_actions, write_pertic_episode
+    raw = [FORWARD] * 17 + ["100100010" + "0" * 2494, _switch(0, 4), _switch(3, 0)]
+    d = str(tmp_path / "raw")
+    _write(d, 0, raw)
+    lat = str(tmp_path / "lat")
+    write_pertic_episode(lat, 0, held_actions([1] * 5))
+    p = os.path.join(lat, "ep_00000_meta.npz")
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    from transitions import raw_button_lengths, switch_request_indices
+    cols["buttons_raw_len"] = raw_button_lengths(raw)
+    cols["switch_requested_index"] = switch_request_indices(raw)
+    np.savez(p, **cols)
+    a = buttons_report.report(d)["episodes"][0]
+    b = buttons_report.report(lat, sidecars=True)["episodes"][0]
+    for k in ("rows", "raw_max_width", "rows_over_executed", "executed_switch_rows",
+              "unexecuted_switch_rows", "inferred_starts", "within_episode_growth"):
+        assert a[k] == b[k], k
+    assert (a["rows_over_executed"], a["unexecuted_switch_rows"]) == (2, 1)
+
+
 def test_the_report_flags_a_within_episode_width_change(tmp_path):
     """This would contradict "the list grows once per `Game.start()`", so it must be visible."""
     d = str(tmp_path / "raw")

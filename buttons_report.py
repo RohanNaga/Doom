@@ -12,9 +12,12 @@ FIRST episode (k = 0) can put a switch inside the engine's 19 buttons.
 This report measures that claim rather than asserting it:
 
   * `raw_max_width` and `raw_widths_over_control_bits` are the widths actually in the file;
-  * `executed_switch_rows` / `unexecuted_switch_rows` split the switch presses at index 18, which is
-    where `ViZDoomGame::setAction` stops reading (`src/lib/ViZDoomGame.cpp:151-158`);
-  * `inferred_starts` is the k those widths imply;
+  * `rows_over_executed` counts rows whose RAW STRING is longer than 19, whatever it holds out
+    there, while `executed_switch_rows` / `unexecuted_switch_rows` split the weapon-select PRESSES
+    at index 18, where `ViZDoomGame::setAction` stops reading (`src/lib/ViZDoomGame.cpp:151-158`).
+    These are separate statistics: an anti-stuck row can be 2,503 characters with no switch bit at
+    all, so nothing was lost on it, and a short row can carry a switch the engine did perform;
+  * `inferred_starts` is the k those widths imply, zero-based, so `k + 1` starts had happened;
   * `within_episode_growth` is True when ONE episode holds two tail widths. The explanation says the
     list grows per `Game.start()`, so that must be false on every episode; if it is true anywhere,
     the explanation is wrong and the row is printed rather than averaged away.
@@ -64,7 +67,8 @@ def from_sidecar(path):
                              "predates the executed-control normalisation, so the raw widths are gone")
         lens = np.asarray(z["buttons_raw_len"]).astype(np.int64)
         idx = np.asarray(z["switch_requested_index"]).astype(np.int64)
-    over = int((idx >= EXECUTED_BUTTONS).sum())
+    over = int((lens > EXECUTED_BUTTONS).sum())          # the raw string ran past the engine
+    lost = int((idx >= EXECUTED_BUTTONS).sum())          # and a switch press was out there
     tails = sorted({int(n) for n in lens if n > CONTROL_BITS})
     starts = sorted({inferred_starts(n) for n in tails})
     widest = int(lens.max()) if len(lens) else 0
@@ -72,7 +76,7 @@ def from_sidecar(path):
             "width": EXECUTED_BUTTONS, "raw_max_width": widest, "raw_min_width": int(lens.min()) if len(lens) else 0,
             "rows_over_executed": over, "fraction_over_executed": over / len(lens) if len(lens) else 0.0,
             "executed_switch_rows": int(((idx >= 0) & (idx < EXECUTED_BUTTONS)).sum()),
-            "unexecuted_switch_rows": over, "raw_widths_over_control_bits": tails,
+            "unexecuted_switch_rows": lost, "raw_widths_over_control_bits": tails,
             "inferred_starts_seen": starts, "within_episode_growth": len(starts) > 1,
             "inferred_starts": inferred_starts(widest)}
 

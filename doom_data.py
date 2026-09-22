@@ -513,7 +513,11 @@ def tic_window_starts(meta, context_frames, horizon=1, strict=True):
     return np.flatnonzero(ok).astype(np.int64)
 
 
-ControlWidths = namedtuple("ControlWidths", "width raw_max_width rows_over_executed fraction_over_executed")
+# `rows_over_executed` counts raw strings longer than the executed width; `unexecuted_switch_rows`
+# counts the weapon-select presses that sat beyond it. Neither implies the other: an anti-stuck row
+# can be 2,503 characters with no switch bit at all.
+ControlWidths = namedtuple("ControlWidths",
+                           "width raw_max_width rows_over_executed fraction_over_executed unexecuted_switch_rows")
 
 
 def control_matrix(buttons):
@@ -552,7 +556,7 @@ def check_control_strings(buttons):
     normalize_button_column(buttons)            # the alphabet check, on what actually reaches the model
     r = button_width_report(buttons)
     return ControlWidths(r["width"], r["raw_max_width"], r["rows_over_executed"],
-                         r["fraction_over_executed"])
+                         r["fraction_over_executed"], r["unexecuted_switch_rows"])
 
 
 def check_sidecar_buttons_dtype(buttons, meta_path):

@@ -390,6 +390,34 @@ def _columns_agree(cols, table, name):
                           table[name].to_numpy(zero_copy_only=False).astype(np.int64))
 
 
+def _sidecar_disagreement(cols, table, need=REPAIR_COLUMNS, owned=()):
+    """Why this sidecar does not describe this recording, as a phrase, or None when it does.
+
+    Four ways a sidecar can fail to be the recording's, in the order that makes the message useful:
+    a different row count, a column that is not that many rows long (a ragged `.npz` is legal and
+    silently describes different rows per column), different recorded tics, or different values in
+    the columns the caller depends on. `buttons` is compared as executed control on both sides.
+
+    `owned` names the columns the CALLER is about to recompute from the recording. A wrong length
+    there is not a reason to refuse the episode, because the repair is exactly what fixes it; every
+    other column is copied through untouched and so must already describe these rows.
+    """
+    n = table.num_rows
+    if len(cols.get("tic", ())) != n:
+        return f"{len(cols.get('tic', ()))} sidecar rows vs {n} raw rows"
+    ragged = sorted(c for c, v in cols.items()
+                    if c not in owned and np.ndim(v) >= 1 and len(v) != n)
+    if ragged:
+        return f"sidecar columns {ragged} are not {n} rows long, so they do not describe the same rows"
+    if not np.array_equal(np.asarray(cols["tic"]).astype(np.int64),
+                          table["tic"].to_numpy(zero_copy_only=False).astype(np.int64)):
+        return "sidecar tics differ from the raw tics"
+    disagree = [c for c in need if not _columns_agree(cols, table, c)]
+    if disagree:
+        return f"sidecar {disagree} differ from the raw recording"
+    return None
+
+
 def rebuild_sidecar_masks(paths, out_dir, canonical, stride=4, dry_run=False):
     """Recompute `is_decision` / `chain_id` in sidecars that already exist, from the raw parquet.
 
@@ -421,17 +449,10 @@ def rebuild_sidecar_masks(paths, out_dir, canonical, stride=4, dry_run=False):
             continue
         with np.load(meta_path) as z:
             cols = {k: z[k] for k in z.files}
-        if len(cols.get("tic", ())) != t.num_rows:
-            out["refused"].append(f"{ep}: {len(cols.get('tic', ()))} sidecar rows vs {t.num_rows} raw rows")
-            continue
-        if not np.array_equal(np.asarray(cols["tic"]).astype(np.int64),
-                              t["tic"].to_numpy(zero_copy_only=False).astype(np.int64)):
-            out["refused"].append(f"{ep}: sidecar tics differ from the raw tics")
-            continue
-        disagree = [c for c in REPAIR_COLUMNS if not _columns_agree(cols, t, c)]
-        if disagree:
-            out["refused"].append(f"{ep}: sidecar {disagree} differ from the raw recording, so the repaired "
-                                  "masks would not describe the controls beside them")
+        bad = _sidecar_disagreement(cols, t, owned=("is_decision", "chain_id") + BUTTON_PROVENANCE_COLS)
+        if bad:
+            out["refused"].append(f"{ep}: {bad}, so the repaired masks would not describe the "
+                                  "controls beside them")
             continue
         dec, dec_chain = decision_rows(t["action"].to_numpy(zero_copy_only=False),
                                        np.array(t["buttons"].to_pylist()),
@@ -471,41 +492,62 @@ def _replace_npz(path, cols):
         raise
 
 
-def normalize_sidecars(out_dir, dry_run=False):
-    """Rewrite every `_meta.npz` in `out_dir` with the EXECUTED 19-button control column.
+def normalize_sidecars(paths, out_dir, dry_run=False):
+    """Rewrite the sidecars of `paths` with the EXECUTED 19-button control column, checked against raw.
 
-    The cheap half of `rebuild_sidecar_masks`: no parquet, no canonical table, no VAE, no latent
-    touched. It exists because the already-encoded corpus carries Arnold's raw request strings, so
+    The cheap half of `rebuild_sidecar_masks`: no canonical table, no VAE, no latent touched, and
+    only the `tic`, `action`, `buttons` and `deaths` columns of each recording are read, never
+    `frame`. It exists because the already-encoded corpus carries Arnold's raw request strings, so
     each sidecar is 38 to 49 MB of `<U2506` column instead of about 200 KB, and re-encoding 2,000
     episodes to fix 19 characters per row would cost days of GPU time for nothing.
 
-    Every other column is copied through, `buttons_raw_len` and `switch_requested_index` are added
-    (or refreshed) from whatever string width the file holds, and the file is replaced atomically.
-    An episode whose column is not binary within its first 19 characters is listed as refused and
-    left exactly as it was: that is a corrupted column, not a wide one.
+    **The recording is read because the repair rewrites the file.** A version that opened only the
+    `.npz` could not tell a merely wide sidecar from a wrong one: it would happily normalise a
+    sidecar with two button rows per tic row, or one belonging to a different episode, and hand back
+    something that looks correct. Every episode must therefore agree with its recording on row
+    count, column lengths, recorded tics and the executed control (`_sidecar_disagreement`), and one
+    that does not is listed under `refused` and left byte-for-byte alone.
+
+    Every other column is copied through and the file is replaced atomically. `buttons_raw_len` and
+    `switch_requested_index` are taken from the RAW recording, which is the only place the request
+    still exists once a sidecar has been normalised.
     """
-    out = {"episodes": 0, "normalized": 0, "unchanged": 0, "refused": []}
-    for meta_path in sorted(glob.glob(os.path.join(out_dir, "ep_*_meta.npz"))):
-        ep = os.path.basename(meta_path).replace("_meta.npz", "")
+    import pyarrow.parquet as pq
+    out = {"episodes": 0, "normalized": 0, "unchanged": 0, "missing": [], "refused": []}
+    for p in paths:
+        ep = os.path.basename(p).replace(".parquet", "")
+        meta_path = os.path.join(out_dir, f"{ep}_meta.npz")
+        if not os.path.exists(meta_path):
+            out["missing"].append(ep)
+            continue
         with np.load(meta_path) as z:
             cols = {k: z[k] for k in z.files}
         if "buttons" not in cols:
             out["refused"].append(f"{ep}: no buttons column, so there is no control to normalise")
             continue
         out["episodes"] += 1
-        raw = np.asarray(cols["buttons"])
+        t = pq.read_table(p, columns=["action", "buttons", "deaths", "tic"])
+        raw = np.array(t["buttons"].to_pylist())
         try:
+            # the sidecar's own column first, so a '2' in it is reported as the corruption it is
+            # rather than as a disagreement with a recording that is perfectly fine
+            normalize_button_column(cols["buttons"])
             fixed = button_columns(raw)
         except ValueError as e:
             out["refused"].append(f"{ep}: {e}")
             continue
-        # a sidecar normalised by an earlier pass no longer holds the raw widths, so its recorded
-        # provenance is the truth and must not be recomputed from the 19-character column
-        for c in BUTTON_PROVENANCE_COLS:
-            if c in cols and len(cols[c]) == len(raw):
-                fixed[c] = cols[c]
-        already = (raw.dtype == fixed["buttons"].dtype and np.array_equal(raw, fixed["buttons"])
-                   and all(c in cols for c in BUTTON_PROVENANCE_COLS))
+        bad = _sidecar_disagreement(cols, t, need=("buttons",), owned=BUTTON_PROVENANCE_COLS)
+        if bad:
+            out["refused"].append(f"{ep}: {bad}, so the normalised column would not describe "
+                                  "the latents beside it")
+            continue
+        # "unchanged" has to mean every column is right, not merely present: a truncated
+        # `buttons_raw_len` from an interrupted write described the wrong rows and was skipped
+        already = (cols["buttons"].dtype == fixed["buttons"].dtype
+                   and np.array_equal(cols["buttons"], fixed["buttons"])
+                   and all(c in cols and len(cols[c]) == t.num_rows
+                           and np.array_equal(np.asarray(cols[c]), fixed[c])
+                           for c in BUTTON_PROVENANCE_COLS))
         if already:
             out["unchanged"] += 1
             continue
@@ -596,11 +638,17 @@ def write_meta(args, contract, scale, shift, check, stored=1):
 def main(args):
     global CANONICAL
     os.makedirs(args.out_dir, exist_ok=True)
+    if not args.in_dir:
+        raise SystemExit("--in-dir is required: every mode compares its output against the recordings")
     if args.normalize_sidecars:
-        # The sidecar-only repair. It runs before --in-dir is even required and before the CUDA probe
-        # below, because it reads no recording and must not take a share of a card the training run
-        # is holding: it is the one mode that can be run on a busy machine.
-        r = normalize_sidecars(args.out_dir, args.dry_run)
+        # The sidecar repair. It runs before the CUDA probe below because it builds no VAE and must
+        # not take a share of a card a training run is holding: it is the one mode that can be run on
+        # a busy machine. It still reads each recording's `tic`, `action`, `buttons` and `deaths`
+        # (never `frame`), because rewriting a file without checking whose it is is how a wrong
+        # sidecar gets laundered into a plausible one.
+        args.shard, args.num_shards = parse_shard(args.shard, args.num_shards)
+        paths = select_paths(args.in_dir, args.episode_ids, args.max_episodes, args.shard, args.num_shards)
+        r = normalize_sidecars(paths, args.out_dir, args.dry_run)
         print(f"normalized sidecars: {json.dumps(r)}", flush=True)
         if r["refused"]:
             raise SystemExit(f"{len(r['refused'])} sidecar(s) refused: {r['refused'][:4]}")
@@ -609,8 +657,6 @@ def main(args):
     device = args.device if torch.cuda.is_available() else "cpu"
     if args.every_tic and args.align_decisions:
         raise SystemExit("--every-tic keeps every row and --align-decisions selects a subset; pick one")
-    if not args.in_dir:
-        raise SystemExit("--in-dir is required for everything but --normalize-sidecars")
     # normalise "i/n" to the pair before anything formats the shard index into a filename
     args.shard, args.num_shards = parse_shard(args.shard, args.num_shards)
     paths = select_paths(args.in_dir, args.episode_ids, args.max_episodes, args.shard, args.num_shards)
@@ -674,8 +720,7 @@ def main(args):
 
 def build_parser():
     p = argparse.ArgumentParser()
-    # not required: --normalize-sidecars works off --out-dir alone and reads no recording at all
-    p.add_argument("--in-dir", default="")
+    p.add_argument("--in-dir", required=True)
     p.add_argument("--out-dir", required=True)
     p.add_argument("--stride", type=int, default=4)
     p.add_argument("--batch-size", type=int, default=64)
@@ -710,10 +755,11 @@ def build_parser():
                         "and --canonical, leaving the latents alone. This is the repair for a corpus encoded "
                         "under a per-shard table")
     p.add_argument("--normalize-sidecars", dest="normalize_sidecars", action="store_true",
-                   help="rewrite every sidecar in --out-dir with the executed 19-button control column and "
-                        "stop. No parquet, no canonical table, no VAE, no latent touched: this is the repair "
-                        "for a corpus whose buttons column holds Arnold's raw request strings, which makes "
-                        "each .npz 38 to 49 MB instead of about 200 KB. --in-dir is not needed")
+                   help="rewrite the sidecars in --out-dir with the executed 19-button control column and "
+                        "stop. No canonical table, no VAE, no latent touched, and only the tic/action/buttons/"
+                        "deaths columns of each --in-dir recording are read (never frame), to check that the "
+                        "sidecar really is that episode's. This is the repair for a corpus whose buttons column "
+                        "holds Arnold's raw request strings, which makes each .npz 38 to 49 MB instead of ~200 KB")
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="with --rebuild-sidecar-masks or --normalize-sidecars: report what would change "
                         "and write nothing")

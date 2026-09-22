@@ -82,16 +82,27 @@ missing, and never reads anything beyond; no error is raised (ViZDoom 1.2.4, `sr
 
     executed = buttons[:19].ljust(19, "0")
 
-and a trailing `1` beyond index 18 is **not** a weapon switch: it was never executed. `buttons.json` is read out of
-the engine itself (`record_arnold.py:319-350`) and lists exactly those 19 buttons; no `_vizdoom.cfg` exists in the
-recorder's directories that could change the list.
+for a non-empty string (an empty `buttons` cell is refused rather than padded: the recorder always renders at least
+Arnold's nine entries, so an empty one means the row stored no control at all). A trailing `1` beyond index 18 is
+**not** a weapon switch: it was never executed. `buttons.json` is read out of the engine itself
+(`record_arnold.py:319-350`) and lists exactly those 19 buttons; no `_vizdoom.cfg` exists in the recorder's
+directories that could change the list.
+
+**Two statistics, not one.** A row longer than 19 characters and a row that lost a weapon switch are different
+things, and reporting either as the other hides cases. An anti-stuck row can be 2,503 characters with no `1` past
+index 18, so nothing was requested out there and nothing was lost; a 14-character row can carry a switch at index
+13 that the engine *did* perform. `buttons_report.py` and the encoder's per-episode summary therefore count
+`rows_over_executed` (raw length > 19) and `unexecuted_switch_rows` (the highest `1` past index 8 sits at 19 or
+beyond) separately, alongside `executed_switch_rows`.
 
 **Mechanism.** Arnold's `add_buttons` appends the ten `SELECT_WEAPON%i` names to the *shared* `available_buttons`
 list on **every** `Game.start()` (`src/doom/actions.py:197-199`, `game.py:485`) and its mapping keeps the last index,
 while ViZDoom deduplicates its own button list (`ViZDoomGame.cpp:367-372`) and therefore still has 19. After k starts
-in one recorder process, `SELECT_WEAPONj` maps to `9 + 10*k + j` — 2,502 at the 250th start. `record_arnold.py:167`
-calls `game.start(...)` once per recorded episode, so **k is that worker's running episode count**: only a worker's
-first episode (k = 0) can put a switch inside the engine's 19 buttons, and in every later episode the requested
+in one recorder process, `SELECT_WEAPONj` maps to `9 + 10*k + j`, where **k is zero-based: `k = starts - 1`**, so
+the 250th `Game.start()` is k = 249 and puts `SELECT_WEAPON0` at index 2,499 and `SELECT_WEAPON9` at 2,508.
+`record_arnold.py:167` calls `game.start(...)` once per recorded episode, so **k is that worker's episode count so
+far**: only a worker's first episode (k = 0, one start behind it) can put a switch inside the engine's 19 buttons
+— `9 + 0 + j <= 18` for every weapon — and in every later episode the requested
 switch was silently dropped. Consequence, and it is a property of the **recorded agent's behaviour**, not of the
 world-model data: in those episodes Arnold did not switch weapons on request. It still fires, and weapon changes
 from pickups still happen. `buttons_report.py` measures this per episode, including a check that k is constant
@@ -101,9 +112,16 @@ inside one episode (the growth is per `Game.start()`, so a within-episode change
 and passes it to ViZDoom. Its published evaluation calls `start()` once per map (`deathmatch.py:148-153`), so k
 stays small there and the effect is mostly invisible.
 
-**No prior report exists.** All 19 Arnold issues and pull requests with their 40 comments, the helper code of its
-106 forks, the ViZDoom issues about action-vector length, and MultiGen (which used Arnold as its data collector)
-were searched on 2026-09-22 and none of them mentions this. That is a bounded negative finding, not a proof.
+**No prior report was found in the searched sources.** Searched on 2026-09-22:
+
+- all 19 issues and pull requests on the Arnold repository, and their 40 comments;
+- the helper code of its 106 forks;
+- the ViZDoom issue tracker for reports about action-vector length;
+- MultiGen, which used Arnold as its data collector.
+
+None of them mentions this. That is a bounded negative finding over those four sources, not a proof that nobody
+has hit it: mailing lists, private forks, papers that did not publish collection code, and anything after that
+date were not searched.
 
 **What the encoder stores.** `encode_parquet.py` writes the normalised 19-character executed vector into
 `ep_XXXXX_meta.npz` as a fixed `<U19` column, and keeps the request beside it as `buttons_raw_len` (the raw

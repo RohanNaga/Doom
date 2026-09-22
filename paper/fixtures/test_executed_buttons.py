@@ -108,11 +108,30 @@ def test_the_width_report_names_the_raw_maximum_and_the_unexecuted_fraction():
     r = button_width_report([FORWARD] * 18 + [SWITCH_IN_RANGE, SWITCH_BEYOND])
     assert r["rows"] == 20
     assert r["raw_max_width"] == 2503
-    assert r["rows_over_executed"] == 1
+    assert r["rows_over_executed"] == 1          # only SWITCH_BEYOND is longer than 19
     assert r["fraction_over_executed"] == pytest.approx(0.05)
-    assert r["executed_switch_rows"] == 1
-    assert r["unexecuted_switch_rows"] == 1
+    assert r["executed_switch_rows"] == 1        # SWITCH_IN_RANGE, at index 13
+    assert r["unexecuted_switch_rows"] == 1      # SWITCH_BEYOND, at index 2502
     assert r["width"] == EXECUTED_BUTTONS
+
+
+LONG_NO_SWITCH = "100100010" + "0" * 2494          # 2503 chars, an anti-stuck row, no switch bit
+
+
+def test_an_oversized_string_with_no_switch_bit_is_counted_as_oversized_only():
+    """Counting only trailing switch bits reported zero oversized rows for exactly this row."""
+    r = button_width_report([FORWARD] * 19 + [LONG_NO_SWITCH])
+    assert r["raw_max_width"] == 2503
+    assert r["rows_over_executed"] == 1, "the string ran past the engine's button list"
+    assert r["unexecuted_switch_rows"] == 0, "but nothing was requested out there, so nothing was lost"
+    assert r["executed_switch_rows"] == 0
+
+
+def test_a_switch_inside_the_engines_buttons_is_not_an_oversized_row():
+    """The two statistics are independent in both directions."""
+    r = button_width_report([FORWARD] * 19 + [SWITCH_IN_RANGE])
+    assert r["rows_over_executed"] == 0 and r["raw_max_width"] == 14
+    assert r["executed_switch_rows"] == 1 and r["unexecuted_switch_rows"] == 0
 
 
 def test_the_width_report_infers_the_recorder_start_count():
@@ -190,6 +209,12 @@ def test_control_strings_of_different_raw_widths_are_accepted_and_reported():
     assert r.width == EXECUTED_BUTTONS
     assert r.raw_max_width == 2503
     assert r.fraction_over_executed == pytest.approx(0.1)
+    assert (r.rows_over_executed, r.unexecuted_switch_rows) == (1, 1)
+
+
+def test_the_corpus_check_separates_an_oversized_row_from_a_lost_switch():
+    r = check_control_strings([FORWARD] * 19 + [LONG_NO_SWITCH])
+    assert (r.rows_over_executed, r.unexecuted_switch_rows) == (1, 0)
 
 
 def test_a_non_binary_control_string_is_still_refused():

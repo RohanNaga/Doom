@@ -131,12 +131,16 @@ def _wide_sidecar(tmp_path, name, widths, stored=None):
     return d, p
 
 
+def _paths(d):
+    return [os.path.join(d, "ep_00000.parquet")]
+
+
 def test_normalize_sidecars_shrinks_an_already_encoded_episode(tmp_path):
     d, p = _wide_sidecar(tmp_path, "repair", MIXED)
     assert np.load(p)["buttons"].dtype.itemsize // 4 == 2503
     before = os.path.getsize(p)
-    r = encode_parquet.normalize_sidecars(d)
-    assert r == {"episodes": 1, "normalized": 1, "unchanged": 0, "refused": []}
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
+    assert r == {"episodes": 1, "normalized": 1, "unchanged": 0, "missing": [], "refused": []}
     with np.load(p) as z:
         assert z["buttons"].dtype == np.dtype(f"<U{EXECUTED_BUTTONS}")
         assert z["buttons"].tolist() == [normalize_buttons(s) for s in MIXED]
@@ -147,18 +151,17 @@ def test_normalize_sidecars_shrinks_an_already_encoded_episode(tmp_path):
     assert os.path.getsize(p) < before
 
 
-def test_normalize_sidecars_is_idempotent_and_needs_no_parquet(tmp_path):
+def test_normalize_sidecars_is_idempotent(tmp_path):
     d, p = _wide_sidecar(tmp_path, "twice", MIXED)
-    os.remove(os.path.join(d, "ep_00000.parquet"))
-    encode_parquet.normalize_sidecars(d)
-    again = encode_parquet.normalize_sidecars(d)
+    encode_parquet.normalize_sidecars(_paths(d), d)
+    again = encode_parquet.normalize_sidecars(_paths(d), d)
     assert again["normalized"] == 0 and again["unchanged"] == 1
 
 
 def test_normalize_sidecars_writes_nothing_under_dry_run(tmp_path):
     d, p = _wide_sidecar(tmp_path, "dry", MIXED)
     before = open(p, "rb").read()
-    r = encode_parquet.normalize_sidecars(d, dry_run=True)
+    r = encode_parquet.normalize_sidecars(_paths(d), d, dry_run=True)
     assert r["normalized"] == 1
     assert open(p, "rb").read() == before
 
@@ -167,10 +170,79 @@ def test_normalize_sidecars_refuses_a_non_binary_column(tmp_path):
     """A '2' is a corrupted column, not a wide one; the file must be left alone for a human to look at."""
     d, p = _wide_sidecar(tmp_path, "bad", [FORWARD] * 20,
                          stored=[FORWARD + "00000"] * 19 + ["12000000000000"])
-    r = encode_parquet.normalize_sidecars(d)
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
     assert r["normalized"] == 0 and len(r["refused"]) == 1
     assert "not binary" in r["refused"][0]
     assert np.load(p)["buttons"].dtype.itemsize // 4 == 14, "the file is left exactly as it was"
+
+
+# ---------------------------------------------------------------------------------------
+# the repair reads the recording, so it can tell a wide sidecar from a WRONG one
+# ---------------------------------------------------------------------------------------
+
+def test_normalize_sidecars_refuses_a_row_count_that_does_not_match_the_recording(tmp_path):
+    d, p = _wide_sidecar(tmp_path, "short", MIXED)
+    with np.load(p) as z:
+        cols = {k: z[k][:12] for k in z.files}
+    np.savez(p, **cols)
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
+    assert r["normalized"] == 0 and "12 sidecar rows vs 20 raw rows" in r["refused"][0]
+
+
+def test_normalize_sidecars_refuses_a_ragged_buttons_column(tmp_path):
+    """Two button rows beside one tic row: the old sidecar-only repair happily rewrote this."""
+    d, p = _wide_sidecar(tmp_path, "ragged", MIXED)
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols["buttons"] = np.array(MIXED + MIXED)
+    np.savez(p, **cols)
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
+    assert r["normalized"] == 0 and r["refused"]
+    assert "buttons" in r["refused"][0]
+    assert np.load(p)["buttons"].shape == (40,), "the file is left exactly as it was"
+
+
+def test_normalize_sidecars_refuses_tics_that_differ_from_the_recording(tmp_path):
+    d, p = _wide_sidecar(tmp_path, "tics", MIXED)
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols["tic"] = np.asarray(cols["tic"]) + 1000
+    np.savez(p, **cols)
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
+    assert r["normalized"] == 0 and "tics differ" in r["refused"][0]
+
+
+def test_normalize_sidecars_refuses_controls_that_differ_from_the_recording(tmp_path):
+    """A sidecar from a different episode would otherwise be "repaired" into looking correct."""
+    d, p = _wide_sidecar(tmp_path, "otherep", MIXED)
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols["buttons"] = np.array([ATTACK] * 20)
+    np.savez(p, **cols)
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
+    assert r["normalized"] == 0 and "differ from the raw recording" in r["refused"][0]
+
+
+def test_normalize_sidecars_reports_an_episode_with_no_sidecar(tmp_path):
+    d, p = _wide_sidecar(tmp_path, "gone", MIXED)
+    os.remove(p)
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
+    assert r["missing"] == ["ep_00000"] and r["episodes"] == 0
+
+
+def test_a_short_provenance_column_is_rewritten_not_called_unchanged(tmp_path):
+    """Presence is not enough: a truncated `buttons_raw_len` described the wrong rows."""
+    d, _, _ = _encode(tmp_path, _episode(MIXED), "prov")
+    p = os.path.join(d, "ep_00000_meta.npz")
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols["buttons_raw_len"] = cols["buttons_raw_len"][:5]
+    np.savez(p, **cols)
+    r = encode_parquet.normalize_sidecars(_paths(d), d)
+    assert r["normalized"] == 1 and r["refused"] == []
+    with np.load(p) as z:
+        assert z["buttons_raw_len"].tolist() == [9] * 18 + [14, 2503]
+        assert len(z["switch_requested_index"]) == 20
 
 
 def test_rebuild_sidecar_masks_normalises_the_buttons_it_rewrites(tmp_path):
@@ -200,30 +272,51 @@ def test_the_mask_repair_compares_the_executed_control_not_the_raw_string(tmp_pa
     assert not encode_parquet._columns_agree(cols, t, "buttons")
 
 
-def test_the_cli_repairs_a_directory_with_no_in_dir_and_no_gpu(tmp_path, monkeypatch, capsys):
-    """The repair must run on a busy machine: no recording, no --in-dir, and no CUDA probe."""
+def test_the_cli_repairs_a_directory_without_touching_a_gpu_or_a_frame(tmp_path, monkeypatch, capsys):
+    """The repair must run on a busy machine: no VAE, no CUDA probe, and never the `frame` column."""
     import torch
+    import pyarrow.parquet as pq
     d, p = _wide_sidecar(tmp_path, "cli", MIXED)
-    os.remove(os.path.join(d, "ep_00000.parquet"))
     monkeypatch.setattr(torch.cuda, "is_available",
                         lambda: pytest.fail("--normalize-sidecars must not touch a GPU"))
-    encode_parquet.main(encode_parquet.build_parser().parse_args(["--normalize-sidecars", "--out-dir", d]))
+    real = pq.read_table
+
+    def no_frames(path, **kw):
+        assert "frame" not in (kw.get("columns") or []), "the repair must not decode frames"
+        assert kw.get("columns"), "the repair must name the columns it needs"
+        return real(path, **kw)
+    monkeypatch.setattr(pq, "read_table", no_frames)
+    encode_parquet.main(encode_parquet.build_parser().parse_args(
+        ["--normalize-sidecars", "--in-dir", d, "--out-dir", d]))
     assert "DONE" in capsys.readouterr().out
     assert np.load(p)["buttons"].dtype == np.dtype(f"<U{EXECUTED_BUTTONS}")
+
+
+def test_the_cli_requires_in_dir_now_that_it_checks_the_recording(tmp_path, capsys):
+    d, _ = _wide_sidecar(tmp_path, "noin", MIXED)
+    with pytest.raises(SystemExit):
+        encode_parquet.build_parser().parse_args(["--normalize-sidecars", "--out-dir", d])
+    assert "--in-dir" in capsys.readouterr().err
+    # and main refuses it too, for a caller that builds the namespace itself
+    a = encode_parquet.build_parser().parse_args(["--normalize-sidecars", "--in-dir", d, "--out-dir", d])
+    a.in_dir = ""
+    with pytest.raises(SystemExit, match="--in-dir is required"):
+        encode_parquet.main(a)
 
 
 def test_the_cli_exits_nonzero_when_a_sidecar_is_refused(tmp_path):
     d, _ = _wide_sidecar(tmp_path, "clibad", [FORWARD] * 20,
                          stored=[FORWARD + "00000"] * 19 + ["12000000000000"])
     with pytest.raises(SystemExit, match="refused"):
-        encode_parquet.main(encode_parquet.build_parser().parse_args(["--normalize-sidecars", "--out-dir", d]))
+        encode_parquet.main(encode_parquet.build_parser().parse_args(
+            ["--normalize-sidecars", "--in-dir", d, "--out-dir", d]))
 
 
-def test_a_recording_with_no_sidecar_is_reported_not_crashed(tmp_path):
+def test_an_empty_directory_is_reported_not_crashed(tmp_path):
     d = str(tmp_path / "empty")
     os.makedirs(d)
-    assert encode_parquet.normalize_sidecars(d) == {"episodes": 0, "normalized": 0,
-                                                    "unchanged": 0, "refused": []}
+    assert encode_parquet.normalize_sidecars([], d) == {"episodes": 0, "normalized": 0, "unchanged": 0,
+                                                        "missing": [], "refused": []}
 
 
 def test_the_canonical_table_is_unchanged_by_the_normalisation(tmp_path):
