@@ -69,7 +69,7 @@ def orphan_latents(latents_dir):
 
 def check_episode(lat_path, meta_path, latent_channels=None, sample=8, seed=0):
     """Problems with one (latent, sidecar) pair, as a list of strings; empty means it is usable."""
-    from doom_data import TIC_CORPUS_COLUMNS, latent_shape_v2
+    from doom_data import TIC_CORPUS_COLUMNS, check_sidecar_buttons_dtype, latent_shape_v2
     bad = []
     lat = np.load(lat_path, mmap_mode="r")
     if lat.ndim != 4:
@@ -87,6 +87,13 @@ def check_episode(lat_path, meta_path, latent_channels=None, sample=8, seed=0):
         for c in TIC_CORPUS_COLUMNS:
             if c in m.files and len(m[c]) != T:
                 bad.append(f"{os.path.basename(meta_path)}: {len(m[c])} rows of {c!r} vs {T} latents")
+        if "buttons" in m.files:
+            # a column wider than the executed control means this sidecar holds Arnold's raw request
+            # strings: readable, but 38 to 49 MB per episode, and the trainer refuses it
+            try:
+                check_sidecar_buttons_dtype(m["buttons"], os.path.basename(meta_path))
+            except ValueError as e:
+                bad.append(str(e))
     if T and sample:
         rows = np.random.RandomState(seed).choice(T, size=min(int(sample), T), replace=False)
         block = np.asarray(lat[np.sort(rows)], dtype=np.float32)

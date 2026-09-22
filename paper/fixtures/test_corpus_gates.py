@@ -247,6 +247,31 @@ def test_a_sidecar_shorter_than_the_latents_is_refused(tmp_path):
         make_dense_eval_splits.build(d, expect_ids=[6000])
 
 
+def test_an_un_normalised_buttons_column_is_refused_and_names_the_repair(tmp_path):
+    """A `<U2503` column is a 40 MB sidecar of Arnold's raw request strings; the fix needs no encode."""
+    d = _eval_corpus(tmp_path / "val", [6000])
+    p = os.path.join(d, "ep_06000_meta.npz")
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols["buttons"] = np.array(["100000000" + "0" * 2493 + "1"] * len(cols["tic"]))
+    np.savez(p, **cols)
+    report = make_dense_eval_splits.validate(d, [6000])
+    assert not report["ok"] and report["invalid"] == [6000]
+    assert any("normalize-sidecars" in s for s in report["problems"])
+    with pytest.raises(SystemExit, match="not validly encoded"):
+        make_dense_eval_splits.build(d, expect_ids=[6000])
+
+
+def test_a_buttons_column_at_the_executed_width_passes(tmp_path):
+    d = _eval_corpus(tmp_path / "val", [6000])
+    p = os.path.join(d, "ep_06000_meta.npz")
+    with np.load(p) as z:
+        cols = {k: z[k] for k in z.files}
+    cols["buttons"] = np.array(["1".ljust(19, "0")] * len(cols["tic"]), dtype="<U19")
+    np.savez(p, **cols)
+    assert make_dense_eval_splits.validate(d, [6000])["ok"]
+
+
 def test_a_missing_sidecar_column_is_refused(tmp_path):
     d = _eval_corpus(tmp_path / "val", [6000])
     p = os.path.join(d, "ep_06000_meta.npz")
