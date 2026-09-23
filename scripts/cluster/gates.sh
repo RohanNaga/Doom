@@ -24,6 +24,14 @@
 #                        sidecar, at exactly the recording's tics? `make_dense_eval_splits.py
 #                        --check-only --expect-ids $TRAIN_IDS --raw-tics`: shapes and one int column
 #                        per episode, no frames, over all of them.
+#   1d latent alignment  do the stored latents belong to the rows their sidecars describe?
+#                        `check_latent_alignment.py`, per encode shard of train and val: re-encode
+#                        a full batch and the tail batch of ALIGN_EPISODES episodes with the
+#                        shard's recorded encoder settings and compare (mean |diff| <= 1e-3, at
+#                        least half bit-identical), then decode the stored rows against the raw
+#                        frames with rows shifted -4/-1/+1/+4, which must all score worse than
+#                        the true alignment. Re-encoding on a different GPU model than the corpus
+#                        was written on can lower the identical fraction by itself.
 #   2 alignment gate     is the control that produced the motion stored on the row the trainer
 #                        reads? Yaw-gated, shifts -1/0/+1, on val 6000:6100. Exit 0 aligned, 2
 #                        misaligned, 3 inconclusive. Exit 3 is NOT approval.
@@ -70,6 +78,7 @@ VAL_IDS=${VAL_IDS:-6000:6100}
 TRAIN_IDS=${TRAIN_IDS:-0:2000}
 TRAIN_AUDIT_EPISODES=${TRAIN_AUDIT_EPISODES:-2000}
 TRAIN_AUDIT_ROWS=${TRAIN_AUDIT_ROWS:-500}
+ALIGN_EPISODES=${ALIGN_EPISODES:-2}   # episodes per encode shard for the stored-latent alignment gate
 RECEIPT=$D/GATES_COMMIT
 RUN_REPO=$D/repo              # the checkout launch_nexttic.sh runs (`cd $D/repo`)
 IFS=, read -r -a SPACES <<< "$VAES"
@@ -109,6 +118,15 @@ inventory_cmd() {   # inventory_cmd <space>: rows and tics of every training epi
        "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--expect-ids $TRAIN_IDS --sample 0 --raw-tics $RAW/arenas"
 }
+space_gpu() { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
+latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shifted-decode, per shard
+  local DIR
+  if [ "$2" = train ]; then DIR=$D/latents_arnold_dense_pertic$(suffix "$1")/arenas
+  else DIR=$D/latents_arnold_dense_pertic_eval$(suffix "$1")/val; fi
+  echo "$PY $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+       "--episodes-per-shard $ALIGN_EPISODES --device cuda:$(space_gpu "$1") --cache-dir $D/hf/hub" \
+       "--out $D/logs/gate1d_latent_align_$1_$2.json"
+}
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
 align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
   echo "$PY $REPO/check_action_alignment.py" \
@@ -145,6 +163,9 @@ if [ "$DRY" = 1 ]; then
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1c inventory $V $(inventory_cmd "$V")"; done
+  for V in "${SPACES[@]}"; do
+    for C in train val; do echo "DRY gate1d latent alignment $V $C $(latent_align_cmd "$V" "$C")"; done
+  done
   echo "DRY gate2 alignment ${SPACES[0]} val $VAL_IDS $(align_cmd "${SPACES[0]}")"
   explain 0; explain 2; explain 3
   for BB in $SMOKE_BBS; do
@@ -207,6 +228,19 @@ for V in "${SPACES[@]}"; do
   $(inventory_cmd "$V") > "$D/logs/gate1c_inventory_$V.json" 2>&1 \
     || gate_fail "1c inventory ($V)" "a training episode is missing, orphaned, or its latents, sidecar and recording disagree on rows or tics; see $D/logs/gate1c_inventory_$V.json"
   say "  ok: $(grep -c '^  [0-9]' "$D/logs/gate1c_inventory_$V.json" 2>/dev/null || echo '?') ids listed, no problems"
+done
+
+# --- gate 1d: do the stored latents belong to their sidecar rows? ----------------------------
+# per encode shard: re-encode sampled rows with the shard's recorded settings and compare, then
+# decode the stored rows against the raw frames with -4/-1/+1/+4 shifted negative controls
+for V in "${SPACES[@]}"; do
+  for C in train val; do
+    say "$(date -Iseconds) gate 1d: stored-latent alignment, $V $C ($ALIGN_EPISODES episode(s) per shard)"
+    # shellcheck disable=SC2046
+    $(latent_align_cmd "$V" "$C") > "$D/logs/gate1d_latent_align_${V}_$C.log" 2>&1 \
+      || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, or a shifted alignment scores as well as the true one; see $D/logs/gate1d_latent_align_${V}_$C.json"
+    say "  $(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
+  done
 done
 
 # --- gate 2: the alignment gate on val ---------------------------------------------------

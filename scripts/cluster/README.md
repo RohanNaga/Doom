@@ -55,7 +55,9 @@ DOOM_ROOT=/data/doom bash scripts/cluster/status.sh
 `gates.sh` must print `GATES_GO` before step 5. It runs, in order: the commit pin (the checkout at
 `$DOOM_ROOT/repo`, no tracked change), the sidecar audit of val and of all 2,000 training episodes in
 both latent spaces against the raw parquet, a rows-and-tics check of every training episode against
-its recording, the yaw alignment gate on val 6000:6100 (exit 2 misaligned, exit 3
+its recording, a per-shard stored-latent alignment check of train and val (`check_latent_alignment.py`:
+re-encode sampled rows under the shard's recorded settings, and decode the stored rows against the raw
+frames with -4/-1/+1/+4 shifted controls), the yaw alignment gate on val 6000:6100 (exit 2 misaligned, exit 3
 inconclusive, and **exit 3 is not approval**), a `FIT=20` fit check of each backbone through the
 real launcher, a 300-step real-data smoke into a throwaway results directory, and an
 `eval_tf.py --tic-stride 1` readback of that smoke's snapshot on 64 val windows. At `GATES_GO` it
