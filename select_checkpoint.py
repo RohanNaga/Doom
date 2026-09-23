@@ -11,6 +11,10 @@ evaluation is now two stages. This module is the hinge between them:
      numbers, the file hashes, the rule itself and the settings the scores were measured under.
   3. `show`: prints the chosen checkpoint for the test stage, after checking the file on disk still
      has the hash that was selected.
+  4. `verify`: compares the scoring configuration the sealed stage is about to use with the one
+     `choose` pinned (`--pin key=value`: decoder path and content hash, sampler steps and spacing,
+     window count and seed, horizons, every corpus fingerprint) and refuses any difference, so the
+     test configuration is frozen before any test score exists (Astra's review, 2026-09-23).
 
 The rule (the audit's "preregistered raw PSNR with LPIPS check",
 `.claude/analyses/astra-prelaunch-audit-2026-09-21.md`): among the candidate (checkpoint, variant)
@@ -134,8 +138,45 @@ def _sha_of_json(obj):
     return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
 
 
-def write_selection(results_dir, cands, scores_dir, out, meta=None, force=False):
-    """Score, choose and write `selection.json` atomically; refuses to overwrite one without `force`."""
+def verify_pins(selection, now):
+    """Differences between the scoring configuration pinned at selection and the one about to be used.
+
+    `now` is the configuration of the sealed stage: every pinned key that is not a corpus must be
+    given and equal; every corpus given (`corpus.<name>`) must have been pinned and be equal. A corpus
+    not being scored in this invocation is not compared.
+    """
+    pinned = selection.get("pinned") or {}
+    bad = []
+    if not pinned:
+        return ["the selection pins no scoring configuration (made before pinning existed); re-select"]
+    for k, v in sorted(now.items()):
+        if k not in pinned:
+            bad.append(f"{k} was not pinned at selection")
+        elif str(pinned[k]) != str(v):
+            bad.append(f"{k} is {v!r} now, pinned {pinned[k]!r} at selection")
+    for k in sorted(pinned):
+        if not k.startswith("corpus.") and k not in now:
+            bad.append(f"{k} is pinned ({pinned[k]!r}) but not given now")
+    return bad
+
+
+def parse_pins(items):
+    """`key=value` strings -> dict; the value may itself contain `=`."""
+    out = {}
+    for item in items or []:
+        if "=" not in item:
+            raise SystemExit(f"--pin takes key=value, got {item!r}")
+        k, v = item.split("=", 1)
+        out[k] = v
+    return out
+
+
+def write_selection(results_dir, cands, scores_dir, out, meta=None, force=False, pins=None):
+    """Score, choose and write `selection.json` atomically; refuses to overwrite one without `force`.
+
+    `pins` is the scoring configuration the sealed stage will be held to: decoder path and hash,
+    sampler steps and spacing, window count and seed, horizons, and every corpus fingerprint.
+    """
     if os.path.exists(out) and not force:
         raise SystemExit(f"{out} exists: a selection is made once. Pass --force only to redo it "
                          "deliberately, and never after a test score exists")
@@ -151,7 +192,7 @@ def write_selection(results_dir, cands, scores_dir, out, meta=None, force=False)
     body = {"results_dir": results_dir, "rule": RULE, "lpips_tolerance": LPIPS_TOLERANCE,
             "chosen": {k: chosen[k] for k in ("path", "step", "sha256", "variant", "psnr_raw", "lpips_raw")},
             "eligible": [(r["step"], r["variant"]) for r in eligible],
-            "scores": rows, "meta": dict(meta or {}),
+            "scores": rows, "meta": dict(meta or {}), "pinned": dict(pins or {}),
             "selected_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     body["selection_sha256"] = _sha_of_json({k: v for k, v in body.items() if k != "selected_at"})
     tmp = f"{out}.tmp.{os.getpid()}"
@@ -182,10 +223,17 @@ def main(args):
     elif args.cmd == "choose":
         meta = dict(kv.split("=", 1) for kv in args.meta)
         body = write_selection(args.results_dir, read_candidates(args.candidates),
-                               args.scores_dir, args.out, meta, args.force)
+                               args.scores_dir, args.out, meta, args.force, parse_pins(args.pin))
         c = body["chosen"]
         print(f"SELECTED {c['path']} step={c['step']} variant={c['variant']} "
               f"psnr_raw={c['psnr_raw']:.3f} lpips_raw={c['lpips_raw']:.4f}")
+    elif args.cmd == "verify":
+        with open(args.selection) as f:
+            bad = verify_pins(json.load(f), parse_pins(args.pin))
+        if bad:
+            print("the scoring configuration differs from the one pinned at selection:\n  " + "\n  ".join(bad))
+            return 1
+        print("PINNED configuration matches")
     else:
         print(show(args.selection))
     return 0
@@ -193,7 +241,9 @@ def main(args):
 
 def build_parser():
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=["candidates", "choose", "show"])
+    p.add_argument("cmd", choices=["candidates", "choose", "show", "verify"])
+    p.add_argument("--pin", action="append", default=[],
+                   help="choose: a key=value of the scoring configuration to pin; verify: the value now")
     p.add_argument("--results-dir", dest="results_dir", default="")
     p.add_argument("--previous", type=int, default=PREVIOUS_SNAPSHOTS)
     p.add_argument("--candidates", default="", help="the file `candidates` wrote")

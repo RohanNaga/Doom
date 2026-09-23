@@ -14,18 +14,19 @@
 # to the earlier tunes, and an hourly checkpoint turns the run into a curve of ceiling against
 # presentations rather than one number.
 #
-#   usage: [TRAIN_IDS=0:6000] decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
+#   usage: [TRAIN_IDS=0:2000] decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
 #   fit:   FIT=1 decoder_mse.sh <gpu> <micro-batch> 60
 #
 # TRAINING IDS ONLY (docs/REVIEW_2026-09-22.md H4). The stream used to sample row groups from every
 # file in raw_arnold_dense/arenas, validation 6000:7000 and test 7000:8000 included, while recording
-# `split_subset: "train"`. `--stream-ids $TRAIN_IDS` (default 0:6000, the dense train range) now
+# `split_subset: "train"`. `--stream-ids $TRAIN_IDS` (default 0:2000, the next-tic runs' own training
+# prefix, so the decoder sees no episode the dynamics models did not; 0:6000 is the whole train range) now
 # restricts it, `finetune_decoder.py` refuses ids that reach into val or test, and the exact episode
 # ids and row groups used are written to provenance.json beside the decoder. The validation frames
 # are still the cached 17-map sample: they only measure the decoder and never train it.
 set -u
 GPU=${1:?gpu}; MB=${2:?micro batch}; STEPS=${3:?max steps}; HOURS=${4:-4.0}
-TRAIN_IDS=${TRAIN_IDS:-0:6000}
+TRAIN_IDS=${TRAIN_IDS:-0:2000}
 D=/sata2/data/rnagabhi/doom
 REPO=${REPO:-$D/tmp/levers/repo}
 PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}

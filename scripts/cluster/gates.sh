@@ -10,7 +10,7 @@
 #
 #   0 pin                which code is being certified? The commit of $REPO, which must be the
 #                        commit of $D/repo (the checkout the launcher runs) with no tracked change.
-#                        Any old receipt is revoked first; a new one is written only at GATES_GO.
+#                        Any old certificate is revoked first; a new one is written only at GATES_GO.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
@@ -27,11 +27,13 @@
 #   1d latent alignment  do the stored latents belong to the rows their sidecars describe?
 #                        `check_latent_alignment.py`, per encode shard of train and val: re-encode
 #                        a full batch and the tail batch of ALIGN_EPISODES episodes with the
-#                        shard's recorded encoder settings and compare (mean |diff| <= 1e-3, at
-#                        least half bit-identical), then decode the stored rows against the raw
-#                        frames with rows shifted -4/-1/+1/+4, which must all score worse than
-#                        the true alignment. Re-encoding on a different GPU model than the corpus
-#                        was written on can lower the identical fraction by itself.
+#                        shard's recorded encoder settings and compare (MAE <= 5e-3, p99 <= 2e-2;
+#                        bit identity reported, not required), then decode the stored rows against
+#                        the raw frames with rows shifted -4/-1/+1/+4, all of which the true
+#                        alignment must beat by 3 dB. Every shard log must be present and every
+#                        shard under one latent contract. The tolerances are cross-host calibrated
+#                        on ONE 4-channel episode: read the printed MAE, p99 and margin of the SD
+#                        3.5 shards before trusting a pass there.
 #   2 alignment gate     is the control that produced the motion stored on the row the trainer
 #                        reads? Yaw-gated, shifts -1/0/+1, on val 6000:6100. Exit 0 aligned, 2
 #                        misaligned, 3 inconclusive. Exit 3 is NOT approval.
@@ -39,12 +41,28 @@
 #                        Run through the launcher, so it is the exact configuration that launches.
 #   4 300-step smoke     does the real corpus train, validate, checkpoint and snapshot? Into a
 #                        throwaway results directory, never the production one.
-#   5 evaluator readback can `eval_tf.py --tic-stride 1` load that snapshot and score raw frames?
+#   4b smoke probes      did the smoke train the conditioning? `smoke_probe.py` on the recovery
+#                        checkpoint: the control MLP, position table, inflated context conv and
+#                        SD 3.5 pooled_control moved and have finite nonzero gradients on a real
+#                        val batch, and flipping the newest control changes the output (fixed noise).
+#   4c resume            does a 10-update `--resume` of the smoke continue it (optimizer, EMA, step)?
+#   5 evaluator readback can `eval_tf.py --tic-stride 1` load that snapshot and score raw frames,
+#                        live AND EMA, at horizon 1 AND 4?
 #
-# The receipt. At GATES_GO, after checking that the checkout did not move while the gates ran, the
-# certified commit is written to $D/GATES_COMMIT. `launch_nexttic.sh` refuses to start unless its
-# checkout is at that commit with no tracked change; the gates' own fit and smoke runs pass
-# GATE_RUN=1 because they come before the receipt exists.
+# Review 7.1 (docs/REVIEW_2026-09-22.md) also asks for, and these run with gates 1c and 1e: an exact
+# inventory of the VAL corpus (ids, rows, tics and split file), and an emitted-window check on real
+# training samples (`check_emitted_windows.py`: newest control = row r-1, and changing buttons[r]
+# leaves the sample unchanged).
+#
+# The certificate. Every gate that passes appends a result to $D/logs/gates_results.jsonl, scoped to
+# the whole run, one latent space, or one backbone. At GATES_GO, after checking that the checkout did
+# not move while the gates ran, `gate_certificate.py write` records for each smoked backbone: its
+# resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under LAUNCH_STEPS, MB_UNET /
+# MB_SD35 and WORKERS, the values launch_runs.sh passes), the commit, the training and validation
+# corpus fingerprints, the encoder records and every gate result that applies to it, into
+# $D/GATES_CERT.json. `launch_nexttic.sh` recomputes all of it for the backbone it launches and
+# refuses on any difference; the gates' own fit, smoke and resume runs pass GATE_RUN=1 because they
+# come before the certificate exists. A backbone whose latent space was not gated cannot be written.
 #
 # What this gate set does NOT do. The audit's 200-update fit and the 10,000-window loader index
 # check the protocol also asks for are not here: FIT=20 is what the task specifies, and 20 updates
@@ -79,8 +97,19 @@ TRAIN_IDS=${TRAIN_IDS:-0:2000}
 TRAIN_AUDIT_EPISODES=${TRAIN_AUDIT_EPISODES:-2000}
 TRAIN_AUDIT_ROWS=${TRAIN_AUDIT_ROWS:-500}
 ALIGN_EPISODES=${ALIGN_EPISODES:-2}   # episodes per encode shard for the stored-latent alignment gate
-RECEIPT=$D/GATES_COMMIT
+EMIT_WINDOWS=${EMIT_WINDOWS:-256}     # real training windows the emitted-window check reads
+CERT=$D/GATES_CERT.json
+RESULTS=$D/logs/gates_results.jsonl
 RUN_REPO=$D/repo              # the checkout launch_nexttic.sh runs (`cd $D/repo`)
+# the production launch the certificate pins, with launch_runs.sh's own defaults
+LAUNCH_STEPS=${LAUNCH_STEPS:-400000}
+MB_UNET=${MB_UNET:-32}
+MB_SD35=${MB_SD35:-32}
+CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 16)
+DEFAULT_WORKERS=$(( CORES / 4 ))
+[ "$DEFAULT_WORKERS" -lt 4 ] && DEFAULT_WORKERS=4
+[ "$DEFAULT_WORKERS" -gt 16 ] && DEFAULT_WORKERS=16
+WORKERS=${WORKERS:-$DEFAULT_WORKERS}
 IFS=, read -r -a SPACES <<< "$VAES"
 
 gate_fail() { echo "GATE_FAILED $1: ${*:2}" >&2; exit "${RC_FAIL:-1}"; }
@@ -128,6 +157,24 @@ latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shi
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
+record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, for the certificate
+  local detail=${3//\"/}; detail=${detail//\\/}
+  printf '{"gate": "%s", "scope": "%s", "status": "ok", "detail": "%s"}\n' "$1" "$2" "$detail" >> "$RESULTS"
+}
+bb_mb() { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
+cert_cmd() {   # cert_cmd <backbone>: the production command, as the launcher resolves it
+  env DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" \
+    CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1"
+}
+bb_latents() {   # bb_latents <backbone> <train|val>
+  local S; S=$(suffix "$(bb_space "$1")")
+  if [ "$2" = train ]; then echo "$D/latents_arnold_dense_pertic$S/arenas"; else echo "$D/latents_arnold_dense_pertic_eval$S/val"; fi
+}
+cert_write_cmd() {   # cert_write_cmd <backbone> <command>
+  echo "$PY $REPO/gate_certificate.py write --cert $CERT --backbone $1 --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
+       "--repo $RUN_REPO --train-latents $(bb_latents "$1" train) --train-ids $TRAIN_IDS" \
+       "--val-latents $(bb_latents "$1" val) --val-ids $VAL_IDS --results $RESULTS --command"
+}
 align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
   echo "$PY $REPO/check_action_alignment.py" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/val" \
@@ -139,18 +186,57 @@ smoke_extra() { # smoke_extra <backbone>: operational overrides only; the recipe
   echo "--results-dir $SMOKE_DIR/$1 --val-every 100 --val-windows 128 --ckpt-every $STEPS" \
        "--snapshot-every $STEPS --local-snapshots --keep-last 1"
 }
-readback_cmd() {  # readback_cmd <backbone>
+resume_extra() { # resume_extra <backbone>: the smoke's own overrides, then resume its checkpoint for 10 updates
+  echo "$(smoke_extra "$1") --resume $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --ckpt-every 10"
+}
+bb_paths() {    # bb_paths <backbone>: where the evaluator and the probe build the backbone from
+  case $1 in
+    sd35) echo "--sd35-path stabilityai/stable-diffusion-3.5-medium" ;;
+    unet) echo "--sd-path CompVis/stable-diffusion-v1-4" ;;
+  esac
+}
+readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
   local S; S=$(suffix "$(bb_space "$1")")
-  local EXTRA=""
-  [ "$1" = sd35 ] && EXTRA="--sd35-path stabilityai/stable-diffusion-3.5-medium --vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae --latent-scale 1.5305 --latent-shift 0.0609"
-  [ "$1" = unet ] && EXTRA="--sd-path CompVis/stable-diffusion-v1-4"
+  local EXTRA EMA=""
+  EXTRA=$(bb_paths "$1")
+  [ "$1" = sd35 ] && EXTRA="$EXTRA --vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae --latent-scale 1.5305 --latent-shift 0.0609"
+  [ "$2" = ema ] && EMA=" --use-ema"
   echo "$PY $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
-       "--ckpt $SMOKE_DIR/$1/snap_$(printf '%07d' "$STEPS").pt --tic-stride 1 --horizon-tics 1" \
+       "--ckpt $SMOKE_DIR/$1/snap_$(printf '%07d' "$STEPS").pt$EMA --tic-stride 1 --horizon-tics $3" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--split $D/latents_arnold_dense_pertic_eval$S/split_val.json --subset val" \
        "--parquet-dir $RAW/arenas --num-windows $WINDOWS --batch-size 16 --steps 10" \
        "--context-frames 32 --num-actions 29 --hf-cache $D/hf/hub $EXTRA" \
-       "--out-dir $SMOKE_DIR/$1/eval_tf_val"
+       "--out-dir $SMOKE_DIR/$1/eval_tf_val_$2_h$3"
+}
+probe_cmd() {   # probe_cmd <backbone>: the conditioning pathways of the smoke's recovery checkpoint
+  local S; S=$(suffix "$(bb_space "$1")")
+  echo "$PY $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
+       "--latent-channels $(bb_chan "$1") --latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
+       "--episodes $VAL_IDS --device cuda:$(bb_gpu "$1") --hf-cache $D/hf/hub $(bb_paths "$1")" \
+       "--out $D/logs/gate4b_probe_$1.json"
+}
+val_inventory_cmd() {   # val_inventory_cmd <space>: exactly the val ids, rows, tics and split file
+  local S; S=$(suffix "$1")
+  echo "$PY $REPO/make_dense_eval_splits.py --check-only" \
+       "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
+       "--expect-ids $VAL_IDS --sample 0 --raw-tics $RAW/arenas" \
+       "--split-file $D/latents_arnold_dense_pertic_eval$S/split_val.json"
+}
+windows_cmd() {   # windows_cmd <space>: the emitted-window contract on real training samples
+  echo "$PY $REPO/check_emitted_windows.py --latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
+       "--episodes $TRAIN_IDS --windows $EMIT_WINDOWS --context-frames 32" \
+       "--latent-channels $( [ "$1" = sd35 ] && echo 16 || echo 4) --out $D/logs/gate1e_windows_$1.json"
+}
+wait_session() {   # wait_session <backbone> <gate label>: until the tmux session ends, or the timeout
+  local SESSION=train-$1-nexttic WAITED=0
+  while tmux has-session -t "$SESSION" 2>/dev/null; do
+    sleep 20; WAITED=$(( WAITED + 20 ))
+    if [ "$WAITED" -ge "$SMOKE_TIMEOUT" ]; then
+      tmux kill-session -t "$SESSION"
+      gate_fail "$2 ($1)" "still running after ${SMOKE_TIMEOUT}s; killed $SESSION"
+    fi
+  done
 }
 launcher() {   # launcher <backbone> <extra env assignments as NAME=VALUE ...>
   local BB=$1; shift
@@ -159,13 +245,15 @@ launcher() {   # launcher <backbone> <extra env assignments as NAME=VALUE ...>
 
 if [ "$DRY" = 1 ]; then
   echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
-  echo "DRY gate0 pin: revoke $RECEIPT; certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
+  echo "DRY gate0 pin: revoke $CERT; certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1c inventory $V $(inventory_cmd "$V")"; done
+  for V in "${SPACES[@]}"; do echo "DRY gate1c val inventory $V $(val_inventory_cmd "$V")"; done
   for V in "${SPACES[@]}"; do
     for C in train val; do echo "DRY gate1d latent alignment $V $C $(latent_align_cmd "$V" "$C")"; done
   done
+  for V in "${SPACES[@]}"; do echo "DRY gate1e emitted windows $V $(windows_cmd "$V")"; done
   echo "DRY gate2 alignment ${SPACES[0]} val $VAL_IDS $(align_cmd "${SPACES[0]}")"
   explain 0; explain 2; explain 3
   for BB in $SMOKE_BBS; do
@@ -179,9 +267,20 @@ if [ "$DRY" = 1 ]; then
     echo "DRY gate4 expect $SMOKE_DIR/$BB/$(printf '%07d' "$STEPS").pt and $SMOKE_DIR/$BB/snap_$(printf '%07d' "$STEPS").pt"
     echo "DRY gate4 refuse if $D/results_spiderman/$(run_name "$BB")/log.jsonl exists: the launcher resumes the newest recovery checkpoint of the production run, and the smoke would continue it into the smoke directory"
   done
-  for BB in $SMOKE_BBS; do echo "DRY gate5 readback $BB $(readback_cmd "$BB")"; done
+  for BB in $SMOKE_BBS; do echo "DRY gate4b probes $BB $(probe_cmd "$BB")"; done
+  for BB in $SMOKE_BBS; do
+    echo "DRY gate4c resume $BB for 10 updates"
+    launcher "$BB" STEPS="$(( STEPS + 10 ))" EXTRA="$(resume_extra "$BB")"
+    echo "DRY gate4c expect 'resumed weights from $SMOKE_DIR/$BB/$(printf '%07d' "$STEPS").pt at step $STEPS with optimizer', an end event at step $(( STEPS + 10 )) and $SMOKE_DIR/$BB/$(printf '%07d' "$(( STEPS + 10 ))").pt"
+  done
+  for BB in $SMOKE_BBS; do
+    for V in live ema; do for H in 1 4; do echo "DRY gate5 readback $BB $V h$H $(readback_cmd "$BB" "$V" "$H")"; done; done
+  done
   echo "DRY summary GATES_GO with the fit rates, the smoke checkpoints and the readback PSNR"
-  echo "DRY receipt write the certified commit to $RECEIPT, after checking the checkout did not move"
+  for BB in $SMOKE_BBS; do
+    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<launch_nexttic.sh CERT_QUERY=1 with STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS>\""
+  done
+  echo "DRY certificate written to $CERT only after checking the checkout did not move"
   exit 0
 fi
 
@@ -195,7 +294,8 @@ say() { echo "$*" | tee -a "$REPORT"; }
 # --- gate 0: pin the commit being certified ------------------------------------------------
 # revoked first: a gate run that fails or is interrupted must not leave an older certificate
 # standing for whatever the checkout is now
-rm -f "$RECEIPT"
+rm -f "$CERT"
+: > "$RESULTS"
 say "$(date -Iseconds) gate 0: pin"
 COMMIT=$(pin_of "$REPO") || gate_fail "0 pin" "$REPO is not a git checkout, so the gates cannot say which code they certify"
 RUN_COMMIT=$(pin_of "$RUN_REPO") || RUN_COMMIT="none"
@@ -204,6 +304,7 @@ RUN_COMMIT=$(pin_of "$RUN_REPO") || RUN_COMMIT="none"
 git -C "$REPO" diff --quiet HEAD -- \
   || gate_fail "0 pin" "tracked files in $REPO differ from $COMMIT; commit or discard them, the gates certify a commit"
 say "  certifying $COMMIT ($REPO)"
+record "0 pin" all "$COMMIT"
 
 # --- gate 1: the sidecar audit ---------------------------------------------------------
 for V in "${SPACES[@]}"; do
@@ -212,6 +313,7 @@ for V in "${SPACES[@]}"; do
   $(audit_cmd "$V") > "$D/logs/gate1_audit_$V.json" 2>&1 \
     || gate_fail "1 sidecar audit ($V)" "the encoded sidecars disagree with the raw parquet; see $D/logs/gate1_audit_$V.json"
   say "  ok: $(grep -o '"mismatches": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1), $(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1)"
+  record "1 sidecar audit val" "space:$V" "$(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1)"
 done
 for V in "${SPACES[@]}"; do
   say "$(date -Iseconds) gate 1: sidecar audit of the TRAINING corpus, $V ($TRAIN_AUDIT_EPISODES episodes, $TRAIN_AUDIT_ROWS rows each)"
@@ -219,6 +321,7 @@ for V in "${SPACES[@]}"; do
   $(train_audit_cmd "$V") > "$D/logs/gate1_train_audit_$V.json" 2>&1 \
     || gate_fail "1 sidecar audit (train, $V)" "the training sidecars disagree with the raw parquet; see $D/logs/gate1_train_audit_$V.json"
   say "  ok: $(grep -o '"episodes": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1), $(grep -o '"mismatches": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1), $(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1)"
+  record "1 sidecar audit train" "space:$V" "$(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1)"
 done
 
 # --- gate 1c: every training episode's rows and tics ---------------------------------------
@@ -228,6 +331,12 @@ for V in "${SPACES[@]}"; do
   $(inventory_cmd "$V") > "$D/logs/gate1c_inventory_$V.json" 2>&1 \
     || gate_fail "1c inventory ($V)" "a training episode is missing, orphaned, or its latents, sidecar and recording disagree on rows or tics; see $D/logs/gate1c_inventory_$V.json"
   say "  ok: $(grep -c '^  [0-9]' "$D/logs/gate1c_inventory_$V.json" 2>/dev/null || echo '?') ids listed, no problems"
+  record "1c inventory train" "space:$V" "$TRAIN_IDS"
+  say "$(date -Iseconds) gate 1c: exact val inventory, $V ($VAL_IDS, rows, tics and split file)"
+  # shellcheck disable=SC2046
+  $(val_inventory_cmd "$V") > "$D/logs/gate1c_val_inventory_$V.json" 2>&1 \
+    || gate_fail "1c inventory val ($V)" "the val corpus is not exactly $VAL_IDS with rows and tics matching the recording and its split file; see $D/logs/gate1c_val_inventory_$V.json"
+  record "1c inventory val" "space:$V" "$VAL_IDS"
 done
 
 # --- gate 1d: do the stored latents belong to their sidecar rows? ----------------------------
@@ -240,7 +349,18 @@ for V in "${SPACES[@]}"; do
     $(latent_align_cmd "$V" "$C") > "$D/logs/gate1d_latent_align_${V}_$C.log" 2>&1 \
       || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, or a shifted alignment scores as well as the true one; see $D/logs/gate1d_latent_align_${V}_$C.json"
     say "  $(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
+    record "1d latent alignment $C" "space:$V" "$(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
   done
+done
+
+# --- gate 1e: the windows the training loader emits from the real corpus -------------------------
+for V in "${SPACES[@]}"; do
+  say "$(date -Iseconds) gate 1e: emitted windows, $V ($EMIT_WINDOWS real training windows)"
+  # shellcheck disable=SC2046
+  $(windows_cmd "$V") > "$D/logs/gate1e_windows_$V.log" 2>&1 \
+    || gate_fail "1e emitted windows ($V)" "a real window broke the causal contract; see $D/logs/gate1e_windows_$V.json"
+  say "  $(grep '^EMITTED_WINDOWS' "$D/logs/gate1e_windows_$V.log")"
+  record "1e emitted windows" "space:$V" "$(grep '^EMITTED_WINDOWS' "$D/logs/gate1e_windows_$V.log")"
 done
 
 # --- gate 2: the alignment gate on val ---------------------------------------------------
@@ -250,6 +370,7 @@ $(align_cmd "${SPACES[0]}") > "$D/logs/gate2_alignment.json" 2>&1
 A_RC=$?
 say "  $(explain $A_RC)"
 [ $A_RC -eq 0 ] || gate_fail "2 alignment" "exit $A_RC; see $D/logs/gate2_alignment.json"
+record "2 alignment" all "exit 0 on val $VAL_IDS (${SPACES[0]})"
 
 # --- gate 3: the fit check, through the launcher -----------------------------------------
 for BB in $SMOKE_BBS; do
@@ -269,6 +390,7 @@ raise SystemExit(0 if r['accum'] == 1 and r['global_batch'] == 32 else 2)
 PY
 ) || gate_fail "3 fit check ($BB)" "no usable fit_check event, or accumulation is not 1: $NUMS ($FITLOG)"
   say "  $BB $NUMS"
+  record "3 fit" "bb:$BB" "$NUMS"
 done
 
 # --- gate 4: the 300-step real-data smoke -------------------------------------------------
@@ -286,14 +408,7 @@ for BB in $SMOKE_BBS; do
   say "$(date -Iseconds) gate 4: $STEPS-step smoke, $BB, into $SD"
   launcher "$BB" STEPS="$STEPS" EXTRA="$(smoke_extra "$BB")" \
     || gate_fail "4 smoke ($BB)" "the launcher refused to start the smoke"
-  WAITED=0
-  while tmux has-session -t "$SESSION" 2>/dev/null; do
-    sleep 20; WAITED=$(( WAITED + 20 ))
-    if [ "$WAITED" -ge "$SMOKE_TIMEOUT" ]; then
-      tmux kill-session -t "$SESSION"
-      gate_fail "4 smoke ($BB)" "still running after ${SMOKE_TIMEOUT}s; killed $SESSION"
-    fi
-  done
+  wait_session "$BB" "4 smoke"
   CK=$SD/$(printf '%07d' "$STEPS").pt
   SNAP=$SD/snap_$(printf '%07d' "$STEPS").pt
   [ -f "$CK" ] || gate_fail "4 smoke ($BB)" "no recovery checkpoint at $CK (see $D/logs/train_$(run_name "$BB").log)"
@@ -301,15 +416,44 @@ for BB in $SMOKE_BBS; do
   grep -q '"event": "end"' "$SD/log.jsonl" 2>/dev/null \
     || gate_fail "4 smoke ($BB)" "the smoke never reached its end event; the run died mid-way"
   say "  ok: $(du -h "$CK" | cut -f1) recovery checkpoint and $(du -h "$SNAP" | cut -f1) snapshot"
+  record "4 smoke" "bb:$BB" "$STEPS steps"
 done
 
-# --- gate 5: the evaluator readback -------------------------------------------------------
+# --- gate 4b: did the smoke train the conditioning pathways? ------------------------------------
 for BB in $SMOKE_BBS; do
-  say "$(date -Iseconds) gate 5: eval_tf readback of the $BB snapshot on $WINDOWS val windows"
+  say "$(date -Iseconds) gate 4b: smoke probes, $BB"
   # shellcheck disable=SC2046
-  $(readback_cmd "$BB") > "$D/logs/gate5_readback_$BB.log" 2>&1 \
-    || gate_fail "5 readback ($BB)" "eval_tf.py could not score the snapshot; see $D/logs/gate5_readback_$BB.log"
-  M=$SMOKE_DIR/$BB/eval_tf_val/metrics.json
+  $(probe_cmd "$BB") > "$D/logs/gate4b_probe_$BB.log" 2>&1 \
+    || gate_fail "4b smoke probes ($BB)" "$(grep '^SMOKE_PROBE' "$D/logs/gate4b_probe_$BB.log" | head -1); see $D/logs/gate4b_probe_$BB.json"
+  record "4b smoke probes" "bb:$BB" "$(grep '^SMOKE_PROBE' "$D/logs/gate4b_probe_$BB.log" | head -1)"
+done
+
+# --- gate 4c: a 10-update resume of the smoke ---------------------------------------------------
+for BB in $SMOKE_BBS; do
+  SD=$SMOKE_DIR/$BB
+  NEXT=$(( STEPS + 10 ))
+  TRAINLOG=$D/logs/train_$(run_name "$BB").log
+  say "$(date -Iseconds) gate 4c: resume the $BB smoke from step $STEPS for 10 updates"
+  launcher "$BB" STEPS="$NEXT" EXTRA="$(resume_extra "$BB")" \
+    || gate_fail "4c resume ($BB)" "the launcher refused to resume the smoke"
+  wait_session "$BB" "4c resume"
+  grep -q "resumed weights from $SD/$(printf '%07d' "$STEPS").pt at step $STEPS with optimizer" "$TRAINLOG" \
+    || gate_fail "4c resume ($BB)" "the resume did not restore the optimizer, scheduler and EMA from step $STEPS; see $TRAINLOG"
+  [ -f "$SD/$(printf '%07d' "$NEXT").pt" ] || gate_fail "4c resume ($BB)" "no checkpoint at step $NEXT"
+  LAST_END=$("$PY" -c "import json,sys; e=[json.loads(l) for l in open(sys.argv[1]) if '\"event\": \"end\"' in l]; print(e[-1]['step'] if e else -1)" "$SD/log.jsonl")
+  [ "$LAST_END" = "$NEXT" ] || gate_fail "4c resume ($BB)" "the resumed run ended at step $LAST_END, not $NEXT"
+  record "4c resume" "bb:$BB" "$STEPS -> $NEXT"
+done
+
+# --- gate 5: the evaluator readback, live and EMA, one tic and four ------------------------------
+for BB in $SMOKE_BBS; do
+ ALL=""
+ for V in live ema; do for H in 1 4; do
+  say "$(date -Iseconds) gate 5: eval_tf readback of the $BB snapshot, $V weights, horizon $H, on $WINDOWS val windows"
+  # shellcheck disable=SC2046
+  $(readback_cmd "$BB" "$V" "$H") > "$D/logs/gate5_readback_${BB}_${V}_h$H.log" 2>&1 \
+    || gate_fail "5 readback ($BB $V h$H)" "eval_tf.py could not score the snapshot; see $D/logs/gate5_readback_${BB}_${V}_h$H.log"
+  M=$SMOKE_DIR/$BB/eval_tf_val_${V}_h$H/metrics.json
   NUMS=$("$PY" - "$M" <<'PY'
 import json, math, sys
 m = json.load(open(sys.argv[1]))
@@ -321,13 +465,21 @@ bad = [k for k in ("psnr_raw",) if got[k] is None or not math.isfinite(got[k])]
 print(" ".join(f"{k}={v}" for k, v in got.items() if v is not None))
 raise SystemExit(1 if bad else 0)
 PY
-) || gate_fail "5 readback ($BB)" "no finite raw PSNR in $M ($NUMS)"
-  say "  $BB $NUMS"
+) || gate_fail "5 readback ($BB $V h$H)" "no finite raw PSNR in $M ($NUMS)"
+  say "  $BB $V h$H $NUMS"
+  ALL="$ALL $V/h$H: $NUMS;"
+ done; done
+ record "5 readback" "bb:$BB" "$ALL"
 done
 
-# the receipt: only if the checkout is still the commit gate 0 pinned, with no tracked change
+# the certificate: only if the checkout is still the commit gate 0 pinned, with no tracked change
 [ "$(pin_of "$REPO")" = "$COMMIT" ] && [ "$(pin_of "$RUN_REPO")" = "$COMMIT" ] && git -C "$REPO" diff --quiet HEAD -- \
   || gate_fail "0 pin" "the checkout moved while the gates ran (certified $COMMIT); rerun the gates"
-echo "$COMMIT $(date -Iseconds) spaces=${SPACES[*]} smoked=$SMOKE_BBS" > "$RECEIPT"
-say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS receipt=$RECEIPT"
+for BB in $SMOKE_BBS; do
+  PROD_CMD=$(cert_cmd "$BB") || gate_fail "certificate ($BB)" "the launcher could not resolve the production command"
+  # shellcheck disable=SC2046
+  $(cert_write_cmd "$BB") "$PROD_CMD" >> "$REPORT" 2>&1 \
+    || { rm -f "$CERT"; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+done
+say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
 say "the gates say the corpus, the configuration and the evaluator agree; the training numbers are still unmeasured"

@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 
+import numpy as np
 import pytest
 import torch
 
@@ -278,11 +279,175 @@ def test_the_rollout_score_stage_is_gated_on_the_file_it_writes(tmp_path):
     out = r / "rollout_metrics_test" / rollout_eval.SCORE_FILE
     assert out.is_file() and json.load(open(out))["idm"] == 0.5
     assert (r / "rollout_metrics_test" / (rollout_eval.SCORE_FILE + ".key")).is_file()
-    again, calls = run(tmp_path, root, r, CORPORA="test", FORCE_TEST="1")
+    assert (r / "sealed" / "test" / "rollout_score.done").is_file()
+    # reopen the corpus as an interrupted run would leave it: the booked score is kept, RESCORE or not
+    (r / "sealed" / "test" / "complete").unlink()
+    again, calls = run(tmp_path, root, r, CORPORA="test", RESCORE="1")
     assert again.returncode == 0, again.stderr
-    assert [c for c in _calls_to(calls, "rollout_eval.py") if "--score" in c] == []
-    redo, calls = run(tmp_path, root, r, CORPORA="test", FORCE_TEST="1", RESCORE="1")
+    assert _calls_to(calls, "rollout_eval.py") == [] and _tf_calls(calls) == []
+    redo, calls = run(tmp_path, root, r, CORPORA="test", FORCE_TEST="1")
     assert [c for c in _calls_to(calls, "rollout_eval.py") if "--score" in c]
+
+
+# ---------------------------------------------------------------------------------------
+# sealing is atomic at first access, and a completed sealed stage is never recomputed
+# ---------------------------------------------------------------------------------------
+
+def test_the_seal_is_written_before_the_first_score(tmp_path):
+    """A run that dies on its first sealed computation has still opened the seal."""
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    proc, calls = run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test")
+    assert proc.returncode != 0 and _tf_calls(calls)
+    seal = (r / "sealed" / "test" / "seal").read_text()
+    assert "selection_sha256=" in seal and "step=" in seal
+    assert (r / "sealed" / "test" / "eval_tf_test.started").is_file()
+    assert not (r / "sealed" / "test" / "eval_tf_test.done").exists()
+    proc, _, _ = selected(tmp_path, root, r)
+    assert proc.returncode == 4 and "selection on test" in proc.stderr
+
+
+def test_an_interrupted_seal_finishes_only_its_incomplete_stages(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    first, _ = run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test_h4")
+    assert first.returncode != 0
+    assert (r / "sealed" / "test" / "eval_tf_test.done").is_file()
+    assert not (r / "sealed" / "test" / "complete").exists()
+    second, calls = run(tmp_path, root, r, CORPORA="test", RESCORE="1")
+    assert second.returncode == 0, second.stderr
+    outs = [flag(c, "--out-dir") for c in _tf_calls(calls)]
+    assert outs == [str(r / "eval_tf_test_h4")], "a completed sealed stage was recomputed"
+    assert (r / "sealed" / "test" / "complete").is_file()
+
+
+def test_a_completed_sealed_stage_under_another_key_is_refused_not_recomputed(tmp_path):
+    """Every part of a key is also pinned at selection, so the book is the second line of defence;
+    it is exercised here by a book entry from another configuration."""
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test_h4")
+    (r / "sealed" / "test" / "eval_tf_test.done").write_text("ckpt=elsewhere\n")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode != 0
+    assert "completed under a different configuration" in proc.stderr
+    assert str(r / "eval_tf_test") not in [flag(c, "--out-dir") for c in _tf_calls(calls)]
+
+
+def test_an_incomplete_sealed_stage_may_not_rerun_under_another_key(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test")
+    (r / "sealed" / "test" / "eval_tf_test.started").write_text("ckpt=elsewhere\n")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode != 0 and "started under a different configuration" in proc.stderr
+    assert str(r / "eval_tf_test") not in [flag(c, "--out-dir") for c in _tf_calls(calls)]
+
+
+# ---------------------------------------------------------------------------------------
+# the selection pins the whole scoring configuration of the sealed stage
+# ---------------------------------------------------------------------------------------
+
+def test_the_selection_pins_decoder_sampler_windows_seed_and_every_corpus(tmp_path):
+    root, r = root_with(tmp_path)
+    _, _, sel = selected(tmp_path, root, r)
+    p = sel["pinned"]
+    for k in ("decoder_path", "decoder_identity", "sampler_steps", "spacing", "num_windows", "seed",
+              "horizon_tics", "rollout_horizon", "rollouts", "corpus.val", "corpus.test", "corpus.arenas_678"):
+        assert k in p, k
+    assert p["num_windows"] == "8" and p["spacing"] == "linear" and p["seed"] == "0"
+    assert p["corpus.test"].startswith("split=") and "fingerprint=fp0" in p["corpus.test"]
+
+
+@pytest.mark.parametrize("change,why", [({"NUM_WINDOWS": "16"}, "num_windows"), ({"SPACING": "karras"}, "spacing"),
+                                        ({"SEED": "1"}, "seed"), ({"HORIZON": "64"}, "rollout_horizon"),
+                                        ({"STUB_CORPUS_FP": "fp1"}, "corpus.test")])
+def test_a_sealed_stage_under_a_different_configuration_is_refused_before_any_seal(tmp_path, change, why):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    proc, calls = run(tmp_path, root, r, CORPORA="test", **change)
+    assert proc.returncode == 4 and why in proc.stderr, proc.stderr
+    assert _tf_calls(calls) == [] and _calls_to(calls, "rollout_eval.py") == []
+    assert not (r / "sealed").exists(), "a refused configuration must not open a seal"
+
+
+def test_a_changed_split_file_is_a_different_corpus(tmp_path):
+    root, r = root_with(tmp_path)
+    split = root / "latents_arnold_dense_pertic_eval" / "split_test.json"
+    split.write_text('{"val": [7000, 7001]}')
+    selected(tmp_path, root, r)
+    split.write_text('{"val": [7000]}')
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode == 4 and "corpus.test" in proc.stderr
+    assert _tf_calls(calls) == []
+
+
+def test_a_decoder_that_appeared_after_selection_is_refused(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    d = root / "vae_decoder_arnold_lpips" / "vae"
+    d.mkdir(parents=True)
+    (d / "diffusion_pytorch_model.safetensors").write_bytes(b"weights")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode == 4 and "decoder_path" in proc.stderr
+    assert _tf_calls(calls) == []
+
+
+def test_the_real_corpus_identity_follows_contents_not_paths(tmp_path):
+    import shutil
+    import score_identity
+    lat = _corpus(tmp_path, [10, 11])
+    path, _ = mdes.build(lat, expect_ids=[10, 11])
+    a = score_identity.corpus_identity(lat, path)
+    assert a.startswith("split=") and "episodes=2" in a
+    moved = str(tmp_path / "elsewhere" / "val")
+    shutil.copytree(lat, moved)
+    shutil.copy(path, str(tmp_path / "elsewhere" / "split_val.json"))
+    assert score_identity.corpus_identity(moved, str(tmp_path / "elsewhere" / "split_val.json")) == a
+    z = np.load(os.path.join(moved, "ep_00011_latents.npy"))
+    np.save(os.path.join(moved, "ep_00011_latents.npy"), (z + 1).astype(z.dtype))
+    assert score_identity.corpus_identity(moved, str(tmp_path / "elsewhere" / "split_val.json")) != a
+    with open(path, "w") as f:
+        json.dump({"val": [10]}, f)
+    assert score_identity.corpus_identity(lat, path) != a
+    assert score_identity.corpus_identity(lat, str(tmp_path / "nope.json")).startswith("split=missing")
+
+
+def test_verify_pins_compares_what_is_scored_now():
+    sel = {"pinned": {"spacing": "linear", "num_windows": "8", "corpus.test": "a", "corpus.arenas_678": "b"}}
+    assert select_checkpoint.verify_pins(sel, {"spacing": "linear", "num_windows": "8", "corpus.test": "a"}) == []
+    bad = select_checkpoint.verify_pins(sel, {"spacing": "linear", "corpus.test": "a", "corpus.seen": "c"})
+    assert any("num_windows is pinned" in b for b in bad) and any("corpus.seen was not pinned" in b for b in bad)
+    assert select_checkpoint.verify_pins({}, {"spacing": "linear"})
+
+
+def test_the_scoring_commands_carry_the_pinned_spacing_and_seed(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode == 0, proc.stderr
+    for c in _tf_calls(calls) + [c for c in _calls_to(calls, "rollout_eval.py") if c.split()[1] == "--rollout"]:
+        assert "--timestep-spacing linear" in c and "--seed 0" in c, c
+
+
+def test_a_seal_opened_under_another_selection_is_refused(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    d = r / "sealed" / "test"
+    d.mkdir(parents=True)
+    (d / "seal").write_text("sealed 2026-09-23 corpus=test selection_sha256=someotherselection\n")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode != 0 and "sealed under a different selection" in proc.stderr
+    assert _tf_calls(calls) == []
+
+
+def test_a_seal_directory_without_a_record_is_refused_as_a_race(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    (r / "sealed" / "test").mkdir(parents=True)
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode != 0 and "another scoring of it may be running" in proc.stderr
+    assert _tf_calls(calls) == []
 
 
 def test_a_failed_rollout_is_not_reported_as_done(tmp_path):
@@ -338,6 +503,61 @@ def test_a_failed_rerun_leaves_no_result_that_looks_current(tmp_path):
     assert proc.returncode != 0
     assert not (r / "eval_tf_val" / "metrics.json.key").exists()
     assert not (r / "eval_tf_val" / "metrics.json").exists()
+
+
+def test_the_key_names_the_corpus_by_content_and_the_windows_not_the_split_path(tmp_path):
+    root, r = root_with(tmp_path)
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    key = (r / "eval_tf_val" / "metrics.json.key").read_text()
+    assert "split=missing" in key and "fingerprint=fp0" in key and "windows=" in key
+    assert "split_val.json" not in key, "the split's pathname is not its identity"
+
+
+def test_a_split_file_with_new_contents_rescores(tmp_path):
+    root, r = root_with(tmp_path)
+    split = root / "latents_arnold_dense_pertic_eval" / "split_val.json"
+    split.write_text('{"val": [6000, 6001]}')
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    _, same = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    assert _tf_calls(same) == []
+    split.write_text('{"val": [6000]}')
+    _, calls = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    assert flag(_tf_calls(calls)[0], "--out-dir") == str(r / "eval_tf_val") and len(_tf_calls(calls)) == 4
+
+
+def test_a_re_encoded_corpus_rescores(tmp_path):
+    root, r = root_with(tmp_path)
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    _, calls = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"), STUB_CORPUS_FP="fp-reencoded")
+    assert len(_tf_calls(calls)) == 4
+
+
+def test_a_different_seed_is_a_different_window_manifest(tmp_path):
+    root, r = root_with(tmp_path)
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    _, calls = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"), SEED="1")
+    assert len(_tf_calls(calls)) == 4 and all("--seed 1" in c for c in _tf_calls(calls))
+
+
+def test_the_real_window_manifest_is_the_evaluators_draw(tmp_path):
+    """`score_identity.py windows` must name exactly the windows `eval_tf.py` scores."""
+    import score_identity
+    from doom_data import TicWindowDataset
+    from eval_tf import draw_windows
+    from pertic_fixtures import held_actions, write_pertic_episode
+    lat = str(tmp_path / "val")
+    for ep in (10, 11):
+        write_pertic_episode(lat, ep, held_actions([0] * 10))
+    path, _ = mdes.build(lat, expect_ids=[10, 11])
+    rows, digest = score_identity.tf_window_manifest(lat, path, 5, 0, 4, 1, 4)
+    ds = TicWindowDataset(lat, [10, 11], 4, latent_channels=4, horizon=1, with_horizon=True)
+    want = [[ds.episodes[ds.locate(int(i))[0]][0], ds.locate(int(i))[1]] for i in draw_windows(len(ds), 5, 0)]
+    assert rows == want and len(rows) == 5
+    assert score_identity.tf_window_manifest(lat, path, 5, 1, 4, 1, 4)[1] != digest
+    assert score_identity.tf_window_manifest(lat, path, 5, 0, 4, 4, 4)[1] != digest
+    assert score_identity.tf_window_manifest(lat, path, 6, 0, 4, 1, 4)[1] != digest
+    r_rows, r_digest = score_identity.rollout_window_manifest(lat, path, 3, 0, 4, 4, 4)
+    assert len(r_rows) == 3 and r_digest != digest
 
 
 def test_the_launcher_no_longer_caches_on_existence_alone():

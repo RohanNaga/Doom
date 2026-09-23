@@ -126,7 +126,9 @@ not_done() {    # print the ids among "$@" whose latents are not on Spiderman ye
   local names="" id
   for id in "$@"; do names="$names $(name "$id")_latents.npy"; done
   local have
-  have=$(remote "cd $DST 2>/dev/null && ls $names 2>/dev/null") || true
+  # an episode uploaded to the Hub and then deleted on Spiderman (ids 2000:6000) is listed in the
+  # directory's uploaded_manifest.jsonl, and is done just as much as one whose file is still there
+  have=$(remote "cd $DST 2>/dev/null && { ls $names 2>/dev/null; grep -ho 'ep_[0-9]*_latents.npy' uploaded_manifest.jsonl 2>/dev/null; }") || true
   for id in "$@"; do
     grep -qx "$(name "$id")_latents.npy" <<< "$have" || echo "$id"
   done
@@ -134,7 +136,7 @@ not_done() {    # print the ids among "$@" whose latents are not on Spiderman ye
 
 missing_in_range() {    # every id of $IDS whose latents Spiderman lacks, from one directory listing
   local have
-  have=$(remote "ls $DST 2>/dev/null | grep '_latents.npy\$'") || true
+  have=$(remote "ls $DST 2>/dev/null | grep '_latents.npy\$'; grep -ho 'ep_[0-9]*_latents.npy' $DST/uploaded_manifest.jsonl 2>/dev/null") || true
   local A=${IDS%:*} Bnd=${IDS#*:} id
   for ((id = A; id < Bnd; id++)); do
     grep -qx "$(name "$id")_latents.npy" <<< "$have" || echo "$id"
@@ -152,9 +154,11 @@ remote_space_ok() {     # REMOTE_MIN_FREE_GB guard on Spiderman's data disk
 }
 
 patch_meta() {  # record where and from which code this shard's latents were made
-  "$PY" - "$1" "$B/repo_git.txt" "$SHARD" "$GPU" "${QUEUE_DIR:-}" <<'P'
-import json, sys
-path, gitfile, shard, gpu, queue = sys.argv[1:6]
+  "$PY" - "$1" "$B/repo_git.txt" "$SHARD" "$GPU" "${QUEUE_DIR:-}" \
+    "$(nvidia-smi --query-gpu=driver_version --format=csv,noheader -i "$GPU" 2>/dev/null)" <<'P'
+import json, platform, sys
+import diffusers, numpy, torch
+path, gitfile, shard, gpu, queue, driver = sys.argv[1:7]
 m = json.load(open(path))
 head = open(gitfile).read().split()[0]
 if m.get("git") in (None, "", "?"):
@@ -166,7 +170,11 @@ m["encoded_on"] = {
     "git_source": "HEAD of Spiderman's $D/repo when it was copied; Superman's copy has no .git",
     "note": "args.in_dir and args.out_dir are this worker's local streaming directories; each "
             "encoder process saw one batch of episodes, and the summary lines of every batch are "
-            "gathered into the matching episodes_NN.jsonl"}
+            "gathered into the matching episodes_NN.jsonl",
+    # the encoder environment: bf16 latents differ at rounding level between environments
+    "env": {"conda_env": "doomenc", "python": platform.python_version(), "torch": torch.__version__,
+            "torch_cuda": torch.version.cuda, "cudnn": torch.backends.cudnn.version(),
+            "diffusers": diffusers.__version__, "numpy": numpy.__version__, "nvidia_driver": driver}}
 json.dump(m, open(path, "w"), indent=1)
 P
 }

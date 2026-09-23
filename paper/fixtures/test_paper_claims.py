@@ -60,6 +60,24 @@ def test_the_framing_is_a_system_comparison():
         assert "system comparison" in text, name
 
 
+def test_the_trainer_help_does_not_claim_gamengens_spacing_or_conditioning():
+    """Text only: the help strings of --tic-stride and --action-history (review H5)."""
+    src = read("train_wm.py")
+    assert "the per-tic dataset, GameNGen's spacing" not in src
+    assert "GameNGen's action conditioning: one token" not in src
+    assert "GameNGen context-noise augmentation" not in src
+    import train_wm
+    helps = {a.dest: a.help or "" for a in train_wm.build_parser()._actions}
+    assert "inference" in helps["tic_stride"] and "not stated" in helps["tic_stride"]
+    assert "ours" in helps["action_history"]
+
+
+def test_the_design_note_names_the_current_unseen_subset():
+    note = read(".claude", "analyses", "nexttic-design-2026-09-20.md")
+    assert "| unseen (`arenas_678`) | 0:60 | 20 |" not in note
+    assert "60:120" in note
+
+
 def test_the_launcher_labels_what_is_gamengens_and_what_is_ours():
     text = read("scripts", "spiderman", "launch_nexttic.sh")
     assert "is GameNGen's own conditioning" not in text

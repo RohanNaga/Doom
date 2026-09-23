@@ -61,6 +61,21 @@ if script == "pick_checkpoint.py":
     sha = os.environ.get("STUB_SHA", "sha-" + os.path.basename(path))
     print("%s %d %d %s" % (path, step_of(path), os.path.basename(path) != "best.pt", sha))
     sys.exit(int(os.environ.get("STUB_PICK_RC", "0")))
+if script == "score_identity.py":
+    # a corpus's identity as the real script prints it: split file CONTENTS, then a fingerprint the
+    # test controls through STUB_CORPUS_FP (the real one reads the latents)
+    import hashlib
+    try:
+        split = hashlib.sha256(open(arg("--split"), "rb").read()).hexdigest()[:16]
+    except OSError:
+        split = "missing"
+    if sys.argv[2] == "windows":
+        # the manifest follows every input the real one follows: the draw's arguments and the split
+        drawn = hashlib.sha256((" ".join(sys.argv[3:]) + split + os.environ.get("STUB_CORPUS_FP", "fp0")).encode())
+        print("windows=%s n=0" % drawn.hexdigest()[:16])
+    else:
+        print("split=%s fingerprint=%s episodes=0" % (split, os.environ.get("STUB_CORPUS_FP", "fp0")))
+    sys.exit(0)
 if script == "make_dense_eval_splits.py":
     corpus = os.path.basename(arg("--latents-dir") or "")
     sys.exit(1 if corpus in os.environ.get("STUB_CHECK_FAIL", "").split(",") else 0)
@@ -70,6 +85,9 @@ if script == "eval_tf.py":
     ck, ema = arg("--ckpt"), "--use-ema" in sys.argv
     scores = json.loads(os.environ.get("STUB_SCORES") or "{}")
     psnr, lp = scores.get("%s|%s" % (os.path.basename(ck), "ema" if ema else "live"), [21.0, 0.3])
+    fail_on = os.environ.get("STUB_TF_FAIL_ON")
+    if fail_on and out.endswith(fail_on):
+        sys.exit(1)
     if not os.environ.get("STUB_TF_NO_OUTPUT"):
         with open(os.path.join(out, "metrics.json"), "w") as f:
             json.dump({"psnr": 21.0, "psnr_raw": {"mean": psnr, "n": 8}, "lpips_raw": {"mean": lp, "n": 8},
@@ -274,7 +292,7 @@ def test_the_score_stage_is_gated_on_the_file_it_actually_writes():
     name = _score_output_name()
     text = open(AFTER).read()
     assert 'M=$R/rollout_metrics_$S' in text
-    assert f'should_run "$M/{name}" "$KEY"' in text, name
+    assert f'run_or_skip "$S" rollout_score "$M/{name}" "$KEY"' in text, name
     assert 'rollout_metrics_test/metrics.json' not in text, "the wrong filename is back"
 
 
