@@ -29,6 +29,7 @@ from doom_data import LatentWindowDataset, load_split
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
 from timestep_spacing import SPACINGS
 from timestep_spacing import sample as sample_spaced
+from wandb_log import add_eval_args, log_evaluation
 
 HUD_ROWS = 32
 
@@ -102,6 +103,11 @@ def load_model(args, device, latent_channels, trained):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     load_world_model_state(model, ck, args.use_ema)
     return model.to(device).eval(), ck.get("step", "?"), checkpoint_objective(ck, args.objective)
+
+
+def wandb_tag(args):
+    """This read's W&B series prefix: `live_h<H>` or `ema_h<H>`, the tags the sidecar uses."""
+    return f"{'ema' if args.use_ema else 'live'}_h{max(1, int(args.horizon_tics))}"
 
 
 def decoder_record(args):
@@ -362,6 +368,7 @@ def main(args):
     with open(os.path.join(args.out_dir, "per_window.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
     print(json.dumps({k: v for k, v in summary.items() if k not in ("config", "per_map")}, indent=1))
+    log_evaluation(args, wandb_tag(args), summary, ckpt=args.ckpt, recorded_step=step, out_dir=args.out_dir)
 
 
 def build_parser():
@@ -412,7 +419,7 @@ def build_parser():
     p.add_argument("--save-images", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-dir", required=True)
-    return p
+    return add_eval_args(p)
 
 
 if __name__ == "__main__":

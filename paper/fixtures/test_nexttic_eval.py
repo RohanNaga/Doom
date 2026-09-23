@@ -260,6 +260,24 @@ def test_four_tics_forward_is_scored_four_tics_later(pertic_eval_corpus, tiny_hu
     assert np.isfinite(m["psnr_dec"]["mean"]) and np.isfinite(m["persist_psnr_raw"]["mean"])
 
 
+def test_the_read_is_appended_to_the_runs_wandb_eval_run(pertic_eval_corpus, tiny_hub, tmp_path, monkeypatch):
+    """`--wandb-run` logs the raw PSNR, LPIPS and persistence floor at the checkpoint's step; `best.pt`
+    carries no step in its name, so the step the checkpoint records (7) is used."""
+    from wandb_stub import inits, logged, stub_wandb
+    wb = stub_wandb()
+    monkeypatch.setitem(sys.modules, "wandb", wb)
+    m = _run_eval(tmp_path, pertic_eval_corpus, {"tic_stride": 1},
+                  ["--horizon-tics", "4", "--wandb-run", "040-unet-nexttic"])
+    (kw,) = inits(wb)
+    assert kw["id"] == "040-unet-nexttic-eval" and kw["group"] == "040-unet-nexttic"
+    (row,) = logged(wb)
+    assert row["step"] == 7
+    assert row["eval/live_h4/psnr"] == m["psnr_raw"]["mean"]
+    assert row["eval/live_h4/persist_psnr"] == m["persist_psnr_raw"]["mean"]
+    assert row["eval/live_h4/psnr_over_persistence"] == pytest.approx(
+        m["psnr_raw"]["mean"] - m["persist_psnr_raw"]["mean"])
+
+
 def test_the_horizon_floor_is_the_gap_k_floor(pertic_eval_corpus, tiny_hub, tmp_path):
     """The floor at gap 4 must be the frame four tics earlier, not the frame one tic earlier."""
     (tmp_path / "a").mkdir(); (tmp_path / "b").mkdir()

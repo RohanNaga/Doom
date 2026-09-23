@@ -265,3 +265,39 @@ class RunLogger:
         run, self.run = self.run, None
         if run is not None:
             self._guard("finishing the W&B run", run.finish)
+
+
+def add_eval_args(p):
+    """The evaluators' W&B flags. Logging is off unless `--wandb-run` names the training run."""
+    p.add_argument("--wandb-run", dest="wandb_run", default="",
+                   help="append this evaluation's summary metrics to W&B. The name of the TRAINING run (its "
+                        "results directory, e.g. 040-unet-nexttic); the metrics go to the run <name>-eval in "
+                        "group <name>, which W&B overlays with the training curves. Empty (default): no W&B")
+    p.add_argument("--wandb-project", dest="wandb_project", default=DEFAULT_PROJECT)
+    p.add_argument("--wandb-entity", dest="wandb_entity", default=None)
+    p.add_argument("--wandb-step", dest="wandb_step", type=int, default=None,
+                   help="the training step to log at; default: from the checkpoint's filename (snap_0010000.pt, "
+                        "0010000.pt), else the step the checkpoint records")
+    return p
+
+
+def log_evaluation(args, tag, metrics, ckpt=None, recorded_step=None, out_dir=None):
+    """Append one evaluator summary to `<run>-eval` at its checkpoint's step, then close the run.
+
+    A no-op without `--wandb-run`. Returns the row logged (without `step`) or None, and never raises:
+    an evaluation's metrics file is its record, and W&B is only the live view of it.
+    """
+    run = getattr(args, "wandb_run", "") or ""
+    if not run:
+        return None
+    step = resolve_eval_step(getattr(args, "wandb_step", None), ckpt, recorded_step)
+    if step is None:
+        print(f"wandb: cannot tell which training step {ckpt!r} holds; pass --wandb-step. Nothing logged",
+              file=sys.stderr, flush=True)
+        return None
+    run_id, group = eval_run_names(run)
+    lg = RunLogger(enabled=True, name=run_id, group=group, project=getattr(args, "wandb_project", DEFAULT_PROJECT),
+                   entity=getattr(args, "wandb_entity", None), config={"trainer_run": group}, results_dir=out_dir)
+    row = lg.log_eval(step, tag, metrics)
+    lg.close()
+    return row

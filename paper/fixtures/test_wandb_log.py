@@ -18,8 +18,10 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, REPO)
+sys.path.insert(0, HERE)
 
 import wandb_log  # noqa: E402
+from wandb_stub import FakeRun, inits, logged, stub_wandb  # noqa: E402
 
 SIDECAR = os.path.join(REPO, "tools", "wandb_tail.py")
 
@@ -31,51 +33,11 @@ def load_sidecar():
     return mod
 
 
-class FakeRun:
-    """Records what a W&B run was asked to do; `fail` names the method that raises."""
-
-    def __init__(self, calls, fail=None):
-        self.calls, self.fail = calls, fail
-
-    def define_metric(self, *a, **k):
-        self.calls.append(("define_metric", a, k))
-
-    def log(self, row, **k):
-        if self.fail == "log":
-            raise RuntimeError("W&B is unreachable")
-        self.calls.append(("log", dict(row), k))
-
-    def finish(self, *a, **k):
-        if self.fail == "finish":
-            raise RuntimeError("W&B is unreachable")
-        self.calls.append(("finish", a, k))
-
-
-def stub_wandb(fail=None):
-    """A `wandb` module that records calls. `fail` in {"init", "log", "finish"} makes that call raise."""
-    mod = types.ModuleType("wandb")
-    mod.calls = []
-
-    def init(**kw):
-        mod.calls.append(("init", (), kw))
-        if fail == "init":
-            raise RuntimeError("W&B is down")
-        return FakeRun(mod.calls, fail)
-
-    mod.init = init
-    mod.Settings = lambda **kw: dict(kw)
-    return mod
-
-
 @pytest.fixture
 def wb(monkeypatch):
     mod = stub_wandb()
     monkeypatch.setitem(sys.modules, "wandb", mod)
     return mod
-
-
-def logged(mod):
-    return [row for kind, row, _ in mod.calls if kind == "log"]
 
 
 T0 = 1_758_000_000.0
@@ -387,7 +349,6 @@ def jsonl(path):
 
 
 def test_the_trainer_flags_default_to_streaming():
-    sys.path.insert(0, HERE)
     import train_wm
     a = train_wm.build_parser().parse_args(["--backbone", "dit"])
     assert a.wandb is True and a.wandb_project == "doomdit-nexttic" and a.wandb_entity is None
@@ -395,7 +356,6 @@ def test_the_trainer_flags_default_to_streaming():
 
 
 def test_the_trainer_streams_every_event_after_writing_it(tiny_pixart, tmp_path, monkeypatch):
-    sys.path.insert(0, HERE)
     mod = stub_wandb()
     out = str(tmp_path / "040-tiny-nexttic")
     seen_on_disk = []
@@ -427,7 +387,6 @@ def test_the_trainer_streams_every_event_after_writing_it(tiny_pixart, tmp_path,
 
 
 def test_no_wandb_opts_out_and_says_so_in_config(tiny_pixart, tmp_path, monkeypatch):
-    sys.path.insert(0, HERE)
     boom = types.ModuleType("wandb")
     boom.init = lambda **kw: pytest.fail("--no-wandb opened a W&B run")
     monkeypatch.setitem(sys.modules, "wandb", boom)
@@ -438,7 +397,6 @@ def test_no_wandb_opts_out_and_says_so_in_config(tiny_pixart, tmp_path, monkeypa
 
 
 def test_a_fit_check_never_logs(tiny_pixart, tmp_path, monkeypatch):
-    sys.path.insert(0, HERE)
     import train_wm
     boom = types.ModuleType("wandb")
     boom.init = lambda **kw: pytest.fail("a fit check opened a W&B run")
@@ -453,7 +411,6 @@ def test_a_fit_check_never_logs(tiny_pixart, tmp_path, monkeypatch):
 
 
 def test_a_wandb_outage_mid_run_does_not_stop_training(tiny_pixart, tmp_path, monkeypatch, capsys):
-    sys.path.insert(0, HERE)
     monkeypatch.setitem(sys.modules, "wandb", stub_wandb(fail="log"))
     out = train_tiny(tmp_path)
     events = jsonl(os.path.join(out, "log.jsonl"))
@@ -461,3 +418,83 @@ def test_a_wandb_outage_mid_run_does_not_stop_training(tiny_pixart, tmp_path, mo
     assert os.path.isfile(os.path.join(out, "best.pt"))
     err = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("wandb:")]
     assert len(err) == 1, err
+
+
+# ---------------------------------------------------------------------------------------
+# the evaluators: --wandb-run appends a summary to `<run>-eval` at the checkpoint's step
+# ---------------------------------------------------------------------------------------
+
+def evaluator_parsers():
+    import eval_tf
+    import rollout_eval
+    import smoke_probe
+    return {
+        "eval_tf": (eval_tf.build_parser(), ["--ckpt", "c.pt", "--backbone", "unet", "--latents-dir", "l",
+                                             "--split", "s.json", "--out-dir", "o"]),
+        "rollout_eval": (rollout_eval.build_parser(), ["--score", "--rollouts", "r.npz", "--out-dir", "o"]),
+        "smoke_probe": (smoke_probe.build_parser(), ["--ckpt", "c.pt", "--backbone", "unet", "--latents-dir", "l",
+                                                     "--episodes", "6000:6100"]),
+    }
+
+
+@pytest.mark.parametrize("name", ["eval_tf", "rollout_eval", "smoke_probe"])
+def test_every_evaluator_takes_the_wandb_flags_and_is_off_by_default(name):
+    p, base = evaluator_parsers()[name]
+    a = p.parse_args(base)
+    assert a.wandb_run == "" and a.wandb_project == "doomdit-nexttic" and a.wandb_entity is None
+    assert a.wandb_step is None
+    a = p.parse_args(base + ["--wandb-run", "040-unet-nexttic", "--wandb-project", "p", "--wandb-entity", "e",
+                             "--wandb-step", "12000"])
+    assert (a.wandb_run, a.wandb_project, a.wandb_entity, a.wandb_step) == ("040-unet-nexttic", "p", "e", 12000)
+
+
+def eval_args(**kw):
+    return types.SimpleNamespace(**{"wandb_run": "040-unet-nexttic", "wandb_project": "doomdit-nexttic",
+                                    "wandb_entity": None, "wandb_step": None, **kw})
+
+
+def test_an_evaluation_is_logged_to_the_eval_run_at_the_checkpoints_step(wb, tmp_path):
+    row = wandb_log.log_evaluation(eval_args(), "live_h1", EVAL_TF_METRICS, ckpt="r/snap_0010000.pt",
+                                   recorded_step=9999, out_dir=str(tmp_path))
+    (kw,) = inits(wb)
+    assert kw["id"] == kw["name"] == "040-unet-nexttic-eval" and kw["group"] == "040-unet-nexttic"
+    assert kw["resume"] == "allow" and kw["dir"] == str(tmp_path / ".wandb")
+    assert logged(wb) == [{"step": 10000, **row}] and "eval/live_h1/psnr" in row
+    assert [c[0] for c in wb.calls].count("finish") == 1
+
+
+def test_the_explicit_step_and_the_recorded_step(wb, tmp_path):
+    wandb_log.log_evaluation(eval_args(wandb_step=4000), "probe", PROBE_REPORT, ckpt="r/0010000.pt",
+                             out_dir=str(tmp_path))
+    wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt="r/best.pt", recorded_step=12000,
+                             out_dir=str(tmp_path))
+    assert [r["step"] for r in logged(wb)] == [4000, 12000]
+
+
+def test_an_unknown_step_logs_nothing_and_says_so(wb, tmp_path, capsys):
+    assert wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt="best.pt", recorded_step="?",
+                                    out_dir=str(tmp_path)) is None
+    assert inits(wb) == []
+    assert "--wandb-step" in capsys.readouterr().err
+
+
+def test_without_wandb_run_nothing_is_imported(monkeypatch, tmp_path):
+    boom = types.ModuleType("wandb")
+    boom.init = lambda **kw: pytest.fail("an evaluator without --wandb-run opened a W&B run")
+    monkeypatch.setitem(sys.modules, "wandb", boom)
+    assert wandb_log.log_evaluation(eval_args(wandb_run=""), "live_h1", EVAL_TF_METRICS,
+                                    ckpt="snap_0010000.pt", out_dir=str(tmp_path)) is None
+
+
+def test_an_evaluation_survives_a_wandb_outage(monkeypatch, tmp_path, capsys):
+    monkeypatch.setitem(sys.modules, "wandb", stub_wandb(fail="init"))
+    assert wandb_log.log_evaluation(eval_args(), "live_h1", EVAL_TF_METRICS, ckpt="snap_0010000.pt",
+                                    out_dir=str(tmp_path)) is None
+    assert len([ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("wandb:")]) == 1
+
+
+@pytest.mark.parametrize("use_ema,horizon,tag", [(False, 1, "live_h1"), (True, 1, "ema_h1"),
+                                                 (False, 4, "live_h4"), (True, 4, "ema_h4")])
+def test_eval_tf_tags_its_read_by_weights_and_horizon(use_ema, horizon, tag):
+    import eval_tf
+    assert eval_tf.wandb_tag(types.SimpleNamespace(use_ema=use_ema, horizon_tics=horizon)) == tag
