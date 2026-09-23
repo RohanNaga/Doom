@@ -175,6 +175,8 @@ def commands(args, step, ckpt, latent_channels, wandb_run, device, python=sys.ex
             argv = [python, os.path.join(HERE, "eval_tf.py"), "--ckpt", ckpt, *model, "--horizon-tics", str(h),
                     "--latents-dir", eval_latents(args), "--split", split, "--subset", "val",
                     "--num-windows", str(args.eval_windows), "--steps", str(args.eval_steps),
+                    # no DataLoader workers: they are the evaluator's own children, which a stop can miss
+                    "--num-workers", "0",
                     *decoder_flags(latent_channels), "--out-dir", os.path.join(out, f"tf_{mode}_h{h}"), *wb]
             if mode == "ema":
                 argv.insert(4, "--use-ema")

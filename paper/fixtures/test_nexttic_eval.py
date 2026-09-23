@@ -222,6 +222,22 @@ def _run_eval(tmp_path, corpus, ckpt_args, extra):
     return json.load(open(os.path.join(out, "metrics.json")))
 
 
+def test_the_loader_takes_its_worker_count_from_the_command_line(pertic_eval_corpus, tiny_hub, tmp_path, monkeypatch):
+    """The loader's workers are the evaluator's own child processes; the trainer's periodic reads run
+    with none, so a stopped read leaves nothing behind. The default stays 2."""
+    base = ["--ckpt", "c.pt", "--backbone", "unet", "--latents-dir", "l", "--split", "s.json", "--out-dir", "o"]
+    assert eval_tf.build_parser().parse_args(base).num_workers == 2
+    seen, real = [], eval_tf.DataLoader
+
+    def loader(*a, **kw):
+        seen.append(kw.get("num_workers"))
+        return real(*a, **kw)
+
+    monkeypatch.setattr(eval_tf, "DataLoader", loader)
+    m = _run_eval(tmp_path, pertic_eval_corpus, {"tic_stride": 1}, ["--num-workers", "0"])
+    assert seen == [0] and m["psnr_dec"]["n"] == 4
+
+
 def test_a_per_tic_checkpoint_is_scored_on_per_tic_windows(pertic_eval_corpus, tiny_hub, tmp_path):
     m = _run_eval(tmp_path, pertic_eval_corpus, {"tic_stride": 1}, [])
     assert m["config"]["checkpoint_interface"]["tic_stride"] == 1

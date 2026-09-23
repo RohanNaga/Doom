@@ -268,6 +268,19 @@ def test_one_detached_process_runs_four_reads_then_the_probe(tmp_path, monkeypat
     assert e["event"] == "eval_launched" and e["step"] == 5000 and e["pid"] == 4001
 
 
+def test_every_periodic_read_loads_its_data_in_its_own_process(tmp_path, monkeypatch):
+    """DataLoader workers are child processes of the evaluator that a stop sent to the evaluator can
+    miss, so the periodic reads run eval_tf.py with none. smoke_probe.py builds no DataLoader."""
+    import eval_tf
+    sp = Spawner()
+    args, ev, _ = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    tf = [c for c in script_commands(sp) if c[1].endswith("eval_tf.py")]
+    assert len(tf) == 4 and all(flag(c, "--num-workers") == "0" for c in tf)
+    assert all(eval_tf.build_parser().parse_args(c[2:]).num_workers == 0 for c in tf)
+
+
 @pytest.mark.parametrize("backbone", ["unet", "sd35"])
 def test_every_generated_command_parses_under_its_own_evaluator(tmp_path, monkeypatch, backbone):
     """A typo in a generated flag would only surface hours into a run, as an argparse error in launch.log."""

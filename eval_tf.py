@@ -260,7 +260,8 @@ def main(args):
                                    latent_channels=latent_channels)
         ds, windows = base, HorizonOne(base)
     idx = draw_windows(len(ds), args.num_windows, args.seed)
-    loader = DataLoader(Subset(windows, idx.tolist()), batch_size=args.batch_size, shuffle=False, num_workers=2)
+    loader = DataLoader(Subset(windows, idx.tolist()), batch_size=args.batch_size, shuffle=False,
+                        num_workers=args.num_workers)
     raw = RawFrames(args.parquet_dir) if args.parquet_dir else None
     print(f"{args.subset}: {len(ds.episodes)} episodes, {len(ds):,} windows, evaluating {len(idx)}, step {step}, "
           f"objective {objective}, tic stride {tic_stride}, horizon {K} tic(s) = {K * tic_stride} tic(s) of game time")
@@ -403,6 +404,9 @@ def build_parser():
     p.add_argument("--subset", default="val", choices=["val", "train", "unseen_map"])
     p.add_argument("--num-windows", type=int, default=2048)
     p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--num-workers", type=int, default=2,
+                   help="DataLoader worker processes; 0 loads in this process, which the trainer's periodic reads "
+                        "use so that a stopped read leaves no workers behind")
     p.add_argument("--steps", type=int, default=50)
     p.add_argument("--timestep-spacing", dest="timestep_spacing", choices=SPACINGS, default="linear",
                    help="which trained timesteps the DDIM sampler visits (timestep_spacing.py). linear, the default, "
