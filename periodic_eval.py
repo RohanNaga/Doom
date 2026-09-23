@@ -18,8 +18,9 @@ second read is refused while the previous one of this run is alive, so reads nev
 evaluation card. `eval_launched` records the child's pid.
 
 The checkpoint read is the compact snapshot (`snap_<step>.pt`, bf16 live and EMA, never pruned)
-when the step is also a snapshot step, else the recovery checkpoint (`<step>.pt`), which the
-trainer prunes `--keep-last` checkpoints later: a read slower than that loses its probe.
+when the step is also a snapshot step, else the recovery checkpoint (`<step>.pt`). The read opens
+a hard link to it in `eval_<step>/` (a copy where no link can be made), because the trainer prunes
+recovery checkpoints while a slow read may still be on one; see `pin_checkpoint`.
 """
 import json
 import os
@@ -171,13 +172,43 @@ def commands(args, step, ckpt, latent_channels, wandb_run, device, python=sys.ex
     return cmds
 
 
-def write_script(path, run, step, cmds):
-    """`run.sh`: every command in order, each one's exit code logged; one failing does not stop the rest."""
+def pin_checkpoint(ckpt, out, snapshot):
+    """(the path the read opens, the file to copy there first or None, whether the wrapper removes it).
+
+    The trainer prunes old recovery checkpoints while a read may still be on one (a FileNotFoundError
+    in the read), so the read opens a HARD LINK in its own directory: the same inode, no bytes
+    copied, and invisible to the pruning, which lists only the top-level `NNNNNNN.pt` files. The
+    wrapper removes the link when the read is done, and the disk space goes when both names are gone.
+    Where a link cannot be made, a recovery checkpoint is COPIED by the wrapper before the first read,
+    not here: the SD 3.5 row's is 35 GB, and the pruning comes two checkpoints later, hours after
+    the copy is done. A snapshot is never pruned, so it is then read in place.
+    """
+    dst = os.path.join(out, os.path.basename(ckpt))
+    if os.path.lexists(dst):
+        os.remove(dst)                  # a link left by an earlier, interrupted read of this step
+    try:
+        os.link(ckpt, dst)
+        return dst, None, True
+    except OSError:
+        if snapshot:
+            return ckpt, None, False
+        return dst, ckpt, True
+
+
+def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinned=False):
+    """`run.sh`: the copy of the checkpoint if one is needed, every read in order with its exit code
+    logged (one failing does not stop the rest), then the removal of the read's own checkpoint link."""
     lines = ["#!/bin/bash", f"# periodic evaluation of {run} at step {step}, launched by train_wm.py --eval-every",
              f"cd {shlex.quote(HERE)}"]
+    if copy_from:
+        tmp = pinned + ".tmp"
+        lines += ['echo "$(date -Iseconds) copying the checkpoint (no hard link possible)"',
+                  f"cp {shlex.quote(copy_from)} {shlex.quote(tmp)} && mv {shlex.quote(tmp)} {shlex.quote(pinned)}"]
     for label, argv in cmds:
         lines += [f'echo "$(date -Iseconds) start {label}"', shlex.join(argv),
                   f'echo "$(date -Iseconds) exit $? {label}"']
+    if remove_pinned:
+        lines.append(f"rm -f {shlex.quote(pinned)}")
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
     return path
@@ -259,9 +290,11 @@ class PeriodicEval:
         out = eval_dir(self.args.results_dir, step)
         os.makedirs(out, exist_ok=True)
         run = os.path.basename(os.path.normpath(self.args.results_dir))
-        script = write_script(os.path.join(out, "run.sh"),
-                              run, step, commands(self.args, step, ckpt, self.latent_channels, self.wandb_run,
-                                                  device, self.python))
+        pinned, copy_from, remove = pin_checkpoint(ckpt, out, os.path.basename(ckpt).startswith("snap_"))
+        script = write_script(os.path.join(out, "run.sh"), run, step,
+                              commands(self.args, step, pinned, self.latent_channels, self.wandb_run, device,
+                                       self.python),
+                              copy_from=copy_from, pinned=pinned, remove_pinned=remove)
         with open(os.path.join(out, "launch.log"), "ab") as logf:
             self.proc = _popen(["bash", script], stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                env=env, cwd=HERE, start_new_session=True, close_fds=True)

@@ -161,10 +161,75 @@ def test_a_recovery_step_reads_the_recovery_checkpoint_and_a_snapshot_step_the_s
     args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
     make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
     ev.launch(5000)
-    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {os.path.join(args.results_dir, "0005000.pt")}
+    (ck,) = {flag(c, "--ckpt") for c in script_commands(sp)}
+    assert ck == os.path.join(args.results_dir, "eval_0005000", "0005000.pt")
+    assert os.path.samefile(ck, os.path.join(args.results_dir, "0005000.pt"))
     ev.launch(10000)
-    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {os.path.join(args.results_dir, "snap_0010000.pt")}
-    assert [e["event"] for e in rec.events] == ["eval_launched", "eval_launched"]
+    (ck,) = {flag(c, "--ckpt") for c in script_commands(sp)}
+    assert ck == os.path.join(args.results_dir, "eval_0010000", "snap_0010000.pt")
+    assert os.path.samefile(ck, os.path.join(args.results_dir, "snap_0010000.pt"))
+    assert [e["event"] for e in rec.events if e["event"] != "eval_finished"] == ["eval_launched", "eval_launched"]
+
+
+def script_lines(spawner):
+    argv, _ = spawner.calls[-1]
+    return open(argv[1]).read().splitlines()
+
+
+def test_the_read_holds_a_hard_link_that_pruning_cannot_remove(tmp_path, monkeypatch):
+    """Pruning a recovery checkpoint under a read that is still on it raised FileNotFoundError. The
+    read now opens a hard link in its own directory, which the trainer's pruning (top-level
+    `NNNNNNN.pt` only) never lists, and the wrapper removes the link when the read is done."""
+    sp = Spawner()
+    args, ev, _ = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    with open(os.path.join(args.results_dir, "0005000.pt"), "wb") as f:
+        f.write(b"weights")
+    ev.launch(5000)
+    link = os.path.join(args.results_dir, "eval_0005000", "0005000.pt")
+    os.remove(os.path.join(args.results_dir, "0005000.pt"))          # what the trainer's pruning does
+    with open(link, "rb") as f:
+        assert f.read() == b"weights"
+    lines = script_lines(sp)
+    last_read = max(i for i, ln in enumerate(lines) if "eval_tf.py" in ln or "smoke_probe.py" in ln)
+    rm = [i for i, ln in enumerate(lines) if ln.startswith("rm -f") and link in ln]
+    assert rm and rm[0] > last_read, "the link must outlive every read and then be removed"
+
+
+def test_a_link_that_cannot_be_made_is_a_copy_made_before_the_reads(tmp_path, monkeypatch):
+    """The copy runs in the detached wrapper, not on the training thread: a recovery checkpoint of the
+    SD 3.5 row is 35 GB, and copying it inline would stall training for minutes."""
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner()
+    args, ev, _ = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    src = os.path.join(args.results_dir, "0005000.pt")
+    dst = os.path.join(args.results_dir, "eval_0005000", "0005000.pt")
+    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {dst}
+    lines = script_lines(sp)
+    cp = [i for i, ln in enumerate(lines) if ln.startswith("cp ") and src in ln and dst in ln]
+    first_read = min(i for i, ln in enumerate(lines) if "eval_tf.py" in ln)
+    assert cp and cp[0] < first_read
+    assert any(ln.startswith("rm -f") and dst in ln for ln in lines)
+
+
+def test_a_snapshot_that_cannot_be_linked_is_read_in_place(tmp_path, monkeypatch):
+    """Snapshots are never pruned, so they need no copy."""
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner()
+    args, ev, _ = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0010000.pt", "snap_0010000.pt")
+    ev.launch(10000)
+    snap = os.path.join(args.results_dir, "snap_0010000.pt")
+    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {snap}
+    assert not any(ln.startswith(("cp ", "rm -f")) for ln in script_lines(sp))
 
 
 def test_one_detached_process_runs_four_reads_then_the_probe(tmp_path, monkeypatch):
@@ -338,6 +403,18 @@ def test_the_trainer_launches_at_each_multiple_after_its_checkpoint(tiny_pixart,
     assert [e["step"] for e in launched] == [2, 4, 6]
     assert seen == [(True, "0000002.pt", ""), (True, "0000004.pt", ""), (True, "0000006.pt", "")]
     assert events[-1]["event"] == "end"
+
+
+def test_the_trainers_pruning_leaves_every_reads_checkpoint_in_place(tiny_pixart, tmp_path, monkeypatch):
+    """With --keep-last 2 the trainer deletes 0000002.pt at step 6. Every read's own link survives
+    that (the stub reads never run, so no wrapper has removed its link yet)."""
+    import torch
+    monkeypatch.setattr(pe, "_popen", lambda argv, **kw: FakeProc(8000, 0))
+    out, events = train_tiny(tmp_path, "--keep-last", "2")
+    assert not os.path.exists(os.path.join(out, "0000002.pt")), "the fixture must actually prune"
+    for step in (2, 4, 6):
+        link = os.path.join(out, f"eval_{step:07d}", f"{step:07d}.pt")
+        assert torch.load(link, map_location="cpu", weights_only=False)["step"] == step
 
 
 def test_the_trainer_skips_while_a_read_is_alive(tiny_pixart, tmp_path, monkeypatch):
