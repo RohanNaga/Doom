@@ -20,6 +20,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import time
 
 
@@ -113,15 +114,16 @@ def steward_rows(run_dir, seen):
         except (OSError, json.JSONDecodeError):
             continue
         row = {}
-        if len(rel) == 3 and rel[1].startswith("eval_tf_val_") and rel[2] == "metrics.json":
-            tag = rel[1].replace("eval_tf_val_", "")      # live_h1, ema_h4, ...
+        m_tag = re.match(r"^(?:eval_tf_val_|tf_)((?:live|ema)_h\d+)$", rel[1]) if len(rel) == 3 else None
+        if m_tag and rel[2] == "metrics.json":
+            tag = m_tag.group(1)                          # live_h1, ema_h4, ...
             for src, dst in (("psnr_raw", "psnr"), ("lpips_raw", "lpips"), ("persist_psnr_raw", "persist_psnr"),
                              ("persist_lpips_raw", "persist_lpips"), ("recon_psnr_raw", "recon_psnr"),
                              ("recon_lpips_raw", "recon_lpips")):
                 v = mean_of(m, src)
                 if v is not None:
                     row[f"eval/{tag}/{dst}"] = v
-            if "eval/live_h1/psnr" in row or f"eval/{tag}/psnr" in row:
+            if f"eval/{tag}/psnr" in row:
                 pf = row.get(f"eval/{tag}/persist_psnr")
                 if pf is not None:
                     row[f"eval/{tag}/psnr_over_persistence"] = row[f"eval/{tag}/psnr"] - pf
