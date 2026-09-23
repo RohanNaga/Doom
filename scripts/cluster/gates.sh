@@ -20,6 +20,14 @@
 # empty environment (`env -i`) and must resolve to the certified command, or the certificate is
 # revoked: a command that needs anything from the operator's shell is not the one printed.
 #
+# Cards. Every GPU step runs under `CUDA_VISIBLE_DEVICES=<its card>` and addresses that card as
+# cuda:0, the launcher's own convention: the sd15 space and the U-Net on UNET_GPU, the sd35 space and
+# SD 3.5 on SD35_GPU. That covers the latent alignment (1d), the fit, smoke and resume (3, 4, 4c, set
+# inside launch_nexttic.sh), the probes (4b) and the readback (5), whose eval_tf.py takes the first
+# visible card: with every card visible it ran on GPU 0, another user's on Spiderman. No process of the
+# gates can see a card it was not given. The audits, inventories, alignment and window checks use no
+# CUDA.
+#
 # Interpreters. Every command of the sd15 space and the U-Net runs under PY_UNET, every command of the
 # sd35 space and SD 3.5 (audits, inventories, the latent alignment that re-encodes with the SD 3.5
 # autoencoder, fit, smoke, probes, readback, certificate) under PY_SD35; each falls back to PY and
@@ -38,7 +46,12 @@
 #                        (gate_certificate.py revoke, every other backbone's entry stays: the gates
 #                        run staggered, one space while the other row already trains); new ones are
 #                        written only at GATES_GO. A run that fails or is interrupted therefore
-#                        leaves no certificate standing for what it was certifying.
+#                        leaves no certificate standing for what it was certifying. A revocation
+#                        that fails under the backbone's interpreter is retried under the gates'
+#                        other interpreters (PY_UNET, PY_SD35, PY, $D/env/bin/python); if none can
+#                        run it, the gates stop before any gate runs and the file is left exactly
+#                        as it was. Another backbone's entry is never deleted: a stale entry of this
+#                        backbone still pins its own commit and corpora, so it certifies nothing new.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
@@ -174,6 +187,7 @@ explain() {   # how check_action_alignment.py's exit code is read
 suffix()   { [ "$1" = sd35 ] && echo _sd35 || echo ""; }
 bb_space() { [ "$1" = sd35 ] && echo sd35 || echo sd15; }
 bb_gpu()   { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
+on_card()  { echo "env CUDA_VISIBLE_DEVICES=$1"; }   # on_card <card>: the prefix of a GPU step; it sees cuda:0 only
 bb_chan()  { [ "$1" = sd35 ] && echo 16 || echo 4; }
 space_py() { [ "$1" = sd35 ] && echo "$PY_SD35" || echo "$PY_UNET"; }
 bb_py()    { space_py "$(bb_space "$1")"; }
@@ -204,22 +218,33 @@ latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shi
   DIR=$VAL; PEER=$TRAIN
   [ "$2" = train ] && { DIR=$TRAIN; PEER=$VAL; }
   # --space and --contract-peer: one latent contract for the space, the backbone's, in train AND val
-  echo "$(space_py "$1") $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+  echo "$(on_card "$(space_gpu "$1")") $(space_py "$1") $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
        "--space $1 --contract-peer $PEER" \
-       "--episodes-per-shard $ALIGN_EPISODES --device cuda:$(space_gpu "$1") --cache-dir $D/hf/hub" \
+       "--episodes-per-shard $ALIGN_EPISODES --device cuda:0 --cache-dir $D/hf/hub" \
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
 revoke_cmd() {   # revoke_cmd <backbone>: drop that backbone's certificate entry, keep the others
   echo "$(bb_py "$1") $HERE_REPO/gate_certificate.py revoke --cert $CERT --backbone $1"
 }
-revoke_mine() {   # revoke every backbone this run certifies; if that fails, revoke everything
-  local BB
-  for BB in $SMOKE_BBS; do
-    # shellcheck disable=SC2046
-    $(revoke_cmd "$BB") > /dev/null 2>&1 || { rm -f "$CERT"; echo "could not revoke $BB alone; removed $CERT" >&2; return 1; }
+revoke_one() {   # revoke_one <backbone>: under its interpreter, then each fallback; 0 once one succeeds
+  local P TRIED=""
+  [ -e "$CERT" ] || return 0      # no certificate, nothing standing to revoke
+  for P in "$(bb_py "$1")" "$PY_UNET" "$PY_SD35" "${PY:-}" "$D/env/bin/python"; do
+    [ -n "$P" ] && [ -x "$P" ] || continue
+    case " $TRIED " in *" $P "*) continue ;; esac
+    TRIED="$TRIED $P"
+    "$P" "$HERE_REPO/gate_certificate.py" revoke --cert "$CERT" --backbone "$1" > /dev/null 2>&1 && return 0
   done
-  return 0
+  echo "could not revoke $1 in $CERT under any of:$TRIED" >&2
+  return 1
+}
+revoke_mine() {   # revoke every backbone this run certifies; never touch another backbone's entry
+  local BB BAD=""
+  for BB in $SMOKE_BBS; do revoke_one "$BB" || BAD="$BAD $BB"; done
+  [ -z "$BAD" ] && return 0
+  REVOKE_FAILED=${BAD# }
+  return 1
 }
 record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, for the certificate
   local detail=${3//\"/}; detail=${detail//\\/}
@@ -293,7 +318,7 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
   EXTRA=$(bb_paths "$1")
   [ "$1" = sd35 ] && EXTRA="$EXTRA --vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae --latent-scale 1.5305 --latent-shift 0.0609"
   [ "$2" = ema ] && EMA=" --use-ema"
-  echo "$(bb_py "$1") $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
+  echo "$(on_card "$(bb_gpu "$1")") $(bb_py "$1") $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
        "--ckpt $SMOKE_DIR/$1/snap_$(printf '%07d' "$STEPS").pt$EMA --tic-stride 1 --horizon-tics $3" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--split $D/latents_arnold_dense_pertic_eval$S/split_val.json --subset val" \
@@ -303,9 +328,9 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
 }
 probe_cmd() {   # probe_cmd <backbone>: the conditioning pathways of the smoke's recovery checkpoint
   local S; S=$(suffix "$(bb_space "$1")")
-  echo "$(bb_py "$1") $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
+  echo "$(on_card "$(bb_gpu "$1")") $(bb_py "$1") $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
        "--latent-channels $(bb_chan "$1") --latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
-       "--episodes $VAL_IDS --device cuda:$(bb_gpu "$1") --hf-cache $D/hf/hub $(bb_paths "$1")" \
+       "--episodes $VAL_IDS --device cuda:0 --hf-cache $D/hf/hub $(bb_paths "$1")" \
        "--out $D/logs/gate4b_probe_$1.json"
 }
 val_inventory_cmd() {   # val_inventory_cmd <space>: exactly the val ids, rows, tics and split file
@@ -339,7 +364,7 @@ launcher() {   # launcher <backbone> <overrides of the production settings as NA
 if [ "$DRY" = 1 ]; then
   echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
   echo "DRY gate0 pin: revoke $CERT entries for $SMOKE_BBS (other backbones' entries stay); certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
-  for BB in $SMOKE_BBS; do echo "DRY gate0 revoke $BB $(revoke_cmd "$BB")"; done
+  for BB in $SMOKE_BBS; do echo "DRY gate0 revoke $BB $(revoke_cmd "$BB") (retried under PY_UNET, PY_SD35, PY, $D/env/bin/python; if none can, stop here and leave $CERT untouched)"; done
   echo "DRY results $RESULTS"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
@@ -399,7 +424,8 @@ say() { echo "$*" | tee -a "$REPORT"; }
 # --- gate 0: pin the commit being certified ------------------------------------------------
 # revoked first: a gate run that fails or is interrupted must not leave an older certificate
 # standing for whatever the checkout is now
-revoke_mine
+revoke_mine \
+  || gate_fail "0 revoke" "the certificate entry of $REVOKE_FAILED could not be revoked; $CERT is left untouched and no gate ran. Fix the interpreters (PY_UNET, PY_SD35, PY) and rerun"
 : > "$RESULTS"
 say "$(date -Iseconds) gate 0: pin"
 COMMIT=$(pin_of "$REPO") || gate_fail "0 pin" "$REPO is not a git checkout, so the gates cannot say which code they certify"
@@ -586,10 +612,12 @@ for BB in $SMOKE_BBS; do
   PROD_CMD=$(cert_cmd "$BB") || gate_fail "certificate ($BB)" "the launcher could not resolve the production command"
   # shellcheck disable=SC2046
   $(cert_write_cmd "$BB") "$PROD_CMD" >> "$REPORT" 2>&1 \
-    || { revoke_mine; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+    || { revoke_mine || echo "revocation failed for $REVOKE_FAILED; those entries may stand from this run" >&2
+         gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
   # the launch printed below must itself resolve to what was just certified, with nothing inherited
   operator_ok "$BB" "$PROD_CMD" \
-    || { revoke_mine; gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
+    || { revoke_mine || echo "revocation failed for $REVOKE_FAILED; those entries may stand from this run" >&2
+         gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
 done
 say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
 for BB in $SMOKE_BBS; do say "GATES_LAUNCH $BB: $(operator_cmd "$BB")"; done
