@@ -159,6 +159,7 @@ def main():
     p.add_argument("--project", default="doomdit-nexttic")
     p.add_argument("--entity", default=None)
     p.add_argument("--name", default=None, help="W&B run name and id (default: the run directory's name)")
+    p.add_argument("--id", default=None, help="W&B run id when it must differ from the name (a deleted id cannot be reused)")
     p.add_argument("--interval", type=float, default=30.0)
     p.add_argument("--once", action="store_true")
     a = p.parse_args()
@@ -173,7 +174,7 @@ def main():
     if os.path.isfile(cfg_path):
         with open(cfg_path) as f:
             config = json.load(f)
-    run = wandb.init(project=a.project, entity=a.entity, id=name, name=name, resume="allow", config=config,
+    run = wandb.init(project=a.project, entity=a.entity, id=a.id or name, name=name, resume="allow", config=config,
                      dir=os.path.join(a.run_dir, ".wandb"), settings=wandb.Settings(_disable_stats=True))
     run.define_metric("step")
     run.define_metric("*", step_metric="step")
