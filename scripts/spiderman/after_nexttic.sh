@@ -324,7 +324,10 @@ fi
 
 export TMPDIR=$D/tmp/tmpdir; mkdir -p "$TMPDIR" "$R" "$D/logs"
 export CUDA_VISIBLE_DEVICES=$GPU HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
-cd "$D/repo" && git pull -q
+# No `git pull`: this is the checkout the training run and the gates use, and pulling here changed
+# the code under a live run (docs/REVIEW_2026-09-22.md H3). The commit is recorded instead.
+cd "$D/repo" || { echo "AFTER_NEXTTIC_FAILED $RUN: no checkout at $D/repo" >&2; exit 2; }
+echo "$(date -Iseconds) evaluating with code at $(git rev-parse HEAD 2>/dev/null || echo unversioned)" >> "$LOG"
 echo "$(date -Iseconds) decoder_used $USED" | tee -a "$R/decoder_used.txt"
 
 # --- stage 1: validation ----------------------------------------------------------------------

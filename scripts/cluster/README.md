@@ -52,11 +52,15 @@ DOOM_ROOT=/data/doom UNET_GPU=0 SD35_GPU=1 bash scripts/cluster/launch_runs.sh
 DOOM_ROOT=/data/doom bash scripts/cluster/status.sh
 ```
 
-`gates.sh` must print `GATES_GO` before step 5. It runs, in order: the sidecar audit of both latent
-spaces against the raw parquet, the yaw alignment gate on val 6000:6100 (exit 2 misaligned, exit 3
+`gates.sh` must print `GATES_GO` before step 5. It runs, in order: the commit pin (the checkout at
+`$DOOM_ROOT/repo`, no tracked change), the sidecar audit of val and of all 2,000 training episodes in
+both latent spaces against the raw parquet, a rows-and-tics check of every training episode against
+its recording, the yaw alignment gate on val 6000:6100 (exit 2 misaligned, exit 3
 inconclusive, and **exit 3 is not approval**), a `FIT=20` fit check of each backbone through the
 real launcher, a 300-step real-data smoke into a throwaway results directory, and an
-`eval_tf.py --tic-stride 1` readback of that smoke's snapshot on 64 val windows.
+`eval_tf.py --tic-stride 1` readback of that smoke's snapshot on 64 val windows. At `GATES_GO` it
+writes the certified commit to `$DOOM_ROOT/GATES_COMMIT`, and `launch_nexttic.sh` (so `launch_runs.sh`)
+refuses to start unless `$DOOM_ROOT/repo` is at that commit with no tracked change.
 
 ## Expected durations
 
@@ -127,9 +131,10 @@ Spiderman: run the `rsync` from Spiderman with the node as the source.
   start without it. `encode_nexttic.sh` would otherwise rebuild it per shard, scanning `action` and
   `buttons` of every episode (~10 GB per process); six shards doing that at once is what the
   Sep 20 2026 Spiderman host-memory outage looks like.
-- **Pin `COMMIT` to a sha.** `launch_nexttic.sh` runs `git pull -q` of its own before launching. On
-  a detached HEAD at a sha that is a no-op; on `main` it can move the code between the smoke gate
-  and the launch.
+- **Pin `COMMIT` to a sha.** `launch_nexttic.sh` no longer pulls (it used to, after the gates, and a
+  failed pull did not stop the launch). It launches only the commit named in
+  `$DOOM_ROOT/GATES_COMMIT`; to change the code, check out the new sha and rerun `gates.sh`.
+  `ALLOW_UNGATED=1` overrides the check and is recorded in `resumes.log`.
 - **The smoke touches production paths.** It trains into `$DOOM_ROOT/results_smoke/<backbone>`, but
   it goes through the real launcher, so it appends to `$DOOM_ROOT/logs/train_<run>.log` and
   `resumes.log` and creates the production results directory empty. The results directory itself

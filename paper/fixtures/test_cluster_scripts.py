@@ -357,7 +357,8 @@ def test_the_gates_run_in_the_order_the_launch_protocol_sets(tmp_path):
 
 def test_the_sidecar_audit_is_gate_one_and_covers_both_spaces(tmp_path):
     out = dry(GATES, root=str(tmp_path), VAES="sd15,sd35")
-    audits = [ln for ln in out.splitlines() if "--audit-only" in ln]
+    # the val audit; the training corpus's own audit is pinned in test_launch_pin.py
+    audits = [ln for ln in out.splitlines() if "--audit-only" in ln and "/val " in ln]
     assert len(audits) == 2, audits
     assert any("latents_arnold_dense_pertic_eval/val" in ln for ln in audits)
     assert any("latents_arnold_dense_pertic_eval_sd35/val" in ln for ln in audits)

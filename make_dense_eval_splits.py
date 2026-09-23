@@ -149,6 +149,32 @@ def check_no_worker_first(parquet_dir, episode_ids):
     return bad
 
 
+def check_raw_tics(meta_path, parquet_path):
+    """Problems, as strings, if the sidecar's `tic` column is not the recording's, row for row.
+
+    A per-tic corpus keeps every recorded row, so the sidecar (which `check_episode` already holds
+    to the latent row count) must list exactly the recording's tics in order. A dropped, duplicated
+    or shifted row shows up here without reading a single frame.
+    """
+    import pyarrow.parquet as pq
+    name = os.path.basename(meta_path)
+    if not os.path.isfile(parquet_path):
+        return [f"{name}: no recording at {parquet_path} to check its tics against"]
+    raw = np.asarray(pq.read_table(parquet_path, columns=["tic"])["tic"]).astype(np.int64)
+    with np.load(meta_path) as m:
+        side = np.asarray(m["tic"]).astype(np.int64) if "tic" in m.files else None
+    if side is None:
+        return [f"{name}: no tic column"]
+    if len(side) != len(raw):
+        return [f"{name}: {len(side)} sidecar rows vs {len(raw)} recorded tics in {os.path.basename(parquet_path)}"]
+    bad = np.flatnonzero(side != raw)
+    if len(bad):
+        i = int(bad[0])
+        return [f"{name}: tic {int(side[i])} at row {i} but the recording has tic {int(raw[i])} "
+                f"({len(bad)} rows differ)"]
+    return []
+
+
 def check_split_file(path, want):
     """Problems, as strings, if the split file at `path` does not list exactly the episodes `want`."""
     try:
@@ -166,7 +192,7 @@ def check_split_file(path, want):
 
 
 def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8, refuse_worker_first=None,
-             split_file=None):
+             split_file=None, raw_tics=None):
     """What this directory holds against what it should hold, as a report with no side effects.
 
     `refuse_worker_first` is the raw recording directory; with it, every expected episode (every
@@ -175,6 +201,10 @@ def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8, refus
     `split_file` is the published split an evaluator will read. Its `val` list must be exactly the
     expected ids (the usable ones when none are expected): `TicWindowDataset` intersects the split
     with what is encoded, so a stale or short split file would silently score a different episode set.
+
+    `raw_tics` is the raw recording directory of a per-tic corpus; with it every episode's sidecar
+    `tic` column must equal the recording's (`check_raw_tics`). This is the launch gate's row-count
+    and tic-alignment check over the training corpus: shapes and one int column, no frames.
     """
     from doom_data import list_latent_episodes
     try:
@@ -184,6 +214,8 @@ def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8, refus
     problems, invalid = [], []
     for ep in sorted(found):
         bad = check_episode(*found[ep], latent_channels=latent_channels, sample=sample)
+        if raw_tics and not bad:
+            bad = check_raw_tics(found[ep][1], os.path.join(raw_tics, f"ep_{ep:05d}.parquet"))
         if bad:
             invalid.append(ep)
             problems += bad
@@ -262,7 +294,7 @@ def main(args):
     expect = parse_episode_ids(args.expect_ids) if args.expect_ids else None
     if args.check_only:
         report = validate(args.latents_dir, expect, args.latent_channels or None, args.sample,
-                          args.refuse_worker_first or None, args.split_file or None)
+                          args.refuse_worker_first or None, args.split_file or None, args.raw_tics or None)
         print(json.dumps(report, indent=1))
         return 0 if report["ok"] else 1
     path, split = build(args.latents_dir, args.name or None, args.out or None, expect,
@@ -296,6 +328,9 @@ def build_parser():
     p.add_argument("--split-file", dest="split_file", default="",
                    help="with --check-only: also require this published split file to list exactly the expected "
                         "episodes. after_nexttic.sh runs this before scoring any corpus")
+    p.add_argument("--raw-tics", dest="raw_tics", default="",
+                   help="with --check-only: the raw recording directory of a per-tic corpus; every sidecar's tic "
+                        "column must equal its recording's. The launch gate runs this over the training corpus")
     p.add_argument("--check-only", dest="check_only", action="store_true",
                    help="print the validation report and write nothing; exit 1 if the corpus is not publishable")
     return p

@@ -3,8 +3,11 @@
 # 1 agent decision (4 tics, 114 ms) ahead. GameNGen's spacing, on 2,000 dense episodes.
 #
 #   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
-#          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [DRY=1] [DOOM_ROOT=..] \
-#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
+#          [ALLOW_UNGATED=1] [DRY=1] [DOOM_ROOT=..] launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#
+# A launch refuses unless $D/GATES_COMMIT (written by scripts/cluster/gates.sh) names the commit
+# $D/repo is at, with no tracked change; see "PIN WHAT LAUNCHES" below.
 #
 # FILL THE CARD (CLAUDE.md, Rohan Sep 17 2026). Every job uses the whole card it holds: the micro-batch
 # IS the global batch of 32 and there is no gradient accumulation. The launcher refuses MB * cards != 32
@@ -153,8 +156,31 @@ tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; 
 [ -d $L ] || { echo "per-tic training latents missing at $L (run encode_nexttic.sh)" >&2; exit 1; }
 [ -d $LVAL ] || { echo "per-tic validation latents missing at $LVAL (run encode_nexttic.sh CORPUS=val)" >&2; exit 1; }
 
+# PIN WHAT LAUNCHES (docs/REVIEW_2026-09-22.md H3). This used to `git pull` here, after the gates
+# had passed, and a failed pull did not stop the launch, so the code that trained could differ from
+# the code the gates certified. Nothing here changes the checkout now. `scripts/cluster/gates.sh`
+# writes `$D/GATES_COMMIT` naming the commit it certified, and the launch refuses unless the
+# checkout it runs ($D/repo) is at that commit with no tracked change. GATE_RUN=1 marks the gates'
+# own smoke run, which comes before any receipt; ALLOW_UNGATED=1 launches anyway and says so in
+# resumes.log. A resume goes through the same check, so the code cannot change mid-run either.
+RECEIPT=${GATES_RECEIPT:-$D/GATES_COMMIT}
+HEAD_SHA=$(git -C "$D/repo" rev-parse HEAD 2>/dev/null) || HEAD_SHA=""
+refuse() { echo "$RUN not launched: $*" >&2; exit 1; }
+if [ "${GATE_RUN:-0}" = 1 ]; then
+  PIN="gate run (the gates are certifying ${HEAD_SHA:-an unversioned checkout})"
+elif [ "${ALLOW_UNGATED:-0}" = 1 ]; then
+  PIN="UNGATED (ALLOW_UNGATED=1)"
+else
+  [ -n "$HEAD_SHA" ] || refuse "$D/repo is not a git checkout, so what launches cannot be pinned"
+  [ -s "$RECEIPT" ] || refuse "no gate receipt at $RECEIPT: run scripts/cluster/gates.sh on this checkout first (ALLOW_UNGATED=1 overrides, and is recorded)"
+  CERT=$(awk '{print $1; exit}' "$RECEIPT")
+  [ "$CERT" = "$HEAD_SHA" ] || refuse "$D/repo is at $HEAD_SHA but the gates certified $CERT; check out $CERT or rerun the gates"
+  git -C "$D/repo" diff --quiet HEAD -- 2>/dev/null \
+    || refuse "tracked files in $D/repo differ from $HEAD_SHA, so this is not the code the gates certified"
+  PIN="certified by $RECEIPT"
+fi
+
 export TMPDIR=$D/tmp/tmpdir; mkdir -p $TMPDIR $R $D/logs
-cd $D/repo && git pull -q
-echo "$(date -Iseconds) launching $RUN on gpu $GPU (world $NP, micro $MB, ids $TRAIN_IDS, steps $STEPS) ${INITF:-pretrained warm start} $RES" >> $D/logs/resumes.log
+echo "$(date -Iseconds) launching $RUN on gpu $GPU (world $NP, micro $MB, ids $TRAIN_IDS, steps $STEPS) ${INITF:-pretrained warm start} $RES commit ${HEAD_SHA:-?} $PIN" >> $D/logs/resumes.log
 tmux new-session -d -s train-$BACKBONE-nexttic "$CMD"
 echo "$RUN launched on gpu $GPU (world $NP, per-gpu batch $MB)"
