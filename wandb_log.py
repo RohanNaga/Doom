@@ -35,7 +35,9 @@ Rules the logger keeps:
   * **One writer per run id.** W&B's resume docs: "Unexpected results will occur if multiple
     processes use the same `id` concurrently." The trainer owns `<run>`; evaluators write to their
     own run `<run>-eval` in group `<run>`, which W&B overlays with the trainer's run in one panel.
-    Evaluations of one training run should therefore not run concurrently either.
+    Two evaluations of one training run take turns on `<run>-eval` under a writer lock, and one
+    that waits longer than `LOCK_WAIT` writes to `<run>-eval-<pid>` in the same group instead (see
+    `log_evaluation`).
 """
 import collections
 import fcntl
