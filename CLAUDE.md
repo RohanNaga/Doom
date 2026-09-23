@@ -36,6 +36,8 @@ Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A400
 
 Every run records git hash, full args, seed, environment, loss curve, eval metrics, and sample artifacts under `results/<run>/`. Weights go to a GitHub release with md5s in `WEIGHTS.md`.
 
+**Live curves are mandatory (Rohan, Sep 23 2026).** Every training run streams its training loss, validation loss (overall and by quartile), gradient norm, throughput, memory and every evaluation read to Weights & Biases (project `doomdit-nexttic`) from the moment it launches, so Rohan can watch them live. When the trainer cannot be changed (a certified, pinned launch), run the sidecar `tools/wandb_tail.py --run-dir <run>` beside it in its own tmux session; a run without a live W&B curve is not fully launched. The API key is Rohan's: he runs `wandb login` himself, never an agent.
+
 ## Session hygiene (how this stays current for the whole semester)
 
 - One long-lived working chat per repo. Spin off a separate chat (task chip) for any experiment or build that will run for hours, and have it report back.
