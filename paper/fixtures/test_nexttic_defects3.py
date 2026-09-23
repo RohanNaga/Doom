@@ -16,6 +16,9 @@
      from $D/repo; the launcher cds into it, the certificate pins its HEAD and gate 0 checks it.
   6. At GATES_GO the gates print, per certified backbone, the exact launch that passes the certificate
      check on this host, verified first in an empty environment.
+  7. Gate 0 deleted the whole certificate and truncated the shared results file, so a staggered SD 3.5
+     gate run revoked the training U-Net's entry. A run now revokes only the backbones it certifies
+     and keeps its own results file.
 
 Everything here is a dry run or a stub run: nothing encodes, trains or touches a GPU.
 
@@ -544,3 +547,57 @@ def test_the_printed_command_launches_against_a_real_certificate(tmp_path):
     short = {k: v for k, v in env.items() if k != "WORKERS"}
     p = subprocess.run(["bash", LAUNCH, *args], capture_output=True, text=True, env={**base, **short}, timeout=120)
     assert p.returncode != 0 and "launch command differs" in p.stderr
+
+
+# ---------------------------------------------------------------------------------------
+# 7. a staggered gate run revokes only the backbones it certifies
+# ---------------------------------------------------------------------------------------
+
+def _both_certified(tmp_path):
+    from test_launch_pin import certify, root_for_launch
+    root, sha, bindir = root_for_launch(tmp_path)
+    certify(tmp_path, root, bindir, backbones=("unet", "sd35"))
+    return root, bindir
+
+
+def test_revoke_removes_one_backbone_and_keeps_the_others(tmp_path):
+    import json
+
+    import gate_certificate as gc
+    from test_launch_pin import launch
+    root, bindir = _both_certified(tmp_path)
+    cert = str(root / "GATES_CERT.json")
+    gc.main(gc.build_parser().parse_args(["revoke", "--cert", cert, "--backbone", "sd35"]))
+    assert set(json.load(open(cert))["backbones"]) == {"unet"}
+    p, started = launch(tmp_path, root, bindir, backbone="unet")
+    assert p.returncode == 0 and started, p.stderr
+    p, started = launch(tmp_path, root, bindir, backbone="sd35")
+    assert p.returncode != 0 and "certifies no sd35 launch" in p.stderr
+    gc.main(gc.build_parser().parse_args(["revoke", "--cert", cert, "--backbone", "unet"]))
+    assert not os.path.exists(cert), "a certificate with no entry left must not stand"
+    gc.main(gc.build_parser().parse_args(["revoke", "--cert", cert, "--backbone", "unet"]))   # idempotent
+
+
+def test_a_second_gate_run_keeps_the_running_backbones_certificate(tmp_path):
+    """The staggered morning: U-Net certified and training, then `VAES=sd35 SMOKE_BBS=sd35` fails at
+    gate 0. The old gate 0 deleted the whole certificate, so the U-Net's next resume refused."""
+    import json
+    root, bindir = _both_certified(tmp_path)
+    (root / "repo" / "train_wm.py").write_text("# dirty\n")
+    e = {k: v for k, v in os.environ.items() if k not in GATE_KNOBS}
+    e.update({"DOOM_ROOT": str(root), "PY": sys.executable, "REPO": str(root / "repo"), "LAUNCH": LAUNCH,
+              "VAES": "sd35", "SMOKE_BBS": "sd35"})
+    p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
+    assert p.returncode != 0 and "GATE_FAILED 0 pin" in p.stderr
+    assert set(json.load(open(root / "GATES_CERT.json"))["backbones"]) == {"unet"}, \
+        "the run revoked a backbone it was not certifying"
+
+
+def test_each_gate_run_writes_its_own_results_file(tmp_path):
+    """A second run's results file is its own, so write() never sees the first run's results, and
+    the first run's are not truncated under it."""
+    lines = _gates_dry(tmp_path, GATES_RUN_ID="run-a")
+    certs = [ln for ln in lines if "gate_certificate.py write" in ln]
+    assert certs and all(f"--results {tmp_path}/logs/gates_results_run-a.jsonl " in ln for ln in certs)
+    zero = next(ln for ln in lines if ln.startswith("DRY gate0 pin"))
+    assert "unet sd35" in zero and "other backbones' entries stay" in zero

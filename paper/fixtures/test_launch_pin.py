@@ -355,8 +355,9 @@ def test_a_dirty_checkout_fails_gate_zero_and_revokes_the_old_certificate(tmp_pa
     checkout(root / "repo")
     (root / "GATES_CERT.json").write_text('{"backbones": {"unet": {}}}')
     (root / "repo" / "train_wm.py").write_text("# dirty\n")
-    e = {**os.environ, "DOOM_ROOT": str(root), "PY": "/bin/echo", "REPO": str(root / "repo"),
-         "LAUNCH": LAUNCH}
+    # a real interpreter: revocation is `gate_certificate.py revoke` on the backbones being certified
+    e = {**os.environ, "DOOM_ROOT": str(root), "PY": sys.executable, "REPO": str(root / "repo"),
+         "LAUNCH": LAUNCH, "SMOKE_BBS": "unet"}
     p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
     assert p.returncode != 0 and "GATE_FAILED 0 pin" in p.stderr
     assert not (root / "GATES_CERT.json").exists(), "a failed gate run left a certificate standing"

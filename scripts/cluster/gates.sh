@@ -34,7 +34,11 @@
 #                        commit of $RUN_REPO (default $D/repo: the checkout the launcher runs and
 #                        the certificate pins), both with no tracked change. The gates' own fit,
 #                        smoke and resume run from $RUN_REPO too; launch with the same RUN_REPO.
-#                        Any old certificate is revoked first; a new one is written only at GATES_GO.
+#                        First the certificate entries of the backbones in SMOKE_BBS are revoked
+#                        (gate_certificate.py revoke, every other backbone's entry stays: the gates
+#                        run staggered, one space while the other row already trains); new ones are
+#                        written only at GATES_GO. A run that fails or is interrupted therefore
+#                        leaves no certificate standing for what it was certifying.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
@@ -92,8 +96,9 @@
 # every other flag is the production one. Astra's third review reproduced a smoke at lr 5e-5 and 12
 # workers certified as lr 0.1 and 4 workers, because the smoke dropped them.
 #
-# The certificate. Every gate that passes appends a result to $D/logs/gates_results.jsonl, scoped to
-# the whole run, one latent space, or one backbone. At GATES_GO, after checking that the checkout did
+# The certificate. Every gate that passes appends a result to this run's own results file,
+# $D/logs/gates_results_<GATES_RUN_ID>.jsonl (a timestamp and the pid unless set), scoped to the
+# whole run, one latent space, or one backbone; a second, staggered run never reads or truncates it. At GATES_GO, after checking that the checkout did
 # not move while the gates ran, `gate_certificate.py write` records for each smoked backbone: its
 # resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under `prod_env`, the values
 # launch_runs.sh passes), the commit, the training and validation
@@ -138,7 +143,9 @@ TRAIN_AUDIT_ROWS=${TRAIN_AUDIT_ROWS:-500}
 ALIGN_EPISODES=${ALIGN_EPISODES:-2}   # episodes per encode shard for the stored-latent alignment gate
 EMIT_WINDOWS=${EMIT_WINDOWS:-256}     # real training windows the emitted-window check reads
 CERT=$D/GATES_CERT.json
-RESULTS=$D/logs/gates_results.jsonl
+GATES_RUN_ID=${GATES_RUN_ID:-$(date +%Y%m%dT%H%M%S)-$$}
+RESULTS=$D/logs/gates_results_$GATES_RUN_ID.jsonl   # this run's results only
+HERE_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)   # revocation must not depend on $REPO
 RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout launch_nexttic.sh runs (`cd $RUN_REPO`) and the certificate pins
 # the production launch the certificate pins, with launch_runs.sh's own defaults
 LAUNCH_STEPS=${LAUNCH_STEPS:-400000}
@@ -203,6 +210,17 @@ latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shi
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
+revoke_cmd() {   # revoke_cmd <backbone>: drop that backbone's certificate entry, keep the others
+  echo "$(bb_py "$1") $HERE_REPO/gate_certificate.py revoke --cert $CERT --backbone $1"
+}
+revoke_mine() {   # revoke every backbone this run certifies; if that fails, revoke everything
+  local BB
+  for BB in $SMOKE_BBS; do
+    # shellcheck disable=SC2046
+    $(revoke_cmd "$BB") > /dev/null 2>&1 || { rm -f "$CERT"; echo "could not revoke $BB alone; removed $CERT" >&2; return 1; }
+  done
+  return 0
+}
 record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, for the certificate
   local detail=${3//\"/}; detail=${detail//\\/}
   printf '{"gate": "%s", "scope": "%s", "status": "ok", "detail": "%s"}\n' "$1" "$2" "$detail" >> "$RESULTS"
@@ -320,7 +338,9 @@ launcher() {   # launcher <backbone> <overrides of the production settings as NA
 
 if [ "$DRY" = 1 ]; then
   echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
-  echo "DRY gate0 pin: revoke $CERT; certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
+  echo "DRY gate0 pin: revoke $CERT entries for $SMOKE_BBS (other backbones' entries stay); certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
+  for BB in $SMOKE_BBS; do echo "DRY gate0 revoke $BB $(revoke_cmd "$BB")"; done
+  echo "DRY results $RESULTS"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1c inventory $V $(inventory_cmd "$V")"; done
@@ -379,7 +399,7 @@ say() { echo "$*" | tee -a "$REPORT"; }
 # --- gate 0: pin the commit being certified ------------------------------------------------
 # revoked first: a gate run that fails or is interrupted must not leave an older certificate
 # standing for whatever the checkout is now
-rm -f "$CERT"
+revoke_mine
 : > "$RESULTS"
 say "$(date -Iseconds) gate 0: pin"
 COMMIT=$(pin_of "$REPO") || gate_fail "0 pin" "$REPO is not a git checkout, so the gates cannot say which code they certify"
@@ -566,10 +586,10 @@ for BB in $SMOKE_BBS; do
   PROD_CMD=$(cert_cmd "$BB") || gate_fail "certificate ($BB)" "the launcher could not resolve the production command"
   # shellcheck disable=SC2046
   $(cert_write_cmd "$BB") "$PROD_CMD" >> "$REPORT" 2>&1 \
-    || { rm -f "$CERT"; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+    || { revoke_mine; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
   # the launch printed below must itself resolve to what was just certified, with nothing inherited
   operator_ok "$BB" "$PROD_CMD" \
-    || { rm -f "$CERT"; gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
+    || { revoke_mine; gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
 done
 say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
 for BB in $SMOKE_BBS; do say "GATES_LAUNCH $BB: $(operator_cmd "$BB")"; done
