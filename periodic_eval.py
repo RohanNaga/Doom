@@ -23,7 +23,8 @@ polling, never by waiting.
 The checkpoint read is the compact snapshot (`snap_<step>.pt`, bf16 live and EMA, never pruned)
 when the step is also a snapshot step, else the recovery checkpoint (`<step>.pt`). The read opens
 a hard link to it in `eval_<step>/` (a copy where no link can be made), because the trainer prunes
-recovery checkpoints while a slow read may still be on one; see `pin_checkpoint`.
+recovery checkpoints while a slow read may still be on one, and the wrapper removes it when it exits,
+stopped or not; see `pin_checkpoint` and `write_script`.
 """
 import json
 import os
@@ -181,7 +182,7 @@ def pin_checkpoint(ckpt, out, snapshot):
     The trainer prunes old recovery checkpoints while a read may still be on one (a FileNotFoundError
     in the read), so the read opens a HARD LINK in its own directory: the same inode, no bytes
     copied, and invisible to the pruning, which lists only the top-level `NNNNNNN.pt` files. The
-    wrapper removes the link when the read is done, and the disk space goes when both names are gone.
+    wrapper removes the link when it exits, and the disk space goes when both names are gone.
     Where a link cannot be made, a recovery checkpoint is COPIED by the wrapper before the first read,
     not here: the SD 3.5 row's is 35 GB, and the pruning comes two checkpoints later, hours after
     the copy is done. A snapshot is never pruned, so it is then read in place.
@@ -203,10 +204,13 @@ STATUS_FILE = "status.json"
 
 def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinned=False):
     """`run.sh`: the copy of the checkpoint if one is needed, every read in order (one failing does
-    not stop the rest), the removal of the read's own checkpoint link, then `status.json`.
+    not stop the rest), then `status.json`.
 
     `status.json` holds each command's exit code and `ok`, and the wrapper exits 1 if any command
     failed, so the trainer can report a failed read (`eval_finished`) instead of assuming it worked.
+    The read's own link (or copy, and a copy's partial `.tmp`) is removed by an EXIT trap, so it goes
+    however the wrapper ends: after the last read, or on a SIGTERM or SIGHUP, for which bash also
+    runs the EXIT trap. Only a SIGKILL of the wrapper leaves it behind.
     """
     status = os.path.join(os.path.dirname(path), STATUS_FILE)
     lines = ["#!/bin/bash", f"# periodic evaluation of {run} at step {step}, launched by train_wm.py --eval-every",
@@ -214,6 +218,9 @@ def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinn
              'note() { CODES="$CODES${CODES:+, }\\"$1\\": $2"; [ "$2" -eq 0 ] || FAILED=1; '
              'echo "$(date -Iseconds) exit $2 $1"; }',
              f"cd {shlex.quote(HERE)} || FAILED=1"]
+    if remove_pinned:
+        doomed = [pinned] + ([pinned + ".tmp"] if copy_from else [])
+        lines.append(f"trap {shlex.quote('rm -f ' + shlex.join(doomed))} EXIT")
     if copy_from:
         tmp = pinned + ".tmp"
         lines += ['echo "$(date -Iseconds) copying the checkpoint (no hard link possible)"',
@@ -221,8 +228,6 @@ def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinn
                   "note copy $?"]
     for label, argv in cmds:
         lines += [f'echo "$(date -Iseconds) start {label}"', shlex.join(argv), f"note {label} $?"]
-    if remove_pinned:
-        lines.append(f"rm -f {shlex.quote(pinned)}")
     ok = '$([ "$FAILED" -eq 0 ] && echo true || echo false)'
     lines += [f"printf '{{\"step\": {int(step)}, \"commands\": {{%s}}, \"ok\": %s}}\\n' \"$CODES\" \"{ok}\" "
               f"> {shlex.quote(status + '.tmp')} && mv {shlex.quote(status + '.tmp')} {shlex.quote(status)}",
