@@ -17,9 +17,9 @@
   "arenas_678": {
    "maps": [6, 7, 8],
    "episodes": 3000,
-   "note": "the Arnold paper's test arenas; the unseen-map row for the dense corpus",
+   "note": "the Arnold paper's test arenas; no episode of this segment is ever trained on. `ranges.unseen` is the SCORING subset of the unseen-map row, not the whole segment",
    "ranges": {
-    "unseen": "0:60"
+    "unseen": "60:120"
    }
   }
  },
@@ -28,12 +28,28 @@
   "train_ids": "0:2000",
   "val_ids": "6000:6100",
   "test_ids": "7000:7100",
-  "unseen_ids": "0:60",
+  "unseen_ids": "60:120",
   "latents": {
    "train": "latents_arnold_dense_pertic/arenas",
    "val": "latents_arnold_dense_pertic_eval/val",
    "test": "latents_arnold_dense_pertic_eval/test",
    "unseen": "latents_arnold_dense_pertic_eval/arenas_678"
   }
- }
+ },
+ "history": [
+  {
+   "date": "2026-09-20",
+   "what": "arenas train 0:6000, val 6000:7000, test 7000:8000 and the next-tic prefixes decided by Rohan before any dense-corpus model was scored"
+  },
+  {
+   "date": "2026-09-21",
+   "what": "unseen scoring subset declared as arenas_678 ids 0:60 (next_tic_runs.unseen_ids and segments.arenas_678.ranges.unseen)"
+  },
+  {
+   "date": "2026-09-22",
+   "what": "unseen scoring subset replaced by arenas_678 ids 60:120, before any model was scored on it",
+   "why": "0:60 is 51 of 60 worker-first episodes (k = 0: ids 0-24 and 26-51; 52-59 are k = 1; 25 has no weapon request and cannot be classified), measured from the raw buttons column with transitions.button_width_report. Only in a recorder process's first episode can Arnold's weapon-select requests execute; val 6000:6100 and test 7000:7100 contain no such episode and training 0:2000 only 32 (1.6%). Scoring on 0:60 would confound map transfer with a control-regime shift. arenas_678 was started three times (RECORDING_LOG.txt: 16, 20, then 16 workers), so k cannot be read off the worker logs there: ids 0-15 were the first 16 workers' first episodes and 16-51 became first episodes again after the restarts. 60:120 holds zero k = 0 episodes (59 with k = 1 to 5, one unclassifiable) and 20 per map. 0:60 may be reported only as a labelled secondary set with its k strata. Source: docs/REVIEW_2026-09-22.md, finding H1.",
+   "worker_first_ids_measured": "0:25,26:52"
+  }
+ ]
 }

@@ -73,6 +73,16 @@ def _real_run(tmp_path, corpus, python=None):
     root = tmp_path / "root"
     for seg in ("arenas", "arenas_678"):
         (root / "raw_arnold_dense" / seg).mkdir(parents=True, exist_ok=True)
+    # the unseen publish classifies every episode from its raw `buttons` column and refuses a
+    # worker-first one (the 2026-09-22 review, H1), so the unseen range needs recordings to read:
+    # nine-character rows, i.e. no weapon request, which is allowed
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from doom_data import parse_episode_ids
+    from test_unseen_subset import split as dense_split
+    for ep in parse_episode_ids(dense_split()["next_tic_runs"]["unseen_ids"]):
+        pq.write_table(pa.table({"buttons": ["100000000"] * 4}),
+                       str(root / "raw_arnold_dense" / "arenas_678" / f"ep_{ep:05d}.parquet"))
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
     (repo / "encode_parquet.py").write_text(STUB_ENCODER)
@@ -132,7 +142,9 @@ def test_the_split_the_encoder_writes_is_the_one_the_evaluator_reads(corpus, suf
     root = f"/d/latents_arnold_dense_pertic_eval{suffix}"
     written = make_dense_eval_splits.split_path(f"{root}/{corpus}")
     assert written == f"{root}/split_{corpus}.json"
-    out = _dry("after_nexttic.sh", ["3", "sd35" if suffix else "unet"])
+    # validation and the sealed corpora are separate stages (docs/REVIEW_2026-09-22.md H2), so each
+    # corpus's plan is printed by the invocation that would score it
+    out = _dry("after_nexttic.sh", ["3", "sd35" if suffix else "unet"], CORPORA=corpus)
     read = [tok for ln in out.splitlines() for tok in ln.split()
             if os.path.basename(tok) == f"split_{corpus}.json"]
     assert read, f"the evaluation script never reads split_{corpus}.json:\n{out}"

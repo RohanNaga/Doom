@@ -8,10 +8,30 @@
 # C). Each gate answers one question, and a failure stops here rather than being carried into a
 # multi-day run:
 #
+#   0 pin                which code is being certified? The commit of $REPO, which must be the
+#                        commit of $D/repo (the checkout the launcher runs) with no tracked change.
+#                        Any old receipt is revoked first; a new one is written only at GATES_GO.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
 #                        and would otherwise hide a clean zero-mismatch audit behind exit 2.
+#                        Val (100 episodes, 100,000 rows) and, since the 2026-09-22 review (H3),
+#                        the TRAINING corpus too: TRAIN_AUDIT_EPISODES (all 2,000) with
+#                        TRAIN_AUDIT_ROWS sampled rows each, zero mismatches required. Train shard
+#                        0 was written by the old encoder and normalised afterwards, shard 1 by the
+#                        new one, and only val had ever been audited.
+#   1c inventory         does every training episode's latent array have as many rows as its
+#                        sidecar, at exactly the recording's tics? `make_dense_eval_splits.py
+#                        --check-only --expect-ids $TRAIN_IDS --raw-tics`: shapes and one int column
+#                        per episode, no frames, over all of them.
+#   1d latent alignment  do the stored latents belong to the rows their sidecars describe?
+#                        `check_latent_alignment.py`, per encode shard of train and val: re-encode
+#                        a full batch and the tail batch of ALIGN_EPISODES episodes with the
+#                        shard's recorded encoder settings and compare (mean |diff| <= 1e-3, at
+#                        least half bit-identical), then decode the stored rows against the raw
+#                        frames with rows shifted -4/-1/+1/+4, which must all score worse than
+#                        the true alignment. Re-encoding on a different GPU model than the corpus
+#                        was written on can lower the identical fraction by itself.
 #   2 alignment gate     is the control that produced the motion stored on the row the trainer
 #                        reads? Yaw-gated, shifts -1/0/+1, on val 6000:6100. Exit 0 aligned, 2
 #                        misaligned, 3 inconclusive. Exit 3 is NOT approval.
@@ -20,6 +40,11 @@
 #   4 300-step smoke     does the real corpus train, validate, checkpoint and snapshot? Into a
 #                        throwaway results directory, never the production one.
 #   5 evaluator readback can `eval_tf.py --tic-stride 1` load that snapshot and score raw frames?
+#
+# The receipt. At GATES_GO, after checking that the checkout did not move while the gates ran, the
+# certified commit is written to $D/GATES_COMMIT. `launch_nexttic.sh` refuses to start unless its
+# checkout is at that commit with no tracked change; the gates' own fit and smoke runs pass
+# GATE_RUN=1 because they come before the receipt exists.
 #
 # What this gate set does NOT do. The audit's 200-update fit and the 10,000-window loader index
 # check the protocol also asks for are not here: FIT=20 is what the task specifies, and 20 updates
@@ -46,10 +71,16 @@ WINDOWS=${WINDOWS:-64}
 SMOKE_TIMEOUT=${SMOKE_TIMEOUT:-7200}
 SMOKE_DIR=${SMOKE_DIR:-$D/results_smoke}
 REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
-LAUNCH=$REPO/scripts/spiderman/launch_nexttic.sh
+LAUNCH=${LAUNCH:-$REPO/scripts/spiderman/launch_nexttic.sh}
 PY=${PY:-$D/env/bin/python}
 RAW=$D/raw_arnold_dense
 VAL_IDS=${VAL_IDS:-6000:6100}
+TRAIN_IDS=${TRAIN_IDS:-0:2000}
+TRAIN_AUDIT_EPISODES=${TRAIN_AUDIT_EPISODES:-2000}
+TRAIN_AUDIT_ROWS=${TRAIN_AUDIT_ROWS:-500}
+ALIGN_EPISODES=${ALIGN_EPISODES:-2}   # episodes per encode shard for the stored-latent alignment gate
+RECEIPT=$D/GATES_COMMIT
+RUN_REPO=$D/repo              # the checkout launch_nexttic.sh runs (`cd $D/repo`)
 IFS=, read -r -a SPACES <<< "$VAES"
 
 gate_fail() { echo "GATE_FAILED $1: ${*:2}" >&2; exit "${RC_FAIL:-1}"; }
@@ -76,6 +107,27 @@ audit_cmd() {   # audit_cmd <space>
        "--audit-parquet-dir $RAW/arenas --episodes 100 --audit-rows 100000" \
        "--canonical $RAW/canonical_controls.json --seed 0"
 }
+train_audit_cmd() {   # train_audit_cmd <space>: the same audit over the training corpus
+  echo "$PY $REPO/check_action_alignment.py --audit-only" \
+       "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
+       "--audit-parquet-dir $RAW/arenas --episodes $TRAIN_AUDIT_EPISODES --audit-rows $TRAIN_AUDIT_ROWS" \
+       "--canonical $RAW/canonical_controls.json --seed 0"
+}
+inventory_cmd() {   # inventory_cmd <space>: rows and tics of every training episode
+  echo "$PY $REPO/make_dense_eval_splits.py --check-only" \
+       "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
+       "--expect-ids $TRAIN_IDS --sample 0 --raw-tics $RAW/arenas"
+}
+space_gpu() { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
+latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shifted-decode, per shard
+  local DIR
+  if [ "$2" = train ]; then DIR=$D/latents_arnold_dense_pertic$(suffix "$1")/arenas
+  else DIR=$D/latents_arnold_dense_pertic_eval$(suffix "$1")/val; fi
+  echo "$PY $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+       "--episodes-per-shard $ALIGN_EPISODES --device cuda:$(space_gpu "$1") --cache-dir $D/hf/hub" \
+       "--out $D/logs/gate1d_latent_align_$1_$2.json"
+}
+pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
 align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
   echo "$PY $REPO/check_action_alignment.py" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/val" \
@@ -102,12 +154,18 @@ readback_cmd() {  # readback_cmd <backbone>
 }
 launcher() {   # launcher <backbone> <extra env assignments as NAME=VALUE ...>
   local BB=$1; shift
-  env DRY=$DRY DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" "$@" bash "$LAUNCH" "$(bb_gpu "$BB")" "$BB"
+  env DRY=$DRY DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" GATE_RUN=1 "$@" bash "$LAUNCH" "$(bb_gpu "$BB")" "$BB"
 }
 
 if [ "$DRY" = 1 ]; then
   echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
+  echo "DRY gate0 pin: revoke $RECEIPT; certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
+  for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
+  for V in "${SPACES[@]}"; do echo "DRY gate1c inventory $V $(inventory_cmd "$V")"; done
+  for V in "${SPACES[@]}"; do
+    for C in train val; do echo "DRY gate1d latent alignment $V $C $(latent_align_cmd "$V" "$C")"; done
+  done
   echo "DRY gate2 alignment ${SPACES[0]} val $VAL_IDS $(align_cmd "${SPACES[0]}")"
   explain 0; explain 2; explain 3
   for BB in $SMOKE_BBS; do
@@ -123,6 +181,7 @@ if [ "$DRY" = 1 ]; then
   done
   for BB in $SMOKE_BBS; do echo "DRY gate5 readback $BB $(readback_cmd "$BB")"; done
   echo "DRY summary GATES_GO with the fit rates, the smoke checkpoints and the readback PSNR"
+  echo "DRY receipt write the certified commit to $RECEIPT, after checking the checkout did not move"
   exit 0
 fi
 
@@ -133,6 +192,19 @@ REPORT=$D/GATES.txt
 : > "$REPORT"
 say() { echo "$*" | tee -a "$REPORT"; }
 
+# --- gate 0: pin the commit being certified ------------------------------------------------
+# revoked first: a gate run that fails or is interrupted must not leave an older certificate
+# standing for whatever the checkout is now
+rm -f "$RECEIPT"
+say "$(date -Iseconds) gate 0: pin"
+COMMIT=$(pin_of "$REPO") || gate_fail "0 pin" "$REPO is not a git checkout, so the gates cannot say which code they certify"
+RUN_COMMIT=$(pin_of "$RUN_REPO") || RUN_COMMIT="none"
+[ "$RUN_COMMIT" = "$COMMIT" ] \
+  || gate_fail "0 pin" "the launcher runs $RUN_REPO at $RUN_COMMIT but the gates run $REPO at $COMMIT"
+git -C "$REPO" diff --quiet HEAD -- \
+  || gate_fail "0 pin" "tracked files in $REPO differ from $COMMIT; commit or discard them, the gates certify a commit"
+say "  certifying $COMMIT ($REPO)"
+
 # --- gate 1: the sidecar audit ---------------------------------------------------------
 for V in "${SPACES[@]}"; do
   say "$(date -Iseconds) gate 1: sidecar audit, $V"
@@ -140,6 +212,35 @@ for V in "${SPACES[@]}"; do
   $(audit_cmd "$V") > "$D/logs/gate1_audit_$V.json" 2>&1 \
     || gate_fail "1 sidecar audit ($V)" "the encoded sidecars disagree with the raw parquet; see $D/logs/gate1_audit_$V.json"
   say "  ok: $(grep -o '"mismatches": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1), $(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1)"
+done
+for V in "${SPACES[@]}"; do
+  say "$(date -Iseconds) gate 1: sidecar audit of the TRAINING corpus, $V ($TRAIN_AUDIT_EPISODES episodes, $TRAIN_AUDIT_ROWS rows each)"
+  # shellcheck disable=SC2046
+  $(train_audit_cmd "$V") > "$D/logs/gate1_train_audit_$V.json" 2>&1 \
+    || gate_fail "1 sidecar audit (train, $V)" "the training sidecars disagree with the raw parquet; see $D/logs/gate1_train_audit_$V.json"
+  say "  ok: $(grep -o '"episodes": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1), $(grep -o '"mismatches": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1), $(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1)"
+done
+
+# --- gate 1c: every training episode's rows and tics ---------------------------------------
+for V in "${SPACES[@]}"; do
+  say "$(date -Iseconds) gate 1c: rows and tics of every training episode, $V ($TRAIN_IDS)"
+  # shellcheck disable=SC2046
+  $(inventory_cmd "$V") > "$D/logs/gate1c_inventory_$V.json" 2>&1 \
+    || gate_fail "1c inventory ($V)" "a training episode is missing, orphaned, or its latents, sidecar and recording disagree on rows or tics; see $D/logs/gate1c_inventory_$V.json"
+  say "  ok: $(grep -c '^  [0-9]' "$D/logs/gate1c_inventory_$V.json" 2>/dev/null || echo '?') ids listed, no problems"
+done
+
+# --- gate 1d: do the stored latents belong to their sidecar rows? ----------------------------
+# per encode shard: re-encode sampled rows with the shard's recorded settings and compare, then
+# decode the stored rows against the raw frames with -4/-1/+1/+4 shifted negative controls
+for V in "${SPACES[@]}"; do
+  for C in train val; do
+    say "$(date -Iseconds) gate 1d: stored-latent alignment, $V $C ($ALIGN_EPISODES episode(s) per shard)"
+    # shellcheck disable=SC2046
+    $(latent_align_cmd "$V" "$C") > "$D/logs/gate1d_latent_align_${V}_$C.log" 2>&1 \
+      || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, or a shifted alignment scores as well as the true one; see $D/logs/gate1d_latent_align_${V}_$C.json"
+    say "  $(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
+  done
 done
 
 # --- gate 2: the alignment gate on val ---------------------------------------------------
@@ -224,5 +325,9 @@ PY
   say "  $BB $NUMS"
 done
 
-say "GATES_GO $(date -Iseconds) root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS"
+# the receipt: only if the checkout is still the commit gate 0 pinned, with no tracked change
+[ "$(pin_of "$REPO")" = "$COMMIT" ] && [ "$(pin_of "$RUN_REPO")" = "$COMMIT" ] && git -C "$REPO" diff --quiet HEAD -- \
+  || gate_fail "0 pin" "the checkout moved while the gates ran (certified $COMMIT); rerun the gates"
+echo "$COMMIT $(date -Iseconds) spaces=${SPACES[*]} smoked=$SMOKE_BBS" > "$RECEIPT"
+say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS receipt=$RECEIPT"
 say "the gates say the corpus, the configuration and the evaluator agree; the training numbers are still unmeasured"

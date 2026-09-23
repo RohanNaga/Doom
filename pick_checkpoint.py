@@ -15,8 +15,9 @@ reading `step` out of a 37 GB recovery checkpoint costs a few page faults.
     python pick_checkpoint.py --results-dir results/042-sd35-nexttic --step 290000
     python pick_checkpoint.py --ckpt results/042-sd35-nexttic/snap_0290000.pt
 
-Prints one line, `<path> <step> <has_ema>`, which is what the launcher reads with `read -r`.
-`--json` prints the full record instead. Exit 1 when nothing matches.
+Prints one line, `<path> <step> <has_ema>`, which is what the launcher reads with `read -r`;
+`--hash` appends the file's SHA-256. `--json` prints the full record instead. Exit 1 when nothing
+matches.
 """
 import argparse
 import glob
@@ -75,7 +76,11 @@ def pick(results_dir=None, ckpt=None, step=None, require_ema=False):
 def main(args):
     r = pick(args.results_dir or None, args.ckpt or None,
              args.step if args.step >= 0 else None, args.require_ema)
-    print(json.dumps(r, indent=1) if args.json else f"{r['path']} {r['step']} {int(r['has_ema'])}")
+    if args.hash:
+        from eval_identity import sha256_file
+        r["sha256"] = sha256_file(r["path"])
+    line = f"{r['path']} {r['step']} {int(r['has_ema'])}" + (f" {r['sha256']}" if args.hash else "")
+    print(json.dumps(r, indent=1) if args.json else line)
     return 0
 
 
@@ -86,6 +91,9 @@ def build_parser():
     p.add_argument("--step", type=int, default=-1, help="require this stored step")
     p.add_argument("--require-ema", dest="require_ema", action="store_true",
                    help="only consider checkpoints that carry an EMA, so live and EMA come from one file")
+    p.add_argument("--hash", action="store_true",
+                   help="append the file's SHA-256 (eval_identity.py, cached beside the file): the evaluation "
+                        "launcher keys every cached score by it, so a stale score cannot carry a new file's name")
     p.add_argument("--json", action="store_true")
     return p
 

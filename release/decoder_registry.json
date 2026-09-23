@@ -1,0 +1,36 @@
+{
+ "note": "Every decoder an evaluator may score with, and what it was tuned on. Read by decoder_provenance.py, which eval_tf.py, rollout_eval.py, vae_gate_score.py and after_nexttic.sh use so every score names its decoder. A decoder tuned after 2026-09-22 carries its own provenance.json (finetune_decoder.py writes the exact episode ids) and needs no entry here. An unseen-map claim needs provenance 'recorded' with training episodes from seen-map training ids only, or provenance 'public'.",
+ "decoders": {
+  "vae_decoder_arnold_lpips": {
+   "latent_space": "sd15, 4 channels",
+   "provenance": "unknown",
+   "corpus": "all maps",
+   "recipe": "finetune_decoder.py --in-dir raw_arnold --split split_arnold.json, MSE + 0.1 LPIPS, 50k cached frames, 100k presentations",
+   "why_unknown": "tuned before finetune_decoder.py recorded episode ids; raw_arnold is the 17-map corpus, whose training maps include arenas 6, 7 and 8 (docs/REVIEW_2026-09-22.md H4)",
+   "unseen_map_claims": "refused: scores made with it are 'unseen by the dynamics model' only"
+  },
+  "vae_decoder_sd35_lpips": {
+   "latent_space": "sd35, 16 channels",
+   "provenance": "unknown",
+   "corpus": "all maps",
+   "recipe": "scripts/spiderman/vae_gate.sh sd35: finetune_decoder.py --in-dir raw_arnold --split split_arnold.json, MSE + 0.1 LPIPS, 50k cached frames",
+   "why_unknown": "tuned before finetune_decoder.py recorded episode ids; raw_arnold is the 17-map corpus, whose training maps include arenas 6, 7 and 8 (docs/REVIEW_2026-09-22.md H4)",
+   "unseen_map_claims": "refused: scores made with it are 'unseen by the dynamics model' only"
+  },
+  "stock": {
+   "latent_space": "sd15, 4 channels",
+   "provenance": "public",
+   "corpus": "none: stabilityai/sd-vae-ft-mse as published, never tuned on Doom frames"
+  },
+  "stabilityai/sd-vae-ft-mse": {
+   "latent_space": "sd15, 4 channels",
+   "provenance": "public",
+   "corpus": "none: published weights, never tuned on Doom frames"
+  },
+  "stabilityai/stable-diffusion-3.5-medium": {
+   "latent_space": "sd35, 16 channels",
+   "provenance": "public",
+   "corpus": "none: published weights, never tuned on Doom frames"
+  }
+ }
+}

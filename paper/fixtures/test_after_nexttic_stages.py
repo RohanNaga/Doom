@@ -17,7 +17,6 @@ tests do; the defects are in bash and the DRY path never reaches them.
 
     python -m pytest paper/fixtures/test_after_nexttic_stages.py -q
 """
-import json
 import os
 import subprocess
 import sys
@@ -36,19 +35,45 @@ AFTER = os.path.join(REPO, "scripts", "spiderman", "after_nexttic.sh")
 RUN = "040-unet-nexttic"
 
 STUB_PY = '''#!/usr/bin/env python3
-"""Stands in for the real evaluation scripts: records its argv and writes the output file."""
-import json, os, sys
+"""Stands in for the real evaluation scripts: records its argv and writes the output file.
+
+`select_checkpoint.py` and `decoder_provenance.py` are run for real (STUB_REAL_PY, STUB_REPO) when
+the test names them: the selection and the decoder's claim are what those tests are about.
+`make_dense_eval_splits.py --check-only` fails for the
+corpora named in STUB_CHECK_FAIL. The checkpoint hash is STUB_SHA, or a name-derived fake.
+"""
+import json, os, re, sys
 script = os.path.basename(sys.argv[1])
 with open(os.environ["STUB_LOG"], "a") as f:
     f.write(" ".join(sys.argv[1:]) + "\\n")
+if script in ("select_checkpoint.py", "decoder_provenance.py") and os.environ.get("STUB_REAL_PY"):
+    real = os.path.join(os.environ["STUB_REPO"], script)
+    os.execv(os.environ["STUB_REAL_PY"], [os.environ["STUB_REAL_PY"], real] + sys.argv[2:])
+def arg(name):
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else None
+def step_of(path):
+    if os.path.basename(path) == "best.pt":
+        return 41000
+    m = re.search(r"(\\d+)\\.pt$", path)
+    return int(m.group(1)) if m else 0
 if script == "pick_checkpoint.py":
-    print("%s 290000 1" % os.environ["STUB_PICK"])
+    path = arg("--ckpt") or os.environ["STUB_PICK"]
+    sha = os.environ.get("STUB_SHA", "sha-" + os.path.basename(path))
+    print("%s %d %d %s" % (path, step_of(path), os.path.basename(path) != "best.pt", sha))
     sys.exit(int(os.environ.get("STUB_PICK_RC", "0")))
+if script == "make_dense_eval_splits.py":
+    corpus = os.path.basename(arg("--latents-dir") or "")
+    sys.exit(1 if corpus in os.environ.get("STUB_CHECK_FAIL", "").split(",") else 0)
 if script == "eval_tf.py":
     out = sys.argv[sys.argv.index("--out-dir") + 1]
     os.makedirs(out, exist_ok=True)
-    with open(os.path.join(out, "metrics.json"), "w") as f:
-        json.dump({"psnr": 21.0}, f)
+    ck, ema = arg("--ckpt"), "--use-ema" in sys.argv
+    scores = json.loads(os.environ.get("STUB_SCORES") or "{}")
+    psnr, lp = scores.get("%s|%s" % (os.path.basename(ck), "ema" if ema else "live"), [21.0, 0.3])
+    if not os.environ.get("STUB_TF_NO_OUTPUT"):
+        with open(os.path.join(out, "metrics.json"), "w") as f:
+            json.dump({"psnr": 21.0, "psnr_raw": {"mean": psnr, "n": 8}, "lpips_raw": {"mean": lp, "n": 8},
+                       "config": {"ckpt": ck, "use_ema": ema, "step": step_of(ck)}}, f)
     sys.exit(int(os.environ.get("STUB_TF_RC", "0")))
 if script == "rollout_eval.py":
     if "--rollout" in sys.argv:
@@ -209,23 +234,24 @@ def test_by_default_an_existing_score_is_not_recomputed(tmp_path):
     assert _calls_to(calls2, "rollout_eval.py") == [], calls2
 
 
-def test_rescore_recomputes_every_stage(tmp_path):
-    """The inverted test: the DEFAULT reran existing rollouts and RESCORE=1 skipped them."""
+def test_rescore_recomputes_every_validation_stage(tmp_path):
+    """The inverted test: the DEFAULT reran existing rollouts and RESCORE=1 skipped them. The
+    validation stage no longer rolls out at all (test rollouts belong to the sealed stage, see
+    test_eval_stages.py), so what RESCORE must redo here is every teacher-forced pass."""
     root, r = _root(tmp_path)
     _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
     again, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), RESCORE="1")
     assert again.returncode == 0
     assert len(_tf_calls(calls)) == 4, _tf_calls(calls)        # live, ema, best, h4
-    roll = _calls_to(calls, "rollout_eval.py")
-    assert any("--rollout" in c for c in roll) and any("--score" in c for c in roll), roll
+    assert _calls_to(calls, "rollout_eval.py") == [], "the validation stage rolled out on test"
 
 
 def test_the_teacher_forced_pass_honours_rescore(tmp_path):
-    """`eval_tf` skipped on `[ -f metrics.json ]` alone and never looked at RESCORE."""
+    """`eval_tf` skipped on `[ -f metrics.json ]` alone and never looked at RESCORE. A result is now
+    reused only under its own key, and RESCORE=1 redoes it anyway."""
     root, r = _root(tmp_path)
-    out = r / "eval_tf_val"
-    out.mkdir()
-    (out / "metrics.json").write_text("{}")
+    _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
+    assert (r / "eval_tf_val" / "metrics.json.key").is_file()
     _, without = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
     assert not [c for c in _tf_calls(without) if c.endswith("eval_tf_val")]
     _, with_flag = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), RESCORE="1")
@@ -241,34 +267,20 @@ def _score_output_name():
     return rollout_eval.SCORE_FILE
 
 
-def test_the_score_stage_is_gated_on_the_file_it_actually_writes(tmp_path):
+def test_the_score_stage_is_gated_on_the_file_it_actually_writes():
     """The defect: the gate tested `rollout_metrics_test/metrics.json`, which this stage has never
     written, so `should_run` was always true and the whole scoring pass -- 256 decodes -- reran on
-    every invocation, RESCORE or not."""
+    every invocation, RESCORE or not. The behaviour is exercised in test_eval_stages.py."""
     name = _score_output_name()
     text = open(AFTER).read()
-    assert f'should_run "$R/rollout_metrics_test/{name}"' in text, name
+    assert 'M=$R/rollout_metrics_$S' in text
+    assert f'should_run "$M/{name}" "$KEY"' in text, name
     assert 'rollout_metrics_test/metrics.json' not in text, "the wrong filename is back"
-    root, r = _root(tmp_path)
-    first, calls1 = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
-    assert first.returncode == 0
-    assert (r / "rollout_metrics_test" / name).is_file(), "the stub wrote a different name"
-    second, calls2 = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
-    assert [c for c in _calls_to(calls2, "rollout_eval.py") if "--score" in c] == []
-
-
-def test_the_score_stage_reruns_under_rescore(tmp_path):
-    name = _score_output_name()
-    root, r = _root(tmp_path)
-    _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
-    assert (r / "rollout_metrics_test" / name).is_file()
-    again, calls = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), RESCORE="1")
-    assert [c for c in _calls_to(calls, "rollout_eval.py") if "--score" in c]
 
 
 def test_the_rescore_condition_is_the_intended_one():
     text = open(AFTER).read()
-    assert 'should_run() { [ ! -e "$1" ] || [ "$RESCORE" = 1 ]; }' in text
+    assert '[ "$RESCORE" = 1 ] && return 0' in text
     assert '[ "${RESCORE:-0}" != 1 ]' not in text, "the inverted test is back"
 
 
@@ -301,12 +313,6 @@ def test_a_failed_scoring_stage_is_not_reported_as_done(tmp_path):
     assert "AFTER_NEXTTIC_STAGE_FAILED" in proc.stderr
 
 
-def test_a_failed_rollout_is_not_reported_as_done(tmp_path):
-    root, r = _root(tmp_path)
-    proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), STUB_ROLL_RC="1")
-    assert proc.returncode != 0 and "AFTER_NEXTTIC_DONE" not in proc.stdout
-
-
 def test_a_missing_checkpoint_stops_the_evaluation(tmp_path):
     root, r = _root(tmp_path)
     proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"), STUB_PICK_RC="1")
@@ -325,15 +331,12 @@ def test_the_dry_output_names_every_stage(tmp_path):
     e = {**os.environ, "DRY": "1", "DOOM_ROOT": str(root)}
     proc = subprocess.run(["bash", AFTER, "0", "unet"], capture_output=True, text=True, env=e)
     assert proc.returncode == 0, proc.stderr
-    for tag in ("DRY pick", "DRY score"):
-        assert tag in proc.stdout, proc.stdout
+    assert "DRY pick" in proc.stdout, proc.stdout
     for variant in ("val ", "val_ema ", "val_best ", "val_h4 "):
         assert f"DRY eval_tf {variant}" in proc.stdout, variant
-
-
-def test_the_rollout_score_output_is_json_the_launcher_can_test_for(tmp_path):
-    root, r = _root(tmp_path)
-    proc, _ = _run(tmp_path, root, r, CKPT=str(r / "snap_0290000.pt"))
-    assert proc.returncode == 0
-    with open(r / "rollout_metrics_test" / _score_output_name()) as f:
-        assert json.load(f)["idm"] == 0.5
+    assert "DRY score" not in proc.stdout, "the validation stage must not score rollouts"
+    sealed = subprocess.run(["bash", AFTER, "0", "unet"], capture_output=True, text=True,
+                            env={**e, "CORPORA": "test"})
+    assert sealed.returncode == 0, sealed.stderr
+    for tag in ("DRY require", "DRY rollout", "DRY score"):
+        assert tag in sealed.stdout, sealed.stdout

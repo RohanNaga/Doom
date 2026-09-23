@@ -15,7 +15,15 @@
 #   train    raw_arnold_dense/arenas             0:2000        500/arena latents_arnold_dense_pertic/arenas
 #   val      raw_arnold_dense/arenas             6000:6100     25/arena  latents_arnold_dense_pertic_eval/val
 #   test     raw_arnold_dense/arenas             7000:7100     25/arena  latents_arnold_dense_pertic_eval/test
-#   unseen   raw_arnold_dense/arenas_678         0:60          20/arena  latents_arnold_dense_pertic_eval/arenas_678
+#   unseen   raw_arnold_dense/arenas_678         60:120        20/arena  latents_arnold_dense_pertic_eval/arenas_678
+#
+# The unseen range is read from the json (`scripts/dense_ids.sh`), not written here. It was 0:60
+# until 2026-09-22, when it was replaced by 60:120 before any model was scored: 51 of ids 0:60 are
+# worker-first episodes (k = 0), the only control regime in which Arnold's weapon selects execute,
+# and val and test hold none. The unseen publish step therefore also classifies every episode from
+# its raw `buttons` column and refuses a worker-first one (`--refuse-worker-first`). A directory
+# still holding the old 0:60 latents is refused too, as episodes present but not expected: move it
+# aside before encoding the new range into it.
 #
 # `--episode-ids A:B` is what makes this possible without a symlink farm: the encoder filters by the
 # id in the `ep_XXXXX.parquet` filename, so the held-out latents come straight out of the same
@@ -56,6 +64,10 @@ SHARD=${SHARD:-}
 PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}
 REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 ENC=$REPO/encode_parquet.py
+# shellcheck source=../dense_ids.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../dense_ids.sh"
+UNSEEN_IDS=${UNSEEN_IDS:-$(dense_ids unseen_ids)}
+[ -n "$UNSEEN_IDS" ] || { echo "no unseen range: set UNSEEN_IDS or fix release/dense_split.json" >&2; exit 2; }
 
 case $VAE in
   sd15) VAE_FLAGS=""; SUF="" ;;
@@ -120,8 +132,12 @@ one() {   # one <in-dir> <out-dir> <tag> <episode-ids>
     # is derived by make_dense_eval_splits.py from the latents directory, so the writer and the
     # reader cannot disagree about where it goes. --expect-ids is this corpus's own id range, so a
     # shard that is still running, or a directory holding the wrong range, refuses to publish
-    # instead of naming a partial evaluation set
-    [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" --expect-ids "$4" || exit $?
+    # instead of naming a partial evaluation set. The unseen corpus is also checked against its
+    # raw recordings for worker-first episodes, which val and test by construction do not hold.
+    # `${WF[@]+...}` because bash before 4.4 calls an empty array unbound under `set -u`
+    WF=()
+    [ "$3" = unseen ] && WF=(--refuse-worker-first "$1")
+    [ "$3" = train ] || "$PY" "$REPO/make_dense_eval_splits.py" --latents-dir "$2" --expect-ids "$4" ${WF[@]+"${WF[@]}"} || exit $?
   )
   local RC=$?
   if [ $RC -ne 0 ]; then
@@ -141,7 +157,7 @@ CANON=${CANON:-$D/latents_arnold_dense_pertic/canonical_controls.json}
 train()  { one $A $OT train "${TRAIN_IDS:-0:2000}"; }
 val()    { one $A $OE/val val "${VAL_IDS:-6000:6100}"; }
 test_()  { one $A $OE/test test "${TEST_IDS:-7000:7100}"; }
-unseen() { one $B $OE/arenas_678 unseen "${UNSEEN_IDS:-0:60}"; }
+unseen() { one $B $OE/arenas_678 unseen "$UNSEEN_IDS"; }
 
 RC=0
 run() { "$@" || RC=$?; }      # keep going through the other corpora, but remember the failure
