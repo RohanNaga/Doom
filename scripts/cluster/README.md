@@ -61,8 +61,12 @@ frames with -4/-1/+1/+4 shifted controls), the yaw alignment gate on val 6000:61
 inconclusive, and **exit 3 is not approval**), a `FIT=20` fit check of each backbone through the
 real launcher, a 300-step real-data smoke into a throwaway results directory, and an
 `eval_tf.py --tic-stride 1` readback of that smoke's snapshot on 64 val windows. At `GATES_GO` it
-writes the certified commit to `$DOOM_ROOT/GATES_COMMIT`, and `launch_nexttic.sh` (so `launch_runs.sh`)
-refuses to start unless `$DOOM_ROOT/repo` is at that commit with no tracked change.
+writes `$DOOM_ROOT/GATES_CERT.json`: per smoked backbone, the resolved production launch command (every
+flag), the clean commit, the training and validation corpus fingerprints, the encoder records and every
+gate result. `launch_nexttic.sh` (so `launch_runs.sh`) recomputes all of it for the backbone it launches
+and refuses on any difference, so a changed recipe, corpus or checkout, or a backbone whose gates never
+ran, cannot launch. The certificate pins `launch_runs.sh`'s values (`LAUNCH_STEPS`, `MB_UNET`, `MB_SD35`,
+`WORKERS`); pass the same ones to both scripts.
 
 ## Expected durations
 
@@ -134,8 +138,8 @@ Spiderman: run the `rsync` from Spiderman with the node as the source.
   `buttons` of every episode (~10 GB per process); six shards doing that at once is what the
   Sep 20 2026 Spiderman host-memory outage looks like.
 - **Pin `COMMIT` to a sha.** `launch_nexttic.sh` no longer pulls (it used to, after the gates, and a
-  failed pull did not stop the launch). It launches only the commit named in
-  `$DOOM_ROOT/GATES_COMMIT`; to change the code, check out the new sha and rerun `gates.sh`.
+  failed pull did not stop the launch). It launches only what `$DOOM_ROOT/GATES_CERT.json` certifies;
+  to change the code or the recipe, check out the new sha and rerun `gates.sh`.
   `ALLOW_UNGATED=1` overrides the check and is recorded in `resumes.log`.
 - **The smoke touches production paths.** It trains into `$DOOM_ROOT/results_smoke/<backbone>`, but
   it goes through the real launcher, so it appends to `$DOOM_ROOT/logs/train_<run>.log` and

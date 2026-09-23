@@ -10,7 +10,7 @@
 #
 #   0 pin                which code is being certified? The commit of $REPO, which must be the
 #                        commit of $D/repo (the checkout the launcher runs) with no tracked change.
-#                        Any old receipt is revoked first; a new one is written only at GATES_GO.
+#                        Any old certificate is revoked first; a new one is written only at GATES_GO.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
@@ -41,10 +41,15 @@
 #                        throwaway results directory, never the production one.
 #   5 evaluator readback can `eval_tf.py --tic-stride 1` load that snapshot and score raw frames?
 #
-# The receipt. At GATES_GO, after checking that the checkout did not move while the gates ran, the
-# certified commit is written to $D/GATES_COMMIT. `launch_nexttic.sh` refuses to start unless its
-# checkout is at that commit with no tracked change; the gates' own fit and smoke runs pass
-# GATE_RUN=1 because they come before the receipt exists.
+# The certificate. Every gate that passes appends a result to $D/logs/gates_results.jsonl, scoped to
+# the whole run, one latent space, or one backbone. At GATES_GO, after checking that the checkout did
+# not move while the gates ran, `gate_certificate.py write` records for each smoked backbone: its
+# resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under LAUNCH_STEPS, MB_UNET /
+# MB_SD35 and WORKERS, the values launch_runs.sh passes), the commit, the training and validation
+# corpus fingerprints, the encoder records and every gate result that applies to it, into
+# $D/GATES_CERT.json. `launch_nexttic.sh` recomputes all of it for the backbone it launches and
+# refuses on any difference; the gates' own fit, smoke and resume runs pass GATE_RUN=1 because they
+# come before the certificate exists. A backbone whose latent space was not gated cannot be written.
 #
 # What this gate set does NOT do. The audit's 200-update fit and the 10,000-window loader index
 # check the protocol also asks for are not here: FIT=20 is what the task specifies, and 20 updates
@@ -79,8 +84,18 @@ TRAIN_IDS=${TRAIN_IDS:-0:2000}
 TRAIN_AUDIT_EPISODES=${TRAIN_AUDIT_EPISODES:-2000}
 TRAIN_AUDIT_ROWS=${TRAIN_AUDIT_ROWS:-500}
 ALIGN_EPISODES=${ALIGN_EPISODES:-2}   # episodes per encode shard for the stored-latent alignment gate
-RECEIPT=$D/GATES_COMMIT
+CERT=$D/GATES_CERT.json
+RESULTS=$D/logs/gates_results.jsonl
 RUN_REPO=$D/repo              # the checkout launch_nexttic.sh runs (`cd $D/repo`)
+# the production launch the certificate pins, with launch_runs.sh's own defaults
+LAUNCH_STEPS=${LAUNCH_STEPS:-400000}
+MB_UNET=${MB_UNET:-32}
+MB_SD35=${MB_SD35:-32}
+CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 16)
+DEFAULT_WORKERS=$(( CORES / 4 ))
+[ "$DEFAULT_WORKERS" -lt 4 ] && DEFAULT_WORKERS=4
+[ "$DEFAULT_WORKERS" -gt 16 ] && DEFAULT_WORKERS=16
+WORKERS=${WORKERS:-$DEFAULT_WORKERS}
 IFS=, read -r -a SPACES <<< "$VAES"
 
 gate_fail() { echo "GATE_FAILED $1: ${*:2}" >&2; exit "${RC_FAIL:-1}"; }
@@ -128,6 +143,24 @@ latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shi
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
+record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, for the certificate
+  local detail=${3//\"/}; detail=${detail//\\/}
+  printf '{"gate": "%s", "scope": "%s", "status": "ok", "detail": "%s"}\n' "$1" "$2" "$detail" >> "$RESULTS"
+}
+bb_mb() { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
+cert_cmd() {   # cert_cmd <backbone>: the production command, as the launcher resolves it
+  env DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" \
+    CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1"
+}
+bb_latents() {   # bb_latents <backbone> <train|val>
+  local S; S=$(suffix "$(bb_space "$1")")
+  if [ "$2" = train ]; then echo "$D/latents_arnold_dense_pertic$S/arenas"; else echo "$D/latents_arnold_dense_pertic_eval$S/val"; fi
+}
+cert_write_cmd() {   # cert_write_cmd <backbone> <command>
+  echo "$PY $REPO/gate_certificate.py write --cert $CERT --backbone $1 --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
+       "--repo $RUN_REPO --train-latents $(bb_latents "$1" train) --train-ids $TRAIN_IDS" \
+       "--val-latents $(bb_latents "$1" val) --val-ids $VAL_IDS --results $RESULTS --command"
+}
 align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
   echo "$PY $REPO/check_action_alignment.py" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/val" \
@@ -159,7 +192,7 @@ launcher() {   # launcher <backbone> <extra env assignments as NAME=VALUE ...>
 
 if [ "$DRY" = 1 ]; then
   echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
-  echo "DRY gate0 pin: revoke $RECEIPT; certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
+  echo "DRY gate0 pin: revoke $CERT; certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1c inventory $V $(inventory_cmd "$V")"; done
@@ -181,7 +214,10 @@ if [ "$DRY" = 1 ]; then
   done
   for BB in $SMOKE_BBS; do echo "DRY gate5 readback $BB $(readback_cmd "$BB")"; done
   echo "DRY summary GATES_GO with the fit rates, the smoke checkpoints and the readback PSNR"
-  echo "DRY receipt write the certified commit to $RECEIPT, after checking the checkout did not move"
+  for BB in $SMOKE_BBS; do
+    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<launch_nexttic.sh CERT_QUERY=1 with STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS>\""
+  done
+  echo "DRY certificate written to $CERT only after checking the checkout did not move"
   exit 0
 fi
 
@@ -195,7 +231,8 @@ say() { echo "$*" | tee -a "$REPORT"; }
 # --- gate 0: pin the commit being certified ------------------------------------------------
 # revoked first: a gate run that fails or is interrupted must not leave an older certificate
 # standing for whatever the checkout is now
-rm -f "$RECEIPT"
+rm -f "$CERT"
+: > "$RESULTS"
 say "$(date -Iseconds) gate 0: pin"
 COMMIT=$(pin_of "$REPO") || gate_fail "0 pin" "$REPO is not a git checkout, so the gates cannot say which code they certify"
 RUN_COMMIT=$(pin_of "$RUN_REPO") || RUN_COMMIT="none"
@@ -204,6 +241,7 @@ RUN_COMMIT=$(pin_of "$RUN_REPO") || RUN_COMMIT="none"
 git -C "$REPO" diff --quiet HEAD -- \
   || gate_fail "0 pin" "tracked files in $REPO differ from $COMMIT; commit or discard them, the gates certify a commit"
 say "  certifying $COMMIT ($REPO)"
+record "0 pin" all "$COMMIT"
 
 # --- gate 1: the sidecar audit ---------------------------------------------------------
 for V in "${SPACES[@]}"; do
@@ -212,6 +250,7 @@ for V in "${SPACES[@]}"; do
   $(audit_cmd "$V") > "$D/logs/gate1_audit_$V.json" 2>&1 \
     || gate_fail "1 sidecar audit ($V)" "the encoded sidecars disagree with the raw parquet; see $D/logs/gate1_audit_$V.json"
   say "  ok: $(grep -o '"mismatches": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1), $(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1)"
+  record "1 sidecar audit val" "space:$V" "$(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_audit_$V.json" | head -1)"
 done
 for V in "${SPACES[@]}"; do
   say "$(date -Iseconds) gate 1: sidecar audit of the TRAINING corpus, $V ($TRAIN_AUDIT_EPISODES episodes, $TRAIN_AUDIT_ROWS rows each)"
@@ -219,6 +258,7 @@ for V in "${SPACES[@]}"; do
   $(train_audit_cmd "$V") > "$D/logs/gate1_train_audit_$V.json" 2>&1 \
     || gate_fail "1 sidecar audit (train, $V)" "the training sidecars disagree with the raw parquet; see $D/logs/gate1_train_audit_$V.json"
   say "  ok: $(grep -o '"episodes": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1), $(grep -o '"mismatches": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1), $(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1)"
+  record "1 sidecar audit train" "space:$V" "$(grep -o '"rows_checked": [0-9]*' "$D/logs/gate1_train_audit_$V.json" | head -1)"
 done
 
 # --- gate 1c: every training episode's rows and tics ---------------------------------------
@@ -228,6 +268,7 @@ for V in "${SPACES[@]}"; do
   $(inventory_cmd "$V") > "$D/logs/gate1c_inventory_$V.json" 2>&1 \
     || gate_fail "1c inventory ($V)" "a training episode is missing, orphaned, or its latents, sidecar and recording disagree on rows or tics; see $D/logs/gate1c_inventory_$V.json"
   say "  ok: $(grep -c '^  [0-9]' "$D/logs/gate1c_inventory_$V.json" 2>/dev/null || echo '?') ids listed, no problems"
+  record "1c inventory train" "space:$V" "$TRAIN_IDS"
 done
 
 # --- gate 1d: do the stored latents belong to their sidecar rows? ----------------------------
@@ -240,6 +281,7 @@ for V in "${SPACES[@]}"; do
     $(latent_align_cmd "$V" "$C") > "$D/logs/gate1d_latent_align_${V}_$C.log" 2>&1 \
       || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, or a shifted alignment scores as well as the true one; see $D/logs/gate1d_latent_align_${V}_$C.json"
     say "  $(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
+    record "1d latent alignment $C" "space:$V" "$(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
   done
 done
 
@@ -250,6 +292,7 @@ $(align_cmd "${SPACES[0]}") > "$D/logs/gate2_alignment.json" 2>&1
 A_RC=$?
 say "  $(explain $A_RC)"
 [ $A_RC -eq 0 ] || gate_fail "2 alignment" "exit $A_RC; see $D/logs/gate2_alignment.json"
+record "2 alignment" all "exit 0 on val $VAL_IDS (${SPACES[0]})"
 
 # --- gate 3: the fit check, through the launcher -----------------------------------------
 for BB in $SMOKE_BBS; do
@@ -269,6 +312,7 @@ raise SystemExit(0 if r['accum'] == 1 and r['global_batch'] == 32 else 2)
 PY
 ) || gate_fail "3 fit check ($BB)" "no usable fit_check event, or accumulation is not 1: $NUMS ($FITLOG)"
   say "  $BB $NUMS"
+  record "3 fit" "bb:$BB" "$NUMS"
 done
 
 # --- gate 4: the 300-step real-data smoke -------------------------------------------------
@@ -301,6 +345,7 @@ for BB in $SMOKE_BBS; do
   grep -q '"event": "end"' "$SD/log.jsonl" 2>/dev/null \
     || gate_fail "4 smoke ($BB)" "the smoke never reached its end event; the run died mid-way"
   say "  ok: $(du -h "$CK" | cut -f1) recovery checkpoint and $(du -h "$SNAP" | cut -f1) snapshot"
+  record "4 smoke" "bb:$BB" "$STEPS steps"
 done
 
 # --- gate 5: the evaluator readback -------------------------------------------------------
@@ -323,11 +368,17 @@ raise SystemExit(1 if bad else 0)
 PY
 ) || gate_fail "5 readback ($BB)" "no finite raw PSNR in $M ($NUMS)"
   say "  $BB $NUMS"
+  record "5 readback" "bb:$BB" "$NUMS"
 done
 
-# the receipt: only if the checkout is still the commit gate 0 pinned, with no tracked change
+# the certificate: only if the checkout is still the commit gate 0 pinned, with no tracked change
 [ "$(pin_of "$REPO")" = "$COMMIT" ] && [ "$(pin_of "$RUN_REPO")" = "$COMMIT" ] && git -C "$REPO" diff --quiet HEAD -- \
   || gate_fail "0 pin" "the checkout moved while the gates ran (certified $COMMIT); rerun the gates"
-echo "$COMMIT $(date -Iseconds) spaces=${SPACES[*]} smoked=$SMOKE_BBS" > "$RECEIPT"
-say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS receipt=$RECEIPT"
+for BB in $SMOKE_BBS; do
+  PROD_CMD=$(cert_cmd "$BB") || gate_fail "certificate ($BB)" "the launcher could not resolve the production command"
+  # shellcheck disable=SC2046
+  $(cert_write_cmd "$BB") "$PROD_CMD" >> "$REPORT" 2>&1 \
+    || { rm -f "$CERT"; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+done
+say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
 say "the gates say the corpus, the configuration and the evaluator agree; the training numbers are still unmeasured"
