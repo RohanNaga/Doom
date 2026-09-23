@@ -175,6 +175,8 @@ def commands(args, step, ckpt, latent_channels, wandb_run, device, python=sys.ex
             argv = [python, os.path.join(HERE, "eval_tf.py"), "--ckpt", ckpt, *model, "--horizon-tics", str(h),
                     "--latents-dir", eval_latents(args), "--split", split, "--subset", "val",
                     "--num-windows", str(args.eval_windows), "--steps", str(args.eval_steps),
+                    # no DataLoader workers: they are the evaluator's own children, which a stop can miss
+                    "--num-workers", "0",
                     *decoder_flags(latent_channels), "--out-dir", os.path.join(out, f"tf_{mode}_h{h}"), *wb]
             if mode == "ema":
                 argv.insert(4, "--use-ema")
@@ -220,31 +222,34 @@ def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinn
 
     Each evaluator runs in the background while the wrapper `wait`s on it, with its pid in
     `child.pid`, because bash runs a trap only between foreground commands but at once inside
-    `wait`. A TERM or HUP (or an INT, when the script is run by hand) is passed on to the running
-    evaluator, which gets `STOP_WAIT` seconds to exit before it is killed, and only then does the
-    wrapper exit. An EXIT trap removes `child.pid` and the read's own link (or copy, and a copy's
-    partial `.tmp`), so they go however the wrapper ends. Only a SIGKILL of the wrapper leaves them
-    behind; `child.pid` then still lets the trainer see the evaluator running (`PeriodicEval.running`).
+    `wait`. Job control (`set -m`) puts each evaluator in a process group of its own, so its own
+    children (DataLoader workers) go with it: a TERM or HUP (or an INT, when the script is run by
+    hand) is passed on to that whole group, which gets `STOP_WAIT` seconds to exit before the group
+    is killed, and only then does the wrapper exit; `setsid` would do the same, but macOS has none.
+    An EXIT trap removes `child.pid` and the read's own link (or copy, and a copy's partial `.tmp`),
+    so they go however the wrapper ends. Only a SIGKILL of the wrapper leaves them behind;
+    `child.pid` then still lets the trainer see the evaluator running (`PeriodicEval.running`).
     """
     out = os.path.dirname(path)
     status, child = os.path.join(out, STATUS_FILE), os.path.join(out, CHILD_FILE)
     doomed = [child] + ([pinned] + ([pinned + ".tmp"] if copy_from else []) if remove_pinned else [])
     ticks = max(1, int(round(STOP_WAIT * 5)))
     lines = ["#!/bin/bash", f"# periodic evaluation of {run} at step {step}, launched by train_wm.py --eval-every",
+             "set -m     # job control: each evaluator (a background job) leads a process group of its own",
              'CODES=""', "FAILED=0", "CHILD=",
              'note() { CODES="$CODES${CODES:+, }\\"$1\\": $2"; [ "$2" -eq 0 ] || FAILED=1; '
              'echo "$(date -Iseconds) exit $2 $1"; }',
              'run_read() { local label=$1; shift; echo "$(date -Iseconds) start $label"; "$@" & CHILD=$!; '
              f'echo "$CHILD" > {shlex.quote(child)}; wait "$CHILD"; local rc=$?; CHILD=; note "$label" "$rc"; }}',
-             # INT goes on as TERM: a background command of a non-interactive shell ignores INT
+             # the stop goes to the evaluator's whole group (-$CHILD); INT goes on as TERM
              "stop() {",
              "  trap '' TERM HUP INT",
-             '  echo "$(date -Iseconds) stopped, exit $2; stopping the running evaluator"',
+             '  echo "$(date -Iseconds) stopped, exit $2; stopping the running evaluator and its workers"',
              '  if [ -n "$CHILD" ]; then',
-             '    kill -s "$1" "$CHILD" 2>/dev/null',
+             '    kill -s "$1" -- "-$CHILD" 2>/dev/null',
              "    n=0",
-             f'    while kill -0 "$CHILD" 2>/dev/null && [ "$n" -lt {ticks} ]; do sleep 0.2; n=$((n + 1)); done',
-             '    kill -KILL "$CHILD" 2>/dev/null',
+             f'    while kill -0 -- "-$CHILD" 2>/dev/null && [ "$n" -lt {ticks} ]; do sleep 0.2; n=$((n + 1)); done',
+             '    kill -KILL -- "-$CHILD" 2>/dev/null',
              '    wait "$CHILD" 2>/dev/null',
              "  fi",
              '  exit "$2"',

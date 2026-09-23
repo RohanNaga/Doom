@@ -396,6 +396,46 @@ def test_a_failed_wandb_call_never_holds_the_process_at_exit(fail, tmp_path):
         assert got["closed"] is False and got["released"], "an unfinished run must detach the SDK's teardown"
 
 
+LATE_PROBE = """
+import json, sys, threading
+sys.path[:0] = [{repo!r}, {here!r}]
+import wandb_log
+from wandb_stub import stub_wandb
+gate = threading.Event()
+gates = {{"init": gate, "finish": threading.Event()}} if {hang!r} else {{"init": gate}}   # a finish that never returns
+mod = stub_wandb(fail={fail!r}, gate=gates, exit_hook="late")
+sys.modules["wandb"] = mod
+wandb_log.FINISH_TIMEOUT, wandb_log.CLOSE_MARGIN = 0.2, 0.2
+lg = wandb_log.RunLogger(enabled=True, name="r", results_dir={out!r})
+lg.log_event({{"event": "train", "step": 100, "loss": 0.3}})
+closed = lg.close()             # init is still pending: close() gives the run up
+gate.set()                      # init completes now, and only now does the SDK register its teardown
+lg._thread.join(2 if {hang!r} else 10)     # the logger thread goes on to the finish
+print(json.dumps({{"closed": closed, "thread_done": not lg._thread.is_alive(), "released": len(mod.released),
+                  "finished": mod.finished}}))
+"""
+
+
+@pytest.mark.parametrize("fail,hang", [("finish", False), (None, True), (None, False)])
+def test_an_init_that_completes_after_close_gave_up_never_holds_the_process(fail, hang, tmp_path):
+    """The reviewer's sequence: close() times out while init is pending, so there is nothing yet to
+    detach; init then completes on the logger thread and the SDK registers its teardown; finish
+    raises, hangs (the process exits while the logger thread is still in it) or succeeds. The
+    teardown registered after the run was given up must not block exit. The stub's teardown waits 60 s."""
+    import subprocess
+    import time
+    script = tmp_path / "late.py"
+    script.write_text(LATE_PROBE.format(repo=REPO, here=HERE, fail=fail, hang=hang, out=str(tmp_path)))
+    t = time.monotonic()
+    r = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=45)
+    assert r.returncode == 0, r.stderr
+    assert time.monotonic() - t < 20, "a teardown registered after close() gave up held the process at exit"
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    assert got["closed"] is False and got["thread_done"] is not hang, got
+    if fail == "finish" or hang:
+        assert got["released"] >= 1, "the late teardown must be detached"
+
+
 def test_a_failed_log_is_still_finished_under_the_writer_lock(tmp_path, monkeypatch):
     run_dir = tmp_path / "run"
     run_dir.mkdir()

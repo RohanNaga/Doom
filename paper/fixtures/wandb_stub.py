@@ -10,7 +10,9 @@ logger unregistered the SDK's exit-time teardown, which is reached as
 
 `exit_hook=True` also registers that teardown the way SDK 0.30 does, at the start of `init` and before
 anything can fail: at interpreter exit it waits (for `HANG` seconds) unless the run was finished or
-the teardown was unregistered. Use it only in a subprocess, never in the test process itself.
+the teardown was unregistered. `exit_hook="late"` registers it, and only then creates the connection
+that unregisters it, once a gated `init` is let go: a teardown that appears after the logger has
+already given up. Use either only in a subprocess, never in the test process itself.
 """
 import atexit
 import threading
@@ -68,15 +70,21 @@ def stub_wandb(fail=None, gate=None, delay=None, exit_hook=False):
     def finished():
         mod.finished = True
 
+    def register():
+        atexit.unregister(teardown)
+        atexit.register(teardown)
+        mod.sdk.wandb_setup._singleton._connection = conn
+
     def init(**kw):
         mod.calls.append(("init", (), kw))
-        if exit_hook:
-            atexit.unregister(teardown)
-            atexit.register(teardown)
+        if exit_hook is True:
+            register()
         if "init" in gate:
             gate["init"].wait(HANG)
         if "init" in delay:
             time.sleep(delay["init"])
+        if exit_hook == "late":
+            register()
         if fail == "init":
             raise RuntimeError("W&B is down")
         return FakeRun(mod.calls, fail, gate, delay, on_finish=finished)
@@ -89,7 +97,7 @@ def stub_wandb(fail=None, gate=None, delay=None, exit_hook=False):
     mod.Settings = lambda **kw: dict(kw)
     conn = types.SimpleNamespace(_cleanup=cleanup)
     mod.sdk = types.SimpleNamespace(wandb_setup=types.SimpleNamespace(
-        _singleton=types.SimpleNamespace(_connection=conn)))
+        _singleton=types.SimpleNamespace(_connection=None if exit_hook == "late" else conn)))
     return mod
 
 
