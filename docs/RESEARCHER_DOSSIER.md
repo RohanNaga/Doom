@@ -338,7 +338,7 @@ The largest seen PixArt PSNR gain was **0.10 dB**, with paired standard error ab
 
 ## 3.10 DDIM step sweep and SD 3.5 budget curve
 
-**Step-sweep protocol:** U-Net and PixArt, historical reporting windows, **512 windows** per evaluated setting; historical live checkpoints and tuned C4 decoder, raw TF references. Exact per-cell checkpoint/window manifests and numerical rows are not locally recovered. The surviving summary compares **1/2/4** denoising steps with **50**. Source: RC 2026-09-22 09:15; `results/levers_2026-09-20/` contains plotting/table builders rather than a complete numeric sweep archive.
+**Step-sweep protocol:** every step count used uniform-in-t timestep spacing over the trained linear betas, which is `--timestep-spacing linear` in `eval_tf.py` (the only spacing that existed then; `trailing` and `karras` were added on 2026-09-22 for the M1 spacing sweep, and none of the numbers here used them). U-Net and PixArt, historical reporting windows, **512 windows** per evaluated setting; historical live checkpoints and tuned C4 decoder, raw TF references. Exact per-cell checkpoint/window manifests and numerical rows are not locally recovered. The surviving summary compares **1/2/4** denoising steps with **50**. Source: RC 2026-09-22 09:15; `results/levers_2026-09-20/` contains plotting/table builders rather than a complete numeric sweep archive.
 
 | Surviving statement | Status |
 |---|---|

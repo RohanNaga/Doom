@@ -27,6 +27,8 @@ from diffusion_v import VDiffusion, checkpoint_objective
 from doom_data import list_latent_episodes, load_split
 from doomdit_utils import (LATENT_SCALE, VAE_NAME, build_vae, denormalize_latents, encode_for_idm,
                            load_world_model_state)
+from timestep_spacing import SPACINGS
+from timestep_spacing import sample as sample_spaced
 
 
 def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_channels=None, tic_stride=4):
@@ -165,7 +167,10 @@ def do_rollout(args):
             noise = window_noise(shape, noise_keys).to(device)
             nfn = eta_noise_fn(shape, noise_keys, device) if args.eta > 0 else None
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                x = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), noise.shape, steps=args.steps, eta=args.eta, noise=noise, device=device, noise_fn=nfn)
+                # `linear` (the default) is diffusion.ddim_sample unchanged; see timestep_spacing.py
+                x = sample_spaced(diffusion, lambda xt, t: model(xt, t, act, ctx_in, bucket, ph), noise.shape,
+                                  steps=args.steps, spacing=args.timestep_spacing, eta=args.eta, noise=noise,
+                                  device=device, noise_fn=nfn)
             preds.append(x.half().cpu().numpy())
             ctx = torch.cat([ctx[:, C:], x.float()], dim=1)   # drop the oldest latent, append the prediction
         pred_all.append(np.stack(preds, axis=1)); gt_all.append(gt); act_all.append(acts)
@@ -556,6 +561,10 @@ def build_parser():
                    help="comma-separated horizons to report, in frames; the default is 4,32,64,128,256 for a "
                         "per-tic rollout and 8,16,32,64 for a decision-spaced one")
     p.add_argument("--batch-size", type=int, default=16); p.add_argument("--steps", type=int, default=50); p.add_argument("--eta", type=float, default=0.0)
+    p.add_argument("--timestep-spacing", dest="timestep_spacing", choices=SPACINGS, default="linear",
+                   help="which trained timesteps the DDIM sampler visits (timestep_spacing.py). linear, the default, "
+                        "is uniform in t and is what every reported number used; trailing and karras are for the "
+                        "few-step spacing sweep (docs/REVIEW_2026-09-22.md M1)")
     p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4"); p.add_argument("--pixart-path", default=PIXART_DEFAULT)
     p.add_argument("--unidiffuser-path", default=UNIDIFFUSER_DEFAULT); p.add_argument("--sd35-path", default=SD35_DEFAULT)
     p.add_argument("--hf-cache", default=None)

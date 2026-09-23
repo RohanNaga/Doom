@@ -209,9 +209,11 @@ def test_rollout_noise_is_keyed_by_window_and_step():
 
 
 def test_the_rollout_passes_its_own_noise_to_the_sampler():
+    # the sampler call now goes through timestep_spacing.sample (review M1), whose default IS
+    # diffusion.ddim_sample; the call spans several lines, so read it up to its closing parenthesis
     src = open(os.path.join(REPO, "rollout_eval.py")).read()
-    call = src[src.index("x = diffusion.ddim_sample"):]
-    call = call[:call.index("\n")]
+    call = src[src.index("x = sample_spaced("):]
+    call = call[:call.index("noise_fn=nfn)")]
     assert "noise=noise" in call, "ddim_sample is still drawing from the global generator"
 
 

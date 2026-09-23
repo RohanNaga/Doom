@@ -27,6 +27,8 @@ from backbones import (BACKBONES, PIXART_DEFAULT, SD35_DEFAULT, UNIDIFFUSER_DEFA
 from diffusion_v import VDiffusion, checkpoint_objective
 from doom_data import LatentWindowDataset, load_split
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
+from timestep_spacing import SPACINGS
+from timestep_spacing import sample as sample_spaced
 
 HUD_ROWS = 32
 
@@ -278,9 +280,10 @@ def main(args):
             noise = window_noise(shape, keys).to(device)
             nfn = eta_noise_fn(shape, keys, device) if args.eta > 0 else None
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                pred = diffusion.ddim_sample(lambda xt, t: model(xt, t, act, run_in, bucket, ph), noise.shape,
-                                             steps=args.steps, eta=args.eta, noise=noise, device=device,
-                                             noise_fn=nfn)
+                # `linear` (the default) is diffusion.ddim_sample unchanged; see timestep_spacing.py
+                pred = sample_spaced(diffusion, lambda xt, t: model(xt, t, act, run_in, bucket, ph), noise.shape,
+                                     steps=args.steps, spacing=args.timestep_spacing, eta=args.eta, noise=noise,
+                                     device=device, noise_fn=nfn)
             if k < K - 1:
                 run = torch.cat([run[:, latent_channels:], pred.float()], dim=1)
         torch.cuda.synchronize() if device == "cuda" else None
@@ -382,6 +385,10 @@ def build_parser():
     p.add_argument("--num-windows", type=int, default=2048)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--steps", type=int, default=50)
+    p.add_argument("--timestep-spacing", dest="timestep_spacing", choices=SPACINGS, default="linear",
+                   help="which trained timesteps the DDIM sampler visits (timestep_spacing.py). linear, the default, "
+                        "is uniform in t and is what every reported number, the 4-step sweep included, used; "
+                        "trailing and karras are for the few-step spacing sweep (docs/REVIEW_2026-09-22.md M1)")
     p.add_argument("--eta", type=float, default=0.0)
     p.add_argument("--lpips-net", default="alex")
     p.add_argument("--vae-path", default="", help="fine-tuned VAE directory or repo id; default sd-vae-ft-mse")
