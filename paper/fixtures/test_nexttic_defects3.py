@@ -394,7 +394,8 @@ def test_the_gates_run_each_space_under_its_own_interpreter(tmp_path):
         assert want in ln and other not in ln, ln
     for space, py in (("sd15", U), ("sd35", S)):
         align = [ln for ln in runs if ln.startswith(f"DRY gate1d latent alignment {space} ")]
-        assert len(align) == 2 and all(ln.split()[6] == py for ln in align), align
+        # after the card prefix (`env CUDA_VISIBLE_DEVICES=<card>`, test_nexttic_defects4.py)
+        assert len(align) == 2 and all(ln.split()[8] == py for ln in align), align
 
 
 def test_the_gates_fall_back_to_py_then_to_the_node_env(tmp_path):

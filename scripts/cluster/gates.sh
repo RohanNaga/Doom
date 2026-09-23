@@ -20,6 +20,14 @@
 # empty environment (`env -i`) and must resolve to the certified command, or the certificate is
 # revoked: a command that needs anything from the operator's shell is not the one printed.
 #
+# Cards. Every GPU step runs under `CUDA_VISIBLE_DEVICES=<its card>` and addresses that card as
+# cuda:0, the launcher's own convention: the sd15 space and the U-Net on UNET_GPU, the sd35 space and
+# SD 3.5 on SD35_GPU. That covers the latent alignment (1d), the fit, smoke and resume (3, 4, 4c, set
+# inside launch_nexttic.sh), the probes (4b) and the readback (5), whose eval_tf.py takes the first
+# visible card: with every card visible it ran on GPU 0, another user's on Spiderman. No process of the
+# gates can see a card it was not given. The audits, inventories, alignment and window checks use no
+# CUDA.
+#
 # Interpreters. Every command of the sd15 space and the U-Net runs under PY_UNET, every command of the
 # sd35 space and SD 3.5 (audits, inventories, the latent alignment that re-encodes with the SD 3.5
 # autoencoder, fit, smoke, probes, readback, certificate) under PY_SD35; each falls back to PY and
@@ -179,6 +187,7 @@ explain() {   # how check_action_alignment.py's exit code is read
 suffix()   { [ "$1" = sd35 ] && echo _sd35 || echo ""; }
 bb_space() { [ "$1" = sd35 ] && echo sd35 || echo sd15; }
 bb_gpu()   { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
+on_card()  { echo "env CUDA_VISIBLE_DEVICES=$1"; }   # on_card <card>: the prefix of a GPU step; it sees cuda:0 only
 bb_chan()  { [ "$1" = sd35 ] && echo 16 || echo 4; }
 space_py() { [ "$1" = sd35 ] && echo "$PY_SD35" || echo "$PY_UNET"; }
 bb_py()    { space_py "$(bb_space "$1")"; }
@@ -209,9 +218,9 @@ latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shi
   DIR=$VAL; PEER=$TRAIN
   [ "$2" = train ] && { DIR=$TRAIN; PEER=$VAL; }
   # --space and --contract-peer: one latent contract for the space, the backbone's, in train AND val
-  echo "$(space_py "$1") $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+  echo "$(on_card "$(space_gpu "$1")") $(space_py "$1") $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
        "--space $1 --contract-peer $PEER" \
-       "--episodes-per-shard $ALIGN_EPISODES --device cuda:$(space_gpu "$1") --cache-dir $D/hf/hub" \
+       "--episodes-per-shard $ALIGN_EPISODES --device cuda:0 --cache-dir $D/hf/hub" \
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
@@ -309,7 +318,7 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
   EXTRA=$(bb_paths "$1")
   [ "$1" = sd35 ] && EXTRA="$EXTRA --vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae --latent-scale 1.5305 --latent-shift 0.0609"
   [ "$2" = ema ] && EMA=" --use-ema"
-  echo "$(bb_py "$1") $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
+  echo "$(on_card "$(bb_gpu "$1")") $(bb_py "$1") $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
        "--ckpt $SMOKE_DIR/$1/snap_$(printf '%07d' "$STEPS").pt$EMA --tic-stride 1 --horizon-tics $3" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--split $D/latents_arnold_dense_pertic_eval$S/split_val.json --subset val" \
@@ -319,9 +328,9 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
 }
 probe_cmd() {   # probe_cmd <backbone>: the conditioning pathways of the smoke's recovery checkpoint
   local S; S=$(suffix "$(bb_space "$1")")
-  echo "$(bb_py "$1") $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
+  echo "$(on_card "$(bb_gpu "$1")") $(bb_py "$1") $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
        "--latent-channels $(bb_chan "$1") --latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
-       "--episodes $VAL_IDS --device cuda:$(bb_gpu "$1") --hf-cache $D/hf/hub $(bb_paths "$1")" \
+       "--episodes $VAL_IDS --device cuda:0 --hf-cache $D/hf/hub $(bb_paths "$1")" \
        "--out $D/logs/gate4b_probe_$1.json"
 }
 val_inventory_cmd() {   # val_inventory_cmd <space>: exactly the val ids, rows, tics and split file
