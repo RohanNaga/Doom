@@ -31,7 +31,12 @@
 #                        bit identity reported, not required), then decode the stored rows against
 #                        the raw frames with rows shifted -4/-1/+1/+4, all of which the true
 #                        alignment must beat by 3 dB. Every shard log must be present and every
-#                        shard under one latent contract. The tolerances are cross-host calibrated
+#                        shard under one latent contract, and since Astra's third review that
+#                        contract (autoencoder, subfolder, scale, shift, channels) must equal the
+#                        other corpus of the space (`--contract-peer`, train against val) AND the
+#                        space's own (`--space`: sd-vae-ft-mse, 0.18215, no shift, 4 channels; SD 3.5
+#                        Medium's `vae`, 1.5305, 0.0609, 16 channels): train at scale 1 and val at
+#                        scale 2 each passed their own directory. The tolerances are cross-host calibrated
 #                        on ONE 4-channel episode: read the printed MAE, p99 and margin of the SD
 #                        3.5 shards before trusting a pass there.
 #   2 alignment gate     is the control that produced the motion stored on the row the trainer
@@ -149,10 +154,14 @@ inventory_cmd() {   # inventory_cmd <space>: rows and tics of every training epi
 }
 space_gpu() { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
 latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shifted-decode, per shard
-  local DIR
-  if [ "$2" = train ]; then DIR=$D/latents_arnold_dense_pertic$(suffix "$1")/arenas
-  else DIR=$D/latents_arnold_dense_pertic_eval$(suffix "$1")/val; fi
+  local S TRAIN VAL DIR PEER
+  S=$(suffix "$1")
+  TRAIN=$D/latents_arnold_dense_pertic$S/arenas; VAL=$D/latents_arnold_dense_pertic_eval$S/val
+  DIR=$VAL; PEER=$TRAIN
+  [ "$2" = train ] && { DIR=$TRAIN; PEER=$VAL; }
+  # --space and --contract-peer: one latent contract for the space, the backbone's, in train AND val
   echo "$PY $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+       "--space $1 --contract-peer $PEER" \
        "--episodes-per-shard $ALIGN_EPISODES --device cuda:$(space_gpu "$1") --cache-dir $D/hf/hub" \
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
@@ -347,7 +356,7 @@ for V in "${SPACES[@]}"; do
     say "$(date -Iseconds) gate 1d: stored-latent alignment, $V $C ($ALIGN_EPISODES episode(s) per shard)"
     # shellcheck disable=SC2046
     $(latent_align_cmd "$V" "$C") > "$D/logs/gate1d_latent_align_${V}_$C.log" 2>&1 \
-      || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, or a shifted alignment scores as well as the true one; see $D/logs/gate1d_latent_align_${V}_$C.json"
+      || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, a shifted alignment scores as well as the true one, or the corpus is not under the $V contract its peer and backbone share; see $D/logs/gate1d_latent_align_${V}_$C.json"
     say "  $(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
     record "1d latent alignment $C" "space:$V" "$(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
   done

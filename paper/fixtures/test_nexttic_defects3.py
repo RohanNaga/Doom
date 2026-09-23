@@ -4,6 +4,9 @@
      invocations both passed the seal, the second as "re-entered", and test was scored twice. One
      evaluator per run now holds an exclusive process lock for as long as it scores; the persistent
      seal stays separate.
+  2. The gates compared latent contracts within each directory only: a train corpus at scale 1 and a
+     val corpus at scale 2 each passed. Train and val of one space must now share one contract, and
+     it must be the space's own (the backbone's channels, its autoencoder and normalisation).
 
 Everything here is a dry run or a stub run: nothing encodes, trains or touches a GPU.
 
@@ -115,3 +118,143 @@ def test_the_lock_is_released_when_the_evaluator_exits(tmp_path):
     assert again.returncode == 0, again.stderr
     assert _outs(_calls(tmp_path, "d")) == [str(r / "eval_tf_test_h4")], \
         "the interrupted seal was not finished by the next evaluator"
+
+
+# ---------------------------------------------------------------------------------------
+# 2. one latent contract per space: train equals val, and both equal the backbone's
+# ---------------------------------------------------------------------------------------
+
+GATES = os.path.join(REPO, "scripts", "cluster", "gates.sh")
+
+
+def space_corpus(tmp_path, name, eps, scale=0.18215, shift=None, vae_id="stabilityai/sd-vae-ft-mse",
+                 subfolder="", channels=4):
+    """A one-shard corpus the stub autoencoder really encoded at `scale` and `shift`, whose shard log
+    records exactly that contract: on its own it passes every per-shard check."""
+    import json
+
+    import numpy as np
+    import torch
+    from encode_parquet import encode_batch
+    from test_latent_alignment import BATCH, T, StubVAE, frame, write_recording
+    raw, lat = tmp_path / "raw", tmp_path / name
+    raw.mkdir(parents=True, exist_ok=True)
+    lat.mkdir(parents=True)
+    lines = []
+    for ep in eps:
+        write_recording(str(raw / f"ep_{ep:05d}.parquet"), ep)
+        frames = np.stack([frame(ep * 1000 + t) for t in range(T)])
+        z = np.concatenate([encode_batch(StubVAE(), frames[a:a + BATCH], "cpu", torch.float32, False, scale, shift)
+                            for a in range(0, T, BATCH)])
+        np.save(str(lat / f"ep_{ep:05d}_latents.npy"), z)
+        np.savez(str(lat / f"ep_{ep:05d}_meta.npz"), tic=np.arange(T, dtype=np.int64),
+                 episode_id=np.full(T, ep, dtype=np.int64))
+        lines.append(json.dumps({"episode": f"ep_{ep:05d}", "frames": T}))
+    (lat / "episodes_00.jsonl").write_text("\n".join(lines) + "\n")
+    (lat / "encode_meta_00.json").write_text(json.dumps({
+        "vae_id": vae_id, "vae_subfolder": subfolder, "scaling_factor_applied": scale,
+        "shift_factor_applied": shift, "every_tic": True, "legacy": False,
+        "latent_contract": {"latent_channels": channels, "scaling_factor": scale, "shift_factor": shift},
+        "args": {"batch_size": BATCH, "dtype": "fp32"}}))
+    return str(lat), str(raw)
+
+
+def _check(lat, raw, **kw):
+    import check_latent_alignment as cla
+    from test_latent_alignment import StubVAE
+    return cla.check(lat, raw, device="cpu", vae=StubVAE(), **kw)
+
+
+def test_train_and_val_under_different_scales_pass_alone_and_fail_as_one_space(tmp_path):
+    """Astra's reproduction: train at scale 1 and val at scale 2 each passed their own directory."""
+    train, raw = space_corpus(tmp_path, "train", (0, 1), scale=1.0, vae_id="stub")
+    val, _ = space_corpus(tmp_path, "val", (6000, 6001), scale=2.0, vae_id="stub")
+    assert _check(train, raw)["ok"] and _check(val, raw)["ok"], "the attack corpora must pass on their own"
+    for mine, peer in ((train, val), (val, train)):
+        rep = _check(mine, raw, contract_peer=peer)
+        assert not rep["ok"]
+        assert any("different scale" in p for p in rep["contract_problems"]), rep["contract_problems"]
+
+
+def test_a_space_whose_contract_is_not_its_backbones_fails(tmp_path):
+    """Equal train and val are not enough: both must be the space's own contract."""
+    train, raw = space_corpus(tmp_path, "train", (0, 1), scale=1.0)
+    val, _ = space_corpus(tmp_path, "val", (6000, 6001), scale=1.0)
+    rep = _check(train, raw, space="sd15", contract_peer=val)
+    assert not rep["ok"] and rep["contract_problems"] == [p for p in rep["contract_problems"] if "sd15" in p]
+    assert any("scale" in p for p in rep["contract_problems"]), rep["contract_problems"]
+    # a 4-channel sd-vae-ft-mse corpus filed as the SD 3.5 space fails on every key the space fixes
+    good, raw = space_corpus(tmp_path / "b", "train", (0, 1))
+    probs = _check(good, raw, space="sd35")["contract_problems"]
+    for k in ("vae_id", "vae_subfolder", "scale", "shift", "channels"):
+        assert any(f"{k} is" in p for p in probs), (k, probs)
+
+
+def test_the_expected_contract_passes_on_train_and_val(tmp_path):
+    train, raw = space_corpus(tmp_path, "train", (0, 1))
+    val, _ = space_corpus(tmp_path, "val", (6000, 6001))
+    for mine, peer in ((train, val), (val, train)):
+        rep = _check(mine, raw, space="sd15", contract_peer=peer)
+        assert rep["ok"], rep["contract_problems"]
+
+
+def test_unrecorded_channels_are_measured_from_the_arrays(tmp_path):
+    import json
+    train, raw = space_corpus(tmp_path, "train", (0, 1))
+    meta = os.path.join(train, "encode_meta_00.json")
+    m = json.load(open(meta))
+    m.pop("latent_contract")
+    json.dump(m, open(meta, "w"))
+    assert _check(train, raw, space="sd15")["ok"]
+    assert any("channels is [4]" in p for p in _check(train, raw, space="sd35")["contract_problems"])
+
+
+def test_a_peer_without_shard_logs_fails(tmp_path):
+    train, raw = space_corpus(tmp_path, "train", (0, 1))
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    rep = _check(train, raw, contract_peer=str(empty))
+    assert not rep["ok"] and any("contract is unknown" in p for p in rep["contract_problems"])
+
+
+def test_the_expected_contracts_are_the_encoders_and_the_evaluators():
+    """The numbers come from the modules that own them, and agree with what the encoder launcher
+    writes and what the evaluator and the gates decode with."""
+    import check_latent_alignment as cla
+    import doomdit_utils
+    import verify_sd35
+    from backbones import BACKBONE_LATENT_CHANNELS, SD35_DEFAULT
+    c = cla.space_contracts()
+    assert c["sd15"] == {"vae_id": doomdit_utils.VAE_NAME, "vae_subfolder": "", "scale": doomdit_utils.LATENT_SCALE,
+                         "shift": None, "channels": BACKBONE_LATENT_CHANNELS["unet"]}
+    assert c["sd15"]["vae_id"] == "stabilityai/sd-vae-ft-mse" and c["sd15"]["scale"] == 0.18215
+    vae = verify_sd35.SD35_VAE
+    assert c["sd35"] == {"vae_id": SD35_DEFAULT, "vae_subfolder": "vae", "scale": vae["scaling_factor"],
+                         "shift": vae["shift_factor"], "channels": BACKBONE_LATENT_CHANNELS["sd35"]}
+    assert (c["sd35"]["scale"], c["sd35"]["shift"], c["sd35"]["channels"]) == (1.5305, 0.0609, 16)
+    enc = open(os.path.join(REPO, "scripts", "spiderman", "encode_nexttic.sh")).read()
+    assert (f"--vae-id {SD35_DEFAULT} --vae-subfolder vae --latent-channels 16" in enc
+            and "--scaling-factor 1.5305 --shift-factor 0.0609" in enc)
+    gates = open(GATES).read()
+    assert "--latent-scale 1.5305 --latent-shift 0.0609" in gates
+
+
+def test_the_gates_check_each_corpus_against_its_space_and_its_peer(tmp_path):
+    e = {**os.environ, "DRY": "1", "DOOM_ROOT": str(tmp_path), "VAES": "sd15,sd35"}
+    p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e)
+    assert p.returncode == 0, p.stderr
+    lines = [ln for ln in p.stdout.splitlines() if "check_latent_alignment.py" in ln]
+    assert len(lines) == 4, lines
+
+    def arg(ln, name):
+        t = ln.split()
+        return t[t.index(name) + 1]
+
+    pairs = {}
+    for ln in lines:
+        space = arg(ln, "--space")
+        assert space in ("sd15", "sd35")
+        assert ("_sd35/" in arg(ln, "--latents-dir")) == (space == "sd35"), ln
+        pairs[arg(ln, "--latents-dir")] = (space, arg(ln, "--contract-peer"))
+    for d, (space, peer) in pairs.items():
+        assert peer != d and pairs[peer] == (space, d), (d, peer)
