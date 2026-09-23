@@ -138,6 +138,16 @@ class HorizonOne(torch.utils.data.Dataset):
         return ctx, tgt.unsqueeze(0), act, torch.zeros(1, dtype=torch.long)
 
 
+def draw_windows(n_total, num_windows, seed):
+    """The sorted dataset indices a run scores: `num_windows` of `n_total`, drawn without replacement.
+
+    One function so the evaluation launcher can name the exact window manifest a score was computed
+    on (`score_identity.py windows`) and key its cache by it.
+    """
+    rng = np.random.RandomState(seed)
+    return np.sort(rng.choice(n_total, size=min(num_windows, n_total), replace=False))
+
+
 def window_seed(purpose, *parts):
     """A 63-bit seed from a purpose tag and a tuple of integers, by hashing rather than arithmetic.
 
@@ -240,8 +250,7 @@ def main(args):
         base = LatentWindowDataset(args.latents_dir, split[args.subset], args.context_frames,
                                    latent_channels=latent_channels)
         ds, windows = base, HorizonOne(base)
-    rng = np.random.RandomState(args.seed)
-    idx = np.sort(rng.choice(len(ds), size=min(args.num_windows, len(ds)), replace=False))
+    idx = draw_windows(len(ds), args.num_windows, args.seed)
     loader = DataLoader(Subset(windows, idx.tolist()), batch_size=args.batch_size, shuffle=False, num_workers=2)
     raw = RawFrames(args.parquet_dir) if args.parquet_dir else None
     print(f"{args.subset}: {len(ds.episodes)} episodes, {len(ds):,} windows, evaluating {len(idx)}, step {step}, "

@@ -69,7 +69,12 @@ if script == "score_identity.py":
         split = hashlib.sha256(open(arg("--split"), "rb").read()).hexdigest()[:16]
     except OSError:
         split = "missing"
-    print("split=%s fingerprint=%s episodes=0" % (split, os.environ.get("STUB_CORPUS_FP", "fp0")))
+    if sys.argv[2] == "windows":
+        # the manifest follows every input the real one follows: the draw's arguments and the split
+        drawn = hashlib.sha256((" ".join(sys.argv[3:]) + split + os.environ.get("STUB_CORPUS_FP", "fp0")).encode())
+        print("windows=%s n=0" % drawn.hexdigest()[:16])
+    else:
+        print("split=%s fingerprint=%s episodes=0" % (split, os.environ.get("STUB_CORPUS_FP", "fp0")))
     sys.exit(0)
 if script == "make_dense_eval_splits.py":
     corpus = os.path.basename(arg("--latents-dir") or "")

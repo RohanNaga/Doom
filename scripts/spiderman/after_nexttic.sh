@@ -41,8 +41,9 @@
 #                       number is at EQUAL GAME TIME with a stride-4 model's single step (114 ms)
 #
 # Caching. Every stage's output is keyed by what produced it: checkpoint path, stored step and
-# SHA-256 (eval_identity.py), variant, corpus and its split file, horizon, window count, sampler and
-# decoder. The key sits beside the result as `<file>.key`; a stage reruns when its result is absent,
+# SHA-256 (eval_identity.py), variant, the corpus by CONTENT (split file bytes and latent
+# fingerprint, score_identity.py; never the split's pathname), the exact window or rollout manifest
+# the evaluator will draw, horizon, window count, seed, sampler steps and spacing, and decoder. The key sits beside the result as `<file>.key`; a stage reruns when its result is absent,
 # when the key differs, or when RESCORE=1. A result computed for one checkpoint can therefore never be
 # relabelled with another's name, which the old existence-only test allowed.
 #
@@ -213,9 +214,19 @@ COMMON="$BB --latent-channels $CH $VAE $SCALE --hf-cache $D/hf/hub --tic-stride 
  --context-frames 32 --num-actions 29"
 
 # --- the cache key --------------------------------------------------------------------------
-key_of() {   # key_of <ckpt> <step> <sha256> <variant> <corpus> <horizon> <windows>
-  echo "ckpt=$1 step=$2 sha256=$3 variant=$4 corpus=$5 split=$(corpus_split "$5") horizon=$6" \
+key_of() {   # key_of <ckpt> <step> <sha256> <variant> <corpus> <horizon> <windows> <tf|rollout>
+  # the corpus by CONTENT (split file bytes and latent fingerprint) and the exact window manifest,
+  # never the split's pathname: two files at one path can list different episodes
+  local CID WM
+  CID=$(corpus_id "$5") && [ -n "$CID" ] || return 1
+  WM=$(window_manifest "$8" "$5" "$6" "$7") && [ -n "$WM" ] || return 1
+  echo "ckpt=$1 step=$2 sha256=$3 variant=$4 corpus=$5 [$CID] [$WM] horizon=$6" \
        "windows=$7 seed=$SEED sampler=ddim$STEPS spacing=$SPACING decoder=$DEC_TAG"
+}
+window_manifest() {   # window_manifest <tf|rollout> <corpus> <horizon> <count>: what that evaluator will score
+  "$PY" "$D/repo/score_identity.py" windows --kind "$1" --latents-dir "$(corpus_dir "$2")" \
+    --split "$(corpus_split "$2")" --num "$4" --seed "$SEED" --context-frames 32 --horizon "$3" \
+    --latent-channels "$CH" < /dev/null
 }
 # A stage runs when its result is absent, when the result was produced under a different key, or
 # when RESCORE=1. The key sits beside the result as `<file>.key`.
@@ -292,12 +303,13 @@ book() { [ "$STAGE" = sealed ] && sealed_done "$1" "$2" "$3"; return 0; }   # bo
 tf() {   # tf <corpus> <out-dir> <ckpt> <step> <sha256> <live|ema> <horizon> <windows>
   local S=$1 OUT=$2 CK=$3 ST=$4 SHA=$5 V=$6 K=$7 N=$8 EMA="" KEY E
   [ "$V" = ema ] && EMA="--use-ema"
-  KEY=$(key_of "$CK" "$ST" "$SHA" "$V" "$S" "$K" "$N")
   if [ "$DRY" = 1 ]; then
     local LABEL; LABEL=$(basename "$OUT"); LABEL=${LABEL#eval_tf_}
     echo "DRY eval_tf $LABEL $PY eval_tf.py $COMMON $(corpus_tf "$S") --subset $SUBSET --num-windows $N --batch-size 16 --steps $STEPS --timestep-spacing $SPACING --seed $SEED --ckpt $CK $EMA --horizon-tics $K --out-dir $OUT"
     return 0
   fi
+  KEY=$(key_of "$CK" "$ST" "$SHA" "$V" "$S" "$K" "$N" tf) \
+    || { fail "eval_tf $(basename "$OUT"): the corpus identity or window manifest could not be computed"; return 0; }
   if ! run_or_skip "$S" "$(basename "$OUT")" "$OUT/metrics.json" "$KEY"; then
     echo "$RUN eval_tf $(basename "$OUT") not run: already scored under this key, or refused" >> "$LOG"
     return 0
@@ -348,13 +360,14 @@ rollout() {   # rollout <corpus> <ckpt> <step> <sha256> <live|ema>: roll out, sc
   local S=$1 CK=$2 ST=$3 SHA=$4 V=$5 EMA="" KEY NPZ M E IDM_ENC=""
   [ "$V" = ema ] && EMA="--use-ema"
   [ "$CH" = 16 ] && IDM_ENC="--idm-reencode-vae stabilityai/sd-vae-ft-mse"
-  KEY=$(key_of "$CK" "$ST" "$SHA" "$V" "$S" "$HORIZON" 256)
   NPZ=$R/rollouts_$S.npz; M=$R/rollout_metrics_$S
   if [ "$DRY" = 1 ]; then
-    echo "DRY rollout $PY rollout_eval.py --rollout $COMMON --ckpt $CK $EMA $(corpus_latents "$S") --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --out $NPZ"
+    echo "DRY rollout $PY rollout_eval.py --rollout $COMMON --ckpt $CK $EMA $(corpus_latents "$S") --subset $SUBSET --num-rollouts 256 --horizon $HORIZON --timestep-spacing $SPACING --seed $SEED --out $NPZ"
     echo "DRY score $PY rollout_eval.py --score --rollouts $NPZ --parquet-dir $(corpus_parquet "$S") --clip-frames 128 --out-dir $M"
     return 0
   fi
+  KEY=$(key_of "$CK" "$ST" "$SHA" "$V" "$S" "$HORIZON" 256 rollout) \
+    || { fail "rollout $S: the corpus identity or rollout manifest could not be computed"; return 1; }
   if run_or_skip "$S" rollout "$NPZ" "$KEY"; then
     forget "$NPZ"; rm -rf "$M"      # everything downstream of a rollout belongs to that rollout
     $PY rollout_eval.py --rollout $COMMON --ckpt "$CK" $EMA $(corpus_latents "$S") \

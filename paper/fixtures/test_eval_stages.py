@@ -505,6 +505,61 @@ def test_a_failed_rerun_leaves_no_result_that_looks_current(tmp_path):
     assert not (r / "eval_tf_val" / "metrics.json").exists()
 
 
+def test_the_key_names_the_corpus_by_content_and_the_windows_not_the_split_path(tmp_path):
+    root, r = root_with(tmp_path)
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    key = (r / "eval_tf_val" / "metrics.json.key").read_text()
+    assert "split=missing" in key and "fingerprint=fp0" in key and "windows=" in key
+    assert "split_val.json" not in key, "the split's pathname is not its identity"
+
+
+def test_a_split_file_with_new_contents_rescores(tmp_path):
+    root, r = root_with(tmp_path)
+    split = root / "latents_arnold_dense_pertic_eval" / "split_val.json"
+    split.write_text('{"val": [6000, 6001]}')
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    _, same = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    assert _tf_calls(same) == []
+    split.write_text('{"val": [6000]}')
+    _, calls = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    assert flag(_tf_calls(calls)[0], "--out-dir") == str(r / "eval_tf_val") and len(_tf_calls(calls)) == 4
+
+
+def test_a_re_encoded_corpus_rescores(tmp_path):
+    root, r = root_with(tmp_path)
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    _, calls = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"), STUB_CORPUS_FP="fp-reencoded")
+    assert len(_tf_calls(calls)) == 4
+
+
+def test_a_different_seed_is_a_different_window_manifest(tmp_path):
+    root, r = root_with(tmp_path)
+    run(tmp_path, root, r, CKPT=str(r / "0300000.pt"))
+    _, calls = run(tmp_path, root, r, CKPT=str(r / "0300000.pt"), SEED="1")
+    assert len(_tf_calls(calls)) == 4 and all("--seed 1" in c for c in _tf_calls(calls))
+
+
+def test_the_real_window_manifest_is_the_evaluators_draw(tmp_path):
+    """`score_identity.py windows` must name exactly the windows `eval_tf.py` scores."""
+    import score_identity
+    from doom_data import TicWindowDataset
+    from eval_tf import draw_windows
+    from pertic_fixtures import held_actions, write_pertic_episode
+    lat = str(tmp_path / "val")
+    for ep in (10, 11):
+        write_pertic_episode(lat, ep, held_actions([0] * 10))
+    path, _ = mdes.build(lat, expect_ids=[10, 11])
+    rows, digest = score_identity.tf_window_manifest(lat, path, 5, 0, 4, 1, 4)
+    ds = TicWindowDataset(lat, [10, 11], 4, latent_channels=4, horizon=1, with_horizon=True)
+    want = [[ds.episodes[ds.locate(int(i))[0]][0], ds.locate(int(i))[1]] for i in draw_windows(len(ds), 5, 0)]
+    assert rows == want and len(rows) == 5
+    assert score_identity.tf_window_manifest(lat, path, 5, 1, 4, 1, 4)[1] != digest
+    assert score_identity.tf_window_manifest(lat, path, 5, 0, 4, 4, 4)[1] != digest
+    assert score_identity.tf_window_manifest(lat, path, 6, 0, 4, 1, 4)[1] != digest
+    r_rows, r_digest = score_identity.rollout_window_manifest(lat, path, 3, 0, 4, 4, 4)
+    assert len(r_rows) == 3 and r_digest != digest
+
+
 def test_the_launcher_no_longer_caches_on_existence_alone():
     text = open(AFTER).read()
     assert 'should_run() { [ ! -e "$1" ] || [ "$RESCORE" = 1 ]; }' not in text
