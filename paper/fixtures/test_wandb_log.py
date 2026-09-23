@@ -420,6 +420,17 @@ def test_a_wandb_outage_mid_run_does_not_stop_training(tiny_pixart, tmp_path, mo
     assert len(err) == 1, err
 
 
+def test_a_real_training_run_streams_exactly_what_the_sidecar_would_replay(tiny_pixart, tmp_path, monkeypatch):
+    """End to end: the rows the trainer streamed natively equal, series for series and value for
+    value, the rows the sidecar logs when it replays that same run's log.jsonl afterwards."""
+    native = stub_wandb()
+    monkeypatch.setitem(sys.modules, "wandb", native)
+    out = train_tiny(tmp_path)
+    expected = run_sidecar(out, monkeypatch)
+    assert len(expected) == 6, "four train and two val events"
+    assert logged(native) == expected
+
+
 # ---------------------------------------------------------------------------------------
 # the evaluators: --wandb-run appends a summary to `<run>-eval` at the checkpoint's step
 # ---------------------------------------------------------------------------------------
