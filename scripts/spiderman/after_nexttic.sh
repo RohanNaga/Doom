@@ -36,6 +36,15 @@
 # A CORPORA that mixes val with a sealed corpus is refused: the two stages score different
 # checkpoints by construction. CKPT and STEP apply to the validation stage only.
 #
+# One evaluator per run at a time. Every stage takes an exclusive flock(2) on
+# `$R/after_nexttic.lock` before it scores anything (the validation stage after its wait for
+# `event=end`) and holds it until this process and every scorer it started have exited; a second
+# invocation of the same run exits 5 with AFTER_NEXTTIC_BUSY. The seal says a corpus was opened; only
+# the lock says whether the process that opened it is still scoring. Without it, two simultaneous
+# sealed invocations both passed the seal, the second as "re-entered", and scored test twice (Astra,
+# 2026-09-23). The kernel releases the lock when its holder dies, so an incomplete seal found by the
+# lock holder was really interrupted.
+#
 #   --tic-stride 1      the per-tic window set and the per-tic copy-last floor
 #   --horizon-tics 4    four tics rolled forward from real context, scored at the 4th frame, so the
 #                       number is at EQUAL GAME TIME with a stride-4 model's single step (114 ms)
@@ -251,6 +260,17 @@ forget() { rm -f "$1" "$1.key"; }            # a failed rerun must not leave the
 # one override, and it is written into the seal's log. `complete` marks a corpus whose every stage is
 # done, which is what "scored once" means.
 SEALS=$R/sealed
+# The process lock that keeps one evaluator per run (see the header). fd 9 stays open in this shell and
+# in every scorer it starts; flock(2) locks belong to the open file, so the lock taken by the perl child
+# lasts until the last of those descriptors closes, and the kernel drops it if they all die.
+LOCK=$R/after_nexttic.lock
+hold_eval_lock() {
+  exec 9>>"$LOCK" || { echo "AFTER_NEXTTIC_FAILED $RUN: cannot open $LOCK" >&2; exit 2; }
+  perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or exit 2; exit(flock($fh, LOCK_EX | LOCK_NB) ? 0 : 1)' && return 0
+  echo "AFTER_NEXTTIC_BUSY $RUN: another evaluation of this run holds $LOCK; it is still scoring, so its" \
+       "seal is not an interrupted one. Wait for it to finish, then rerun." >&2
+  exit 5
+}
 seal_open() {   # seal_open <corpus>: 0 if the corpus may be (re)entered now, else fails and returns 1
   local SD=$SEALS/$1
   mkdir -p "$SEALS" || { fail "cannot write $SEALS"; return 1; }
@@ -263,7 +283,7 @@ seal_open() {   # seal_open <corpus>: 0 if the corpus may be (re)entered now, el
     rm -f "$SD/complete"
     return 0
   fi
-  [ -f "$SD/seal" ] || { fail "$1: $SD exists without a seal record; another scoring of it may be running"; return 1; }
+  [ -f "$SD/seal" ] || { fail "$1: $SD exists without a seal record; an evaluator died between opening it and recording the seal, so what it scored is unknown (FORCE_TEST=1 reopens it)"; return 1; }
   if ! grep -q "selection_sha256=$SEL_SHA\$" "$SD/seal"; then
     fail "$1 was sealed under a different selection ($(head -1 "$SD/seal")); FORCE_TEST=1 overrides"
     return 1
@@ -410,6 +430,7 @@ rollout() {   # rollout <corpus> <ckpt> <step> <sha256> <live|ema>: roll out, sc
 # --- DRY: print the plan of this stage and stop ------------------------------------------
 if [ "$DRY" = 1 ]; then
   echo "DRY $RUN stage=$STAGE corpora=${CORPORA} decoder: $USED"
+  echo "DRY lock $LOCK exclusively before scoring, held until every scorer exits; a second evaluator of $RUN exits 5 (AFTER_NEXTTIC_BUSY)"
   case $STAGE in
     val)
       echo "DRY pick $PY pick_checkpoint.py --results-dir $R --require-ema --hash ${STEP:+--step $STEP} ${CKPT:+--ckpt $CKPT}"
@@ -463,6 +484,8 @@ if [ "$STAGE" = val ]; then
   elif [ "${NOWAIT:-0}" != 1 ]; then
     until grep -q "\"event\": \"end\"" "$R/log.jsonl" 2>/dev/null; do sleep 300; done
   fi
+  # after the wait, so a waiter does not block a named-checkpoint evaluation of the same run
+  hold_eval_lock
   # ONE checkpoint, chosen by its STORED step, carrying both the live weights and the EMA. A
   # lexicographic `ls ... | sort | tail -1` put every snap_* ahead of every numbered recovery file.
   PICK_LINE=$("$PY" "$D/repo/pick_checkpoint.py" --results-dir "$R" --require-ema --hash \
@@ -490,6 +513,7 @@ fi
 
 # --- stage 2: selection on validation --------------------------------------------------------
 if [ "$STAGE" = select ]; then
+  hold_eval_lock
   if [ -e "$SCORED" ] || [ -d "$SEALS" ]; then
     echo "AFTER_NEXTTIC_FAILED $RUN: a sealed corpus has been opened ($SEALS, $SCORED), so a test score may exist; a selection made now would be a selection on test" >&2
     exit 4
@@ -530,6 +554,7 @@ fi
 
 # --- stage 3: the sealed corpora, once, with the selected checkpoint ----------------------------
 if [ "$STAGE" = sealed ]; then
+  hold_eval_lock
   [ -f "$SEL" ] || { echo "AFTER_NEXTTIC_FAILED $RUN: no $SEL. Run the validation stage, then --select; the sealed corpora score only the selected checkpoint" >&2; exit 4; }
   SEL_LINE=$("$PY" "$D/repo/select_checkpoint.py" show --selection "$SEL" < /dev/null) \
     || { echo "AFTER_NEXTTIC_FAILED $RUN: $SEL does not name a checkpoint that is still on disk unchanged" >&2; exit 4; }

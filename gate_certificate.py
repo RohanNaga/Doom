@@ -20,12 +20,21 @@ backbone the gates smoked. Each entry records
 difference, a missing entry, or a gate that is absent or not ok. `ALLOW_UNGATED=1` bypasses the check
 and is recorded in `resumes.log`.
 
+Entries are per backbone, and so is revocation: `revoke --backbone B` removes B's entry and keeps the
+others (the file goes when no entry is left). A gate run revokes only the backbones it is about to
+certify, because the gates run staggered (the U-Net certified and training, SD 3.5 gated hours later)
+and deleting the whole file made the running U-Net's next resume refuse. Every read-modify-write of
+the file holds an exclusive lock on `<cert>.lock`.
+
     python gate_certificate.py write --cert $D/GATES_CERT.json --backbone unet --space sd15 \\
         --command "<CERT_QUERY output>" --repo $D/repo --train-latents ... --train-ids 0:2000 \\
-        --val-latents ... --val-ids 6000:6100 --results $D/logs/gates_results.jsonl
+        --val-latents ... --val-ids 6000:6100 --results $D/logs/gates_results_<run>.jsonl
     python gate_certificate.py check --cert $D/GATES_CERT.json --backbone unet --command "..." ...
+    python gate_certificate.py revoke --cert $D/GATES_CERT.json --backbone sd35
 """
 import argparse
+import contextlib
+import fcntl
 import glob
 import hashlib
 import json
@@ -165,6 +174,22 @@ def load(cert_path):
         return {"backbones": {}}
 
 
+@contextlib.contextmanager
+def locked(cert_path):
+    """An exclusive lock for one read-modify-write of the certificate, so two gate runs finishing
+    together cannot drop each other's entries."""
+    with open(f"{cert_path}.lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def _replace(cert_path, cert):
+    tmp = f"{cert_path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(cert, f, indent=1)
+    os.replace(tmp, cert_path)
+
+
 def write(cert_path, backbone, space, gpu, now, results_path):
     """Add or replace one backbone's entry, atomically, refusing if its gates did not all pass."""
     gates = gate_results(results_path, backbone, space)
@@ -173,18 +198,39 @@ def write(cert_path, backbone, space, gpu, now, results_path):
         raise SystemExit(f"{backbone} cannot be certified: " + "; ".join(problems))
     if not now["commit"] or not now["clean"]:
         raise SystemExit(f"{backbone} cannot be certified: the checkout is not a clean git commit")
-    cert = load(cert_path)
-    cert.setdefault("backbones", {})[backbone] = {**now, "space": space, "gpu": gpu, "gates": gates,
-                                                  "certified_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
-    cert["written_by"] = "scripts/cluster/gates.sh"
-    tmp = f"{cert_path}.tmp.{os.getpid()}"
-    with open(tmp, "w") as f:
-        json.dump(cert, f, indent=1)
-    os.replace(tmp, cert_path)
+    with locked(cert_path):
+        cert = load(cert_path)
+        cert.setdefault("backbones", {})[backbone] = {**now, "space": space, "gpu": gpu, "gates": gates,
+                                                      "certified_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+        cert["written_by"] = "scripts/cluster/gates.sh"
+        _replace(cert_path, cert)
     return cert
 
 
+def revoke(cert_path, backbone):
+    """Remove one backbone's entry and keep every other; remove the file when none is left.
+    Returns whether an entry was removed. A missing or unreadable certificate certifies nothing."""
+    if not os.path.exists(cert_path):
+        return False
+    with locked(cert_path):
+        cert = load(cert_path)
+        gone = cert.get("backbones", {}).pop(backbone, None) is not None
+        if cert.get("backbones"):
+            _replace(cert_path, cert)
+        else:
+            os.remove(cert_path)
+    return gone
+
+
 def main(args):
+    if args.cmd == "revoke":
+        gone = revoke(args.cert, args.backbone)
+        print(f"REVOKED {args.backbone} in {args.cert}" if gone else f"no {args.backbone} entry in {args.cert}")
+        return 0
+    missing = [n for n in ("command", "repo", "train_latents", "train_ids", "val_latents", "val_ids")
+               if not getattr(args, n)]
+    if missing:
+        raise SystemExit(f"{args.cmd} needs --{', --'.join(m.replace('_', '-') for m in missing)}")
     now = identity(args.backbone, args.command, args.init_from, args.repo, args.train_latents, args.train_ids,
                    args.val_latents, args.val_ids)
     if args.cmd == "write":
@@ -209,19 +255,20 @@ def main(args):
 
 def build_parser():
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=["write", "check"])
+    p.add_argument("cmd", choices=["write", "check", "revoke"])
     p.add_argument("--cert", required=True)
     p.add_argument("--backbone", required=True)
     p.add_argument("--space", default="", help="write: the backbone's latent space (sd15 or sd35)")
     p.add_argument("--gpu", default="", help="write: recorded for information, not compared")
-    p.add_argument("--command", required=True, help="the normalized launch command (launch_nexttic.sh CERT_QUERY=1)")
+    # required by write and check, not by revoke (checked in main)
+    p.add_argument("--command", default="", help="the normalized launch command (launch_nexttic.sh CERT_QUERY=1)")
     p.add_argument("--init-from", dest="init_from", default="")
     p.add_argument("--resuming", action="store_true", help="check: a resume, so init_from is not compared")
-    p.add_argument("--repo", required=True, help="the checkout the launcher runs")
-    p.add_argument("--train-latents", dest="train_latents", required=True)
-    p.add_argument("--train-ids", dest="train_ids", required=True)
-    p.add_argument("--val-latents", dest="val_latents", required=True)
-    p.add_argument("--val-ids", dest="val_ids", required=True)
+    p.add_argument("--repo", default="", help="the checkout the launcher runs")
+    p.add_argument("--train-latents", dest="train_latents", default="")
+    p.add_argument("--train-ids", dest="train_ids", default="")
+    p.add_argument("--val-latents", dest="val_latents", default="")
+    p.add_argument("--val-ids", dest="val_ids", default="")
     p.add_argument("--results", default="", help="write: the gates' results, one JSON object per line")
     return p
 
