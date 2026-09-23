@@ -142,7 +142,9 @@ def test_the_split_the_encoder_writes_is_the_one_the_evaluator_reads(corpus, suf
     root = f"/d/latents_arnold_dense_pertic_eval{suffix}"
     written = make_dense_eval_splits.split_path(f"{root}/{corpus}")
     assert written == f"{root}/split_{corpus}.json"
-    out = _dry("after_nexttic.sh", ["3", "sd35" if suffix else "unet"])
+    # validation and the sealed corpora are separate stages (docs/REVIEW_2026-09-22.md H2), so each
+    # corpus's plan is printed by the invocation that would score it
+    out = _dry("after_nexttic.sh", ["3", "sd35" if suffix else "unet"], CORPORA=corpus)
     read = [tok for ln in out.splitlines() for tok in ln.split()
             if os.path.basename(tok) == f"split_{corpus}.json"]
     assert read, f"the evaluation script never reads split_{corpus}.json:\n{out}"

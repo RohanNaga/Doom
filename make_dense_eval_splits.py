@@ -149,11 +149,32 @@ def check_no_worker_first(parquet_dir, episode_ids):
     return bad
 
 
-def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8, refuse_worker_first=None):
+def check_split_file(path, want):
+    """Problems, as strings, if the split file at `path` does not list exactly the episodes `want`."""
+    try:
+        with open(path) as f:
+            listed = sorted(int(e) for e in json.load(f)[SUBSET])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return [f"split file {path} is missing or unreadable ({e.__class__.__name__}: {e})"]
+    want = sorted(int(e) for e in want)
+    if listed == want:
+        return []
+    extra = sorted(set(listed) - set(want))
+    short = sorted(set(want) - set(listed))
+    return [f"split file {path} lists {len(listed)} episode(s), not the {len(want)} expected: "
+            f"{len(short)} missing {short[:8]}, {len(extra)} extra {extra[:8]}"]
+
+
+def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8, refuse_worker_first=None,
+             split_file=None):
     """What this directory holds against what it should hold, as a report with no side effects.
 
     `refuse_worker_first` is the raw recording directory; with it, every expected episode (every
     usable one when no ids are expected) is classified, and a worker-first one is a problem.
+
+    `split_file` is the published split an evaluator will read. Its `val` list must be exactly the
+    expected ids (the usable ones when none are expected): `TicWindowDataset` intersects the split
+    with what is encoded, so a stale or short split file would silently score a different episode set.
     """
     from doom_data import list_latent_episodes
     try:
@@ -190,6 +211,8 @@ def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8, refus
         wf = worker_first_episodes(refuse_worker_first, ids)
         report["worker_first"], report["unclassifiable"] = wf["worker_first"], wf["unclassifiable"]
         problems += check_no_worker_first(refuse_worker_first, ids)
+    if split_file:
+        problems += check_split_file(split_file, report.get("expected") or usable)
     report["ok"] = not problems
     return report
 
@@ -239,7 +262,7 @@ def main(args):
     expect = parse_episode_ids(args.expect_ids) if args.expect_ids else None
     if args.check_only:
         report = validate(args.latents_dir, expect, args.latent_channels or None, args.sample,
-                          args.refuse_worker_first or None)
+                          args.refuse_worker_first or None, args.split_file or None)
         print(json.dumps(report, indent=1))
         return 0 if report["ok"] else 1
     path, split = build(args.latents_dir, args.name or None, args.out or None, expect,
@@ -270,6 +293,9 @@ def build_parser():
                    help="the RAW recording directory of this corpus; refuse to publish if any expected episode is "
                         "a recorder process's first episode (k = 0), the only control regime in which Arnold's "
                         "weapon-select requests execute. Used for the unseen subset")
+    p.add_argument("--split-file", dest="split_file", default="",
+                   help="with --check-only: also require this published split file to list exactly the expected "
+                        "episodes. after_nexttic.sh runs this before scoring any corpus")
     p.add_argument("--check-only", dest="check_only", action="store_true",
                    help="print the validation report and write nothing; exit 1 if the corpus is not publishable")
     return p
