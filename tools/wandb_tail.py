@@ -11,8 +11,9 @@ and in a local state file, and only newer steps are sent).
 
 Logged at `step`: every `train` event's loss, lr, grad_norm, grad_norm_max, clip_frac, steps_per_s,
 peak_mem_gb, nonfinite_loss, skipped_updates; every `val` event's val_loss and its four t-quartiles;
-and each `steward_<step>/eval_tf_val_<live|ema>_h<H>/metrics.json` the steward writes (raw PSNR and
-LPIPS with the persistence floor beside them). `--once` processes what is there and exits;
+each `steward_<step>/eval_tf_val_<live|ema>_h<H>/metrics.json` the steward writes (raw PSNR and
+LPIPS with the persistence floor beside them, and PSNR minus persistence), and every other JSON under
+`steward_<step>/` (probe, rollouts, sweeps) flattened generically. `--once` processes what is there and exits;
 otherwise it polls every `--interval` seconds until the run's `end` event has been logged.
 """
 import argparse
@@ -74,26 +75,58 @@ def mean_of(m, key):
     return v if isinstance(v, (int, float)) else None
 
 
+def flatten(prefix, obj, out, depth=0):
+    """Every numeric leaf of a JSON object as `prefix/key`; dicts with a `mean` collapse to it."""
+    if isinstance(obj, dict) and isinstance(obj.get("mean"), (int, float)):
+        out[prefix] = obj["mean"]
+        return
+    if isinstance(obj, dict) and depth < 3:
+        for k, v in obj.items():
+            flatten(f"{prefix}/{k}", v, out, depth + 1)
+    elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        out[prefix] = obj
+    elif isinstance(obj, list) and obj and all(isinstance(v, (int, float)) for v in obj) and len(obj) <= 16:
+        for i, v in enumerate(obj):
+            out[f"{prefix}/{i}"] = v
+
+
 def steward_rows(run_dir, seen):
-    """(step, row) for every steward metrics.json not yet sent."""
+    """(step, row, path) for every JSON the steward wrote under `steward_<step>/` and not yet sent.
+
+    `eval_tf_val_<live|ema>_h<H>/metrics.json` becomes `eval/<tag>/<metric>` (raw PSNR and LPIPS with
+    the persistence and reconstruction references beside them); every other JSON (`probe.json`,
+    rollout metrics, sweeps) is flattened generically under `eval/<relative path>/...`, so a new
+    steward artifact is plotted without a code change.
+    """
     out = []
-    for path in sorted(glob.glob(os.path.join(run_dir, "steward_*", "eval_tf_val_*", "metrics.json"))):
+    for path in sorted(glob.glob(os.path.join(run_dir, "steward_*", "**", "*.json"), recursive=True)):
         if path in seen:
             continue
-        parts = path.split(os.sep)
+        rel = os.path.relpath(path, run_dir).split(os.sep)
         try:
-            step = int(parts[-3].split("_")[1])
-            tag = parts[-2].replace("eval_tf_val_", "")      # live_h1, ema_h4, ...
+            step = int(rel[0].split("_")[1])
         except (IndexError, ValueError):
             continue
-        with open(path) as f:
-            m = json.load(f)
+        try:
+            with open(path) as f:
+                m = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
         row = {}
-        for src, dst in (("psnr_raw", "psnr"), ("lpips_raw", "lpips"), ("persist_psnr_raw", "persist_psnr"),
-                         ("persist_lpips_raw", "persist_lpips"), ("recon_psnr_raw", "recon_psnr")):
-            v = mean_of(m, src)
-            if v is not None:
-                row[f"eval/{tag}/{dst}"] = v
+        if len(rel) == 3 and rel[1].startswith("eval_tf_val_") and rel[2] == "metrics.json":
+            tag = rel[1].replace("eval_tf_val_", "")      # live_h1, ema_h4, ...
+            for src, dst in (("psnr_raw", "psnr"), ("lpips_raw", "lpips"), ("persist_psnr_raw", "persist_psnr"),
+                             ("persist_lpips_raw", "persist_lpips"), ("recon_psnr_raw", "recon_psnr"),
+                             ("recon_lpips_raw", "recon_lpips")):
+                v = mean_of(m, src)
+                if v is not None:
+                    row[f"eval/{tag}/{dst}"] = v
+            if "eval/live_h1/psnr" in row or f"eval/{tag}/psnr" in row:
+                pf = row.get(f"eval/{tag}/persist_psnr")
+                if pf is not None:
+                    row[f"eval/{tag}/psnr_over_persistence"] = row[f"eval/{tag}/psnr"] - pf
+        else:
+            flatten("eval/" + "/".join(rel[1:]).replace(".json", ""), m, row)
         if row:
             out.append((step, row, path))
     return out
