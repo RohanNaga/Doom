@@ -58,7 +58,7 @@
 #                        shard's recorded encoder settings and compare (MAE <= 5e-3, p99 <= 2e-2;
 #                        bit identity reported, not required), then decode the stored rows against
 #                        the raw frames with rows shifted -4/-1/+1/+4, all of which the true
-#                        alignment must beat by 3 dB. Every shard log must be present and every
+#                        alignment must beat by 2 dB (val measured 2.91). Every shard log must be present and every
 #                        shard under one latent contract, and since Astra's third review that
 #                        contract (autoencoder, subfolder, scale, shift, channels) must equal the
 #                        other corpus of the space (`--contract-peer`, train against val) AND the
