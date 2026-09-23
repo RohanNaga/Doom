@@ -50,8 +50,27 @@ TRAIN_KEYS = ("loss", "lr", "grad_norm", "grad_norm_max", "clip_frac", "steps_pe
               "nonfinite_loss", "skipped_updates", "data_wait_frac")
 
 
-def train_row(e):
+def train_row(e, t0=None, global_batch=32, windows=None, tics_per_s=35.0):
+    """The trainer's own numbers plus the derived time and data series Rohan asked for.
+
+    `time/wall_hours` is the wall clock since the run's start event, `time/steps_per_hour` the
+    smoothed rate the trainer reports, `data/examples_seen` step x global batch, `data/game_hours_seen`
+    those examples in game time at 35 tics/s, and `data/epochs` examples over the corpus's window
+    count when the start event recorded it. All share `step` as the x axis, so W&B plots any of
+    them against any other (loss against wall clock, PSNR against game hours seen).
+    """
     row = {f"train/{k}": e[k] for k in TRAIN_KEYS if isinstance(e.get(k), (int, float))}
+    step = e.get("step")
+    if t0 is not None and isinstance(e.get("time"), (int, float)):
+        row["time/wall_hours"] = (e["time"] - t0) / 3600.0
+    if isinstance(e.get("steps_per_s"), (int, float)):
+        row["time/steps_per_hour"] = e["steps_per_s"] * 3600.0
+    if isinstance(step, int):
+        seen = step * global_batch
+        row["data/examples_seen"] = seen
+        row["data/game_hours_seen"] = seen / tics_per_s / 3600.0
+        if windows:
+            row["data/epochs"] = seen / windows
     return row
 
 
@@ -163,6 +182,7 @@ def main():
         with open(state_path) as f:
             state.update(json.load(f))
     seen = set(state["steward_seen"])
+    t0, gb, windows, last_train_loss = state.get("t0"), state.get("gb") or 32, state.get("windows"), None
     ended = False
     while True:
         if os.path.isfile(log_path):
@@ -171,7 +191,17 @@ def main():
                 kind, step = e.get("event"), e.get("step")
                 if not isinstance(step, int):
                     continue
-                row = train_row(e) if kind == "train" else val_row(e) if kind == "val" else {}
+                if kind == "start":
+                    t0 = e.get("time") if isinstance(e.get("time"), (int, float)) else t0
+                    gb = e.get("global_batch") if isinstance(e.get("global_batch"), int) else gb
+                    ds = e.get("dataset_summary") or {}
+                    windows = ds.get("windows") if isinstance(ds.get("windows"), int) else windows
+                    state.update({"t0": t0, "gb": gb, "windows": windows})
+                row = train_row(e, t0, gb, windows) if kind == "train" else val_row(e) if kind == "val" else {}
+                if kind == "val" and isinstance(e.get("val_loss"), (int, float)) and last_train_loss is not None:
+                    row["val/loss_minus_train"] = e["val_loss"] - last_train_loss
+                if kind == "train" and isinstance(e.get("loss"), (int, float)):
+                    last_train_loss = e["loss"]
                 if kind == "end":
                     ended = True
                 if row and step > state["last_step"] - 1:
