@@ -153,7 +153,7 @@ Everything except the frame spacing and (optionally) the conditioning interface:
 | train | 0:6000 | 1,500 |
 | val | 6000:7000 | 250 |
 | test | 7000:8000 | 250 |
-| unseen (`arenas_678`) | 0:60 | 20 |
+| unseen (`arenas_678`) | 60:120 (0:60 until 2026-09-22: 51 of those 60 are worker-first episodes; `release/dense_split.json` history) | 20 |
 
 Ranges are half-open, like a Python slice. `record_arnold.py:322-323` assigns
 `map_ids[episode_id % len(map_ids)]` independent of the worker count, so any contiguous range whose

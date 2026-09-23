@@ -2,7 +2,7 @@
 Train a DoomDiT world model, any backbone, under one recipe.
 
 Shared between backbones: stride-4 latents, L context frames channel-stacked, single action at
-the last context frame, GameNGen context-noise augmentation with a bucket id, velocity target
+the last context frame, GameNGen-inspired context-noise augmentation with a bucket id, velocity target
 (or epsilon under --objective eps, which is one cell of the knob grid),
 AdamW, bf16 autocast with fp32 master weights, EMA in fp32 on the CPU, held-out latent v-loss
 for checkpoint selection. The only thing the --backbone flag changes is the network, and the
@@ -907,10 +907,14 @@ def build_parser():
     p.add_argument("--tic-stride", type=int, choices=[1, 4], default=4,
                    help="game time between the frames the model predicts, in ViZDoom tics. 4 (default) is "
                         "one frame per agent decision, the spacing every finished row trained at; 1 selects "
-                        "the per-tic dataset, GameNGen's spacing. Sample shapes are identical either way, so "
+                        "the per-tic dataset (our inference about GameNGen's spacing: its action repeat is 4 and it "
+                        "evaluates on 35 FPS data, but its training stride is not stated). Sample shapes are "
+                        "identical either way, so "
                         "the backbones and the whole recipe are unchanged")
     p.add_argument("--action-history", type=int, default=0,
-                   help="GameNGen's action conditioning: one token per context tic carrying the EXECUTED button "
+                   help="GameNGen's idea of one learned token per past action, in our form (the 19-bit MLP and "
+                        "learned positions are ours; GameNGen's embedding is undisclosed): one token per context "
+                        "tic carrying the EXECUTED button "
                         "vector of that tic (the `buttons` column), oldest first, the newest being the control "
                         "applied into the target. Must equal --context-frames. 0 (default) keeps the single "
                         "action-id token every finished row trained with, bit-identically")

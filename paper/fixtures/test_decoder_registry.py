@@ -99,7 +99,8 @@ def test_a_cached_tune_records_the_split_train_ids(tmp_path, monkeypatch):
 
 def test_the_dense_decoder_tune_draws_from_training_ids_only():
     text = open(DECODER_MSE).read()
-    assert "TRAIN_IDS=${TRAIN_IDS:-0:6000}" in text
+    # the runs' own training prefix, not the whole train range (Astra's review, 2026-09-23)
+    assert "TRAIN_IDS=${TRAIN_IDS:-0:2000}" in text
     assert '--stream-ids "$TRAIN_IDS"' in text
 
 

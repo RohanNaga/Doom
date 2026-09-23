@@ -51,6 +51,9 @@ def frame(i):
     return np.stack([r, g, b], -1).astype(np.uint8)
 
 
+FROZEN = frame(0)       # a scene that never moves: every shifted control ties with the true alignment
+
+
 def write_recording(path, ep, n=T):
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -141,14 +144,57 @@ def test_perturbed_latents_fail_the_difference_thresholds(tmp_path):
     s = rep["shards"]["00"]
     assert not s["ok"]
     text = " ".join(s["problems"])
-    assert "mean |re-encoded - stored|" in text and "bit-identical" in text
+    assert "mean |re-encoded - stored|" in text and "p99 |re-encoded - stored|" in text
+    assert "bit-identical" not in text, "bit identity is reported, not required, by default"
     assert rep["shards"]["01"]["ok"]
 
 
 def test_the_thresholds_are_the_callers(tmp_path):
     lat, raw = corpus(tmp_path, perturb_shard=0)
-    rep = run(lat, raw, max_abs_diff=1.0, min_identical=0.0)
+    rep = run(lat, raw, max_mae=1.0, max_p99=1.0)
     assert rep["shards"]["00"]["ok"], rep["shards"]["00"]["problems"]
+
+
+def test_one_fp16_ulp_of_rounding_passes_although_nothing_is_bit_identical(tmp_path):
+    """Astra's counterexample to the first version: harmless rounding gave 0% identical and failed."""
+    lat, raw = corpus(tmp_path, shards=((0, 1),))
+    for ep in (0, 1):
+        path = os.path.join(lat, f"ep_{ep:05d}_latents.npy")
+        z = np.load(path)
+        np.save(path, np.nextafter(z, np.float16(np.inf)).astype(np.float16))
+    rep = run(lat, raw)
+    s = rep["shards"]["00"]
+    assert s["ok"], s["problems"]
+    assert s["fraction_identical"] == 0.0 and 0 < s["mean_abs_diff"] < cla.MAX_MAE
+    old = run(lat, raw, min_identical=0.5)
+    assert not old["shards"]["00"]["ok"], "the old identity floor must still be reachable on request"
+
+
+def test_a_static_stretch_fails_the_margin_rather_than_certifying(tmp_path, monkeypatch):
+    """Frames that do not move make every shifted control tie with the true alignment."""
+    monkeypatch.setattr(sys.modules[__name__], "frame", lambda i: FROZEN)
+    lat, raw = corpus(tmp_path, shards=((0,),))
+    rep = run(lat, raw)
+    s = rep["shards"]["00"]
+    assert not s["ok"] and s["shift_margin_db"] < cla.MIN_SHIFT_MARGIN_DB
+    assert any("margin" in p for p in s["problems"])
+
+
+def test_a_moving_corpus_clears_the_margin_by_more_than_three_db(tmp_path):
+    rep = run(*corpus(tmp_path))
+    for s in rep["shards"].values():
+        assert s["shift_margin_db"] >= 3.0, s["vae_psnr"]
+        assert {"rms_diff", "p99_abs_diff", "max_abs_diff"} <= set(s)
+
+
+def test_the_thresholds_are_printed_with_the_values(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cla, "load_encoder", lambda meta, device, cache_dir=None: StubVAE())
+    lat, raw = corpus(tmp_path)
+    cla.main(cla.build_parser().parse_args(["--latents-dir", lat, "--parquet-dir", raw, "--device", "cpu"]))
+    out = capsys.readouterr().out
+    assert "thresholds: max_mae=0.005 max_p99=0.02 min_identical=0 min_shift_margin_db=3" in out
+    assert "re-check on the SD 3.5 corpus" in out
+    assert "shard 00: ok mae=" in out and "p99=" in out and "margin_db=" in out
 
 
 def test_the_tail_batch_is_always_checked():
@@ -160,16 +206,98 @@ def test_the_tail_batch_is_always_checked():
     assert cla.sample_rows(10, 16, rng) == [(0, 10)]
 
 
-def test_a_shard_with_no_recorded_settings_is_refused(tmp_path):
+def test_a_shard_with_no_recorded_settings_fails_coverage(tmp_path):
     lat, raw = corpus(tmp_path, meta_for={0})
-    with pytest.raises(SystemExit, match="encode_meta_01.json"):
-        run(lat, raw)
+    rep = run(lat, raw)
+    assert not rep["ok"]
+    assert any("encode_meta_01.json" in p for p in rep["coverage_problems"])
+    assert "01" not in rep["shards"]
 
 
-def test_explicit_episodes_are_one_shard(tmp_path):
+def test_explicit_episodes_are_checked_inside_their_own_shards(tmp_path):
     lat, raw = corpus(tmp_path)
     rep = run(lat, raw, episodes=[0, 3])
-    assert list(rep["shards"]) == ["given"] and rep["shards"]["given"]["episodes"] == [0, 3]
+    assert rep["ok"], rep
+    assert rep["shards"]["00"]["episodes"] == [0] and rep["shards"]["01"]["episodes"] == [3]
+    bad = run(lat, raw, episodes=[0, 9])
+    assert not bad["ok"] and any("not encoded" in p for p in bad["coverage_problems"])
+
+
+# ---------------------------------------------------------------------------------------
+# coverage, one contract, finite values (Astra's review of the first version, 2026-09-23)
+# ---------------------------------------------------------------------------------------
+
+def test_a_missing_shard_log_can_no_longer_hide_a_shifted_shard(tmp_path):
+    """The reproduction: delete shard 1's episodes log and its shifted latents went unchecked."""
+    lat, raw = corpus(tmp_path, shift_shard=1)
+    os.remove(os.path.join(lat, "episodes_01.jsonl"))
+    rep = run(lat, raw)
+    assert not rep["ok"]
+    text = " ".join(rep["coverage_problems"])
+    assert "belong to no shard log" in text and "[2, 3]" in text
+    assert "encode_meta_01.json has no episodes_01.jsonl" in text
+
+
+def test_no_shard_logs_at_all_fails(tmp_path):
+    lat, raw = corpus(tmp_path)
+    for f in os.listdir(lat):
+        if f.startswith("episodes_"):
+            os.remove(os.path.join(lat, f))
+    rep = run(lat, raw)
+    assert not rep["ok"] and any("no episodes_NN.jsonl" in p for p in rep["coverage_problems"])
+
+
+def test_an_episode_claimed_by_two_shards_fails(tmp_path):
+    lat, raw = corpus(tmp_path)
+    with open(os.path.join(lat, "episodes_01.jsonl"), "a") as f:
+        f.write(json.dumps({"episode": "ep_00000", "frames": T}) + "\n")
+    rep = run(lat, raw)
+    assert not rep["ok"] and any("listed by shards 00 and 01" in p for p in rep["coverage_problems"])
+
+
+@pytest.mark.parametrize("key,value", [("scaling_factor_applied", 0.5), ("vae_id", "other/vae"),
+                                       ("shift_factor_applied", 0.06)])
+def test_shards_under_different_latent_contracts_fail(tmp_path, key, value):
+    lat, raw = corpus(tmp_path)
+    path = os.path.join(lat, "encode_meta_01.json")
+    m = json.load(open(path))
+    m[key] = value
+    json.dump(m, open(path, "w"))
+    rep = run(lat, raw)
+    assert not rep["ok"]
+    assert rep["contract_problems"], rep
+    assert any("different" in p for p in rep["contract_problems"])
+
+
+def test_a_different_batch_size_is_a_different_contract(tmp_path):
+    lat, raw = corpus(tmp_path)
+    path = os.path.join(lat, "encode_meta_01.json")
+    m = json.load(open(path))
+    m["args"]["batch_size"] = 8
+    json.dump(m, open(path, "w"))
+    rep = run(lat, raw)
+    assert not rep["ok"] and any("batch_size" in p for p in rep["contract_problems"])
+
+
+def test_a_sampled_nan_fails(tmp_path):
+    """NaN > threshold is False, so a NaN in the sampled rows used to pass every comparison."""
+    lat, raw = corpus(tmp_path)
+    for ep in (0, 1):
+        path = os.path.join(lat, f"ep_{ep:05d}_latents.npy")
+        z = np.load(path)
+        z[:, 0, 0, 0] = np.nan
+        np.save(path, z)
+    rep = run(lat, raw)
+    assert not rep["ok"] and not rep["shards"]["00"]["ok"]
+    assert any("non-finite" in p for p in rep["shards"]["00"]["problems"])
+    assert rep["shards"]["01"]["ok"]
+
+
+def test_non_finite_statistics_fail():
+    diffs = np.array([np.nan, 0.0], np.float32)
+    psnr = {s: [20.0] for s in cla.SHIFTS}
+    stats, problems = cla.shard_verdict(diffs, 2, 2, psnr, [20.0], 1.0, 0.0)
+    assert problems and "non-finite" in problems[0]
 
 
 def test_the_cli_exits_nonzero_on_a_failing_shard_and_writes_the_report(tmp_path, monkeypatch):
@@ -185,9 +313,15 @@ def test_the_cli_exits_nonzero_on_a_failing_shard_and_writes_the_report(tmp_path
     assert cla.main(args) == 0
 
 
-def test_the_defaults_are_the_sep20_measurement():
+def test_the_defaults_are_the_cross_host_calibration():
     a = cla.build_parser().parse_args(["--latents-dir", "x", "--parquet-dir", "y"])
-    assert a.max_abs_diff == 1e-3 and a.min_identical == 0.5 and a.episodes_per_shard == 2
+    assert a.max_mae == 5e-3 and a.max_p99 == 2e-2 and a.min_identical == 0.0
+    assert a.min_shift_margin_db == 3.0 and a.episodes_per_shard == 2
+    # the old spelling still reaches the same threshold
+    assert cla.build_parser().parse_args(["--latents-dir", "x", "--parquet-dir", "y",
+                                          "--max-abs-diff", "1e-3"]).max_mae == 1e-3
+    doc = cla.__doc__
+    assert "1.45e-5" in doc and "2.5e-3" in doc and "0.011" in doc and "67%" in doc and "SD 3.5" in doc
 
 
 def test_the_gates_run_it_per_space_on_train_and_val(tmp_path):

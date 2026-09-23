@@ -8,8 +8,9 @@
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
 #          [ALLOW_UNGATED=1] [DRY=1] [DOOM_ROOT=..] launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
 #
-# A launch refuses unless $D/GATES_COMMIT (written by scripts/cluster/gates.sh) names the commit
-# $D/repo is at, with no tracked change; see "PIN WHAT LAUNCHES" below.
+# A launch refuses unless $D/GATES_CERT.json (written by scripts/cluster/gates.sh) certifies this
+# backbone's exact command, commit, corpora, encoders and gate results; see "PIN WHAT LAUNCHES".
+# CERT_QUERY=1 prints the command the certificate pins and stops.
 #
 # FILL THE CARD (CLAUDE.md, Rohan Sep 17 2026). Every job uses the whole card it holds: the micro-batch
 # IS the global batch of 32 and there is no gradient accumulation. The launcher refuses MB * cards != 32
@@ -138,9 +139,15 @@ COMMON="--tic-stride 1 --action-history $ACTION_HISTORY --context-frames $CTX --
  --dense-segment arenas --val-every 1000 --val-windows 1024 --ckpt-every 5000 \
  --snapshot-every 10000 --local-snapshots --keep-last 2 --num-workers $WORKERS \
  $BB_FLAGS $PHASEF $CKPTF $PARTIALF ${EXTRA:-}"
+TRAIN_ARGS="--backbone $BACKBONE --latent-channels $CH --warm-start $WARM --hf-cache $D/hf/hub \
+ --results-dir $R $COMMON"
 CMD="cd $D/repo && TMPDIR=$D/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU $LAUNCHER train_wm.py \
- --backbone $BACKBONE --latent-channels $CH --warm-start $WARM --hf-cache $D/hf/hub \
- --results-dir $R $COMMON $INITF $RES >> $D/logs/train_${RUN}.log 2>&1"
+ $TRAIN_ARGS $INITF $RES >> $D/logs/train_${RUN}.log 2>&1"
+# The command the gate certificate pins: interpreter or accelerate world, then every train_wm.py flag,
+# whitespace-normalised. `--resume` and `--init-from` are per-launch and compared separately.
+# CERT_QUERY=1 prints it and stops, which is how scripts/cluster/gates.sh records it.
+CERT_CMD=$(set -f; echo $LAUNCHER train_wm.py $TRAIN_ARGS)
+[ "${CERT_QUERY:-0}" = 1 ] && { echo "$CERT_CMD"; exit 0; }
 
 # FIT replaces the launch with a throughput and memory measurement of this exact configuration
 if [ -n "${FIT:-}" ]; then
@@ -161,13 +168,16 @@ tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; 
 [ -d $LVAL ] || { echo "per-tic validation latents missing at $LVAL (run encode_nexttic.sh CORPUS=val)" >&2; exit 1; }
 
 # PIN WHAT LAUNCHES (docs/REVIEW_2026-09-22.md H3). This used to `git pull` here, after the gates
-# had passed, and a failed pull did not stop the launch, so the code that trained could differ from
-# the code the gates certified. Nothing here changes the checkout now. `scripts/cluster/gates.sh`
-# writes `$D/GATES_COMMIT` naming the commit it certified, and the launch refuses unless the
-# checkout it runs ($D/repo) is at that commit with no tracked change. GATE_RUN=1 marks the gates'
-# own smoke run, which comes before any receipt; ALLOW_UNGATED=1 launches anyway and says so in
-# resumes.log. A resume goes through the same check, so the code cannot change mid-run either.
-RECEIPT=${GATES_RECEIPT:-$D/GATES_COMMIT}
+# had passed, and a failed pull did not stop the launch. Nothing here changes the checkout now, and
+# the launch refuses unless `$D/GATES_CERT.json` (written by scripts/cluster/gates.sh at GATES_GO)
+# has an entry for THIS backbone whose resolved command, clean commit of $D/repo, training and
+# validation corpus fingerprints, encoder records and gate results all equal what is here now
+# (gate_certificate.py). A commit-only receipt accepted a changed recipe and let an SD 3.5-only gate
+# run certify a U-Net launch. GATE_RUN=1 marks the gates' own fit, smoke and resume runs, which come
+# before the certificate; ALLOW_UNGATED=1 launches anyway and says so in resumes.log. A resume goes
+# through the same check, so neither code nor corpus can change mid-run either.
+CERT=${GATES_CERT:-$D/GATES_CERT.json}
+TOOLS=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HEAD_SHA=$(git -C "$D/repo" rev-parse HEAD 2>/dev/null) || HEAD_SHA=""
 refuse() { echo "$RUN not launched: $*" >&2; exit 1; }
 if [ "${GATE_RUN:-0}" = 1 ]; then
@@ -175,13 +185,11 @@ if [ "${GATE_RUN:-0}" = 1 ]; then
 elif [ "${ALLOW_UNGATED:-0}" = 1 ]; then
   PIN="UNGATED (ALLOW_UNGATED=1)"
 else
-  [ -n "$HEAD_SHA" ] || refuse "$D/repo is not a git checkout, so what launches cannot be pinned"
-  [ -s "$RECEIPT" ] || refuse "no gate receipt at $RECEIPT: run scripts/cluster/gates.sh on this checkout first (ALLOW_UNGATED=1 overrides, and is recorded)"
-  CERT=$(awk '{print $1; exit}' "$RECEIPT")
-  [ "$CERT" = "$HEAD_SHA" ] || refuse "$D/repo is at $HEAD_SHA but the gates certified $CERT; check out $CERT or rerun the gates"
-  git -C "$D/repo" diff --quiet HEAD -- 2>/dev/null \
-    || refuse "tracked files in $D/repo differ from $HEAD_SHA, so this is not the code the gates certified"
-  PIN="certified by $RECEIPT"
+  WHY=$("$PY" "$TOOLS/gate_certificate.py" check --cert "$CERT" --backbone "$BACKBONE" --command "$CERT_CMD" \
+        --init-from "${INIT:-}" ${RES:+--resuming} --repo "$D/repo" --train-latents "$L" --train-ids "$TRAIN_IDS" \
+        --val-latents "$LVAL" --val-ids "$VAL_IDS" 2>&1 < /dev/null) \
+    || refuse "$WHY (ALLOW_UNGATED=1 overrides, and is recorded)"
+  PIN="certified by $CERT"
 fi
 
 export TMPDIR=$D/tmp/tmpdir; mkdir -p $TMPDIR $R $D/logs
