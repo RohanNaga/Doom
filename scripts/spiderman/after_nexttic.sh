@@ -18,9 +18,13 @@
 #                  `select_checkpoint.RULE`) writes `$R/selection.json`. Refused once any test score
 #                  exists, because a selection made after seeing test is selection on test.
 #   3 sealed       CORPORA naming test, arenas_678 or the stride-4 corpora: refused without
-#                  `selection.json`, scores ONLY the selected checkpoint and variant, and records each
-#                  corpus in `$R/test_scored_at`. A corpus already recorded there is refused unless
-#                  FORCE_TEST=1. Test rollouts happen here and only when CORPORA names test.
+#                  `selection.json`, and scores ONLY the selected checkpoint and variant. Each corpus
+#                  is SEALED at first access, before any score on it exists (`$R/sealed/<corpus>/`,
+#                  an atomic mkdir, then one book entry per stage); a completed stage is never
+#                  recomputed, RESCORE or not, an interrupted one may only rerun under its original
+#                  key, and a complete corpus is refused, all unless FORCE_TEST=1, which the seal
+#                  records. `$R/test_scored_at` keeps a readable log. Test rollouts happen here and
+#                  only when CORPORA names test.
 #                  arenas_678 is refused with a decoder that cannot back an unseen-map claim
 #                  (decoder_provenance.py; every decoder tuned before 2026-09-22 is one) unless
 #                  UNSEEN_CLAIM=dynamics-only asks for the weaker label, which is then recorded.
@@ -218,6 +222,66 @@ should_run() {   # should_run <result file> <key>
 stamp() { printf '%s\n' "$2" > "$1.key"; }   # stamp <result file> <key>
 forget() { rm -f "$1" "$1.key"; }            # a failed rerun must not leave the old result looking current
 
+# --- sealing ------------------------------------------------------------------------------------
+# A sealed corpus is sealed at FIRST ACCESS: `seal_open` creates `$R/sealed/<corpus>/` with an atomic
+# `mkdir` and writes the seal (time, selection, checkpoint) BEFORE any score on it is computed, so a
+# run that dies half way has still opened the seal, a second process racing it is refused, and no
+# selection can follow it. Every sealed stage is then booked in that directory: `<stage>.started` with
+# its key before it runs, `<stage>.done` with its key after it succeeded. On a later invocation a
+# stage that is done is never recomputed, RESCORE or not; a stage that started and did not finish may
+# rerun only under the key it started with; a different key on either is refused. FORCE_TEST=1 is the
+# one override, and it is written into the seal's log. `complete` marks a corpus whose every stage is
+# done, which is what "scored once" means.
+SEALS=$R/sealed
+seal_open() {   # seal_open <corpus>: 0 if the corpus may be (re)entered now, else fails and returns 1
+  local SD=$SEALS/$1
+  mkdir -p "$SEALS" || { fail "cannot write $SEALS"; return 1; }
+  if mkdir "$SD" 2>/dev/null; then
+    echo "sealed $(date -Iseconds) corpus=$1 ckpt=$PICK step=$PICK_STEP sha256=$PICK_SHA variant=$PICK_VARIANT selection_sha256=$SEL_SHA" > "$SD/seal"
+    return 0
+  fi
+  if [ "$FORCE_TEST" = 1 ]; then
+    echo "FORCED $(date -Iseconds) FORCE_TEST=1 reopened $1 (selection_sha256=$SEL_SHA)" >> "$SD/seal"
+    rm -f "$SD/complete"
+    return 0
+  fi
+  [ -f "$SD/seal" ] || { fail "$1: $SD exists without a seal record; another scoring of it may be running"; return 1; }
+  if ! grep -q "selection_sha256=$SEL_SHA\$" "$SD/seal"; then
+    fail "$1 was sealed under a different selection ($(head -1 "$SD/seal")); FORCE_TEST=1 overrides"
+    return 1
+  fi
+  if [ -f "$SD/complete" ]; then
+    fail "$1 was already scored once (see $SD and $SCORED); FORCE_TEST=1 scores it again, and says so there"
+    return 1
+  fi
+  echo "$(date -Iseconds) re-entered to finish its incomplete stages" >> "$SD/seal"
+  return 0
+}
+sealed_should_run() {   # sealed_should_run <corpus> <stage id> <key>: 0 run, 1 skip (kept or refused)
+  local SD=$SEALS/$1
+  if [ "$FORCE_TEST" = 1 ]; then printf '%s\n' "$3" > "$SD/$2.started"; rm -f "$SD/$2.done"; return 0; fi
+  if [ -f "$SD/$2.done" ]; then
+    if [ "$(cat "$SD/$2.done")" = "$3" ]; then
+      echo "$RUN sealed $1 $2 already complete; kept (RESCORE does not reopen a sealed stage)" >> "$LOG"
+    else
+      fail "sealed $1 $2 completed under a different configuration; refusing to recompute it (FORCE_TEST=1 overrides)"
+    fi
+    return 1
+  fi
+  if [ -f "$SD/$2.started" ] && [ "$(cat "$SD/$2.started")" != "$3" ]; then
+    fail "sealed $1 $2 started under a different configuration; refusing to rerun it under this one (FORCE_TEST=1 overrides)"
+    return 1
+  fi
+  printf '%s\n' "$3" > "$SD/$2.started"
+  return 0
+}
+sealed_done() { printf '%s\n' "$3" > "$SEALS/$1/$2.done"; }   # sealed_done <corpus> <stage id> <key>
+# run_or_skip <corpus> <stage id> <result file> <key>: the sealed rule for sealed corpora, the key rule otherwise
+run_or_skip() {
+  if [ "$STAGE" = sealed ]; then sealed_should_run "$1" "$2" "$4"; else should_run "$3" "$4"; fi
+}
+book() { [ "$STAGE" = sealed ] && sealed_done "$1" "$2" "$3"; return 0; }   # book <corpus> <stage id> <key>
+
 tf() {   # tf <corpus> <out-dir> <ckpt> <step> <sha256> <live|ema> <horizon> <windows>
   local S=$1 OUT=$2 CK=$3 ST=$4 SHA=$5 V=$6 K=$7 N=$8 EMA="" KEY E
   [ "$V" = ema ] && EMA="--use-ema"
@@ -227,8 +291,8 @@ tf() {   # tf <corpus> <out-dir> <ckpt> <step> <sha256> <live|ema> <horizon> <wi
     echo "DRY eval_tf $LABEL $PY eval_tf.py $COMMON $(corpus_tf "$S") --subset $SUBSET --num-windows $N --batch-size 16 --steps $STEPS --ckpt $CK $EMA --horizon-tics $K --out-dir $OUT"
     return 0
   fi
-  if ! should_run "$OUT/metrics.json" "$KEY"; then
-    echo "$RUN eval_tf $(basename "$OUT") already scored under this key (RESCORE=1 to redo)" >> "$LOG"
+  if ! run_or_skip "$S" "$(basename "$OUT")" "$OUT/metrics.json" "$KEY"; then
+    echo "$RUN eval_tf $(basename "$OUT") not run: already scored under this key, or refused" >> "$LOG"
     return 0
   fi
   forget "$OUT/metrics.json"
@@ -236,7 +300,7 @@ tf() {   # tf <corpus> <out-dir> <ckpt> <step> <sha256> <live|ema> <horizon> <wi
     --steps $STEPS --ckpt "$CK" $EMA --horizon-tics "$K" --out-dir "$OUT" \
     > "$D/logs/${RUN}_$(basename "$OUT").log" 2>&1 < /dev/null; E=$?
   echo "$RUN eval_tf $(basename "$OUT") ckpt=$CK variant=$V exit $E" >> "$LOG"
-  if [ $E -eq 0 ]; then stamp "$OUT/metrics.json" "$KEY"; prov "$OUT" "$KEY"
+  if [ $E -eq 0 ]; then stamp "$OUT/metrics.json" "$KEY"; prov "$OUT" "$KEY"; book "$S" "$(basename "$OUT")" "$KEY"
   else fail "eval_tf $(basename "$OUT") exit $E"; fi
 }
 
@@ -265,24 +329,25 @@ rollout() {   # rollout <corpus> <ckpt> <step> <sha256> <live|ema>: roll out, sc
     echo "DRY score $PY rollout_eval.py --score --rollouts $NPZ --parquet-dir $(corpus_parquet "$S") --clip-frames 128 --out-dir $M"
     return 0
   fi
-  if should_run "$NPZ" "$KEY"; then
+  if run_or_skip "$S" rollout "$NPZ" "$KEY"; then
     forget "$NPZ"; rm -rf "$M"      # everything downstream of a rollout belongs to that rollout
     $PY rollout_eval.py --rollout $COMMON --ckpt "$CK" $EMA $(corpus_latents "$S") \
       --subset $SUBSET --num-rollouts 256 --horizon "$HORIZON" --batch-size 16 --steps $STEPS --out "$NPZ" \
       > "$D/logs/${RUN}_rollout.log" 2>&1 < /dev/null; E=$?
     echo "$RUN rollout $S ckpt=$CK variant=$V exit $E" >> "$D/logs/${RUN}_rollout_status.log"
     [ $E -eq 0 ] || { fail "rollout $S exit $E"; return 1; }
-    stamp "$NPZ" "$KEY"
+    stamp "$NPZ" "$KEY"; book "$S" rollout "$KEY"
   fi
+  [ -f "$NPZ" ] || { fail "rollout $S: no rollouts at $NPZ to score"; return 1; }
   # drift.json, not metrics.json: rollout_eval.py --score writes `rollout_eval.SCORE_FILE`
-  if should_run "$M/drift.json" "$KEY"; then
+  if run_or_skip "$S" rollout_score "$M/drift.json" "$KEY"; then
     forget "$M/drift.json"
     $PY rollout_eval.py --score --rollouts "$NPZ" --idm "$D/results_spiderman/idm_aligned/idm.pt" $IDM_ENC \
       $VAE $SCALE --hf-cache "$D/hf/hub" --parquet-dir "$(corpus_parquet "$S")" \
       --out-dir "$M" --save-clips 256 --clip-frames 128 \
       >> "$D/logs/${RUN}_rollout.log" 2>&1 < /dev/null || { fail "rollout score $S"; return 1; }
-    stamp "$M/drift.json" "$KEY"
-    rm -f "$M"/fvd*.json "$M"/fvd*.json.key
+    stamp "$M/drift.json" "$KEY"; book "$S" rollout_score "$KEY"
+    [ "$STAGE" = sealed ] || rm -f "$M"/fvd*.json "$M"/fvd*.json.key
   fi
   prov "$M" "$KEY"
   # FVD on both clip spacings: every tic, and every fourth tic so the clip covers the same game
@@ -293,10 +358,11 @@ rollout() {   # rollout <corpus> <ckpt> <step> <sha256> <live|ema>: roll out, sc
     [ -f "$M/$CLIPS" ] || continue
     for F in 16 32; do
       OUTF=$M/fvd${F}_${CLIPS%.npz}.json
-      should_run "$OUTF" "$KEY" || continue
+      run_or_skip "$S" "fvd${F}_${CLIPS%.npz}" "$OUTF" "$KEY" || continue
       forget "$OUTF"
       if $PY fvd.py --clips "$M/$CLIPS" --frames $F --i3d "$D/weights/i3d_torchscript.pt" \
-           --out "$OUTF" >> "$D/logs/${RUN}_rollout.log" 2>&1 < /dev/null; then stamp "$OUTF" "$KEY"
+           --out "$OUTF" >> "$D/logs/${RUN}_rollout.log" 2>&1 < /dev/null; then
+        stamp "$OUTF" "$KEY"; book "$S" "fvd${F}_${CLIPS%.npz}" "$KEY"
       else fail "fvd${F} ${CLIPS}"; fi
     done
   done
@@ -316,7 +382,7 @@ if [ "$DRY" = 1 ]; then
         tf "$S" "$R/eval_tf_${S}_h4" PICKED STEP SHA live 4 "$NUM_WINDOWS"
       done ;;
     select)
-      echo "DRY refuse if $SCORED exists (a selection after any test score is selection on test)"
+      echo "DRY refuse if $SEALS or $SCORED exists (a selection after any sealed access is selection on test)"
       corpus_ok val
       echo "DRY candidates $PY select_checkpoint.py candidates --results-dir $R > $R/select/candidates.txt"
       tf val "$R/select/CANDIDATE/eval_tf_val" CANDIDATE STEP SHA live 1 "$SELECT_WINDOWS"
@@ -325,7 +391,7 @@ if [ "$DRY" = 1 ]; then
     sealed)
       echo "DRY require $SEL, else refuse; $PY select_checkpoint.py show --selection $SEL"
       for S in $SEALED; do
-        echo "DRY refuse $S if $SCORED records it done (FORCE_TEST=1 overrides)"
+        echo "DRY seal $S at first access: mkdir $SEALS/$S, then book every stage; refuse a complete or differently keyed stage (FORCE_TEST=1 overrides)"
         corpus_ok "$S"
         tf "$S" "$R/eval_tf_$S" SELECTED STEP SHA VARIANT 1 "$NUM_WINDOWS"
         tf "$S" "$R/eval_tf_${S}_h4" SELECTED STEP SHA VARIANT 4 "$NUM_WINDOWS"
@@ -383,8 +449,8 @@ fi
 
 # --- stage 2: selection on validation --------------------------------------------------------
 if [ "$STAGE" = select ]; then
-  if [ -e "$SCORED" ]; then
-    echo "AFTER_NEXTTIC_FAILED $RUN: $SCORED exists, so a test score exists; a selection made now would be a selection on test" >&2
+  if [ -e "$SCORED" ] || [ -d "$SEALS" ]; then
+    echo "AFTER_NEXTTIC_FAILED $RUN: a sealed corpus has been opened ($SEALS, $SCORED), so a test score may exist; a selection made now would be a selection on test" >&2
     exit 4
   fi
   if [ -e "$SEL" ] && [ "$FORCE_SELECT" != 1 ]; then
@@ -424,8 +490,8 @@ if [ "$STAGE" = sealed ]; then
   read -r PICK PICK_STEP PICK_SHA PICK_VARIANT SEL_SHA <<<"$SEL_LINE"
   echo "$(date -Iseconds) selected $PICK step=$PICK_STEP variant=$PICK_VARIANT sha256=$PICK_SHA selection=$SEL_SHA" | tee -a "$R/scored_checkpoint.txt"
   for S in $SEALED; do
-    if grep -q "^$S done " "$SCORED" 2>/dev/null && [ "$FORCE_TEST" != 1 ]; then
-      fail "$S was already scored once (see $SCORED); FORCE_TEST=1 scores it again, and says so there"
+    if [ -f "$SEALS/$S/complete" ] && [ "$FORCE_TEST" != 1 ]; then
+      fail "$S was already scored once (see $SEALS/$S and $SCORED); FORCE_TEST=1 scores it again, and says so there"
       continue
     fi
     corpus_ok "$S" || continue
@@ -441,13 +507,18 @@ if [ "$STAGE" = sealed ]; then
         continue
       fi
     fi
+    # the seal opens here, before the first score on this corpus exists
+    seal_open "$S" || continue
     echo "$S started $(date -Iseconds) ckpt=$PICK step=$PICK_STEP sha256=$PICK_SHA variant=$PICK_VARIANT selection_sha256=$SEL_SHA${CLAIM:+ unseen_claim=$CLAIM}" >> "$SCORED"
     BEFORE=$RC; RC=0
     tf "$S" "$R/eval_tf_$S" "$PICK" "$PICK_STEP" "$PICK_SHA" "$PICK_VARIANT" 1 "$NUM_WINDOWS"
     tf "$S" "$R/eval_tf_${S}_h4" "$PICK" "$PICK_STEP" "$PICK_SHA" "$PICK_VARIANT" 4 "$NUM_WINDOWS"
     # rollouts on the sealed seen-map corpus, horizon in tics
     [ "$S" = test ] && rollout "$S" "$PICK" "$PICK_STEP" "$PICK_SHA" "$PICK_VARIANT"
-    [ $RC -eq 0 ] && echo "$S done $(date -Iseconds) ckpt=$PICK step=$PICK_STEP sha256=$PICK_SHA variant=$PICK_VARIANT selection_sha256=$SEL_SHA forced=$FORCE_TEST" >> "$SCORED"
+    if [ $RC -eq 0 ]; then
+      echo "complete $(date -Iseconds) forced=$FORCE_TEST" > "$SEALS/$S/complete"
+      echo "$S done $(date -Iseconds) ckpt=$PICK step=$PICK_STEP sha256=$PICK_SHA variant=$PICK_VARIANT selection_sha256=$SEL_SHA forced=$FORCE_TEST" >> "$SCORED"
+    fi
     [ $BEFORE -ne 0 ] && RC=$BEFORE
   done
   DONE_STEP=$PICK_STEP

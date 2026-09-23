@@ -278,11 +278,85 @@ def test_the_rollout_score_stage_is_gated_on_the_file_it_writes(tmp_path):
     out = r / "rollout_metrics_test" / rollout_eval.SCORE_FILE
     assert out.is_file() and json.load(open(out))["idm"] == 0.5
     assert (r / "rollout_metrics_test" / (rollout_eval.SCORE_FILE + ".key")).is_file()
-    again, calls = run(tmp_path, root, r, CORPORA="test", FORCE_TEST="1")
+    assert (r / "sealed" / "test" / "rollout_score.done").is_file()
+    # reopen the corpus as an interrupted run would leave it: the booked score is kept, RESCORE or not
+    (r / "sealed" / "test" / "complete").unlink()
+    again, calls = run(tmp_path, root, r, CORPORA="test", RESCORE="1")
     assert again.returncode == 0, again.stderr
-    assert [c for c in _calls_to(calls, "rollout_eval.py") if "--score" in c] == []
-    redo, calls = run(tmp_path, root, r, CORPORA="test", FORCE_TEST="1", RESCORE="1")
+    assert _calls_to(calls, "rollout_eval.py") == [] and _tf_calls(calls) == []
+    redo, calls = run(tmp_path, root, r, CORPORA="test", FORCE_TEST="1")
     assert [c for c in _calls_to(calls, "rollout_eval.py") if "--score" in c]
+
+
+# ---------------------------------------------------------------------------------------
+# sealing is atomic at first access, and a completed sealed stage is never recomputed
+# ---------------------------------------------------------------------------------------
+
+def test_the_seal_is_written_before_the_first_score(tmp_path):
+    """A run that dies on its first sealed computation has still opened the seal."""
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    proc, calls = run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test")
+    assert proc.returncode != 0 and _tf_calls(calls)
+    seal = (r / "sealed" / "test" / "seal").read_text()
+    assert "selection_sha256=" in seal and "step=" in seal
+    assert (r / "sealed" / "test" / "eval_tf_test.started").is_file()
+    assert not (r / "sealed" / "test" / "eval_tf_test.done").exists()
+    proc, _, _ = selected(tmp_path, root, r)
+    assert proc.returncode == 4 and "selection on test" in proc.stderr
+
+
+def test_an_interrupted_seal_finishes_only_its_incomplete_stages(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    first, _ = run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test_h4")
+    assert first.returncode != 0
+    assert (r / "sealed" / "test" / "eval_tf_test.done").is_file()
+    assert not (r / "sealed" / "test" / "complete").exists()
+    second, calls = run(tmp_path, root, r, CORPORA="test", RESCORE="1")
+    assert second.returncode == 0, second.stderr
+    outs = [flag(c, "--out-dir") for c in _tf_calls(calls)]
+    assert outs == [str(r / "eval_tf_test_h4")], "a completed sealed stage was recomputed"
+    assert (r / "sealed" / "test" / "complete").is_file()
+
+
+def test_a_completed_sealed_stage_under_another_key_is_refused_not_recomputed(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test_h4")
+    proc, calls = run(tmp_path, root, r, CORPORA="test", NUM_WINDOWS="16")
+    assert proc.returncode != 0
+    assert "completed under a different configuration" in proc.stderr
+    assert str(r / "eval_tf_test") not in [flag(c, "--out-dir") for c in _tf_calls(calls)]
+
+
+def test_an_incomplete_sealed_stage_may_not_rerun_under_another_key(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test")
+    proc, calls = run(tmp_path, root, r, CORPORA="test", NUM_WINDOWS="16")
+    assert proc.returncode != 0 and "started under a different configuration" in proc.stderr
+    assert _tf_calls(calls) == [] or str(r / "eval_tf_test") not in [flag(c, "--out-dir") for c in _tf_calls(calls)]
+
+
+def test_a_seal_opened_under_another_selection_is_refused(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    d = r / "sealed" / "test"
+    d.mkdir(parents=True)
+    (d / "seal").write_text("sealed 2026-09-23 corpus=test selection_sha256=someotherselection\n")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode != 0 and "sealed under a different selection" in proc.stderr
+    assert _tf_calls(calls) == []
+
+
+def test_a_seal_directory_without_a_record_is_refused_as_a_race(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    (r / "sealed" / "test").mkdir(parents=True)
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode != 0 and "another scoring of it may be running" in proc.stderr
+    assert _tf_calls(calls) == []
 
 
 def test_a_failed_rollout_is_not_reported_as_done(tmp_path):

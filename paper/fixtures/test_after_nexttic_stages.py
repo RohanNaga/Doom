@@ -70,6 +70,9 @@ if script == "eval_tf.py":
     ck, ema = arg("--ckpt"), "--use-ema" in sys.argv
     scores = json.loads(os.environ.get("STUB_SCORES") or "{}")
     psnr, lp = scores.get("%s|%s" % (os.path.basename(ck), "ema" if ema else "live"), [21.0, 0.3])
+    fail_on = os.environ.get("STUB_TF_FAIL_ON")
+    if fail_on and out.endswith(fail_on):
+        sys.exit(1)
     if not os.environ.get("STUB_TF_NO_OUTPUT"):
         with open(os.path.join(out, "metrics.json"), "w") as f:
             json.dump({"psnr": 21.0, "psnr_raw": {"mean": psnr, "n": 8}, "lpips_raw": {"mean": lp, "n": 8},
@@ -274,7 +277,7 @@ def test_the_score_stage_is_gated_on_the_file_it_actually_writes():
     name = _score_output_name()
     text = open(AFTER).read()
     assert 'M=$R/rollout_metrics_$S' in text
-    assert f'should_run "$M/{name}" "$KEY"' in text, name
+    assert f'run_or_skip "$S" rollout_score "$M/{name}" "$KEY"' in text, name
     assert 'rollout_metrics_test/metrics.json' not in text, "the wrong filename is back"
 
 
