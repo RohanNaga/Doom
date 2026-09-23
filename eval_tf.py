@@ -8,6 +8,9 @@ MSE, HUD-crop PSNR, the copy-last-frame baseline, and the VAE ceiling.
 
     python eval_tf.py --ckpt results/010-dit-l32/best.pt --backbone dit --latents-dir data/latents_arnold \
         --parquet-dir raw_arnold --split data/split_arnold.json --subset val --num-windows 2048 --out-dir eval/dit_val
+
+`--wandb-run <training run>` also appends the raw PSNR, LPIPS and persistence floor to the W&B run
+`<training run>-eval` as eval/<live|ema>_h<H>/..., at the step in the checkpoint's filename.
 """
 import argparse
 import csv

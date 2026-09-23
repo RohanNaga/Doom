@@ -24,6 +24,9 @@ checks, per group:
 
     python smoke_probe.py --ckpt $D/results_smoke/unet/0000300.pt --backbone unet \\
         --latents-dir $D/latents_arnold_dense_pertic_eval/val --episodes 6000:6100 --device cuda:0
+
+`--wandb-run <training run>` also appends the report to the W&B run `<training run>-eval` as
+eval/probe/..., at the step in the checkpoint's filename (the gates' own probe never passes it).
 """
 import argparse
 import json

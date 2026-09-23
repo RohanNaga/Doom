@@ -9,6 +9,11 @@ for checkpoint selection. The only thing the --backbone flag changes is the netw
 only thing --latent-channels changes is the autoencoder the corpus was encoded with (4 for the
 SD KL-f8 rows, 16 for sd35's own autoencoder); it defaults to whichever the warm start needs.
 
+Every event goes to `<results-dir>/log.jsonl` through one writer, and from there, live, to the
+Weights & Biases run named after the results directory (project doomdit-nexttic; `wandb_log.py`).
+Streaming is on by default, never runs in a fit check, is switched off by `--no-wandb`, and cannot
+stop training: a W&B failure or a missing package prints one line and log.jsonl stays the record.
+
 Fit check (no data needed):
     python train_wm.py --backbone dit --fit-check 30 --per-gpu-batch 4 --context-frames 32
 Training (single process or under `accelerate launch --multi_gpu`):

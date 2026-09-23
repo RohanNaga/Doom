@@ -12,6 +12,9 @@ optional IDM action-following accuracy per horizon, and decoded clips for FVD.
         --num-rollouts 256 --horizon 64 --out results/010-dit-l32/rollouts_val.npz
     python rollout_eval.py --score --rollouts results/010-dit-l32/rollouts_val.npz \
         --idm results/idm/idm.pt --out-dir results/010-dit-l32/rollout_metrics
+
+`--score --wandb-run <training run>` also appends drift.json's scalars (psnr@H, the raw floors, the
+IDM means) to the W&B run `<training run>-eval` as eval/rollout/..., at the rolled-out checkpoint's step.
 """
 import argparse
 import json
