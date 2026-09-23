@@ -61,6 +61,16 @@ if script == "pick_checkpoint.py":
     sha = os.environ.get("STUB_SHA", "sha-" + os.path.basename(path))
     print("%s %d %d %s" % (path, step_of(path), os.path.basename(path) != "best.pt", sha))
     sys.exit(int(os.environ.get("STUB_PICK_RC", "0")))
+if script == "score_identity.py":
+    # a corpus's identity as the real script prints it: split file CONTENTS, then a fingerprint the
+    # test controls through STUB_CORPUS_FP (the real one reads the latents)
+    import hashlib
+    try:
+        split = hashlib.sha256(open(arg("--split"), "rb").read()).hexdigest()[:16]
+    except OSError:
+        split = "missing"
+    print("split=%s fingerprint=%s episodes=0" % (split, os.environ.get("STUB_CORPUS_FP", "fp0")))
+    sys.exit(0)
 if script == "make_dense_eval_splits.py":
     corpus = os.path.basename(arg("--latents-dir") or "")
     sys.exit(1 if corpus in os.environ.get("STUB_CHECK_FAIL", "").split(",") else 0)

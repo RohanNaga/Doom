@@ -2,7 +2,7 @@
 # Evaluation suite for a next-tic row, in three stages that cannot be run out of order.
 #
 #   usage: [PY=..] [NOWAIT=1] [CKPT=path] [STEP=n] [CORPORA=".."] [RESCORE=1] [BEST=0] \
-#          [SELECT_WINDOWS=512] [FORCE_SELECT=1] [FORCE_TEST=1] [DRY=1] [DOOM_ROOT=..] \
+#          [SELECT_WINDOWS=512] [SPACING=linear] [SEED=0] [FORCE_SELECT=1] [FORCE_TEST=1] [DRY=1] [DOOM_ROOT=..] \
 #          after_nexttic.sh <gpu> <unet | sd35 | pixart> [--select]
 #
 # The three stages (docs/REVIEW_2026-09-22.md, H2). The old script scored validation, test and
@@ -16,7 +16,11 @@
 #                  before it (select_checkpoint.py), each scored on validation live and EMA on
 #                  SELECT_WINDOWS windows, then the preregistered rule (raw PSNR with an LPIPS check,
 #                  `select_checkpoint.RULE`) writes `$R/selection.json`. Refused once any test score
-#                  exists, because a selection made after seeing test is selection on test.
+#                  exists, because a selection made after seeing test is selection on test. The
+#                  selection also PINS the sealed stage's whole scoring configuration: decoder path
+#                  and content hash, sampler steps and SPACING, NUM_WINDOWS and SEED, horizons, and
+#                  the content identity of every corpus present (score_identity.py); the sealed
+#                  stage verifies it (`select_checkpoint.py verify`) and refuses any difference.
 #   3 sealed       CORPORA naming test, arenas_678 or the stride-4 corpora: refused without
 #                  `selection.json`, and scores ONLY the selected checkpoint and variant. Each corpus
 #                  is SEALED at first access, before any score on it exists (`$R/sealed/<corpus>/`,
@@ -81,6 +85,8 @@ RESCORE=${RESCORE:-0}
 FORCE_SELECT=${FORCE_SELECT:-0}
 FORCE_TEST=${FORCE_TEST:-0}
 STEPS=50
+SPACING=${SPACING:-linear}      # --timestep-spacing: which trained timesteps the sampler visits (timestep_spacing.py)
+SEED=${SEED:-0}                 # the window draw and the sampler's noise keys
 # shellcheck source=../dense_ids.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../dense_ids.sh"
 VAL_IDS=${VAL_IDS:-$(dense_ids val_ids)}
@@ -175,6 +181,7 @@ DEC_TAG="$DEC_KIND:$DEC_PATH"
 # tuned before 2026-09-22 are `provenance: unknown, corpus: all maps` in release/decoder_registry.json).
 # Filled in once the interpreter may run; every score directory records it.
 DEC_INFO=unrecorded
+DEC_ID=""
 # the unseen-map claim a score of arenas_678 may make with this decoder: `system` when the decoder
 # never saw the unseen maps or a held-out episode, `dynamics-only` when UNSEEN_CLAIM says so
 CLAIM=""
@@ -208,7 +215,7 @@ COMMON="$BB --latent-channels $CH $VAE $SCALE --hf-cache $D/hf/hub --tic-stride 
 # --- the cache key --------------------------------------------------------------------------
 key_of() {   # key_of <ckpt> <step> <sha256> <variant> <corpus> <horizon> <windows>
   echo "ckpt=$1 step=$2 sha256=$3 variant=$4 corpus=$5 split=$(corpus_split "$5") horizon=$6" \
-       "windows=$7 sampler=ddim$STEPS decoder=$DEC_TAG"
+       "windows=$7 seed=$SEED sampler=ddim$STEPS spacing=$SPACING decoder=$DEC_TAG"
 }
 # A stage runs when its result is absent, when the result was produced under a different key, or
 # when RESCORE=1. The key sits beside the result as `<file>.key`.
@@ -288,7 +295,7 @@ tf() {   # tf <corpus> <out-dir> <ckpt> <step> <sha256> <live|ema> <horizon> <wi
   KEY=$(key_of "$CK" "$ST" "$SHA" "$V" "$S" "$K" "$N")
   if [ "$DRY" = 1 ]; then
     local LABEL; LABEL=$(basename "$OUT"); LABEL=${LABEL#eval_tf_}
-    echo "DRY eval_tf $LABEL $PY eval_tf.py $COMMON $(corpus_tf "$S") --subset $SUBSET --num-windows $N --batch-size 16 --steps $STEPS --ckpt $CK $EMA --horizon-tics $K --out-dir $OUT"
+    echo "DRY eval_tf $LABEL $PY eval_tf.py $COMMON $(corpus_tf "$S") --subset $SUBSET --num-windows $N --batch-size 16 --steps $STEPS --timestep-spacing $SPACING --seed $SEED --ckpt $CK $EMA --horizon-tics $K --out-dir $OUT"
     return 0
   fi
   if ! run_or_skip "$S" "$(basename "$OUT")" "$OUT/metrics.json" "$KEY"; then
@@ -297,7 +304,7 @@ tf() {   # tf <corpus> <out-dir> <ckpt> <step> <sha256> <live|ema> <horizon> <wi
   fi
   forget "$OUT/metrics.json"
   $PY eval_tf.py $COMMON $(corpus_tf "$S") --subset $SUBSET --num-windows "$N" --batch-size 16 \
-    --steps $STEPS --ckpt "$CK" $EMA --horizon-tics "$K" --out-dir "$OUT" \
+    --steps $STEPS --timestep-spacing "$SPACING" --seed "$SEED" --ckpt "$CK" $EMA --horizon-tics "$K" --out-dir "$OUT" \
     > "$D/logs/${RUN}_$(basename "$OUT").log" 2>&1 < /dev/null; E=$?
   echo "$RUN eval_tf $(basename "$OUT") ckpt=$CK variant=$V exit $E" >> "$LOG"
   if [ $E -eq 0 ]; then stamp "$OUT/metrics.json" "$KEY"; prov "$OUT" "$KEY"; book "$S" "$(basename "$OUT")" "$KEY"
@@ -318,6 +325,25 @@ corpus_ok() {   # corpus_ok <corpus>: present, and exactly the expected episodes
   fi
 }
 
+# --- the scoring configuration a selection pins ------------------------------------------------
+corpus_id() {   # corpus_id <corpus>: split file contents, latent fingerprint and size (score_identity.py)
+  "$PY" "$D/repo/score_identity.py" corpus --latents-dir "$(corpus_dir "$1")" --split "$(corpus_split "$1")" < /dev/null
+}
+build_pins() {   # build_pins <corpus...>: PINS=(--pin key=value ...), what a sealed stage will score with
+  PINS=(--pin "decoder_path=$DEC_PATH" --pin "decoder_identity=$DEC_ID" --pin "sampler_steps=$STEPS"
+        --pin "spacing=$SPACING" --pin "num_windows=$NUM_WINDOWS" --pin "seed=$SEED" --pin "horizon_tics=1,4"
+        --pin "rollout_horizon=$HORIZON" --pin "rollouts=256")
+  local S ID
+  for S in "$@"; do
+    ID=$(corpus_id "$S") || { fail "corpus $S: its identity could not be computed"; return 1; }
+    PINS+=(--pin "corpus.$S=$ID")
+  done
+}
+present_corpora() {   # the corpora that exist now: every one of them is pinned at selection
+  local S
+  for S in val test arenas_678 seen unseen unseen2; do [ -d "$(corpus_dir "$S")" ] && echo "$S"; done
+}
+
 rollout() {   # rollout <corpus> <ckpt> <step> <sha256> <live|ema>: roll out, score, FVD
   local S=$1 CK=$2 ST=$3 SHA=$4 V=$5 EMA="" KEY NPZ M E IDM_ENC=""
   [ "$V" = ema ] && EMA="--use-ema"
@@ -332,7 +358,7 @@ rollout() {   # rollout <corpus> <ckpt> <step> <sha256> <live|ema>: roll out, sc
   if run_or_skip "$S" rollout "$NPZ" "$KEY"; then
     forget "$NPZ"; rm -rf "$M"      # everything downstream of a rollout belongs to that rollout
     $PY rollout_eval.py --rollout $COMMON --ckpt "$CK" $EMA $(corpus_latents "$S") \
-      --subset $SUBSET --num-rollouts 256 --horizon "$HORIZON" --batch-size 16 --steps $STEPS --out "$NPZ" \
+      --subset $SUBSET --num-rollouts 256 --horizon "$HORIZON" --batch-size 16 --steps $STEPS --timestep-spacing "$SPACING" --seed "$SEED" --out "$NPZ" \
       > "$D/logs/${RUN}_rollout.log" 2>&1 < /dev/null; E=$?
     echo "$RUN rollout $S ckpt=$CK variant=$V exit $E" >> "$D/logs/${RUN}_rollout_status.log"
     [ $E -eq 0 ] || { fail "rollout $S exit $E"; return 1; }
@@ -387,9 +413,10 @@ if [ "$DRY" = 1 ]; then
       echo "DRY candidates $PY select_checkpoint.py candidates --results-dir $R > $R/select/candidates.txt"
       tf val "$R/select/CANDIDATE/eval_tf_val" CANDIDATE STEP SHA live 1 "$SELECT_WINDOWS"
       tf val "$R/select/CANDIDATE/eval_tf_val_ema" CANDIDATE STEP SHA ema 1 "$SELECT_WINDOWS"
-      echo "DRY choose $PY select_checkpoint.py choose --results-dir $R --candidates $R/select/candidates.txt --scores-dir $R/select --out $SEL" ;;
+      echo "DRY choose $PY select_checkpoint.py choose --results-dir $R --candidates $R/select/candidates.txt --scores-dir $R/select --out $SEL --pin decoder_path=$DEC_PATH --pin decoder_identity=<sha> --pin sampler_steps=$STEPS --pin spacing=$SPACING --pin num_windows=$NUM_WINDOWS --pin seed=$SEED --pin horizon_tics=1,4 --pin rollout_horizon=$HORIZON --pin rollouts=256 --pin corpus.<every present corpus>=<score_identity.py corpus>" ;;
     sealed)
       echo "DRY require $SEL, else refuse; $PY select_checkpoint.py show --selection $SEL"
+      echo "DRY verify $PY select_checkpoint.py verify --selection $SEL <the same pins, for$SEALED>; refuse on any difference, before any seal opens"
       for S in $SEALED; do
         echo "DRY seal $S at first access: mkdir $SEALS/$S, then book every stage; refuse a complete or differently keyed stage (FORCE_TEST=1 overrides)"
         corpus_ok "$S"
@@ -410,7 +437,8 @@ echo "$(date -Iseconds) evaluating with code at $(git rev-parse HEAD 2>/dev/null
 DEC_INFO=$("$PY" "$D/repo/decoder_provenance.py" show "$DEC_PATH" < /dev/null 2>/dev/null) || DEC_INFO=""
 DEC_INFO=${DEC_INFO:-unrecorded}
 # the key carries the decoder's content hash, so re-tuned weights under the same path rescore
-DEC_TAG="$DEC_TAG:$(echo "$DEC_INFO" | tr ' ' '\n' | sed -n 's/^identity=//p')"
+DEC_ID=$(echo "$DEC_INFO" | tr ' ' '\n' | sed -n 's/^identity=//p')
+DEC_TAG="$DEC_TAG:$DEC_ID"
 echo "$(date -Iseconds) decoder_used $USED" | tee -a "$R/decoder_used.txt"
 
 # --- stage 1: validation ----------------------------------------------------------------------
@@ -473,9 +501,14 @@ if [ "$STAGE" = select ]; then
     echo "AFTER_NEXTTIC_FAILED $RUN: a candidate could not be scored; nothing was selected" >&2; exit $RC
   fi
   FORCE=""; [ "$FORCE_SELECT" = 1 ] && FORCE=--force
+  # the whole scoring configuration of the sealed stage is frozen here, before any test score:
+  # decoder path and hash, sampler steps and spacing, window count and seed, horizons, and the
+  # content identity of every corpus that exists now (test and unseen included)
+  # shellcheck disable=SC2046
+  build_pins $(present_corpora) || { echo "AFTER_NEXTTIC_FAILED $RUN: the scoring configuration could not be pinned" >&2; exit 4; }
   CHOSE=$("$PY" "$D/repo/select_checkpoint.py" choose --results-dir "$R" --candidates "$R/select/candidates.txt" \
     --scores-dir "$R/select" --out "$SEL" --meta "windows=$SELECT_WINDOWS" --meta "sampler=ddim$STEPS" \
-    --meta "decoder=$DEC_TAG" --meta "corpus=val:$VAL_IDS" $FORCE < /dev/null) \
+    --meta "decoder=$DEC_TAG" --meta "corpus=val:$VAL_IDS" "${PINS[@]}" $FORCE < /dev/null) \
     || { echo "AFTER_NEXTTIC_FAILED $RUN: selection refused (see above)" >&2; exit 4; }
   echo "$CHOSE" | tee -a "$LOG"
   echo "AFTER_NEXTTIC_SELECTED $RUN $SEL"
@@ -488,6 +521,13 @@ if [ "$STAGE" = sealed ]; then
   SEL_LINE=$("$PY" "$D/repo/select_checkpoint.py" show --selection "$SEL" < /dev/null) \
     || { echo "AFTER_NEXTTIC_FAILED $RUN: $SEL does not name a checkpoint that is still on disk unchanged" >&2; exit 4; }
   read -r PICK PICK_STEP PICK_SHA PICK_VARIANT SEL_SHA <<<"$SEL_LINE"
+  # the configuration about to be used must be the one pinned at selection, for every corpus named
+  # shellcheck disable=SC2086
+  build_pins $SEALED || { echo "AFTER_NEXTTIC_FAILED $RUN: the scoring configuration could not be computed" >&2; exit 4; }
+  if ! WHY=$("$PY" "$D/repo/select_checkpoint.py" verify --selection "$SEL" "${PINS[@]}" < /dev/null 2>&1); then
+    echo "AFTER_NEXTTIC_FAILED $RUN: $WHY" >&2
+    exit 4
+  fi
   echo "$(date -Iseconds) selected $PICK step=$PICK_STEP variant=$PICK_VARIANT sha256=$PICK_SHA selection=$SEL_SHA" | tee -a "$R/scored_checkpoint.txt"
   for S in $SEALED; do
     if [ -f "$SEALS/$S/complete" ] && [ "$FORCE_TEST" != 1 ]; then

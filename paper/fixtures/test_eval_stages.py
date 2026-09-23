@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 
+import numpy as np
 import pytest
 import torch
 
@@ -321,10 +322,13 @@ def test_an_interrupted_seal_finishes_only_its_incomplete_stages(tmp_path):
 
 
 def test_a_completed_sealed_stage_under_another_key_is_refused_not_recomputed(tmp_path):
+    """Every part of a key is also pinned at selection, so the book is the second line of defence;
+    it is exercised here by a book entry from another configuration."""
     root, r = root_with(tmp_path)
     selected(tmp_path, root, r)
     run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test_h4")
-    proc, calls = run(tmp_path, root, r, CORPORA="test", NUM_WINDOWS="16")
+    (r / "sealed" / "test" / "eval_tf_test.done").write_text("ckpt=elsewhere\n")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
     assert proc.returncode != 0
     assert "completed under a different configuration" in proc.stderr
     assert str(r / "eval_tf_test") not in [flag(c, "--out-dir") for c in _tf_calls(calls)]
@@ -334,9 +338,96 @@ def test_an_incomplete_sealed_stage_may_not_rerun_under_another_key(tmp_path):
     root, r = root_with(tmp_path)
     selected(tmp_path, root, r)
     run(tmp_path, root, r, CORPORA="test", STUB_TF_FAIL_ON="eval_tf_test")
-    proc, calls = run(tmp_path, root, r, CORPORA="test", NUM_WINDOWS="16")
+    (r / "sealed" / "test" / "eval_tf_test.started").write_text("ckpt=elsewhere\n")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
     assert proc.returncode != 0 and "started under a different configuration" in proc.stderr
-    assert _tf_calls(calls) == [] or str(r / "eval_tf_test") not in [flag(c, "--out-dir") for c in _tf_calls(calls)]
+    assert str(r / "eval_tf_test") not in [flag(c, "--out-dir") for c in _tf_calls(calls)]
+
+
+# ---------------------------------------------------------------------------------------
+# the selection pins the whole scoring configuration of the sealed stage
+# ---------------------------------------------------------------------------------------
+
+def test_the_selection_pins_decoder_sampler_windows_seed_and_every_corpus(tmp_path):
+    root, r = root_with(tmp_path)
+    _, _, sel = selected(tmp_path, root, r)
+    p = sel["pinned"]
+    for k in ("decoder_path", "decoder_identity", "sampler_steps", "spacing", "num_windows", "seed",
+              "horizon_tics", "rollout_horizon", "rollouts", "corpus.val", "corpus.test", "corpus.arenas_678"):
+        assert k in p, k
+    assert p["num_windows"] == "8" and p["spacing"] == "linear" and p["seed"] == "0"
+    assert p["corpus.test"].startswith("split=") and "fingerprint=fp0" in p["corpus.test"]
+
+
+@pytest.mark.parametrize("change,why", [({"NUM_WINDOWS": "16"}, "num_windows"), ({"SPACING": "karras"}, "spacing"),
+                                        ({"SEED": "1"}, "seed"), ({"HORIZON": "64"}, "rollout_horizon"),
+                                        ({"STUB_CORPUS_FP": "fp1"}, "corpus.test")])
+def test_a_sealed_stage_under_a_different_configuration_is_refused_before_any_seal(tmp_path, change, why):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    proc, calls = run(tmp_path, root, r, CORPORA="test", **change)
+    assert proc.returncode == 4 and why in proc.stderr, proc.stderr
+    assert _tf_calls(calls) == [] and _calls_to(calls, "rollout_eval.py") == []
+    assert not (r / "sealed").exists(), "a refused configuration must not open a seal"
+
+
+def test_a_changed_split_file_is_a_different_corpus(tmp_path):
+    root, r = root_with(tmp_path)
+    split = root / "latents_arnold_dense_pertic_eval" / "split_test.json"
+    split.write_text('{"val": [7000, 7001]}')
+    selected(tmp_path, root, r)
+    split.write_text('{"val": [7000]}')
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode == 4 and "corpus.test" in proc.stderr
+    assert _tf_calls(calls) == []
+
+
+def test_a_decoder_that_appeared_after_selection_is_refused(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    d = root / "vae_decoder_arnold_lpips" / "vae"
+    d.mkdir(parents=True)
+    (d / "diffusion_pytorch_model.safetensors").write_bytes(b"weights")
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode == 4 and "decoder_path" in proc.stderr
+    assert _tf_calls(calls) == []
+
+
+def test_the_real_corpus_identity_follows_contents_not_paths(tmp_path):
+    import shutil
+    import score_identity
+    lat = _corpus(tmp_path, [10, 11])
+    path, _ = mdes.build(lat, expect_ids=[10, 11])
+    a = score_identity.corpus_identity(lat, path)
+    assert a.startswith("split=") and "episodes=2" in a
+    moved = str(tmp_path / "elsewhere" / "val")
+    shutil.copytree(lat, moved)
+    shutil.copy(path, str(tmp_path / "elsewhere" / "split_val.json"))
+    assert score_identity.corpus_identity(moved, str(tmp_path / "elsewhere" / "split_val.json")) == a
+    z = np.load(os.path.join(moved, "ep_00011_latents.npy"))
+    np.save(os.path.join(moved, "ep_00011_latents.npy"), (z + 1).astype(z.dtype))
+    assert score_identity.corpus_identity(moved, str(tmp_path / "elsewhere" / "split_val.json")) != a
+    with open(path, "w") as f:
+        json.dump({"val": [10]}, f)
+    assert score_identity.corpus_identity(lat, path) != a
+    assert score_identity.corpus_identity(lat, str(tmp_path / "nope.json")).startswith("split=missing")
+
+
+def test_verify_pins_compares_what_is_scored_now():
+    sel = {"pinned": {"spacing": "linear", "num_windows": "8", "corpus.test": "a", "corpus.arenas_678": "b"}}
+    assert select_checkpoint.verify_pins(sel, {"spacing": "linear", "num_windows": "8", "corpus.test": "a"}) == []
+    bad = select_checkpoint.verify_pins(sel, {"spacing": "linear", "corpus.test": "a", "corpus.seen": "c"})
+    assert any("num_windows is pinned" in b for b in bad) and any("corpus.seen was not pinned" in b for b in bad)
+    assert select_checkpoint.verify_pins({}, {"spacing": "linear"})
+
+
+def test_the_scoring_commands_carry_the_pinned_spacing_and_seed(tmp_path):
+    root, r = root_with(tmp_path)
+    selected(tmp_path, root, r)
+    proc, calls = run(tmp_path, root, r, CORPORA="test")
+    assert proc.returncode == 0, proc.stderr
+    for c in _tf_calls(calls) + [c for c in _calls_to(calls, "rollout_eval.py") if c.split()[1] == "--rollout"]:
+        assert "--timestep-spacing linear" in c and "--seed 0" in c, c
 
 
 def test_a_seal_opened_under_another_selection_is_refused(tmp_path):
