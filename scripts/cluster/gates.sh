@@ -2,7 +2,14 @@
 # Zero to a usable node, step 4 of 5: the launch gates, in order, stopping at the first failure.
 #
 #   usage: [DOOM_ROOT=..] [UNET_GPU=0] [SD35_GPU=1] [VAES=sd15,sd35] [SMOKE_BBS="unet sd35"] \
-#          [FIT=20] [STEPS=300] [WINDOWS=64] [SMOKE_TIMEOUT=7200] [EXPLAIN=<rc>] [DRY=1] gates.sh
+#          [PY_UNET=..] [PY_SD35=..] [PY=..] [FIT=20] [STEPS=300] [WINDOWS=64] [SMOKE_TIMEOUT=7200] \
+#          [EXPLAIN=<rc>] [DRY=1] gates.sh
+#
+# Interpreters. Every command of the sd15 space and the U-Net runs under PY_UNET, every command of the
+# sd35 space and SD 3.5 (audits, inventories, the latent alignment that re-encodes with the SD 3.5
+# autoencoder, fit, smoke, probes, readback, certificate) under PY_SD35; each falls back to PY and
+# then to $D/env/bin/python. The launcher is handed the same two, so the certified command names the
+# interpreter the production launch will use.
 #
 # The order is the launch protocol's (`.claude/analyses/astra-prelaunch-audit-2026-09-21.md`, part
 # C). Each gate answers one question, and a failure stops here rather than being carried into a
@@ -104,7 +111,8 @@ SMOKE_TIMEOUT=${SMOKE_TIMEOUT:-7200}
 SMOKE_DIR=${SMOKE_DIR:-$D/results_smoke}
 REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 LAUNCH=${LAUNCH:-$REPO/scripts/spiderman/launch_nexttic.sh}
-PY=${PY:-$D/env/bin/python}
+PY_UNET=${PY_UNET:-${PY:-$D/env/bin/python}}   # the sd15 space and the 4-channel rows
+PY_SD35=${PY_SD35:-${PY:-$D/env/bin/python}}   # the sd35 space and the SD 3.5 row
 RAW=$D/raw_arnold_dense
 VAL_IDS=${VAL_IDS:-6000:6100}
 TRAIN_IDS=${TRAIN_IDS:-0:2000}
@@ -143,22 +151,24 @@ suffix()   { [ "$1" = sd35 ] && echo _sd35 || echo ""; }
 bb_space() { [ "$1" = sd35 ] && echo sd35 || echo sd15; }
 bb_gpu()   { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
 bb_chan()  { [ "$1" = sd35 ] && echo 16 || echo 4; }
+space_py() { [ "$1" = sd35 ] && echo "$PY_SD35" || echo "$PY_UNET"; }
+bb_py()    { space_py "$(bb_space "$1")"; }
 run_name() { [ "$1" = sd35 ] && echo 042-sd35-nexttic || echo 040-unet-nexttic; }
 
 audit_cmd() {   # audit_cmd <space>
-  echo "$PY $REPO/check_action_alignment.py --audit-only" \
+  echo "$(space_py "$1") $REPO/check_action_alignment.py --audit-only" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/val" \
        "--audit-parquet-dir $RAW/arenas --episodes 100 --audit-rows 100000" \
        "--canonical $RAW/canonical_controls.json --seed 0"
 }
 train_audit_cmd() {   # train_audit_cmd <space>: the same audit over the training corpus
-  echo "$PY $REPO/check_action_alignment.py --audit-only" \
+  echo "$(space_py "$1") $REPO/check_action_alignment.py --audit-only" \
        "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--audit-parquet-dir $RAW/arenas --episodes $TRAIN_AUDIT_EPISODES --audit-rows $TRAIN_AUDIT_ROWS" \
        "--canonical $RAW/canonical_controls.json --seed 0"
 }
 inventory_cmd() {   # inventory_cmd <space>: rows and tics of every training episode
-  echo "$PY $REPO/make_dense_eval_splits.py --check-only" \
+  echo "$(space_py "$1") $REPO/make_dense_eval_splits.py --check-only" \
        "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--expect-ids $TRAIN_IDS --sample 0 --raw-tics $RAW/arenas"
 }
@@ -170,7 +180,7 @@ latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shi
   DIR=$VAL; PEER=$TRAIN
   [ "$2" = train ] && { DIR=$TRAIN; PEER=$VAL; }
   # --space and --contract-peer: one latent contract for the space, the backbone's, in train AND val
-  echo "$PY $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+  echo "$(space_py "$1") $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
        "--space $1 --contract-peer $PEER" \
        "--episodes-per-shard $ALIGN_EPISODES --device cuda:$(space_gpu "$1") --cache-dir $D/hf/hub" \
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
@@ -182,7 +192,7 @@ record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, f
 }
 bb_mb() { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
 prod_env() {   # prod_env <backbone>: PROD_ENV=(NAME=VALUE ...), the production launch every gate launch starts from
-  PROD_ENV=(DOOM_ROOT="$D" PY="$PY" PY_SD35="$PY" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
+  PROD_ENV=(DOOM_ROOT="$D" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
         TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" EXTRA="$PROD_EXTRA")
 }
 cert_cmd() {   # cert_cmd <backbone>: the production command, as the launcher resolves it
@@ -194,12 +204,12 @@ bb_latents() {   # bb_latents <backbone> <train|val>
   if [ "$2" = train ]; then echo "$D/latents_arnold_dense_pertic$S/arenas"; else echo "$D/latents_arnold_dense_pertic_eval$S/val"; fi
 }
 cert_write_cmd() {   # cert_write_cmd <backbone> <command>
-  echo "$PY $REPO/gate_certificate.py write --cert $CERT --backbone $1 --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
+  echo "$(bb_py "$1") $REPO/gate_certificate.py write --cert $CERT --backbone $1 --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
        "--repo $RUN_REPO --train-latents $(bb_latents "$1" train) --train-ids $TRAIN_IDS" \
        "--val-latents $(bb_latents "$1" val) --val-ids $VAL_IDS --results $RESULTS --command"
 }
 align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
-  echo "$PY $REPO/check_action_alignment.py" \
+  echo "$(space_py "$1") $REPO/check_action_alignment.py" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/val" \
        "--audit-parquet-dir $RAW/arenas --episodes 100 --audit-rows 100000" \
        "--min-yaw 0.25 --min-move 0.05 --min-rows 1000 --min-episodes 20 --min-per-class 100" \
@@ -224,7 +234,7 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
   EXTRA=$(bb_paths "$1")
   [ "$1" = sd35 ] && EXTRA="$EXTRA --vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae --latent-scale 1.5305 --latent-shift 0.0609"
   [ "$2" = ema ] && EMA=" --use-ema"
-  echo "$PY $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
+  echo "$(bb_py "$1") $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
        "--ckpt $SMOKE_DIR/$1/snap_$(printf '%07d' "$STEPS").pt$EMA --tic-stride 1 --horizon-tics $3" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--split $D/latents_arnold_dense_pertic_eval$S/split_val.json --subset val" \
@@ -234,20 +244,20 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
 }
 probe_cmd() {   # probe_cmd <backbone>: the conditioning pathways of the smoke's recovery checkpoint
   local S; S=$(suffix "$(bb_space "$1")")
-  echo "$PY $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
+  echo "$(bb_py "$1") $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
        "--latent-channels $(bb_chan "$1") --latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--episodes $VAL_IDS --device cuda:$(bb_gpu "$1") --hf-cache $D/hf/hub $(bb_paths "$1")" \
        "--out $D/logs/gate4b_probe_$1.json"
 }
 val_inventory_cmd() {   # val_inventory_cmd <space>: exactly the val ids, rows, tics and split file
   local S; S=$(suffix "$1")
-  echo "$PY $REPO/make_dense_eval_splits.py --check-only" \
+  echo "$(space_py "$1") $REPO/make_dense_eval_splits.py --check-only" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--expect-ids $VAL_IDS --sample 0 --raw-tics $RAW/arenas" \
        "--split-file $D/latents_arnold_dense_pertic_eval$S/split_val.json"
 }
 windows_cmd() {   # windows_cmd <space>: the emitted-window contract on real training samples
-  echo "$PY $REPO/check_emitted_windows.py --latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
+  echo "$(space_py "$1") $REPO/check_emitted_windows.py --latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--episodes $TRAIN_IDS --windows $EMIT_WINDOWS --context-frames 32" \
        "--latent-channels $( [ "$1" = sd35 ] && echo 16 || echo 4) --out $D/logs/gate1e_windows_$1.json"
 }
@@ -309,7 +319,12 @@ if [ "$DRY" = 1 ]; then
   exit 0
 fi
 
-[ -x "$PY" ] || gate_fail preflight "no interpreter at $PY (run setup_node.sh first)"
+for V in "${SPACES[@]}"; do
+  [ -x "$(space_py "$V")" ] || gate_fail preflight "no $V interpreter at $(space_py "$V") (run setup_node.sh first)"
+done
+for BB in $SMOKE_BBS; do
+  [ -x "$(bb_py "$BB")" ] || gate_fail preflight "no $BB interpreter at $(bb_py "$BB") (run setup_node.sh first)"
+done
 [ -f "$LAUNCH" ] || gate_fail preflight "no launch_nexttic.sh at $LAUNCH"
 mkdir -p "$SMOKE_DIR" "$D/logs" || gate_fail preflight "cannot write under $D"
 REPORT=$D/GATES.txt
@@ -403,7 +418,7 @@ for BB in $SMOKE_BBS; do
   launcher "$BB" FIT="$FIT" > "$D/logs/gate3_fit_$BB.log" 2>&1 \
     || gate_fail "3 fit check ($BB)" "the launch configuration did not run; see $D/logs/gate3_fit_$BB.log"
   FITLOG=$D/results_spiderman/$(run_name "$BB")/fitcheck/log.jsonl
-  NUMS=$("$PY" - "$FITLOG" <<'PY'
+  NUMS=$("$(bb_py "$BB")" - "$FITLOG" <<'PY'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1]) if '"fit_check"' in l]
 if not rows:
@@ -465,7 +480,7 @@ for BB in $SMOKE_BBS; do
   grep -q "resumed weights from $SD/$(printf '%07d' "$STEPS").pt at step $STEPS with optimizer" "$TRAINLOG" \
     || gate_fail "4c resume ($BB)" "the resume did not restore the optimizer, scheduler and EMA from step $STEPS; see $TRAINLOG"
   [ -f "$SD/$(printf '%07d' "$NEXT").pt" ] || gate_fail "4c resume ($BB)" "no checkpoint at step $NEXT"
-  LAST_END=$("$PY" -c "import json,sys; e=[json.loads(l) for l in open(sys.argv[1]) if '\"event\": \"end\"' in l]; print(e[-1]['step'] if e else -1)" "$SD/log.jsonl")
+  LAST_END=$("$(bb_py "$BB")" -c "import json,sys; e=[json.loads(l) for l in open(sys.argv[1]) if '\"event\": \"end\"' in l]; print(e[-1]['step'] if e else -1)" "$SD/log.jsonl")
   [ "$LAST_END" = "$NEXT" ] || gate_fail "4c resume ($BB)" "the resumed run ended at step $LAST_END, not $NEXT"
   record "4c resume" "bb:$BB" "$STEPS -> $NEXT"
 done
@@ -479,7 +494,7 @@ for BB in $SMOKE_BBS; do
   $(readback_cmd "$BB" "$V" "$H") > "$D/logs/gate5_readback_${BB}_${V}_h$H.log" 2>&1 \
     || gate_fail "5 readback ($BB $V h$H)" "eval_tf.py could not score the snapshot; see $D/logs/gate5_readback_${BB}_${V}_h$H.log"
   M=$SMOKE_DIR/$BB/eval_tf_val_${V}_h$H/metrics.json
-  NUMS=$("$PY" - "$M" <<'PY'
+  NUMS=$("$(bb_py "$BB")" - "$M" <<'PY'
 import json, math, sys
 m = json.load(open(sys.argv[1]))
 def num(k):

@@ -10,6 +10,8 @@
   3. The smoke dropped the gates' micro-batch and worker count and replaced the operator's EXTRA, so
      it trained at lr 5e-5 and 12 workers while the certificate pinned lr 0.1 and 4 workers. The fit,
      smoke, resume and certificate now resolve from one set of production arguments.
+  4. One interpreter per backbone (PY_UNET, PY_SD35, falling back to PY): Spiderman runs the 4-channel
+     rows in the doom env and SD 3.5 in ~/wanenc, and the gates ran every sd35 command under one PY.
 
 Everything here is a dry run or a stub run: nothing encodes, trains or touches a GPU.
 
@@ -339,3 +341,69 @@ def test_smoke_resume_fit_and_certificate_differ_only_in_smoke_settings(tmp_path
             assert _flag_names(only_here) <= allowed and _flag_names(only_cert) <= allowed, \
                 (marker, only_here, only_cert)
             assert _interp(line) == _interp(cert_line), marker
+
+
+# ---------------------------------------------------------------------------------------
+# 4. one interpreter per backbone: PY_UNET for the 4-channel rows, PY_SD35 for SD 3.5
+# ---------------------------------------------------------------------------------------
+
+LAUNCH = os.path.join(REPO, "scripts", "spiderman", "launch_nexttic.sh")
+LAUNCH_RUNS = os.path.join(REPO, "scripts", "cluster", "launch_runs.sh")
+U, S = "/opt/u/python", "/opt/s/python"
+
+
+def _launch_dry(tmp_path, backbone, **env):
+    e = {k: v for k, v in os.environ.items() if k not in GATE_KNOBS}
+    e.update({"DRY": "1", "DOOM_ROOT": str(tmp_path), "HOME": str(tmp_path / "home"), **env})
+    p = subprocess.run(["bash", LAUNCH, "0", backbone], capture_output=True, text=True, env=e, timeout=60)
+    assert p.returncode == 0, p.stderr
+    return p.stdout
+
+
+def test_the_launcher_takes_each_backbones_interpreter(tmp_path):
+    for knobs, want in (({"PY_UNET": U, "PY_SD35": S}, {"unet": U, "pixart": U, "sd35": S}),
+                        ({"PY": "/opt/p/python"}, {"unet": "/opt/p/python", "sd35": "/opt/p/python"}),
+                        ({"PY": "/opt/p/python", "PY_SD35": S}, {"unet": "/opt/p/python", "sd35": S}),
+                        ({}, {"unet": f"{tmp_path}/home/miniconda3/envs/doom/bin/python",
+                              "sd35": f"{tmp_path}/home/wanenc/bin/python"})):
+        for bb, py in want.items():
+            for extra in ({}, {"CERT_QUERY": "1"}, {"FIT": "20"}):
+                out = _launch_dry(tmp_path, bb, **knobs, **extra)
+                assert f"{py} train_wm.py" in out, (knobs, bb, extra, out)
+
+
+def test_the_gates_run_each_space_under_its_own_interpreter(tmp_path):
+    """Every sd35 command (audits, inventories, the latent alignment that re-encodes with the SD 3.5
+    autoencoder, smoke, probes, readback, certificate) under PY_SD35; every sd15 one under PY_UNET."""
+    import re
+    lines = _gates_dry(tmp_path, VAES="sd15,sd35", PY_UNET=U, PY_SD35=S)
+    runs = [ln for ln in lines if ln.startswith("DRY ") and re.search(r"\.py\b", ln)]
+    assert len(runs) > 30, runs
+    for ln in runs:
+        m = re.search(r"/opt/[us]/python", ln)
+        assert m, f"a gate command runs under neither interpreter: {ln}"
+        want = S if re.search(r"\bsd35\b|042-sd35", ln[:m.start()]) else U
+        other = U if want == S else S
+        assert want in ln and other not in ln, ln
+    for space, py in (("sd15", U), ("sd35", S)):
+        align = [ln for ln in runs if ln.startswith(f"DRY gate1d latent alignment {space} ")]
+        assert len(align) == 2 and all(ln.split()[6] == py for ln in align), align
+
+
+def test_the_gates_fall_back_to_py_then_to_the_node_env(tmp_path):
+    import re
+    for knobs, want in (({"PY": "/opt/p/python"}, "/opt/p/python"), ({}, f"{tmp_path}/env/bin/python")):
+        lines = _gates_dry(tmp_path, VAES="sd15,sd35", **knobs)
+        runs = [ln for ln in lines if ln.startswith("DRY ") and re.search(r"\.py\b", ln)]
+        assert runs and all(want in ln for ln in runs), [ln for ln in runs if want not in ln][:3]
+
+
+def test_launch_runs_passes_each_rows_interpreter(tmp_path):
+    e = {k: v for k, v in os.environ.items() if k not in GATE_KNOBS}
+    e.update({"DRY": "1", "DOOM_ROOT": str(tmp_path), "PY_UNET": U, "PY_SD35": S})
+    p = subprocess.run(["bash", LAUNCH_RUNS], capture_output=True, text=True, env=e, timeout=60)
+    assert p.returncode == 0, p.stderr
+    rows = [ln for ln in p.stdout.splitlines() if "train_wm.py" in ln]
+    assert len(rows) == 2
+    assert f"{U} train_wm.py" in [r for r in rows if "--backbone unet" in r][0]
+    assert f"{S} train_wm.py" in [r for r in rows if "--backbone sd35" in r][0]

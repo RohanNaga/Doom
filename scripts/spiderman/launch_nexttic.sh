@@ -6,7 +6,12 @@
 #
 #   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
-#          [ALLOW_UNGATED=1] [DRY=1] [DOOM_ROOT=..] launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#          [ALLOW_UNGATED=1] [PY_UNET=..] [PY_SD35=..] [PY=..] [DRY=1] [DOOM_ROOT=..] \
+#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#
+# The interpreter is per backbone: PY_UNET for the 4-channel rows (unet, pixart), PY_SD35 for sd35,
+# each falling back to PY and then to this host's env (~/miniconda3/envs/doom, ~/wanenc: diffusers
+# 0.40 for SD 3.5 lives only in the second). It is part of the certified command.
 #
 # A launch refuses unless $D/GATES_CERT.json (written by scripts/cluster/gates.sh) certifies this
 # backbone's exact command, commit, corpora, encoders and gate results; see "PIN WHAT LAUNCHES".
@@ -85,14 +90,14 @@ NP=$(( $(echo "$GPU" | tr -cd , | wc -c) + 1 ))
 case $BACKBONE in
   unet)
     RUN=040-unet-nexttic; WARM=CompVis/stable-diffusion-v1-4; CH=4
-    PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="" ;;
+    PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; BB_FLAGS="" ;;
   pixart)
     RUN=041-pixart-nexttic; WARM=PixArt-alpha/PixArt-XL-2-512x512; CH=4
-    PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="--action-inject token" ;;
+    PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; BB_FLAGS="--action-inject token" ;;
   sd35)
     # the 16-channel corpus, its own latent directory, and the two deviations this row already carries
     RUN=042-sd35-nexttic; WARM=stabilityai/stable-diffusion-3.5-medium; CH=16
-    PY=${PY:-$HOME/wanenc/bin/python}
+    PY=${PY_SD35:-${PY:-$HOME/wanenc/bin/python}}
     BB_FLAGS="--grad-ckpt --skip-grad-norm 5 --skip-grad-after 3000"
     L=$D/latents_arnold_dense_pertic_sd35/arenas
     LVAL=$D/latents_arnold_dense_pertic_eval_sd35/val ;;
