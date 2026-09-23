@@ -1,6 +1,8 @@
 #!/bin/bash
 # NEXT-TIC rows on the dense corpus: the model predicts the frame 1 tic (28.6 ms) ahead instead of
-# 1 agent decision (4 tics, 114 ms) ahead. GameNGen's spacing, on 2,000 dense episodes.
+# 1 agent decision (4 tics, 114 ms) ahead, on 2,000 dense episodes. Per-tic spacing is our inference
+# about GameNGen (action repeat 4 in its App. A.5, evaluation on "35FPS data" in A.6); its training
+# stride is not stated.
 #
 #   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
@@ -30,7 +32,9 @@
 #                         Validation is a SEPARATE corpus (ids 6000-6099) so the in-training
 #                         checkpoint-selection signal is held out; ids are checked against
 #                         release/dense_split.json and the run refuses to start if they overlap.
-#   the action            ACTION_HISTORY=32 (the default) is GameNGen's own conditioning: one token
+#   the action            ACTION_HISTORY=32 (the default) follows GameNGen's idea of one learned token
+#                         per past action (its §3.2; vocabulary, embedding and positions undisclosed);
+#                         the 19-bit executed-control MLP and learned positions here are ours. One token
 #                         per context tic carrying the EXECUTED button vector of that tic, oldest
 #                         first, the newest being the control applied from the last context frame
 #                         into the target (`buttons[r-32:r]` for target row r; `buttons[r]` is
