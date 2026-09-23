@@ -1,10 +1,13 @@
 """Stream a training run's `log.jsonl` (and the steward's evaluation reads) to Weights & Biases.
 
-A sidecar, not a trainer change: the launch certificate pins the trainer's code, so a live run cannot
-gain a `--wandb` flag mid-run. This process tails the run directory instead and re-logs every event
-at its training step, so the W&B run is a faithful copy of `log.jsonl` and survives restarts of
-either process (`wandb.init(id=..., resume="allow")`; the last logged step is kept in W&B's summary
-and in a local state file, and only newer steps are sent).
+The FALLBACK for pinned runs only. train_wm.py now streams natively by default (`wandb_log.py`) and
+the evaluators append their reads with `--wandb-run`, so a run launched from a commit that has them
+needs no sidecar. This one is for a run whose certified launch pins trainer code from before native
+logging: the certificate forbids changing that code mid-run, so this process tails the run directory
+instead and re-logs every event at its training step, so the W&B run is a faithful copy of
+`log.jsonl` and survives restarts of either process (`wandb.init(id=..., resume="allow")`; the last
+logged step is kept in W&B's summary and in a local state file, and only newer steps are sent). Its
+series names are the native logger's; `paper/fixtures/test_wandb_log.py` pins the two equal.
 
     python tools/wandb_tail.py --run-dir $D/results_spiderman/040-unet-nexttic \\
         --project doomdit-nexttic --name 040-unet-nexttic [--once]

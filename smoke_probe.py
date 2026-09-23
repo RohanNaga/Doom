@@ -24,13 +24,19 @@ checks, per group:
 
     python smoke_probe.py --ckpt $D/results_smoke/unet/0000300.pt --backbone unet \\
         --latents-dir $D/latents_arnold_dense_pertic_eval/val --episodes 6000:6100 --device cuda:0
+
+`--wandb-run <training run>` also appends the report to the W&B run `<training run>-eval` as
+eval/probe/..., at the step in the checkpoint's filename (the gates' own probe never passes it).
 """
 import argparse
 import json
 import math
+import os
 
 import numpy as np
 import torch
+
+from wandb_log import add_eval_args, log_evaluation
 
 GROUPS = ("control_mlp", "control_pos", "context_conv", "pooled_control")
 REL_UPDATE_FLOOR = 1e-6     # relative |live - EMA|; fp32 rounding of an unmoved parameter is ~1e-7
@@ -215,6 +221,8 @@ def main(args):
     print(text)
     print(("SMOKE_PROBE_OK " if rep["ok"] else "SMOKE_PROBE_FAILED ") + args.backbone + " "
           + "; ".join(rep["problems"]))
+    log_evaluation(args, "probe", rep, ckpt=args.ckpt, recorded_step=rep.get("step"),
+                   out_dir=os.path.dirname(os.path.abspath(args.out or args.ckpt)))
     return 0 if rep["ok"] else 2
 
 
@@ -238,7 +246,7 @@ def build_parser():
     p.add_argument("--unidiffuser-path", dest="unidiffuser_path", default=UNIDIFFUSER_DEFAULT)
     p.add_argument("--sd35-path", dest="sd35_path", default=SD35_DEFAULT)
     p.add_argument("--out", default="")
-    return p
+    return add_eval_args(p)
 
 
 if __name__ == "__main__":

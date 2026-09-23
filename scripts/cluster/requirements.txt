@@ -39,3 +39,7 @@ huggingface_hub==0.34.4
 hf_xet==1.1.5
 
 tqdm==4.66.5
+
+# wandb streams every training event live (train_wm.py does it by default; wandb_log.py). Without it
+# the trainer prints one line and trains on, so a missing package never blocks a run.
+wandb==0.30.0

@@ -138,6 +138,22 @@ def test_the_raw_scores_are_reported_at_the_named_horizons(rollouts, tmp_path):
         assert f"persist_last_psnr_raw@{hh}" in out
 
 
+def test_the_scores_are_appended_to_the_runs_wandb_eval_run(rollouts, tmp_path, monkeypatch):
+    """The scoring pass is the one with numbers, so it logs, and the step comes from the checkpoint's filename."""
+    from wandb_stub import inits, logged, stub_wandb
+    wb = stub_wandb()
+    monkeypatch.setitem(sys.modules, "wandb", wb)
+    out = _score(rollouts, tmp_path / "wb", **{"--save-clips": 0, "--parquet-dir": rollouts[2], "--score-at": "4",
+                                               "--ckpt": "results/040/snap_0010000.pt",
+                                               "--wandb-run": "040-unet-nexttic"})
+    (kw,) = inits(wb)
+    assert kw["id"] == "040-unet-nexttic-eval" and kw["group"] == "040-unet-nexttic"
+    (row,) = logged(wb)
+    assert row["step"] == 10000
+    assert row["eval/rollout/psnr_raw@4"] == out["psnr_raw@4"]
+    assert row["eval/rollout/persist_last_psnr_raw@4"] == out["persist_last_psnr_raw@4"]
+
+
 def test_an_old_rollout_without_tics_cannot_be_scored_against_raw_frames(rollouts, tmp_path):
     path, vae_dir, raw_dir = rollouts
     d = dict(np.load(path))
