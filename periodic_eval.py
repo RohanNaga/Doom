@@ -14,11 +14,13 @@ goes to `eval_<step>/launch.log`.
 
 The trainer never waits for the child and never fails because of it: every problem (no checkpoint
 file, no split file, a spawn that fails) becomes an `eval_skipped` event with the reason, and a
-second read is refused while the previous one of this run is alive, so reads never pile up on the
-evaluation card. `eval_launched` records the child's pid. The wrapper writes each command's exit
-code to `eval_<step>/status.json` and exits non-zero if any failed; the trainer records
-`eval_finished` (its exit code, `ok`, the per-command codes) the next time a read is due, by
-polling, never by waiting.
+second read is refused while the previous one of this run is alive (the wrapper, or the evaluator it
+last started, whose pid it keeps in `eval_<step>/child.pid`), so reads never pile up on the
+evaluation card. A stop sent to the wrapper is passed on to its running evaluator, and the wrapper
+exits only once that is gone. `eval_launched` records the wrapper's pid. The wrapper writes each
+command's exit code to `eval_<step>/status.json` and exits non-zero if any failed; the trainer
+records `eval_finished` (its exit code, `ok`, the per-command codes) the next time a read is due,
+by polling, never by waiting.
 
 The checkpoint read is the compact snapshot (`snap_<step>.pt`, bf16 live and EMA, never pruned)
 when the step is also a snapshot step, else the recovery checkpoint (`<step>.pt`). The read opens
@@ -36,6 +38,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = "eval_running.pid"
 STATUS_FILE = "status.json"
+CHILD_FILE = "child.pid"
+STOP_WAIT = 30.0    # seconds a stopped wrapper gives its running evaluator to exit before it kills it
 HORIZONS = (1, 4)
 DEVICE = re.compile(r"^(?:cuda:(\d+)|cpu)$")
 # eval_tf.py's flag for where each backbone's architecture is rebuilt from (its `backbone_source`)
@@ -213,26 +217,48 @@ def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinn
 
     `status.json` holds each command's exit code and `ok`, and the wrapper exits 1 if any command
     failed, so the trainer can report a failed read (`eval_finished`) instead of assuming it worked.
-    The read's own link (or copy, and a copy's partial `.tmp`) is removed by an EXIT trap, so it goes
-    however the wrapper ends: after the last read, or on a SIGTERM or SIGHUP, for which bash also
-    runs the EXIT trap. Only a SIGKILL of the wrapper leaves it behind.
+
+    Each evaluator runs in the background while the wrapper `wait`s on it, with its pid in
+    `child.pid`, because bash runs a trap only between foreground commands but at once inside
+    `wait`. A TERM or HUP (or an INT, when the script is run by hand) is passed on to the running
+    evaluator, which gets `STOP_WAIT` seconds to exit before it is killed, and only then does the
+    wrapper exit. An EXIT trap removes `child.pid` and the read's own link (or copy, and a copy's
+    partial `.tmp`), so they go however the wrapper ends. Only a SIGKILL of the wrapper leaves them
+    behind; `child.pid` then still lets the trainer see the evaluator running (`PeriodicEval.running`).
     """
-    status = os.path.join(os.path.dirname(path), STATUS_FILE)
+    out = os.path.dirname(path)
+    status, child = os.path.join(out, STATUS_FILE), os.path.join(out, CHILD_FILE)
+    doomed = [child] + ([pinned] + ([pinned + ".tmp"] if copy_from else []) if remove_pinned else [])
+    ticks = max(1, int(round(STOP_WAIT * 5)))
     lines = ["#!/bin/bash", f"# periodic evaluation of {run} at step {step}, launched by train_wm.py --eval-every",
-             'CODES=""', "FAILED=0",
+             'CODES=""', "FAILED=0", "CHILD=",
              'note() { CODES="$CODES${CODES:+, }\\"$1\\": $2"; [ "$2" -eq 0 ] || FAILED=1; '
              'echo "$(date -Iseconds) exit $2 $1"; }',
+             'run_read() { local label=$1; shift; echo "$(date -Iseconds) start $label"; "$@" & CHILD=$!; '
+             f'echo "$CHILD" > {shlex.quote(child)}; wait "$CHILD"; local rc=$?; CHILD=; note "$label" "$rc"; }}',
+             # INT goes on as TERM: a background command of a non-interactive shell ignores INT
+             "stop() {",
+             "  trap '' TERM HUP INT",
+             '  echo "$(date -Iseconds) stopped, exit $2; stopping the running evaluator"',
+             '  if [ -n "$CHILD" ]; then',
+             '    kill -s "$1" "$CHILD" 2>/dev/null',
+             "    n=0",
+             f'    while kill -0 "$CHILD" 2>/dev/null && [ "$n" -lt {ticks} ]; do sleep 0.2; n=$((n + 1)); done',
+             '    kill -KILL "$CHILD" 2>/dev/null',
+             '    wait "$CHILD" 2>/dev/null',
+             "  fi",
+             '  exit "$2"',
+             "}",
+             f"trap {shlex.quote('rm -f ' + shlex.join(doomed))} EXIT",
+             "trap 'stop TERM 143' TERM", "trap 'stop HUP 129' HUP", "trap 'stop TERM 130' INT",
              f"cd {shlex.quote(HERE)} || FAILED=1"]
-    if remove_pinned:
-        doomed = [pinned] + ([pinned + ".tmp"] if copy_from else [])
-        lines.append(f"trap {shlex.quote('rm -f ' + shlex.join(doomed))} EXIT")
     if copy_from:
         tmp = pinned + ".tmp"
         lines += ['echo "$(date -Iseconds) copying the checkpoint (no hard link possible)"',
                   f"cp {shlex.quote(copy_from)} {shlex.quote(tmp)} && mv {shlex.quote(tmp)} {shlex.quote(pinned)}",
                   "note copy $?"]
     for label, argv in cmds:
-        lines += [f'echo "$(date -Iseconds) start {label}"', shlex.join(argv), f"note {label} $?"]
+        lines.append(f"run_read {shlex.quote(label)} {shlex.join(argv)}")
     ok = '$([ "$FAILED" -eq 0 ] && echo true || echo false)'
     lines += [f"printf '{{\"step\": {int(step)}, \"commands\": {{%s}}, \"ok\": %s}}\\n' \"$CODES\" \"{ok}\" "
               f"> {shlex.quote(status + '.tmp')} && mv {shlex.quote(status + '.tmp')} {shlex.quote(status)}",
@@ -242,19 +268,33 @@ def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinn
     return path
 
 
-def _alive(pid, script):
+def _alive(pid, marker):
+    """Whether `pid` is alive and, where /proc shows its command line, that line contains `marker`
+    (the wrapper's script, or the read's directory for its evaluator): a guard against a reused pid."""
     try:
         os.kill(int(pid), 0)
     except (OSError, ValueError):
         return False
     proc = f"/proc/{int(pid)}/cmdline"
-    if os.path.exists(proc):        # guard against a reused pid: it must still be running our script
+    if os.path.exists(proc):
         try:
             with open(proc, "rb") as f:
-                return script.encode() in f.read()
+                return marker.encode() in f.read()
         except OSError:
             return False
     return True
+
+
+def _live_child(rec):
+    """The pid of a read's evaluator still running although its wrapper has ended (a SIGKILL of the
+    wrapper), from the wrapper's `child.pid`; None when there is none."""
+    out = (rec or {}).get("out")
+    try:
+        with open(os.path.join(out, CHILD_FILE)) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError, TypeError):
+        return None
+    return pid if _alive(pid, out) else None
 
 
 class PeriodicEval:
@@ -271,12 +311,16 @@ class PeriodicEval:
         return self.every > 0 and step > 0 and step % self.every == 0
 
     def running(self):
-        """The pid of this run's read that is still alive, or None. Never waits: a read found ended is
-        reported (`eval_finished`) here, which is the next time a read is due."""
+        """The pid of this run's read that is still alive (its wrapper, or the evaluator the wrapper
+        left running), or None. Never waits: a read found ended is reported (`eval_finished`) here,
+        which is the next time a read is due."""
         if self.proc is not None:
             code = self.proc.poll()            # also reaps the finished child
             if code is None:
                 return self.proc.pid
+            child = _live_child(self.current)
+            if child:
+                return child
             self._finished(self.current, code)
             self.proc = self.current = None
             return None
@@ -289,6 +333,9 @@ class PeriodicEval:
         pid = rec.get("pid")
         if pid and _alive(pid, rec.get("script") or ""):
             return pid
+        child = _live_child(rec)
+        if child:
+            return child
         self._finished(rec, None)              # not our child, so its exit code is only in status.json
         return None
 
