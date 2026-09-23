@@ -7,6 +7,9 @@
   2. The gates compared latent contracts within each directory only: a train corpus at scale 1 and a
      val corpus at scale 2 each passed. Train and val of one space must now share one contract, and
      it must be the space's own (the backbone's channels, its autoencoder and normalisation).
+  3. The smoke dropped the gates' micro-batch and worker count and replaced the operator's EXTRA, so
+     it trained at lr 5e-5 and 12 workers while the certificate pinned lr 0.1 and 4 workers. The fit,
+     smoke, resume and certificate now resolve from one set of production arguments.
 
 Everything here is a dry run or a stub run: nothing encodes, trains or touches a GPU.
 
@@ -258,3 +261,81 @@ def test_the_gates_check_each_corpus_against_its_space_and_its_peer(tmp_path):
         pairs[arg(ln, "--latents-dir")] = (space, arg(ln, "--contract-peer"))
     for d, (space, peer) in pairs.items():
         assert peer != d and pairs[peer] == (space, d), (d, peer)
+
+
+# ---------------------------------------------------------------------------------------
+# 3. the fit, the smoke, the resume and the certificate resolve from one set of production arguments
+# ---------------------------------------------------------------------------------------
+
+SMOKE_FLAGS = {"--steps", "--results-dir", "--val-every", "--val-windows", "--ckpt-every", "--snapshot-every",
+               "--local-snapshots", "--keep-last"}
+# what an operator may have exported that gates.sh reads; each test sets its own
+GATE_KNOBS = ("WORKERS", "MB", "MB_UNET", "MB_SD35", "STEPS", "LAUNCH_STEPS", "EXTRA", "PY", "PY_UNET", "PY_SD35",
+              "RUN_REPO", "REPO", "ALLOW_ACCUM", "GATES_RUN_ID")
+
+
+def _gates_dry(tmp_path, **env):
+    e = {k: v for k, v in os.environ.items() if k not in GATE_KNOBS}
+    e.update({"DRY": "1", "DOOM_ROOT": str(tmp_path), "SMOKE_BBS": "unet sd35", **env})
+    p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
+    assert p.returncode == 0, p.stderr
+    return p.stdout.splitlines()
+
+
+def _launch_line(lines, marker):
+    """The train_wm.py line the launcher printed right after the line starting with `marker`."""
+    i = next(i for i, ln in enumerate(lines) if ln.startswith(marker))
+    return next(ln for ln in lines[i + 1:] if "train_wm.py" in ln)
+
+
+def _args(line):
+    return line.split("train_wm.py", 1)[1].split(">>")[0]
+
+
+def _interp(line):
+    return line.split("train_wm.py", 1)[0].split()[-1]
+
+
+def _cert_line(lines, bb):
+    return next(ln for ln in lines if ln.startswith(f"DRY certificate command {bb} "))
+
+
+def _gates_workers():
+    n = int(subprocess.run(["getconf", "_NPROCESSORS_ONLN"], capture_output=True, text=True).stdout.strip() or 16)
+    return min(16, max(4, n // 4))
+
+
+def _flag_names(pairs):
+    return {p.split()[0] for p in pairs}
+
+
+def test_the_smoke_carries_the_operators_extra_workers_and_micro_batch(tmp_path):
+    """Astra's reproduction: the certificate resolved `--lr 0.1` and the gates' own worker count and
+    micro-batch while the smoke ran the launcher's defaults, lr 5e-5 and 12 workers."""
+    w = _gates_workers()
+    lines = _gates_dry(tmp_path, EXTRA="--lr 0.1", MB_UNET="16", ALLOW_ACCUM="1")
+    for marker in ("DRY gate3 fit unet", "DRY gate4 smoke unet", "DRY gate4c resume unet"):
+        cmd = _args(_launch_line(lines, marker)) + " "
+        assert "--lr 0.1 " in cmd, (marker, cmd)
+        assert f"--num-workers {w} " in cmd and "--per-gpu-batch 16 " in cmd, (marker, cmd)
+    # the smoke's own overrides come AFTER the operator's, so argparse gives the smoke its settings
+    smoke = _args(_launch_line(lines, "DRY gate4 smoke unet"))
+    assert smoke.index("--lr 0.1") < smoke.index("--val-windows 128")
+
+
+def test_smoke_resume_fit_and_certificate_differ_only_in_smoke_settings(tmp_path):
+    import gate_certificate as gc
+    lines = _gates_dry(tmp_path, EXTRA="--lr 0.1 --clip 0.5", WORKERS="7")
+    for bb in ("unet", "sd35"):
+        cert_line = _cert_line(lines, bb)
+        cert = gc.flag_pairs(_args(cert_line))
+        assert "--lr 0.1" in cert and "--num-workers 7" in cert and "--steps 400000" in cert, cert
+        for marker, allowed in ((f"DRY gate4 smoke {bb}", SMOKE_FLAGS),
+                                (f"DRY gate4c resume {bb}", SMOKE_FLAGS | {"--resume"}),
+                                (f"DRY gate3 fit {bb}", {"--results-dir", "--fit-check"})):
+            line = _launch_line(lines, marker)
+            got = gc.flag_pairs(_args(line))
+            only_here, only_cert = set(got) - set(cert), set(cert) - set(got)
+            assert _flag_names(only_here) <= allowed and _flag_names(only_cert) <= allowed, \
+                (marker, only_here, only_cert)
+            assert _interp(line) == _interp(cert_line), marker

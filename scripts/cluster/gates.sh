@@ -59,11 +59,20 @@
 # training samples (`check_emitted_windows.py`: newest control = row r-1, and changing buttons[r]
 # leaves the sample unchanged).
 #
+# One set of production arguments. The fit, the smoke, the resume and the certificate all go through
+# `launch_nexttic.sh` under the same production settings (`prod_env`: DOOM_ROOT, the interpreter,
+# MB_UNET / MB_SD35 as MB, WORKERS, LAUNCH_STEPS as STEPS, TRAIN_IDS, VAL_IDS and the operator's
+# EXTRA). The fit adds only FIT; the smoke and its resume change only STEPS and append their own
+# `smoke_extra` after the operator's EXTRA (a results directory, validation, checkpoint and snapshot
+# cadence, and the resume's `--resume`), so argparse's last-value rule gives them those settings and
+# every other flag is the production one. Astra's third review reproduced a smoke at lr 5e-5 and 12
+# workers certified as lr 0.1 and 4 workers, because the smoke dropped them.
+#
 # The certificate. Every gate that passes appends a result to $D/logs/gates_results.jsonl, scoped to
 # the whole run, one latent space, or one backbone. At GATES_GO, after checking that the checkout did
 # not move while the gates ran, `gate_certificate.py write` records for each smoked backbone: its
-# resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under LAUNCH_STEPS, MB_UNET /
-# MB_SD35 and WORKERS, the values launch_runs.sh passes), the commit, the training and validation
+# resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under `prod_env`, the values
+# launch_runs.sh passes), the commit, the training and validation
 # corpus fingerprints, the encoder records and every gate result that applies to it, into
 # $D/GATES_CERT.json. `launch_nexttic.sh` recomputes all of it for the backbone it launches and
 # refuses on any difference; the gates' own fit, smoke and resume runs pass GATE_RUN=1 because they
@@ -115,6 +124,7 @@ DEFAULT_WORKERS=$(( CORES / 4 ))
 [ "$DEFAULT_WORKERS" -lt 4 ] && DEFAULT_WORKERS=4
 [ "$DEFAULT_WORKERS" -gt 16 ] && DEFAULT_WORKERS=16
 WORKERS=${WORKERS:-$DEFAULT_WORKERS}
+PROD_EXTRA=${EXTRA:-}         # the operator's extra trainer flags: part of the production command
 IFS=, read -r -a SPACES <<< "$VAES"
 
 gate_fail() { echo "GATE_FAILED $1: ${*:2}" >&2; exit "${RC_FAIL:-1}"; }
@@ -171,9 +181,13 @@ record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, f
   printf '{"gate": "%s", "scope": "%s", "status": "ok", "detail": "%s"}\n' "$1" "$2" "$detail" >> "$RESULTS"
 }
 bb_mb() { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
+prod_env() {   # prod_env <backbone>: PROD_ENV=(NAME=VALUE ...), the production launch every gate launch starts from
+  PROD_ENV=(DOOM_ROOT="$D" PY="$PY" PY_SD35="$PY" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
+        TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" EXTRA="$PROD_EXTRA")
+}
 cert_cmd() {   # cert_cmd <backbone>: the production command, as the launcher resolves it
-  env DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" \
-    CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1"
+  prod_env "$1"
+  env "${PROD_ENV[@]}" CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1"
 }
 bb_latents() {   # bb_latents <backbone> <train|val>
   local S; S=$(suffix "$(bb_space "$1")")
@@ -191,11 +205,11 @@ align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
        "--min-yaw 0.25 --min-move 0.05 --min-rows 1000 --min-episodes 20 --min-per-class 100" \
        "--min-accuracy 0.95 --margin 0.20 --bootstrap 1000 --seed 0"
 }
-smoke_extra() { # smoke_extra <backbone>: operational overrides only; the recipe is untouched
-  echo "--results-dir $SMOKE_DIR/$1 --val-every 100 --val-windows 128 --ckpt-every $STEPS" \
+smoke_extra() { # smoke_extra <backbone>: the operator's EXTRA, then the smoke's operational overrides
+  echo "${PROD_EXTRA:+$PROD_EXTRA }--results-dir $SMOKE_DIR/$1 --val-every 100 --val-windows 128 --ckpt-every $STEPS" \
        "--snapshot-every $STEPS --local-snapshots --keep-last 1"
 }
-resume_extra() { # resume_extra <backbone>: the smoke's own overrides, then resume its checkpoint for 10 updates
+resume_extra() { # resume_extra <backbone>: the smoke's EXTRA, then resume its checkpoint for 10 updates
   echo "$(smoke_extra "$1") --resume $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --ckpt-every 10"
 }
 bb_paths() {    # bb_paths <backbone>: where the evaluator and the probe build the backbone from
@@ -247,9 +261,10 @@ wait_session() {   # wait_session <backbone> <gate label>: until the tmux sessio
     fi
   done
 }
-launcher() {   # launcher <backbone> <extra env assignments as NAME=VALUE ...>
+launcher() {   # launcher <backbone> <overrides of the production settings as NAME=VALUE ...>
   local BB=$1; shift
-  env DRY=$DRY DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" GATE_RUN=1 "$@" bash "$LAUNCH" "$(bb_gpu "$BB")" "$BB"
+  prod_env "$BB"
+  env "${PROD_ENV[@]}" DRY="$DRY" GATE_RUN=1 "$@" bash "$LAUNCH" "$(bb_gpu "$BB")" "$BB"
 }
 
 if [ "$DRY" = 1 ]; then
@@ -287,7 +302,8 @@ if [ "$DRY" = 1 ]; then
   done
   echo "DRY summary GATES_GO with the fit rates, the smoke checkpoints and the readback PSNR"
   for BB in $SMOKE_BBS; do
-    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<launch_nexttic.sh CERT_QUERY=1 with STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS>\""
+    echo "DRY certificate command $BB $(cert_cmd "$BB")"
+    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<the certificate command above: STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS${PROD_EXTRA:+ EXTRA=$PROD_EXTRA}>\""
   done
   echo "DRY certificate written to $CERT only after checking the checkout did not move"
   exit 0
