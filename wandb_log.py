@@ -31,7 +31,9 @@ Rules the logger keeps:
     is set, and `close()` tries `run.finish()` whatever failed before (a run left open keeps the
     SDK's exit-time teardown waiting), waiting at most `FINISH_TIMEOUT + CLOSE_MARGIN`. A run it
     could not finish (init or finish raised, or the wait ran out) is abandoned: the SDK's exit-time
-    teardown is unregistered, so the process can exit and release its GPU.
+    teardown is unregistered, so the process can exit and release its GPU. An init still pending
+    when the run was abandoned registers that teardown later, so the logger thread unregisters it
+    again the moment init returns, and once more after any finish that did not succeed.
     Only `import wandb` runs on the caller's thread (local work, before the timed loop): importing
     on a thread while DataLoader workers fork could leave a module import lock held in the child.
   * **One writer per run id.** W&B's resume docs: "Unexpected results will occur if multiple
@@ -240,6 +242,7 @@ class RunLogger:
         self._cv = threading.Condition()
         self._failed, self._closed, self._close_result = threading.Event(), False, True
         self._run_finished = threading.Event()      # set once run.finish() has returned
+        self._abandoned = threading.Event()         # set by close() when it gives the run up
         self._report_lock, self._reported, self._dropped = threading.Lock(), False, 0
         self._t0, self._global_batch, self._windows, self._last_train_loss = None, 32, None, None
         if not (enabled and self.name):
@@ -380,6 +383,7 @@ class RunLogger:
         if self._dropped:
             self._say(f"dropped {self._dropped} rows in total while the queue was full; log.jsonl has all of them")
         if not finished:
+            self._abandoned.set()       # before the release: see _work for the init that completes later
             _release_exit_hook(self._wandb)
         if timed_out:
             self._say(f"the run did not finish within {wait:.0f}s; it is left to W&B's background thread and "
@@ -407,6 +411,11 @@ class RunLogger:
                            FINISH_TIMEOUT)
         except Exception as exc:
             self._fail("opening the W&B run", exc)
+        # An init that returns after close() gave up has registered a teardown close() could not see.
+        # close() sets `_abandoned` before its own release, so the teardown is released by close()
+        # when init returned first, and here when it returned after.
+        if self._abandoned.is_set():
+            _release_exit_hook(self._wandb)
         while True:
             kind, payload = self._get()
             if kind == "flush":
@@ -418,6 +427,8 @@ class RunLogger:
                         self._run_finished.set()
                     except Exception as exc:
                         self._fail("finishing the W&B run", exc)
+                if not self._run_finished.is_set():
+                    _release_exit_hook(self._wandb)     # close() may have given up before this teardown existed
                 return
             elif run is not None and not self._failed.is_set():
                 try:
