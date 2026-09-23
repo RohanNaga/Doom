@@ -277,10 +277,10 @@ def test_the_gates_check_each_corpus_against_its_space_and_its_peer(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 SMOKE_FLAGS = {"--steps", "--results-dir", "--val-every", "--val-windows", "--ckpt-every", "--snapshot-every",
-               "--local-snapshots", "--keep-last", "--no-wandb"}
+               "--local-snapshots", "--keep-last", "--no-wandb", "--eval-every"}
 # what an operator may have exported that gates.sh reads; each test sets its own
 GATE_KNOBS = ("WORKERS", "MB", "MB_UNET", "MB_SD35", "STEPS", "LAUNCH_STEPS", "EXTRA", "PY", "PY_UNET", "PY_SD35",
-              "RUN_REPO", "REPO", "ALLOW_ACCUM", "GATES_RUN_ID")
+              "RUN_REPO", "REPO", "ALLOW_ACCUM", "GATES_RUN_ID", "EVAL_EVERY", "EVAL_DEVICE")
 
 
 def _gates_dry(tmp_path, **env):
@@ -364,6 +364,34 @@ def test_the_production_launch_streams_to_wandb_and_the_gate_runs_do_not(tmp_pat
     src = open(GATES).read()
     assert "--no-wandb" in src and "EXTRA=\"--no-wandb\"" not in src, \
         "the gates append --no-wandb to the operator's EXTRA, never replace it"
+
+
+def _last(args, name):
+    toks = args.split()
+    return toks[len(toks) - 1 - toks[::-1].index(name) + 1]
+
+
+def test_the_certified_launch_evaluates_every_5000_steps_and_the_smoke_never(tmp_path):
+    """The periodic read is part of the certified command; the smoke and its resume turn it off (a
+    300-step run has nothing worth reading, and its 10-update resume cannot meet a 5000 cadence)."""
+    lines = _gates_dry(tmp_path)
+    for bb in ("unet", "sd35"):
+        cert = _args(_cert_line(lines, bb))
+        assert _last(cert, "--eval-every") == "5000" and _last(cert, "--eval-device") == "cuda:3"
+        assert _last(cert, "--eval-parquet-dir") == f"{tmp_path}/raw_arnold_dense/arenas"
+        for marker in (f"DRY gate4 smoke {bb}", f"DRY gate4c resume {bb}"):
+            assert _last(_args(_launch_line(lines, marker)), "--eval-every") == "0", marker
+
+
+def test_an_operators_eval_cadence_is_certified_and_repeated_in_the_printed_launch(tmp_path):
+    lines = _gates_dry(tmp_path, EVAL_EVERY="10000", EVAL_DEVICE="cuda:5")
+    text = "\n".join(lines)
+    for bb in ("unet", "sd35"):
+        cert = _args(_cert_line(lines, bb))
+        assert _last(cert, "--eval-every") == "10000" and _last(cert, "--eval-device") == "cuda:5"
+        launch = next(ln for ln in lines if ln.startswith(f"DRY launch {bb} "))
+        assert "EVAL_EVERY=10000" in launch and "EVAL_DEVICE=cuda:5" in launch
+        assert f"DRY launch check {bb}: resolves to the certified command" in text
 
 
 # ---------------------------------------------------------------------------------------

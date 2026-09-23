@@ -15,7 +15,7 @@
 # At GATES_GO the gates print, per certified backbone, the exact launch to paste (GATES_LAUNCH): `cd
 # $RUN_REPO &&` DOOM_ROOT, RUN_REPO, that backbone's PY_UNET or PY_SD35, MB, WORKERS, STEPS,
 # TRAIN_IDS, VAL_IDS, EXTRA and any other launcher knob set here (CTX, ACTION_HISTORY, PHASE,
-# GRAD_CKPT, ALLOW_PARTIAL, ALLOW_ACCUM, INIT, ACCELERATE), then `bash
+# GRAD_CKPT, ALLOW_PARTIAL, ALLOW_ACCUM, INIT, ACCELERATE, EVAL_EVERY, EVAL_DEVICE), then `bash
 # scripts/spiderman/launch_nexttic.sh <gpu> <backbone>`. Each is first run with CERT_QUERY=1 in an
 # empty environment (`env -i`) and must resolve to the certified command, or the certificate is
 # revoked: a command that needs anything from the operator's shell is not the one printed.
@@ -109,7 +109,10 @@
 # them those settings and every other flag is the production one. Astra's third review reproduced a
 # smoke at lr 5e-5 and 12 workers certified as lr 0.1 and 4 workers, because the smoke dropped them.
 # `--no-wandb` keeps the gates' throwaway runs out of W&B: train_wm.py streams by default, so the
-# certified production command carries no W&B flag at all and its live curves start at launch.
+# certified production command carries no W&B flag at all and its live curves start at launch. The
+# smoke and its resume also pass `--eval-every 0`: the production cadence (EVAL_EVERY, default 5000,
+# on EVAL_DEVICE, default cuda:3) is certified, and the trainer refuses a cadence that no checkpoint
+# of a 300-step smoke or a 10-update resume could meet.
 #
 # The certificate. Every gate that passes appends a result to this run's own results file,
 # $D/logs/gates_results_<GATES_RUN_ID>.jsonl (a timestamp and the pid unless set), scoped to the
@@ -258,7 +261,7 @@ prod_env() {   # prod_env <backbone>: PROD_ENV=(NAME=VALUE ...), the production 
         TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" EXTRA="$PROD_EXTRA")
 }
 # launcher knobs that change the certified command; the operator's launch repeats any set here
-LAUNCH_KNOBS="CTX ACTION_HISTORY PHASE GRAD_CKPT ALLOW_PARTIAL ALLOW_ACCUM INIT ACCELERATE"
+LAUNCH_KNOBS="CTX ACTION_HISTORY PHASE GRAD_CKPT ALLOW_PARTIAL ALLOW_ACCUM INIT ACCELERATE EVAL_EVERY EVAL_DEVICE"
 operator_env() {   # operator_env <backbone>: OP_ENV=(NAME=VALUE ...), everything the operator's launch sets
   local K
   OP_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO")
@@ -306,7 +309,7 @@ fit_extra() {   # fit_extra: the operator's EXTRA, then --no-wandb (a fit check 
 }
 smoke_extra() { # smoke_extra <backbone>: the operator's EXTRA, then the smoke's operational overrides
   echo "${PROD_EXTRA:+$PROD_EXTRA }--results-dir $SMOKE_DIR/$1 --val-every 100 --val-windows 128 --ckpt-every $STEPS" \
-       "--snapshot-every $STEPS --local-snapshots --keep-last 1 --no-wandb"
+       "--snapshot-every $STEPS --local-snapshots --keep-last 1 --no-wandb --eval-every 0"
 }
 resume_extra() { # resume_extra <backbone>: the smoke's EXTRA, then resume its checkpoint for 10 updates
   echo "$(smoke_extra "$1") --resume $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --ckpt-every 10"

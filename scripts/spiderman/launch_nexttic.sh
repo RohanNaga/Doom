@@ -7,6 +7,7 @@
 #   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
 #          [ALLOW_UNGATED=1] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [DRY=1] [DOOM_ROOT=..] \
+#          [EVAL_EVERY=5000] [EVAL_DEVICE=cuda:3] \
 #          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
 #
 # RUN_REPO is the checkout the run executes from (`cd $RUN_REPO`) and whose clean HEAD the certificate
@@ -39,6 +40,14 @@
 # ~/miniconda3/envs/doom and ~/wanenc on Spiderman, and Rohan runs `wandb login` himself. Without the
 # package the trainer prints one `wandb:` line and trains on without W&B, so read the head of
 # $D/logs/train_$RUN.log after launching. tools/wandb_tail.py is only for runs launched before this.
+#
+# PERIODIC READS. The production launch sets EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 on Spiderman through
+# COMMON (these are the defaults), so the cadence is part of the certified command. At every multiple
+# of 5,000 steps, right after that step's checkpoint is written, train_wm.py starts ONE detached read
+# on physical card 3 (periodic_eval.py): eval_tf.py live and EMA at horizons 1 and 4 against the raw
+# frames, then smoke_probe.py, into $R/eval_<step>/, logged to the W&B run $RUN-eval. The trainer never
+# waits for it, skips a read while the previous one is alive, and records eval_launched or
+# eval_skipped in log.jsonl. The gates' smoke and resume pass --eval-every 0; EVAL_EVERY=0 turns it off.
 #
 # What differs from the stride-4 rows (030-035) and what does not:
 #
@@ -94,6 +103,8 @@ CTX=${CTX:-32}
 ACTION_HISTORY=${ACTION_HISTORY:-32}
 MB=${MB:-32}                    # fill the card: the micro-batch IS the global batch
 WORKERS=${WORKERS:-12}          # a per-tic corpus does not fit the page cache; the loader is seek-bound
+EVAL_EVERY=${EVAL_EVERY:-5000}  # the trainer's own detached read of each 5k checkpoint (0 turns it off)
+EVAL_DEVICE=${EVAL_DEVICE:-cuda:3}   # the PHYSICAL card that read runs on, never the training card
 GLOBAL=32
 L=$D/latents_arnold_dense_pertic/arenas
 LVAL=$D/latents_arnold_dense_pertic_eval/val
@@ -157,6 +168,7 @@ COMMON="--tic-stride 1 --action-history $ACTION_HISTORY --context-frames $CTX --
  --latents-dir $L --val-latents-dir $LVAL --episode-ids $TRAIN_IDS --val-episode-ids $VAL_IDS \
  --dense-segment arenas --val-every 1000 --val-windows 1024 --ckpt-every 5000 \
  --snapshot-every 10000 --local-snapshots --keep-last 2 --num-workers $WORKERS \
+ --eval-every $EVAL_EVERY --eval-device $EVAL_DEVICE --eval-parquet-dir $D/raw_arnold_dense/arenas \
  $BB_FLAGS $PHASEF $CKPTF $PARTIALF ${EXTRA:-}"
 TRAIN_ARGS="--backbone $BACKBONE --latent-channels $CH --warm-start $WARM --hf-cache $D/hf/hub \
  --results-dir $R $COMMON"

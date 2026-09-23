@@ -34,6 +34,7 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from backbones import ACTION_INJECTIONS, BACKBONES, LATENT_HW, build_model, resolve_latent_channels
 from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
 from doom_data import PHASE_BUCKETS
+from periodic_eval import PeriodicEval, cadence_problem
 from wandb_log import DEFAULT_PROJECT as WANDB_PROJECT
 from wandb_log import RunLogger
 
@@ -597,6 +598,7 @@ def main(args):
     os.makedirs(args.results_dir, exist_ok=True)
     log_path = os.path.join(args.results_dir, "log.jsonl")
     wb = RunLogger()   # a no-op until config.json exists; replaced there on the main process
+    evals = None       # the periodic evaluation (--eval-every), main process only
 
     def log(**kw):
         if is_main:
@@ -729,6 +731,8 @@ def main(args):
         # opened here, before the start event and the timed loop, so wandb.init's cost never lands in steps_per_s
         wb = RunLogger(enabled=wandb_run is not None, name=wandb_run, project=args.wandb_project,
                        entity=args.wandb_entity, config=cfg, results_dir=args.results_dir)
+        if args.eval_every and not args.fit_check:
+            evals = PeriodicEval(args, latent_channels, device, log, wandb_run=wandb_run)
         if train_ids is not None and not (args.resume and os.path.exists(os.path.join(args.results_dir, EPISODES_FILE))):
             # which episodes this run actually trained on, so a data cell is reproducible from the
             # results directory alone and not only from (split, fraction, seed) -- and so a resume
@@ -889,6 +893,10 @@ def main(args):
                                        capture_output=True, timeout=600)
                     except (subprocess.TimeoutExpired, OSError) as e:
                         print(f"remote housekeeping failed: {e}", flush=True)
+            if evals is not None and evals.due(step):
+                # this step's snapshot or recovery checkpoint is on disk now; the read is a detached
+                # process the trainer never waits for, and any problem only becomes an eval_skipped event
+                evals.launch(step)
             if not args.fit_check and step % args.ckpt_every == 0:
                 acc.wait_for_everyone()   # other ranks wait here instead of inside a collective while rank 0 serializes and uploads
             if step >= max_steps:
@@ -907,9 +915,21 @@ def main(args):
     log(event="end", step=step)
 
 
+class TrainParser(argparse.ArgumentParser):
+    """The trainer's parser, with the checks that need more than one flag made at parse time, so a
+    cadence with no checkpoint to read fails before any model is built."""
+
+    def parse_args(self, args=None, namespace=None):
+        a = super().parse_args(args, namespace)
+        problem = cadence_problem(a)
+        if problem:
+            self.error(problem)
+        return a
+
+
 def build_parser():
     """Every trainer flag in one place, so a test can construct args without a subprocess."""
-    p = argparse.ArgumentParser()
+    p = TrainParser()
     p.add_argument("--backbone", choices=list(BACKBONES), required=True)
     p.add_argument("--latent-channels", type=int, default=0,
                    help="latent channels of the corpus and the backbone; 0 takes the warm start's own (4 for the SD KL-f8 rows, 16 for sd35)")
@@ -1027,6 +1047,27 @@ def build_parser():
                         "a missing wandb package only switches streaming off, with one line on stderr")
     p.add_argument("--wandb-project", default=WANDB_PROJECT, help="W&B project of the live run")
     p.add_argument("--wandb-entity", default=None, help="W&B entity (user or team); default: the logged-in user's")
+    p.add_argument("--eval-every", type=int, default=0,
+                   help="every this many steps, right after that step's checkpoint is written, start ONE detached "
+                        "read of it (periodic_eval.py): eval_tf.py live and EMA at horizons 1 and 4 into "
+                        "<results>/eval_<step>/tf_<live|ema>_h<H>/, then smoke_probe.py into probe.json, logged to "
+                        "the W&B run <run>-eval at that step. The trainer never waits for it or fails because of "
+                        "it, and skips a read while the previous one is alive. Must be a multiple of --ckpt-every "
+                        "or of --snapshot-every (with --local-snapshots). 0 (default) is off; the production launch "
+                        "sets EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 on Spiderman through the launcher's COMMON, so the "
+                        "cadence is part of the certified command, and the gates' smoke passes 0")
+    p.add_argument("--eval-device", default=None,
+                   help="cuda:K (the PHYSICAL card K; the read sees only it, as cuda:0) or cpu. Default: the training "
+                        "card, which stalls training for the read's duration and needs the memory training leaves free")
+    p.add_argument("--eval-windows", type=int, default=512, help="held-out windows per eval_tf.py read")
+    p.add_argument("--eval-steps", type=int, default=10, help="sampler steps per eval_tf.py read")
+    p.add_argument("--eval-latents-dir", default="",
+                   help="the corpus the reads score; default: the validation latents (--val-latents-dir, else --latents-dir)")
+    p.add_argument("--eval-split", default="",
+                   help="its split file; default: the canonical <parent>/split_<corpus>.json of that corpus")
+    p.add_argument("--eval-parquet-dir", default="",
+                   help="the raw recordings of that corpus, so the reads score raw PSNR and LPIPS against the "
+                        "persistence floor (the numbers W&B plots); empty scores decoded frames only")
     p.add_argument("--seed", type=int, default=0)
     return p
 
