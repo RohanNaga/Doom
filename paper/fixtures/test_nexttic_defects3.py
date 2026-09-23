@@ -277,7 +277,7 @@ def test_the_gates_check_each_corpus_against_its_space_and_its_peer(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 SMOKE_FLAGS = {"--steps", "--results-dir", "--val-every", "--val-windows", "--ckpt-every", "--snapshot-every",
-               "--local-snapshots", "--keep-last"}
+               "--local-snapshots", "--keep-last", "--no-wandb"}
 # what an operator may have exported that gates.sh reads; each test sets its own
 GATE_KNOBS = ("WORKERS", "MB", "MB_UNET", "MB_SD35", "STEPS", "LAUNCH_STEPS", "EXTRA", "PY", "PY_UNET", "PY_SD35",
               "RUN_REPO", "REPO", "ALLOW_ACCUM", "GATES_RUN_ID")
@@ -341,13 +341,29 @@ def test_smoke_resume_fit_and_certificate_differ_only_in_smoke_settings(tmp_path
         assert "--lr 0.1" in cert and "--num-workers 7" in cert and "--steps 400000" in cert, cert
         for marker, allowed in ((f"DRY gate4 smoke {bb}", SMOKE_FLAGS),
                                 (f"DRY gate4c resume {bb}", SMOKE_FLAGS | {"--resume"}),
-                                (f"DRY gate3 fit {bb}", {"--results-dir", "--fit-check"})):
+                                (f"DRY gate3 fit {bb}", {"--results-dir", "--fit-check", "--no-wandb"})):
             line = _launch_line(lines, marker)
             got = gc.flag_pairs(_args(line))
             only_here, only_cert = set(got) - set(cert), set(cert) - set(got)
             assert _flag_names(only_here) <= allowed and _flag_names(only_cert) <= allowed, \
                 (marker, only_here, only_cert)
             assert _interp(line) == _interp(cert_line), marker
+
+
+def test_the_production_launch_streams_to_wandb_and_the_gate_runs_do_not(tmp_path):
+    """W&B streaming is the trainer's default, so the certified command carries no W&B flag and
+    `--no-wandb` never reaches it. The gates' fit, smoke and resume pass `--no-wandb`, so a 300-step
+    throwaway run never becomes a W&B run beside the real one, and the launch the gates print still
+    resolves to the certified command."""
+    lines = _gates_dry(tmp_path, EXTRA="--lr 0.1")
+    for bb in ("unet", "sd35"):
+        assert "--no-wandb" not in _cert_line(lines, bb), bb
+        assert f"DRY launch check {bb}: resolves to the certified command" in "\n".join(lines)
+        for marker in (f"DRY gate3 fit {bb}", f"DRY gate4 smoke {bb}", f"DRY gate4c resume {bb}"):
+            assert "--no-wandb" in _args(_launch_line(lines, marker)).split(), marker
+    src = open(GATES).read()
+    assert "--no-wandb" in src and "EXTRA=\"--no-wandb\"" not in src, \
+        "the gates append --no-wandb to the operator's EXTRA, never replace it"
 
 
 # ---------------------------------------------------------------------------------------

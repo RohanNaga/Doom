@@ -103,11 +103,13 @@
 # One set of production arguments. The fit, the smoke, the resume and the certificate all go through
 # `launch_nexttic.sh` under the same production settings (`prod_env`: DOOM_ROOT, the interpreter,
 # MB_UNET / MB_SD35 as MB, WORKERS, LAUNCH_STEPS as STEPS, TRAIN_IDS, VAL_IDS and the operator's
-# EXTRA). The fit adds only FIT; the smoke and its resume change only STEPS and append their own
-# `smoke_extra` after the operator's EXTRA (a results directory, validation, checkpoint and snapshot
-# cadence, and the resume's `--resume`), so argparse's last-value rule gives them those settings and
-# every other flag is the production one. Astra's third review reproduced a smoke at lr 5e-5 and 12
-# workers certified as lr 0.1 and 4 workers, because the smoke dropped them.
+# EXTRA). The fit adds only FIT and `--no-wandb`; the smoke and its resume change only STEPS and append
+# their own `smoke_extra` after the operator's EXTRA (a results directory, validation, checkpoint and
+# snapshot cadence, `--no-wandb`, and the resume's `--resume`), so argparse's last-value rule gives
+# them those settings and every other flag is the production one. Astra's third review reproduced a
+# smoke at lr 5e-5 and 12 workers certified as lr 0.1 and 4 workers, because the smoke dropped them.
+# `--no-wandb` keeps the gates' throwaway runs out of W&B: train_wm.py streams by default, so the
+# certified production command carries no W&B flag at all and its live curves start at launch.
 #
 # The certificate. Every gate that passes appends a result to this run's own results file,
 # $D/logs/gates_results_<GATES_RUN_ID>.jsonl (a timestamp and the pid unless set), scoped to the
@@ -299,9 +301,12 @@ align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
        "--min-yaw 0.25 --min-move 0.05 --min-rows 1000 --min-episodes 20 --min-per-class 100" \
        "--min-accuracy 0.95 --margin 0.20 --bootstrap 1000 --seed 0"
 }
+fit_extra() {   # fit_extra: the operator's EXTRA, then --no-wandb (a fit check never streams anyway)
+  echo "${PROD_EXTRA:+$PROD_EXTRA }--no-wandb"
+}
 smoke_extra() { # smoke_extra <backbone>: the operator's EXTRA, then the smoke's operational overrides
   echo "${PROD_EXTRA:+$PROD_EXTRA }--results-dir $SMOKE_DIR/$1 --val-every 100 --val-windows 128 --ckpt-every $STEPS" \
-       "--snapshot-every $STEPS --local-snapshots --keep-last 1"
+       "--snapshot-every $STEPS --local-snapshots --keep-last 1 --no-wandb"
 }
 resume_extra() { # resume_extra <backbone>: the smoke's EXTRA, then resume its checkpoint for 10 updates
   echo "$(smoke_extra "$1") --resume $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --ckpt-every 10"
@@ -378,7 +383,7 @@ if [ "$DRY" = 1 ]; then
   explain 0; explain 2; explain 3
   for BB in $SMOKE_BBS; do
     echo "DRY gate3 fit $BB"
-    launcher "$BB" FIT="$FIT"
+    launcher "$BB" FIT="$FIT" EXTRA="$(fit_extra)"
     echo "DRY gate3 record steps_per_s and peak_mem_gb from $D/results_spiderman/$(run_name "$BB")/fitcheck/log.jsonl (accum must be 1)"
   done
   for BB in $SMOKE_BBS; do
@@ -508,7 +513,7 @@ record "2 alignment" all "exit 0 on val $VAL_IDS (${SPACES[0]})"
 # --- gate 3: the fit check, through the launcher -----------------------------------------
 for BB in $SMOKE_BBS; do
   say "$(date -Iseconds) gate 3: fit check, $BB, $FIT updates on gpu $(bb_gpu "$BB")"
-  launcher "$BB" FIT="$FIT" > "$D/logs/gate3_fit_$BB.log" 2>&1 \
+  launcher "$BB" FIT="$FIT" EXTRA="$(fit_extra)" > "$D/logs/gate3_fit_$BB.log" 2>&1 \
     || gate_fail "3 fit check ($BB)" "the launch configuration did not run; see $D/logs/gate3_fit_$BB.log"
   FITLOG=$D/results_spiderman/$(run_name "$BB")/fitcheck/log.jsonl
   NUMS=$("$(bb_py "$BB")" - "$FITLOG" <<'PY'

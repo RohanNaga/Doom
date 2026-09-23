@@ -31,6 +31,15 @@
 # updates/s and peak allocated and reserved memory. Run it before every multi-hour launch; that is the
 # throughput sweep the fill-the-card rule asks for.
 #
+# LIVE CURVES (CLAUDE.md, Rohan Sep 23 2026). train_wm.py streams every log.jsonl event to Weights &
+# Biases by default: project doomdit-nexttic, run named after the results directory ($RUN), resumed
+# on restart. The certified command therefore carries no W&B flag; only the gates' fit, smoke and
+# resume runs pass --no-wandb, and a fit check never streams. BEFORE THE NEXT LAUNCH each training env
+# needs the package: `pip install wandb` (the version pinned in scripts/cluster/requirements.txt) in
+# ~/miniconda3/envs/doom and ~/wanenc on Spiderman, and Rohan runs `wandb login` himself. Without the
+# package the trainer prints one `wandb:` line and trains on without W&B, so read the head of
+# $D/logs/train_$RUN.log after launching. tools/wandb_tail.py is only for runs launched before this.
+#
 # What differs from the stride-4 rows (030-035) and what does not:
 #
 #   --tic-stride 1        the ONLY change to what the model learns. The sample shapes are identical
