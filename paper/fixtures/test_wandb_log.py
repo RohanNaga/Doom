@@ -338,3 +338,126 @@ def test_evaluations_go_to_their_own_run_in_the_trainers_group():
     an evaluator never writes to the live trainer's run; it writes `<run>-eval` in group `<run>`."""
     assert wandb_log.eval_run_names("040-unet-nexttic") == ("040-unet-nexttic-eval", "040-unet-nexttic")
     assert wandb_log.eval_run_names("040-unet-nexttic-eval") == ("040-unet-nexttic-eval", "040-unet-nexttic")
+
+
+# ---------------------------------------------------------------------------------------
+# train_wm.py: on by default, off under --no-wandb and in fit checks, fed by the one event writer
+# ---------------------------------------------------------------------------------------
+
+os.environ.setdefault("ACCELERATE_USE_CPU", "1")
+TINY_PIXART = dict(num_attention_heads=2, attention_head_dim=8, in_channels=4, out_channels=8, num_layers=2,
+                   caption_channels=32, sample_size=64, patch_size=2, cross_attention_dim=16,
+                   use_additional_conditions=False, norm_num_groups=2)
+BITS = 19
+
+
+@pytest.fixture
+def tiny_pixart(monkeypatch):
+    """Serve a tiny transformer wherever PixArt would pull the 611M checkpoint, so the trainer runs on the CPU."""
+    from diffusers import PixArtTransformer2DModel as P
+    monkeypatch.setattr(P, "from_pretrained", classmethod(lambda cls, *a, **k: cls(**TINY_PIXART)))
+    monkeypatch.setattr(P, "load_config", classmethod(lambda cls, *a, **k: dict(TINY_PIXART)))
+    monkeypatch.setenv("ACCELERATE_USE_CPU", "1")
+
+
+def train_tiny(tmp_path, *flags, run="040-tiny-nexttic"):
+    """Four updates of a tiny next-tic PixArt on three synthetic per-tic episodes; the results dir."""
+    import numpy as np
+    import train_wm
+    from pertic_fixtures import held_actions, write_pertic_episode
+    d = str(tmp_path / "lat")
+    rng = np.random.RandomState(0)
+    for ep in range(3):
+        btns = ["".join(str(int(b)) for b in rng.randint(0, 2, BITS)) for _ in range(40)]
+        write_pertic_episode(d, ep, held_actions([0, 1, 2] * 4)[:40], buttons=btns)
+    out = str(tmp_path / run)
+    train_wm.main(train_wm.build_parser().parse_args(
+        ["--backbone", "pixart", "--warm-start", "PixArt-alpha/PixArt-XL-2-512x512",
+         "--latents-dir", d, "--results-dir", out, "--tic-stride", "1", "--action-history", "8",
+         "--context-frames", "8", "--episode-ids", "0:2", "--val-episode-ids", "2:3",
+         "--num-actions", "3", "--noise-buckets", "4", "--per-gpu-batch", "2", "--global-batch", "2",
+         "--steps", "4", "--warmup", "1", "--log-every", "1", "--val-every", "2", "--val-windows", "2",
+         "--ckpt-every", "4", "--ema-every", "1", "--num-workers", "0", "--action-dropout", "0.0", *flags]))
+    return out
+
+
+def jsonl(path):
+    with open(path) as f:
+        return [json.loads(ln) for ln in f if ln.strip()]
+
+
+def test_the_trainer_flags_default_to_streaming():
+    sys.path.insert(0, HERE)
+    import train_wm
+    a = train_wm.build_parser().parse_args(["--backbone", "dit"])
+    assert a.wandb is True and a.wandb_project == "doomdit-nexttic" and a.wandb_entity is None
+    assert train_wm.build_parser().parse_args(["--backbone", "dit", "--no-wandb"]).wandb is False
+
+
+def test_the_trainer_streams_every_event_after_writing_it(tiny_pixart, tmp_path, monkeypatch):
+    sys.path.insert(0, HERE)
+    mod = stub_wandb()
+    out = str(tmp_path / "040-tiny-nexttic")
+    seen_on_disk = []
+
+    class OrderedRun(FakeRun):
+        def log(self, row, **k):
+            # the line for this event must already be in log.jsonl when W&B is handed it
+            last = jsonl(os.path.join(out, "log.jsonl"))[-1]
+            seen_on_disk.append(last["step"] == row["step"] and last["event"] in ("train", "val"))
+            super().log(row, **k)
+
+    real_init = mod.init
+    mod.init = lambda **kw: (real_init(**kw), OrderedRun(mod.calls))[1]
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    train_tiny(tmp_path)
+
+    (kind, _, kw), = [c for c in mod.calls if c[0] == "init"]
+    cfg = json.load(open(os.path.join(out, "config.json")))
+    assert kw["id"] == kw["name"] == kw["group"] == "040-tiny-nexttic"
+    assert kw["resume"] == "allow" and kw["dir"] == os.path.join(out, ".wandb")
+    assert kw["config"] == cfg and cfg["git"], "the W&B config is config.json, git hash included"
+    assert cfg["wandb"] is True and cfg["wandb_run"] == "040-tiny-nexttic"
+    events = jsonl(os.path.join(out, "log.jsonl"))
+    want = [(e["event"], e["step"]) for e in events if e["event"] in ("train", "val")]
+    got = [("val" if "val/loss" in r else "train", r["step"]) for r in logged(mod)]
+    assert got == want and len(want) == 6, "four train and two val events"
+    assert seen_on_disk and all(seen_on_disk), "a row reached W&B before its line was in log.jsonl"
+    assert [c[0] for c in mod.calls].count("finish") == 1, "the end event closes the run"
+
+
+def test_no_wandb_opts_out_and_says_so_in_config(tiny_pixart, tmp_path, monkeypatch):
+    sys.path.insert(0, HERE)
+    boom = types.ModuleType("wandb")
+    boom.init = lambda **kw: pytest.fail("--no-wandb opened a W&B run")
+    monkeypatch.setitem(sys.modules, "wandb", boom)
+    out = train_tiny(tmp_path, "--no-wandb")
+    cfg = json.load(open(os.path.join(out, "config.json")))
+    assert cfg["wandb"] is False and cfg["wandb_run"] is None
+    assert not os.path.exists(os.path.join(out, ".wandb"))
+
+
+def test_a_fit_check_never_logs(tiny_pixart, tmp_path, monkeypatch):
+    sys.path.insert(0, HERE)
+    import train_wm
+    boom = types.ModuleType("wandb")
+    boom.init = lambda **kw: pytest.fail("a fit check opened a W&B run")
+    monkeypatch.setitem(sys.modules, "wandb", boom)
+    out = str(tmp_path / "fit")
+    train_wm.main(train_wm.build_parser().parse_args(
+        ["--backbone", "pixart", "--warm-start", "PixArt-alpha/PixArt-XL-2-512x512", "--results-dir", out,
+         "--fit-check", "2", "--context-frames", "2", "--num-actions", "3", "--noise-buckets", "4",
+         "--per-gpu-batch", "2", "--global-batch", "2", "--num-workers", "0", "--action-dropout", "0.0"]))
+    assert any(e["event"] == "fit_check" for e in jsonl(os.path.join(out, "log.jsonl")))
+    assert json.load(open(os.path.join(out, "config.json")))["wandb_run"] is None
+
+
+def test_a_wandb_outage_mid_run_does_not_stop_training(tiny_pixart, tmp_path, monkeypatch, capsys):
+    sys.path.insert(0, HERE)
+    monkeypatch.setitem(sys.modules, "wandb", stub_wandb(fail="log"))
+    out = train_tiny(tmp_path)
+    events = jsonl(os.path.join(out, "log.jsonl"))
+    assert events[-1]["event"] == "end" and events[-1]["step"] == 4
+    assert os.path.isfile(os.path.join(out, "best.pt"))
+    err = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("wandb:")]
+    assert len(err) == 1, err

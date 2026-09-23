@@ -29,6 +29,8 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from backbones import ACTION_INJECTIONS, BACKBONES, LATENT_HW, build_model, resolve_latent_channels
 from diffusion_v import OBJECTIVES, VDiffusion, noise_augment
 from doom_data import PHASE_BUCKETS
+from wandb_log import DEFAULT_PROJECT as WANDB_PROJECT
+from wandb_log import RunLogger
 
 ARNOLD_BUTTONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "cards", "arnold", "buttons.json")
 
@@ -589,6 +591,7 @@ def main(args):
 
     os.makedirs(args.results_dir, exist_ok=True)
     log_path = os.path.join(args.results_dir, "log.jsonl")
+    wb = RunLogger()   # a no-op until config.json exists; replaced there on the main process
 
     def log(**kw):
         if is_main:
@@ -599,6 +602,9 @@ def main(args):
             except OSError as e:   # a full disk must not kill training; stdout and the remote copy still get the line
                 print(f"log write failed: {e}", flush=True)
             print(json.dumps(kw), flush=True)
+            # the live W&B copy of the line just written: host-side floats only, no device sync, and
+            # it never raises (a W&B outage switches the logger off, log.jsonl stays the record)
+            wb.log_event(kw)
 
     latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
     phase_buckets = args.phase_buckets if args.phase_conditioning else 0
@@ -697,19 +703,27 @@ def main(args):
             git = "?"
         import hashlib
         split_hash = hashlib.md5(open(args.split, "rb").read()).hexdigest() if (not args.fit_check and os.path.exists(args.split)) else None
+        # live curves (CLAUDE.md): on unless --no-wandb, never for a fit check. The W&B run is named
+        # after the results directory, so a resume continues it
+        wandb_run = os.path.basename(os.path.normpath(args.results_dir)) if (args.wandb and not args.fit_check) else None
+        cfg = {**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum,
+               "split_md5": split_hash, "torch": torch.__version__,
+               "resolved_latent_channels": latent_channels,
+               # what a consumer needs to know about the data contract this run trained under:
+               # the frame spacing, the dataset class that produced it, and whether the phase
+               # of the held action was a conditioning signal
+               "tic_stride": args.tic_stride,
+               "dataset_class": type(train_ds).__name__,
+               "resolved_phase_buckets": phase_buckets,
+               "resolved_control_bits": control_bits,
+               "dataset_summary": getattr(train_ds, "summary", None),
+               "init_from": args.init_from or None, "init_from_step": init_step,
+               "wandb_run": wandb_run}
         with open(os.path.join(args.results_dir, "config.json"), "w") as f:
-            json.dump({**vars(args), "git": git, "params": n_params, "world_size": world, "accum": accum,
-                       "split_md5": split_hash, "torch": torch.__version__,
-                       "resolved_latent_channels": latent_channels,
-                       # what a consumer needs to know about the data contract this run trained under:
-                       # the frame spacing, the dataset class that produced it, and whether the phase
-                       # of the held action was a conditioning signal
-                       "tic_stride": args.tic_stride,
-                       "dataset_class": type(train_ds).__name__,
-                       "resolved_phase_buckets": phase_buckets,
-                       "resolved_control_bits": control_bits,
-                       "dataset_summary": getattr(train_ds, "summary", None),
-                       "init_from": args.init_from or None, "init_from_step": init_step}, f, indent=1)
+            json.dump(cfg, f, indent=1)
+        # opened here, before the start event and the timed loop, so wandb.init's cost never lands in steps_per_s
+        wb = RunLogger(enabled=wandb_run is not None, name=wandb_run, project=args.wandb_project,
+                       entity=args.wandb_entity, config=cfg, results_dir=args.results_dir)
         if train_ids is not None and not (args.resume and os.path.exists(os.path.join(args.results_dir, EPISODES_FILE))):
             # which episodes this run actually trained on, so a data cell is reproducible from the
             # results directory alone and not only from (split, fraction, seed) -- and so a resume
@@ -1000,6 +1014,14 @@ def build_parser():
                    help="start a NEW run from one of our own checkpoints' weights (best.pt, a recovery "
                         "NNNNNNN.pt or a snap_*.pt): weights and EMA only, fresh optimizer, step 0, warmup "
                         "again. Mutually exclusive with --resume, and recorded in config.json")
+    p.add_argument("--no-wandb", dest="wandb", action="store_false",
+                   help="do not stream this run to Weights & Biases. Streaming is ON by default (CLAUDE.md: live "
+                        "curves are mandatory): every log.jsonl event is re-logged, right after it is written, to "
+                        "the W&B run named after the results directory, which a resume continues. A fit check "
+                        "never streams; the gates' fit, smoke and resume runs pass this flag. A W&B failure or "
+                        "a missing wandb package only switches streaming off, with one line on stderr")
+    p.add_argument("--wandb-project", default=WANDB_PROJECT, help="W&B project of the live run")
+    p.add_argument("--wandb-entity", default=None, help="W&B entity (user or team); default: the logged-in user's")
     p.add_argument("--seed", type=int, default=0)
     return p
 
