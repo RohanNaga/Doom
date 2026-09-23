@@ -1,9 +1,17 @@
 #!/bin/bash
 # Evaluation suite for a next-tic row, in three stages that cannot be run out of order.
 #
-#   usage: [PY=..] [NOWAIT=1] [CKPT=path] [STEP=n] [CORPORA=".."] [RESCORE=1] [BEST=0] \
-#          [SELECT_WINDOWS=512] [SPACING=linear] [SEED=0] [FORCE_SELECT=1] [FORCE_TEST=1] [DRY=1] [DOOM_ROOT=..] \
+#   usage: [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [NOWAIT=1] [CKPT=path] [STEP=n] \
+#          [CORPORA=".."] [RESCORE=1] [BEST=0] [SELECT_WINDOWS=512] [SPACING=linear] [SEED=0] \
+#          [FORCE_SELECT=1] [FORCE_TEST=1] [DRY=1] [DOOM_ROOT=..] \
 #          after_nexttic.sh <gpu> <unet | sd35 | pixart> [--select]
+#
+# Which code scores. RUN_REPO (default $D/repo) is the checkout the evaluation runs: the scripts are
+# started from it and every helper is called by its path in it, so an evaluation launched from a
+# second checkout ($D/repo_launch) never runs $D/repo's code. Its commit and path are written to the
+# eval log and to each score directory's decoder_provenance.txt. The interpreter is the launcher's:
+# PY_UNET for the 4-channel rows, PY_SD35 for SD 3.5, each falling back to PY and then to this host's
+# env (~/miniconda3/envs/doom, ~/wanenc).
 #
 # The three stages (docs/REVIEW_2026-09-22.md, H2). The old script scored validation, test and
 # unseen in one unattended pass, so nothing kept a test number from informing which checkpoint or
@@ -137,8 +145,11 @@ R=$D/results_spiderman/$RUN
 SEL=$R/selection.json
 SCORED=$R/test_scored_at
 LOG=$D/logs/${RUN}_eval.log
-PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}
-[ "$CH" = 16 ] && PY=${PY_SD35:-$HOME/wanenc/bin/python}
+# the interpreter, with launch_nexttic.sh's fallbacks: the backbone's own, then PY, then this host's env
+if [ "$CH" = 16 ]; then PY=${PY_SD35:-${PY:-$HOME/wanenc/bin/python}}
+else PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; fi
+RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout that scores: cwd and every helper path
+CODE=unrecorded                 # its commit, filled in once the checkout is entered
 
 # per-tic latents and raw parquet per corpus; the dense ones and the original ones live apart
 if [ "$CH" = 16 ]; then LE=$D/latents_arnold_dense_pertic_eval_sd35; LO=$D/latents_arnold_eval_pertic_sd35
@@ -207,6 +218,7 @@ prov() {   # prov <score-dir> <key>: say which decoder and which checkpoint prod
     echo "decoder_path=$DEC_PATH"
     echo "decoder=$DEC_INFO"
     echo "decoder_metrics=$DEC_METRICS"
+    echo "checkout=$RUN_REPO code=$CODE"
     [ -n "$CLAIM" ] && echo "unseen_claim=$CLAIM"
     echo "score_key=$2"
     echo "recorded=$(date -Iseconds)"
@@ -233,7 +245,7 @@ key_of() {   # key_of <ckpt> <step> <sha256> <variant> <corpus> <horizon> <windo
        "windows=$7 seed=$SEED sampler=ddim$STEPS spacing=$SPACING decoder=$DEC_TAG"
 }
 window_manifest() {   # window_manifest <tf|rollout> <corpus> <horizon> <count>: what that evaluator will score
-  "$PY" "$D/repo/score_identity.py" windows --kind "$1" --latents-dir "$(corpus_dir "$2")" \
+  "$PY" "$RUN_REPO/score_identity.py" windows --kind "$1" --latents-dir "$(corpus_dir "$2")" \
     --split "$(corpus_split "$2")" --num "$4" --seed "$SEED" --context-frames 32 --horizon "$3" \
     --latent-channels "$CH" < /dev/null
 }
@@ -346,7 +358,7 @@ tf() {   # tf <corpus> <out-dir> <ckpt> <step> <sha256> <live|ema> <horizon> <wi
 corpus_ok() {   # corpus_ok <corpus>: present, and exactly the expected episodes, or it is not scored
   local S=$1 LAT IDS
   LAT=$(corpus_dir "$S"); IDS=$(expected_ids "$S")
-  local CMD=("$PY" "$D/repo/make_dense_eval_splits.py" --latents-dir "$LAT" --split-file "$(corpus_split "$S")"
+  local CMD=("$PY" "$RUN_REPO/make_dense_eval_splits.py" --latents-dir "$LAT" --split-file "$(corpus_split "$S")"
              --check-only --sample 0)
   [ -n "$IDS" ] && CMD+=(--expect-ids "$IDS")
   if [ "$DRY" = 1 ]; then echo "DRY check $S ${CMD[*]}"; return 0; fi
@@ -359,7 +371,7 @@ corpus_ok() {   # corpus_ok <corpus>: present, and exactly the expected episodes
 
 # --- the scoring configuration a selection pins ------------------------------------------------
 corpus_id() {   # corpus_id <corpus>: split file contents, latent fingerprint and size (score_identity.py)
-  "$PY" "$D/repo/score_identity.py" corpus --latents-dir "$(corpus_dir "$1")" --split "$(corpus_split "$1")" < /dev/null
+  "$PY" "$RUN_REPO/score_identity.py" corpus --latents-dir "$(corpus_dir "$1")" --split "$(corpus_split "$1")" < /dev/null
 }
 build_pins() {   # build_pins <corpus...>: PINS=(--pin key=value ...), what a sealed stage will score with
   PINS=(--pin "decoder_path=$DEC_PATH" --pin "decoder_identity=$DEC_ID" --pin "sampler_steps=$STEPS"
@@ -430,6 +442,7 @@ rollout() {   # rollout <corpus> <ckpt> <step> <sha256> <live|ema>: roll out, sc
 # --- DRY: print the plan of this stage and stop ------------------------------------------
 if [ "$DRY" = 1 ]; then
   echo "DRY $RUN stage=$STAGE corpora=${CORPORA} decoder: $USED"
+  echo "DRY checkout $RUN_REPO (every script and helper runs from it) interpreter $PY"
   echo "DRY lock $LOCK exclusively before scoring, held until every scorer exits; a second evaluator of $RUN exits 5 (AFTER_NEXTTIC_BUSY)"
   case $STAGE in
     val)
@@ -465,10 +478,11 @@ fi
 export TMPDIR=$D/tmp/tmpdir; mkdir -p "$TMPDIR" "$R" "$D/logs"
 export CUDA_VISIBLE_DEVICES=$GPU HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 # No `git pull`: this is the checkout the training run and the gates use, and pulling here changed
-# the code under a live run (docs/REVIEW_2026-09-22.md H3). The commit is recorded instead.
-cd "$D/repo" || { echo "AFTER_NEXTTIC_FAILED $RUN: no checkout at $D/repo" >&2; exit 2; }
-echo "$(date -Iseconds) evaluating with code at $(git rev-parse HEAD 2>/dev/null || echo unversioned)" >> "$LOG"
-DEC_INFO=$("$PY" "$D/repo/decoder_provenance.py" show "$DEC_PATH" < /dev/null 2>/dev/null) || DEC_INFO=""
+# the code under a live run (docs/REVIEW_2026-09-22.md H3). The checkout and its commit are recorded.
+cd "$RUN_REPO" || { echo "AFTER_NEXTTIC_FAILED $RUN: no checkout at $RUN_REPO" >&2; exit 2; }
+CODE=$(git rev-parse HEAD 2>/dev/null || echo unversioned)
+echo "$(date -Iseconds) evaluating with code at $CODE (checkout $RUN_REPO, interpreter $PY)" >> "$LOG"
+DEC_INFO=$("$PY" "$RUN_REPO/decoder_provenance.py" show "$DEC_PATH" < /dev/null 2>/dev/null) || DEC_INFO=""
 DEC_INFO=${DEC_INFO:-unrecorded}
 # the key carries the decoder's content hash, so re-tuned weights under the same path rescore
 DEC_ID=$(echo "$DEC_INFO" | tr ' ' '\n' | sed -n 's/^identity=//p')
@@ -488,7 +502,7 @@ if [ "$STAGE" = val ]; then
   hold_eval_lock
   # ONE checkpoint, chosen by its STORED step, carrying both the live weights and the EMA. A
   # lexicographic `ls ... | sort | tail -1` put every snap_* ahead of every numbered recovery file.
-  PICK_LINE=$("$PY" "$D/repo/pick_checkpoint.py" --results-dir "$R" --require-ema --hash \
+  PICK_LINE=$("$PY" "$RUN_REPO/pick_checkpoint.py" --results-dir "$R" --require-ema --hash \
     ${STEP:+--step "$STEP"} ${CKPT:+--ckpt "$CKPT"} < /dev/null) || {
     echo "AFTER_NEXTTIC_FAILED $RUN: no checkpoint to score in $R" >&2; exit 3; }
   read -r PICK PICK_STEP PICK_EMA PICK_SHA <<<"$PICK_LINE"
@@ -500,7 +514,7 @@ if [ "$STAGE" = val ]; then
     # a separately labelled SELECTION result, not the same weights: best.pt is the minimum of the
     # noisy-context validation loss at whatever step reached it
     if [ "$BEST" = 1 ] && [ -f "$R/best.pt" ]; then
-      if BEST_LINE=$("$PY" "$D/repo/pick_checkpoint.py" --ckpt "$R/best.pt" --hash < /dev/null); then
+      if BEST_LINE=$("$PY" "$RUN_REPO/pick_checkpoint.py" --ckpt "$R/best.pt" --hash < /dev/null); then
         read -r BCK BSTEP _ BSHA <<<"$BEST_LINE"
         tf "$S" "$R/eval_tf_${S}_best" "$BCK" "$BSTEP" "${BSHA:-?}" live 1 "$NUM_WINDOWS"
       else fail "best.pt could not be read"; fi
@@ -524,7 +538,7 @@ if [ "$STAGE" = select ]; then
   fi
   corpus_ok val || { echo "AFTER_NEXTTIC_FAILED $RUN: the val corpus cannot be scored" >&2; exit 4; }
   mkdir -p "$R/select"
-  "$PY" "$D/repo/select_checkpoint.py" candidates --results-dir "$R" > "$R/select/candidates.txt" < /dev/null \
+  "$PY" "$RUN_REPO/select_checkpoint.py" candidates --results-dir "$R" > "$R/select/candidates.txt" < /dev/null \
     || { echo "AFTER_NEXTTIC_FAILED $RUN: no candidate checkpoint in $R" >&2; exit 3; }
   CANDS=()
   while IFS= read -r LINE; do [ -n "$LINE" ] && CANDS+=("$LINE"); done < "$R/select/candidates.txt"
@@ -543,7 +557,7 @@ if [ "$STAGE" = select ]; then
   # content identity of every corpus that exists now (test and unseen included)
   # shellcheck disable=SC2046
   build_pins $(present_corpora) || { echo "AFTER_NEXTTIC_FAILED $RUN: the scoring configuration could not be pinned" >&2; exit 4; }
-  CHOSE=$("$PY" "$D/repo/select_checkpoint.py" choose --results-dir "$R" --candidates "$R/select/candidates.txt" \
+  CHOSE=$("$PY" "$RUN_REPO/select_checkpoint.py" choose --results-dir "$R" --candidates "$R/select/candidates.txt" \
     --scores-dir "$R/select" --out "$SEL" --meta "windows=$SELECT_WINDOWS" --meta "sampler=ddim$STEPS" \
     --meta "decoder=$DEC_TAG" --meta "corpus=val:$VAL_IDS" "${PINS[@]}" $FORCE < /dev/null) \
     || { echo "AFTER_NEXTTIC_FAILED $RUN: selection refused (see above)" >&2; exit 4; }
@@ -556,13 +570,13 @@ fi
 if [ "$STAGE" = sealed ]; then
   hold_eval_lock
   [ -f "$SEL" ] || { echo "AFTER_NEXTTIC_FAILED $RUN: no $SEL. Run the validation stage, then --select; the sealed corpora score only the selected checkpoint" >&2; exit 4; }
-  SEL_LINE=$("$PY" "$D/repo/select_checkpoint.py" show --selection "$SEL" < /dev/null) \
+  SEL_LINE=$("$PY" "$RUN_REPO/select_checkpoint.py" show --selection "$SEL" < /dev/null) \
     || { echo "AFTER_NEXTTIC_FAILED $RUN: $SEL does not name a checkpoint that is still on disk unchanged" >&2; exit 4; }
   read -r PICK PICK_STEP PICK_SHA PICK_VARIANT SEL_SHA <<<"$SEL_LINE"
   # the configuration about to be used must be the one pinned at selection, for every corpus named
   # shellcheck disable=SC2086
   build_pins $SEALED || { echo "AFTER_NEXTTIC_FAILED $RUN: the scoring configuration could not be computed" >&2; exit 4; }
-  if ! WHY=$("$PY" "$D/repo/select_checkpoint.py" verify --selection "$SEL" "${PINS[@]}" < /dev/null 2>&1); then
+  if ! WHY=$("$PY" "$RUN_REPO/select_checkpoint.py" verify --selection "$SEL" "${PINS[@]}" < /dev/null 2>&1); then
     echo "AFTER_NEXTTIC_FAILED $RUN: $WHY" >&2
     exit 4
   fi
@@ -577,7 +591,7 @@ if [ "$STAGE" = sealed ]; then
     if [ "$S" = arenas_678 ]; then
       # an unseen-map number is about the whole system: a decoder that saw arenas 6-8, a held-out
       # episode, or whose training frames are unknown cannot back it (docs/REVIEW_2026-09-22.md H4)
-      if "$PY" "$D/repo/decoder_provenance.py" check "$DEC_PATH" --claim unseen-map \
+      if "$PY" "$RUN_REPO/decoder_provenance.py" check "$DEC_PATH" --claim unseen-map \
            > "$D/logs/${RUN}_decoder_claim.txt" 2>&1 < /dev/null; then CLAIM=system
       elif [ "${UNSEEN_CLAIM:-}" = dynamics-only ]; then CLAIM=dynamics-only
       else

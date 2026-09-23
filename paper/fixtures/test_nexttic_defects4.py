@@ -7,6 +7,9 @@
   9. The readback ran eval_tf.py with every card visible, so it took GPU 0 (another user's on
      Spiderman) while the smoke used the backbone's card. Every GPU step of the gates now runs under
      CUDA_VISIBLE_DEVICES=<its card> and addresses it as cuda:0.
+ 10. after_nexttic.sh ran `cd $D/repo` and `$D/repo/<helper>.py`, so an evaluation launched from a
+     second checkout still ran $D/repo's code. It now honours RUN_REPO throughout, records which
+     checkout scored, and takes PY_UNET / PY_SD35 with the launcher's fallbacks.
 
 Everything here is a dry run or a stub run: nothing encodes, trains or touches a GPU.
 
@@ -152,3 +155,95 @@ def test_the_readback_runs_on_the_backbones_card(tmp_path):
 def test_the_header_states_the_device_convention():
     head = open(GATES).read().split("\nset -u", 1)[0]
     assert "CUDA_VISIBLE_DEVICES" in head and "cuda:0" in head
+
+
+# ---------------------------------------------------------------------------------------
+# 10. the evaluator runs the checkout it is given (RUN_REPO) under the backbone's interpreter
+# ---------------------------------------------------------------------------------------
+
+AFTER = os.path.join(REPO, "scripts", "spiderman", "after_nexttic.sh")
+
+# records the working directory and the script path of every call, then runs the evaluation stub
+WHERE_PY = '''#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ["WHERE_LOG"], "a") as f:
+    f.write(json.dumps({"cwd": os.getcwd(), "script": sys.argv[1]}) + "\\n")
+os.execv(os.environ["STUB_INNER"], [os.environ["STUB_INNER"]] + sys.argv[1:])
+'''
+
+
+def _evaluate_from(tmp_path, *args, **env):
+    import rollout_eval
+    from test_after_nexttic_stages import STUB_PY
+    from test_eval_stages import root_with
+    from test_launch_pin import checkout
+    root, r = root_with(tmp_path)                 # $D/repo exists, and is not a git checkout
+    second = root / "repo_launch"
+    sha = checkout(second)
+    inner = tmp_path / "stubpy"
+    inner.write_text(STUB_PY)
+    inner.chmod(0o755)
+    where = tmp_path / "where.py"
+    where.write_text(WHERE_PY)
+    where.chmod(0o755)
+    e = _clean_env(DOOM_ROOT=str(root), PY_UNET=str(where), STUB_INNER=str(inner),
+                   WHERE_LOG=str(tmp_path / "where.jsonl"), STUB_LOG=str(tmp_path / "stub.log"),
+                   STUB_PICK=str(r / "0300000.pt"), STUB_SCORE_FILE=rollout_eval.SCORE_FILE,
+                   STUB_REAL_PY=sys.executable, STUB_REPO=REPO, NUM_WINDOWS="8", SELECT_WINDOWS="4", **env)
+    p = subprocess.run(["bash", AFTER, "0", "unet", *args], capture_output=True, text=True, env=e, timeout=120)
+    log = tmp_path / "where.jsonl"
+    calls = [json.loads(ln) for ln in log.read_text().splitlines()] if log.exists() else []
+    return p, calls, root, r, second, sha
+
+
+def _ckpt(tmp_path):
+    return str(tmp_path / "root" / "results_spiderman" / "040-unet-nexttic" / "0300000.pt")
+
+
+def test_an_evaluation_from_a_second_checkout_runs_only_that_checkouts_code(tmp_path):
+    """Astra's finding: `cd $D/repo` and `$D/repo/<helper>.py` ran $D/repo's code for an evaluation
+    launched from $D/repo_launch."""
+    second_dir = str(tmp_path / "root" / "repo_launch")
+    p, calls, root, r, second, sha = _evaluate_from(tmp_path, RUN_REPO=second_dir, CKPT=_ckpt(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert calls, "the stand-in interpreter was never called"
+    for c in calls:
+        assert c["cwd"] == str(second), c
+        s = c["script"]
+        assert not os.path.isabs(s) or s.startswith(str(second) + "/"), f"ran code outside RUN_REPO: {s}"
+    names = {os.path.basename(c["script"]) for c in calls}
+    assert {"pick_checkpoint.py", "eval_tf.py", "decoder_provenance.py", "score_identity.py"} <= names, names
+    log = (root / "logs" / "040-unet-nexttic_eval.log").read_text()
+    assert f"checkout {second}" in log and sha in log, log
+    assert f"checkout={second}" in (r / "eval_tf_val" / "decoder_provenance.txt").read_text()
+
+
+def test_the_selection_stage_uses_run_repo_too(tmp_path):
+    second_dir = str(tmp_path / "root" / "repo_launch")
+    p, calls, root, r, second, sha = _evaluate_from(tmp_path, "--select", RUN_REPO=second_dir)
+    assert p.returncode == 0, p.stderr
+    sel = [c for c in calls if os.path.basename(c["script"]) == "select_checkpoint.py"]
+    assert sel and all(c["script"] == str(second / "select_checkpoint.py") for c in sel), sel
+
+
+def test_the_default_checkout_is_still_d_repo(tmp_path):
+    p, calls, root, r, second, sha = _evaluate_from(tmp_path, CKPT=_ckpt(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert calls and all(c["cwd"] == str(root / "repo") for c in calls)
+
+
+def test_the_evaluator_takes_each_backbones_interpreter(tmp_path):
+    def dry(bb, **env):
+        e = _clean_env(DRY="1", DOOM_ROOT=str(tmp_path), HOME=str(tmp_path / "home"), **env)
+        p = subprocess.run(["bash", AFTER, "0", bb], capture_output=True, text=True, env=e, timeout=60)
+        assert p.returncode == 0, p.stderr
+        return [ln for ln in p.stdout.splitlines() if "eval_tf.py" in ln]
+
+    u, s = "/opt/u/python", "/opt/s/python"
+    for knobs, want in (({"PY_UNET": u, "PY_SD35": s}, {"unet": u, "pixart": u, "sd35": s}),
+                        ({"PY": "/opt/p/python"}, {"unet": "/opt/p/python", "sd35": "/opt/p/python"}),
+                        ({}, {"unet": f"{tmp_path}/home/miniconda3/envs/doom/bin/python",
+                              "sd35": f"{tmp_path}/home/wanenc/bin/python"})):
+        for bb, py in want.items():
+            lines = dry(bb, **knobs)
+            assert lines and all(f" {py} eval_tf.py" in ln for ln in lines), (knobs, bb, lines[:1])
