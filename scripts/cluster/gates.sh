@@ -5,6 +5,21 @@
 #          [PY_UNET=..] [PY_SD35=..] [PY=..] [FIT=20] [STEPS=300] [WINDOWS=64] [SMOKE_TIMEOUT=7200] \
 #          [EXPLAIN=<rc>] [DRY=1] gates.sh
 #
+#   on Spiderman (the launch may come from a second checkout while an encoder runs from $D/repo;
+#   REPO, the checkout these gates run from, must then be that same checkout):
+#     cd /sata2/data/rnagabhi/doom/repo_launch && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#       RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch UNET_GPU=1 SD35_GPU=2 LAUNCH_STEPS=400000 \
+#       MB_UNET=32 MB_SD35=32 WORKERS=12 PY_UNET=$HOME/miniconda3/envs/doom/bin/python \
+#       PY_SD35=$HOME/wanenc/bin/python bash scripts/cluster/gates.sh
+#
+# At GATES_GO the gates print, per certified backbone, the exact launch to paste (GATES_LAUNCH): `cd
+# $RUN_REPO &&` DOOM_ROOT, RUN_REPO, that backbone's PY_UNET or PY_SD35, MB, WORKERS, STEPS,
+# TRAIN_IDS, VAL_IDS, EXTRA and any other launcher knob set here (CTX, ACTION_HISTORY, PHASE,
+# GRAD_CKPT, ALLOW_PARTIAL, ALLOW_ACCUM, INIT, ACCELERATE), then `bash
+# scripts/spiderman/launch_nexttic.sh <gpu> <backbone>`. Each is first run with CERT_QUERY=1 in an
+# empty environment (`env -i`) and must resolve to the certified command, or the certificate is
+# revoked: a command that needs anything from the operator's shell is not the one printed.
+#
 # Interpreters. Every command of the sd15 space and the U-Net runs under PY_UNET, every command of the
 # sd35 space and SD 3.5 (audits, inventories, the latent alignment that re-encodes with the SD 3.5
 # autoencoder, fit, smoke, probes, readback, certificate) under PY_SD35; each falls back to PY and
@@ -197,6 +212,30 @@ prod_env() {   # prod_env <backbone>: PROD_ENV=(NAME=VALUE ...), the production 
   PROD_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
         TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" EXTRA="$PROD_EXTRA")
 }
+# launcher knobs that change the certified command; the operator's launch repeats any set here
+LAUNCH_KNOBS="CTX ACTION_HISTORY PHASE GRAD_CKPT ALLOW_PARTIAL ALLOW_ACCUM INIT ACCELERATE"
+operator_env() {   # operator_env <backbone>: OP_ENV=(NAME=VALUE ...), everything the operator's launch sets
+  local K
+  OP_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO")
+  if [ "$1" = sd35 ]; then OP_ENV+=(PY_SD35="$PY_SD35"); else OP_ENV+=(PY_UNET="$PY_UNET"); fi
+  OP_ENV+=(MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS")
+  [ -n "$PROD_EXTRA" ] && OP_ENV+=(EXTRA="$PROD_EXTRA")
+  for K in $LAUNCH_KNOBS; do [ -n "${!K:-}" ] && OP_ENV+=("$K=${!K}"); done
+  return 0
+}
+operator_cmd() {   # operator_cmd <backbone>: the launch to paste on this host, shell-quoted
+  local A OUT
+  operator_env "$1"
+  OUT="cd $(printf '%q' "$RUN_REPO") &&"
+  for A in "${OP_ENV[@]}"; do OUT="$OUT ${A%%=*}=$(printf '%q' "${A#*=}")"; done
+  echo "$OUT bash scripts/spiderman/launch_nexttic.sh $(bb_gpu "$1") $1"
+}
+operator_ok() {   # operator_ok <backbone> <certified command>: does the printed launch resolve to it in an empty environment?
+  local GOT
+  operator_env "$1"
+  GOT=$(env -i PATH="$PATH" HOME="$HOME" "${OP_ENV[@]}" CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1") \
+    && [ "$GOT" = "$2" ]
+}
 cert_cmd() {   # cert_cmd <backbone>: the production command, as the launcher resolves it
   prod_env "$1"
   env "${PROD_ENV[@]}" CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1"
@@ -314,7 +353,11 @@ if [ "$DRY" = 1 ]; then
   done
   echo "DRY summary GATES_GO with the fit rates, the smoke checkpoints and the readback PSNR"
   for BB in $SMOKE_BBS; do
-    echo "DRY certificate command $BB $(cert_cmd "$BB")"
+    PROD_CMD=$(cert_cmd "$BB")
+    echo "DRY certificate command $BB $PROD_CMD"
+    echo "DRY launch $BB $(operator_cmd "$BB")"
+    if operator_ok "$BB" "$PROD_CMD"; then echo "DRY launch check $BB: resolves to the certified command in an empty environment"
+    else echo "DRY launch check $BB: MISMATCH, the printed launch does not resolve to the certified command"; fi
     echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<the certificate command above: STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS${PROD_EXTRA:+ EXTRA=$PROD_EXTRA}>\""
   done
   echo "DRY certificate written to $CERT only after checking the checkout did not move"
@@ -524,6 +567,10 @@ for BB in $SMOKE_BBS; do
   # shellcheck disable=SC2046
   $(cert_write_cmd "$BB") "$PROD_CMD" >> "$REPORT" 2>&1 \
     || { rm -f "$CERT"; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+  # the launch printed below must itself resolve to what was just certified, with nothing inherited
+  operator_ok "$BB" "$PROD_CMD" \
+    || { rm -f "$CERT"; gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
 done
 say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
+for BB in $SMOKE_BBS; do say "GATES_LAUNCH $BB: $(operator_cmd "$BB")"; done
 say "the gates say the corpus, the configuration and the evaluator agree; the training numbers are still unmeasured"

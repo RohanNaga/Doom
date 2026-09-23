@@ -14,6 +14,8 @@
      rows in the doom env and SD 3.5 in ~/wanenc, and the gates ran every sd35 command under one PY.
   5. RUN_REPO: the launch may come from a second checkout ($D/repo_launch) while an encoder still runs
      from $D/repo; the launcher cds into it, the certificate pins its HEAD and gate 0 checks it.
+  6. At GATES_GO the gates print, per certified backbone, the exact launch that passes the certificate
+     check on this host, verified first in an empty environment.
 
 Everything here is a dry run or a stub run: nothing encodes, trains or touches a GPU.
 
@@ -473,3 +475,72 @@ def test_gate_zero_pins_run_repo(tmp_path):
     (second / "train_wm.py").write_text("# dirty\n")
     p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
     assert "GATE_FAILED 0 pin" in p.stderr
+
+
+# ---------------------------------------------------------------------------------------
+# 6. GATES_GO prints, per certified backbone, the operator command that passes the certificate
+# ---------------------------------------------------------------------------------------
+
+def _operator(lines, bb):
+    """(cd target, {NAME: VALUE}, [launcher args]) of the printed operator command for `bb`."""
+    import shlex
+    ln = next(ln for ln in lines if ln.startswith(f"DRY launch {bb} "))
+    toks = shlex.split(ln[len(f"DRY launch {bb} "):])
+    assert toks[0] == "cd" and toks[2] == "&&", toks
+    i, env = 3, {}
+    while "=" in toks[i] and not toks[i].startswith("-"):
+        k, v = toks[i].split("=", 1)
+        env[k] = v
+        i += 1
+    assert toks[i:i + 2] == ["bash", "scripts/spiderman/launch_nexttic.sh"], toks
+    return toks[1], env, toks[i + 2:]
+
+
+SPIDERMAN = {"RUN_REPO": "/sata2/data/rnagabhi/doom/repo_launch", "UNET_GPU": "1", "SD35_GPU": "2",
+             "LAUNCH_STEPS": "400000", "MB_UNET": "32", "MB_SD35": "32", "WORKERS": "12",
+             "PY_UNET": U, "PY_SD35": S}
+
+
+def test_the_printed_command_resolves_to_the_certified_one_in_a_clean_shell(tmp_path):
+    lines = _gates_dry(tmp_path, **SPIDERMAN, EXTRA="--lr 1e-4 --clip 0.5")
+    for bb, gpu, py in (("unet", "1", U), ("sd35", "2", S)):
+        cd, env, args = _operator(lines, bb)
+        assert cd == SPIDERMAN["RUN_REPO"] and args == [gpu, bb]
+        assert env["DOOM_ROOT"] == str(tmp_path) and env["RUN_REPO"] == SPIDERMAN["RUN_REPO"]
+        assert env[f"PY_{'SD35' if bb == 'sd35' else 'UNET'}"] == py
+        assert (env["MB"], env["WORKERS"], env["STEPS"], env["EXTRA"]) == ("32", "12", "400000", "--lr 1e-4 --clip 0.5")
+        clean = {"PATH": os.environ["PATH"], "HOME": str(tmp_path / "home"), **env, "CERT_QUERY": "1"}
+        p = subprocess.run(["bash", LAUNCH, *args], capture_output=True, text=True, env=clean, timeout=60)
+        assert p.returncode == 0, p.stderr
+        certified = _cert_line(lines, bb)[len(f"DRY certificate command {bb} "):]
+        assert p.stdout.strip() == certified.strip(), (p.stdout, certified)
+    assert "EXTRA" not in _operator(_gates_dry(tmp_path, **SPIDERMAN), "unet")[1], "EXTRA only when it is set"
+
+
+def test_the_printed_command_launches_against_a_real_certificate(tmp_path):
+    """End to end on a throwaway root: certify what the gates resolve, then run exactly the printed
+    command (fake tmux); it launches, and the same command without one of its settings is refused."""
+    import gate_certificate as gc
+    from test_launch_pin import TRAIN_IDS, VAL_IDS, root_for_launch
+    root, sha, bindir = root_for_launch(tmp_path)
+    knobs = {"RUN_REPO": str(root / "repo"), "UNET_GPU": "1", "WORKERS": "7", "PY_UNET": sys.executable,
+             "PY_SD35": sys.executable, "TRAIN_IDS": TRAIN_IDS, "VAL_IDS": VAL_IDS, "LAUNCH": LAUNCH,
+             "SMOKE_BBS": "unet"}
+    lines = _gates_dry(root, **knobs)
+    import json
+    results = tmp_path / "results.jsonl"
+    results.write_text("\n".join(json.dumps({"gate": g, "scope": "all", "status": "ok", "detail": ""})
+                                 for g in gc.REQUIRED_GATES) + "\n")
+    now = gc.identity("unet", _cert_line(lines, "unet")[len("DRY certificate command unet "):], "",
+                      str(root / "repo"), str(root / "latents_arnold_dense_pertic/arenas"), TRAIN_IDS,
+                      str(root / "latents_arnold_dense_pertic_eval/val"), VAL_IDS)
+    gc.write(str(root / "GATES_CERT.json"), "unet", "sd15", "1", now, str(results))
+    cd, env, args = _operator(lines, "unet")
+    log = tmp_path / "tmux.log"
+    base = {"PATH": f"{bindir}:{os.environ['PATH']}", "HOME": str(tmp_path / "home"), "TMUX_LOG": str(log)}
+    p = subprocess.run(["bash", LAUNCH, *args], capture_output=True, text=True, env={**base, **env}, timeout=120)
+    assert p.returncode == 0, p.stderr
+    assert "new-session" in log.read_text()
+    short = {k: v for k, v in env.items() if k != "WORKERS"}
+    p = subprocess.run(["bash", LAUNCH, *args], capture_output=True, text=True, env={**base, **short}, timeout=120)
+    assert p.returncode != 0 and "launch command differs" in p.stderr
