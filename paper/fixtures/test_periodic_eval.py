@@ -530,6 +530,38 @@ def test_a_step_read_again_does_not_report_the_earlier_reads_status(tmp_path, mo
     assert fin["step"] == 5000 and fin["ok"] is False and "status.json" in fin["reason"]
 
 
+@pytest.mark.parametrize("where", ["spawn", "script"])
+def test_a_launch_that_fails_removes_the_link_it_made(tmp_path, monkeypatch, where):
+    """Until the wrapper has started, nothing else will ever remove the read's link, and a link left
+    behind keeps a pruned recovery checkpoint's bytes on disk for good."""
+    def no_script(*a, **k):
+        raise OSError("No space left on device")
+
+    sp = Spawner(fail=OSError("fork failed") if where == "spawn" else None)
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    if where == "script":
+        monkeypatch.setattr(pe, "write_script", no_script)
+    make_ckpts(args, "0005000.pt")
+    assert ev.launch(5000) is None
+    assert not os.path.exists(os.path.join(args.results_dir, "eval_0005000", "0005000.pt")), "the link leaked"
+    assert os.path.isfile(os.path.join(args.results_dir, "0005000.pt")), "the checkpoint itself must stay"
+    (e,) = rec.events
+    assert e["event"] == "eval_skipped" and ("fork failed" in e["reason"] or "No space" in e["reason"])
+
+
+def test_a_launch_that_fails_never_removes_a_snapshot_read_in_place(tmp_path, monkeypatch):
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner(fail=OSError("fork failed"))
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0010000.pt", "snap_0010000.pt")
+    assert ev.launch(10000) is None
+    assert os.path.isfile(os.path.join(args.results_dir, "snap_0010000.pt"))
+    assert rec.events[-1]["event"] == "eval_skipped"
+
+
 @pytest.mark.parametrize("problem", ["no_checkpoint", "spawn_fails", "no_split"])
 def test_nothing_about_a_read_can_raise_into_the_trainer(tmp_path, monkeypatch, problem):
     sp = Spawner(fail=OSError("fork failed") if problem == "spawn_fails" else None)
@@ -620,6 +652,21 @@ def test_the_trainer_skips_while_a_read_is_alive(tiny_pixart, tmp_path, monkeypa
     kinds = [(e["event"], e["step"]) for e in events if e["event"].startswith("eval_")]
     assert kinds == [("eval_launched", 2), ("eval_skipped", 4), ("eval_skipped", 6)]
     assert len(calls) == 1 and events[-1]["event"] == "end"
+
+
+def test_failed_launches_keep_no_pruned_checkpoint_alive(tiny_pixart, tmp_path, monkeypatch):
+    """The reviewer's case: reads that never start, then the trainer prunes. No link may survive."""
+    def spawn(argv, **kw):
+        raise OSError("the eval could not start")
+
+    monkeypatch.setattr(pe, "_popen", spawn)
+    out, events = train_tiny(tmp_path, "--keep-last", "2")
+    assert not os.path.exists(os.path.join(out, "0000002.pt")), "the fixture must actually prune"
+    left = [os.path.join(d, f) for d in sorted(os.listdir(out)) if d.startswith("eval_")
+            for f in os.listdir(os.path.join(out, d)) if f.endswith(".pt")]
+    assert left == [], left
+    skips = [e for e in events if e["event"] == "eval_skipped"]
+    assert [e["step"] for e in skips] == [2, 4, 6] and all("could not start" in e["reason"] for e in skips)
 
 
 @pytest.mark.parametrize("how", ["spawn_raises", "child_exits_nonzero"])

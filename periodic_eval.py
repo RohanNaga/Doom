@@ -47,6 +47,13 @@ def _popen(argv, **kw):
     return subprocess.Popen(argv, **kw)
 
 
+def _discard(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
 def cadence_problem(args):
     """Why `--eval-every` / `--eval-device` cannot work with this run's checkpoints, or None.
 
@@ -334,19 +341,24 @@ class PeriodicEval:
         env["CUDA_VISIBLE_DEVICES"] = visible
         out = eval_dir(self.args.results_dir, step)
         os.makedirs(out, exist_ok=True)
-        try:        # an earlier read of this step left it; eval_finished must report this read's, or none
-            os.remove(os.path.join(out, STATUS_FILE))
-        except FileNotFoundError:
-            pass
+        _discard(os.path.join(out, STATUS_FILE))    # an earlier read's; eval_finished reports this one's, or none
         run = os.path.basename(os.path.normpath(self.args.results_dir))
         pinned, copy_from, remove = pin_checkpoint(ckpt, out, os.path.basename(ckpt).startswith("snap_"))
-        script = write_script(os.path.join(out, "run.sh"), run, step,
-                              commands(self.args, step, pinned, self.latent_channels, self.wandb_run, device,
-                                       self.python),
-                              copy_from=copy_from, pinned=pinned, remove_pinned=remove)
-        with open(os.path.join(out, "launch.log"), "ab") as logf:
-            self.proc = _popen(["bash", script], stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                               env=env, cwd=HERE, start_new_session=True, close_fds=True)
+        try:
+            script = write_script(os.path.join(out, "run.sh"), run, step,
+                                  commands(self.args, step, pinned, self.latent_channels, self.wandb_run, device,
+                                           self.python),
+                                  copy_from=copy_from, pinned=pinned, remove_pinned=remove)
+            with open(os.path.join(out, "launch.log"), "ab") as logf:
+                self.proc = _popen(["bash", script], stdout=logf, stderr=subprocess.STDOUT,
+                                   stdin=subprocess.DEVNULL, env=env, cwd=HERE, start_new_session=True,
+                                   close_fds=True)
+        except BaseException:
+            # no wrapper is running to remove the link this launch made, and a link left behind keeps
+            # a pruned checkpoint on disk; `launch` reports the failure as eval_skipped
+            if remove:
+                _discard(pinned)
+            raise
         self.current = {"pid": self.proc.pid, "step": step, "script": script, "out": out}
         with open(self.pid_file, "w") as f:
             json.dump(self.current, f)
