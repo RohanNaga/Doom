@@ -503,6 +503,33 @@ def test_a_read_a_previous_trainer_process_left_is_reported_once_it_has_ended(tm
     assert rec.events[0]["ok"] is True and rec.events[0]["returncode"] is None
 
 
+def test_a_step_read_again_does_not_report_the_earlier_reads_status(tmp_path, monkeypatch):
+    """A step read twice (a resume from an earlier checkpoint) must not report the first read's
+    status.json for a second read that ended without writing its own."""
+    import subprocess
+    sp = Spawner()
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
+    out = os.path.join(args.results_dir, "eval_0005000")
+    os.makedirs(out)
+    with open(os.path.join(out, "status.json"), "w") as f:
+        json.dump({"step": 5000, "commands": {"tf_live_h1": 0}, "ok": True}, f)       # the earlier read's
+    ev.launch(5000)
+    assert not os.path.exists(os.path.join(out, "status.json"))
+    # the trainer restarts, and finds the second read gone without a status.json
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    pid_file = os.path.join(args.results_dir, pe.PID_FILE)
+    with open(pid_file) as f:
+        r = json.load(f)
+    with open(pid_file, "w") as f:
+        json.dump({**r, "pid": dead.pid}, f)
+    ev.proc = ev.current = None
+    ev.launch(10000)
+    (fin,) = [e for e in rec.events if e["event"] == "eval_finished"]
+    assert fin["step"] == 5000 and fin["ok"] is False and "status.json" in fin["reason"]
+
+
 @pytest.mark.parametrize("problem", ["no_checkpoint", "spawn_fails", "no_split"])
 def test_nothing_about_a_read_can_raise_into_the_trainer(tmp_path, monkeypatch, problem):
     sp = Spawner(fail=OSError("fork failed") if problem == "spawn_fails" else None)

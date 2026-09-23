@@ -35,6 +35,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = "eval_running.pid"
+STATUS_FILE = "status.json"
 HORIZONS = (1, 4)
 DEVICE = re.compile(r"^(?:cuda:(\d+)|cpu)$")
 # eval_tf.py's flag for where each backbone's architecture is rebuilt from (its `backbone_source`)
@@ -199,9 +200,6 @@ def pin_checkpoint(ckpt, out, snapshot):
         return dst, ckpt, True
 
 
-STATUS_FILE = "status.json"
-
-
 def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinned=False):
     """`run.sh`: the copy of the checkpoint if one is needed, every read in order (one failing does
     not stop the rest), then `status.json`.
@@ -336,6 +334,10 @@ class PeriodicEval:
         env["CUDA_VISIBLE_DEVICES"] = visible
         out = eval_dir(self.args.results_dir, step)
         os.makedirs(out, exist_ok=True)
+        try:        # an earlier read of this step left it; eval_finished must report this read's, or none
+            os.remove(os.path.join(out, STATUS_FILE))
+        except FileNotFoundError:
+            pass
         run = os.path.basename(os.path.normpath(self.args.results_dir))
         pinned, copy_from, remove = pin_checkpoint(ckpt, out, os.path.basename(ckpt).startswith("snap_"))
         script = write_script(os.path.join(out, "run.sh"), run, step,
