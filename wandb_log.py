@@ -28,8 +28,10 @@ Rules the logger keeps:
     own daemon thread. The caller builds the row (pure Python on host floats) and appends it to a
     bounded queue under a lock held for microseconds; when the queue is full the OLDEST row is
     dropped, and the drops are counted on stderr. Shutdown is bounded: W&B's own `finish_timeout`
-    is set, `close()` waits at most `FINISH_TIMEOUT + CLOSE_MARGIN`, and on a timeout it says so
-    once and unregisters the SDK's exit-time teardown, so the process can exit and release its GPU.
+    is set, and `close()` tries `run.finish()` whatever failed before (a run left open keeps the
+    SDK's exit-time teardown waiting), waiting at most `FINISH_TIMEOUT + CLOSE_MARGIN`. A run it
+    could not finish (init or finish raised, or the wait ran out) is abandoned: the SDK's exit-time
+    teardown is unregistered, so the process can exit and release its GPU.
     Only `import wandb` runs on the caller's thread (local work, before the timed loop): importing
     on a thread while DataLoader workers fork could leave a module import lock held in the child.
   * **One writer per run id.** W&B's resume docs: "Unexpected results will occur if multiple
@@ -236,7 +238,8 @@ class RunLogger:
         self._wandb = self._thread = None
         self._items, self._rows, self._cap = collections.deque(), 0, int(queue_rows or QUEUE_ROWS)
         self._cv = threading.Condition()
-        self._failed, self._closed = threading.Event(), False
+        self._failed, self._closed, self._close_result = threading.Event(), False, True
+        self._run_finished = threading.Event()      # set once run.finish() has returned
         self._report_lock, self._reported, self._dropped = threading.Lock(), False, 0
         self._t0, self._global_batch, self._windows, self._last_train_loss = None, 32, None, None
         if not (enabled and self.name):
@@ -359,23 +362,29 @@ class RunLogger:
     def close(self, timeout=None):
         """Finish the run, waiting at most `timeout` (default FINISH_TIMEOUT + CLOSE_MARGIN) seconds.
 
-        True when the run finished in time (or there was none). On a timeout it says so once,
-        unregisters the SDK's exit-time teardown and returns False: the daemon thread keeps trying,
-        but nothing holds the process at exit. Safe to call more than once.
+        `run.finish()` is tried whatever failed before, because a run left open keeps the SDK's
+        exit-time teardown waiting. True when it returned in time (or there was no run to open).
+        Otherwise the run is abandoned: init or finish raised (already reported once), or the wait
+        ran out (said here). Either way the SDK's exit-time teardown is unregistered and False is
+        returned; the daemon thread may keep trying, but nothing holds the process at exit. Safe to
+        call more than once; later calls return the first call's answer.
         """
         if self._thread is None or self._closed:
-            return True
+            return self._close_result
         self._closed = True
         self._put("close")
         wait = FINISH_TIMEOUT + CLOSE_MARGIN if timeout is None else timeout
         self._thread.join(wait)
-        finished = not self._thread.is_alive()
+        timed_out = self._thread.is_alive()
+        finished = not timed_out and self._run_finished.is_set()
         if self._dropped:
             self._say(f"dropped {self._dropped} rows in total while the queue was full; log.jsonl has all of them")
         if not finished:
             _release_exit_hook(self._wandb)
+        if timed_out:
             self._say(f"the run did not finish within {wait:.0f}s; it is left to W&B's background thread and "
                       "this process is free to exit (unsent rows stay under .wandb/ for `wandb sync`)")
+        self._close_result = finished
         return finished
 
     # --- the logger's own thread: every W&B call ----------------------------------------------------
@@ -403,9 +412,10 @@ class RunLogger:
             if kind == "flush":
                 payload.set()
             elif kind == "close":
-                if run is not None and not self._failed.is_set():
+                if run is not None:         # even after a failed log: an open run holds the SDK at exit
                     try:
                         run.finish()
+                        self._run_finished.set()
                     except Exception as exc:
                         self._fail("finishing the W&B run", exc)
                 return
@@ -515,7 +525,8 @@ def log_evaluation(args, tag, metrics, ckpt=None, recorded_step=None, out_dir=No
     `lock_path(run_dir_of(ckpt), project, run id)`. A second evaluator of the same run (a steward's
     read beside the trainer's periodic one) waits up to `LOCK_WAIT` seconds, then logs to
     `<run>-eval-<pid>` in the same group and says so, so nothing is lost and no id has two writers.
-    A session that does not finish in time keeps the lock until this process exits.
+    The lock is released only once the run has been finished; a session that was abandoned (see
+    `RunLogger.close`) keeps it until this process exits.
     """
     run = getattr(args, "wandb_run", "") or ""
     if not run:
@@ -539,5 +550,5 @@ def log_evaluation(args, tag, metrics, ckpt=None, recorded_step=None, out_dir=No
     row = lg.log_eval(step, tag, metrics)
     finished = lg.close()
     if finished:
-        lock.release()          # otherwise W&B is still finishing: the lock goes when this process exits
+        lock.release()          # otherwise W&B's state is unknown: the lock goes when this process exits
     return row if finished and not lg.failed else None

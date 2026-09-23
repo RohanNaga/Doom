@@ -140,11 +140,13 @@ def evaluator(tmp_path, monkeypatch, spawner, *flags, backbone="unet", wandb_run
 
 
 def script_commands(spawner):
-    """The command lines of the launched script, one argv per evaluator call."""
+    """The command lines of the launched script, one argv per evaluator call (`run_read <label>` dropped)."""
     argv, _ = spawner.calls[-1]
     assert argv[0] == "bash"
     lines = open(argv[1]).read().splitlines()
-    return [shlex.split(ln) for ln in lines if "eval_tf.py" in ln or "smoke_probe.py" in ln]
+    cmds = [shlex.split(ln) for ln in lines if "eval_tf.py" in ln or "smoke_probe.py" in ln]
+    assert all(c[0] == "run_read" for c in cmds), cmds
+    return [c[2:] for c in cmds]
 
 
 def flag(cmd, name):
@@ -229,7 +231,8 @@ def test_a_snapshot_that_cannot_be_linked_is_read_in_place(tmp_path, monkeypatch
     ev.launch(10000)
     snap = os.path.join(args.results_dir, "snap_0010000.pt")
     assert {flag(c, "--ckpt") for c in script_commands(sp)} == {snap}
-    assert not any(ln.startswith(("cp ", "rm ", "trap ")) for ln in script_lines(sp)), "never remove the snapshot"
+    assert not any(snap in ln for ln in script_lines(sp) if ln.startswith(("cp ", "rm ", "trap "))), \
+        "never remove the snapshot"
 
 
 def test_one_detached_process_runs_four_reads_then_the_probe(tmp_path, monkeypatch):
@@ -340,9 +343,12 @@ def test_a_read_left_running_by_a_previous_trainer_process_is_seen(tmp_path, mon
 
 FAKE_PYTHON = """#!/bin/bash
 # stands in for the evaluators: exits $FAIL_CODE when its arguments mention $FAIL_ON, else 0; when
-# they mention $HANG_ON it touches $HANG_FILE and waits to be stopped, like a read still running
+# they mention $HANG_ON it writes its pid to $HANG_FILE and waits to be stopped, like a read still
+# running, and with $IGNORE_STOP set it ignores TERM and HUP as a stuck read would
 case "$*" in *"$FAIL_ON"*) exit "$FAIL_CODE" ;; esac
-if [ -n "$HANG_ON" ]; then case "$*" in *"$HANG_ON"*) touch "$HANG_FILE"; exec sleep 60 ;; esac; fi
+if [ -n "$HANG_ON" ]; then case "$*" in *"$HANG_ON"*)
+  [ -n "$IGNORE_STOP" ] && trap '' TERM HUP
+  echo $$ > "$HANG_FILE.tmp" && mv "$HANG_FILE.tmp" "$HANG_FILE"; exec sleep 60 ;; esac; fi
 exit 0
 """
 
@@ -414,7 +420,6 @@ def test_a_wrapper_stopped_mid_read_still_removes_its_link(tmp_path, monkeypatch
     link keeps a pruned recovery checkpoint's bytes on disk, 35 GB for the SD 3.5 row."""
     import signal
     import subprocess
-    import time
     sp = Spawner()
     args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
     make_ckpts(args, "0005000.pt")
@@ -426,14 +431,114 @@ def test_a_wrapper_stopped_mid_read_still_removes_its_link(tmp_path, monkeypatch
     p = subprocess.Popen(argv, env={**os.environ, "FAIL_ON": "nothing-fails", "FAIL_CODE": "3",
                                     "HANG_ON": "tf_ema_h1", "HANG_FILE": str(reading)},
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    deadline = time.monotonic() + 30
-    while not reading.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert reading.exists() and os.path.exists(link), "the read must be on its link when it is stopped"
+    wait_for_read(reading)
+    assert os.path.exists(link), "the read must be on its link when it is stopped"
     os.killpg(p.pid, signal.SIGTERM)
     assert p.wait(timeout=30) != 0
     assert not os.path.exists(link), "the stopped wrapper left its checkpoint link behind"
     assert not os.path.exists(os.path.join(out, "status.json")), "a stopped read has no status to report"
+
+
+def wait_for_read(pid_file, timeout=30):
+    """The pid the stand-in evaluator wrote once it is running."""
+    import time
+    deadline = time.monotonic() + timeout
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert pid_file.exists(), "the read never started"
+    return int(pid_file.read_text().strip())
+
+
+def gone(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+def start_hanging_read(tmp_path, monkeypatch, **env):
+    """A real wrapper, started as the trainer starts it, whose second read hangs; (args, ev, rec,
+    the wrapper's Popen, the hanging evaluator's pid)."""
+    import subprocess
+    sp = Spawner()
+    args, ev, rec = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
+    ev.launch(5000)
+    reading = tmp_path / "reading"
+    argv, _ = sp.calls[-1]
+    p = subprocess.Popen(argv, env={**os.environ, "FAIL_ON": "nothing-fails", "FAIL_CODE": "3",
+                                    "HANG_ON": "tf_ema_h1", "HANG_FILE": str(reading), **env},
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    ev.proc, ev.current["pid"] = p, p.pid           # the trainer's handle and pid file name the real wrapper
+    with open(os.path.join(args.results_dir, pe.PID_FILE), "w") as f:
+        json.dump(ev.current, f)
+    return args, ev, rec, p, wait_for_read(reading)
+
+
+@pytest.mark.parametrize("sig", ["SIGTERM", "SIGHUP"])
+def test_a_stop_sent_to_the_wrapper_alone_stops_its_evaluator_first(tmp_path, monkeypatch, sig):
+    """`kill <wrapper pid>` used to end the wrapper and leave its evaluator on the card, so the
+    trainer, seeing the wrapper gone, started an overlapping read. The wrapper now passes the stop
+    on and exits only when the evaluator is gone."""
+    import signal
+    args, ev, rec, p, child = start_hanging_read(tmp_path, monkeypatch)
+    try:
+        os.kill(p.pid, getattr(signal, sig))                 # the wrapper's pid only, not its group
+        assert p.wait(timeout=30) == 128 + getattr(signal, sig)
+        assert gone(child), "the wrapper exited and left its evaluator running"
+    finally:
+        if not gone(child):
+            os.kill(child, signal.SIGKILL)
+    out = os.path.join(args.results_dir, "eval_0005000")
+    assert not os.path.exists(os.path.join(out, "0005000.pt")) and not os.path.exists(os.path.join(out, "child.pid"))
+    assert ev.launch(10000) is not None
+    fin = [e for e in rec.events if e["event"] == "eval_finished"]
+    assert len(fin) == 1 and fin[0]["ok"] is False and "status.json" in fin[0]["reason"]
+
+
+def test_an_evaluator_that_ignores_the_stop_is_killed_after_the_bound(tmp_path, monkeypatch):
+    import signal
+    import time
+    monkeypatch.setattr(pe, "STOP_WAIT", 1.0)
+    args, ev, rec, p, child = start_hanging_read(tmp_path, monkeypatch, IGNORE_STOP="1")
+    try:
+        t = time.monotonic()
+        os.kill(p.pid, signal.SIGTERM)
+        assert p.wait(timeout=30) == 143
+        assert time.monotonic() - t < 10, "the wrapper did not bound its wait"
+        assert gone(child), "an evaluator that ignores the stop must be killed"
+    finally:
+        if not gone(child):
+            os.kill(child, signal.SIGKILL)
+
+
+def test_the_guard_sees_an_evaluator_whose_wrapper_was_killed_outright(tmp_path, monkeypatch):
+    """A SIGKILL cannot be passed on: the wrapper dies and its evaluator runs on. The pid the wrapper
+    recorded for it keeps the next read from overlapping, in this trainer process and after a restart."""
+    import signal
+    import time
+    args, ev, rec, p, child = start_hanging_read(tmp_path, monkeypatch)
+    try:
+        os.kill(p.pid, signal.SIGKILL)
+        p.wait(timeout=30)
+        assert not gone(child)
+        assert ev.running() == child and ev.launch(10000) is None
+        # a restarted trainer: no Popen handle, and the pid file names the dead wrapper
+        ev.proc = ev.current = None
+        assert ev.running() == child and ev.launch(10000) is None
+        skips = [e for e in rec.events if e["event"] == "eval_skipped"]
+        assert len(skips) == 2 and all(str(child) in e["reason"] for e in skips)
+        assert not any(e["event"] == "eval_finished" for e in rec.events)
+    finally:
+        if not gone(child):
+            os.kill(child, signal.SIGKILL)
+    deadline = time.monotonic() + 10                     # the orphan is reaped by init, not by us
+    while not gone(child) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert ev.launch(10000) is not None
+    fin = [e for e in rec.events if e["event"] == "eval_finished"]
+    assert len(fin) == 1 and fin[0]["step"] == 5000 and fin[0]["ok"] is False
 
 
 def test_a_copy_cut_short_leaves_no_partial_file(tmp_path, monkeypatch):
@@ -530,6 +635,38 @@ def test_a_step_read_again_does_not_report_the_earlier_reads_status(tmp_path, mo
     assert fin["step"] == 5000 and fin["ok"] is False and "status.json" in fin["reason"]
 
 
+@pytest.mark.parametrize("where", ["spawn", "script"])
+def test_a_launch_that_fails_removes_the_link_it_made(tmp_path, monkeypatch, where):
+    """Until the wrapper has started, nothing else will ever remove the read's link, and a link left
+    behind keeps a pruned recovery checkpoint's bytes on disk for good."""
+    def no_script(*a, **k):
+        raise OSError("No space left on device")
+
+    sp = Spawner(fail=OSError("fork failed") if where == "spawn" else None)
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    if where == "script":
+        monkeypatch.setattr(pe, "write_script", no_script)
+    make_ckpts(args, "0005000.pt")
+    assert ev.launch(5000) is None
+    assert not os.path.exists(os.path.join(args.results_dir, "eval_0005000", "0005000.pt")), "the link leaked"
+    assert os.path.isfile(os.path.join(args.results_dir, "0005000.pt")), "the checkpoint itself must stay"
+    (e,) = rec.events
+    assert e["event"] == "eval_skipped" and ("fork failed" in e["reason"] or "No space" in e["reason"])
+
+
+def test_a_launch_that_fails_never_removes_a_snapshot_read_in_place(tmp_path, monkeypatch):
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner(fail=OSError("fork failed"))
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0010000.pt", "snap_0010000.pt")
+    assert ev.launch(10000) is None
+    assert os.path.isfile(os.path.join(args.results_dir, "snap_0010000.pt"))
+    assert rec.events[-1]["event"] == "eval_skipped"
+
+
 @pytest.mark.parametrize("problem", ["no_checkpoint", "spawn_fails", "no_split"])
 def test_nothing_about_a_read_can_raise_into_the_trainer(tmp_path, monkeypatch, problem):
     sp = Spawner(fail=OSError("fork failed") if problem == "spawn_fails" else None)
@@ -620,6 +757,21 @@ def test_the_trainer_skips_while_a_read_is_alive(tiny_pixart, tmp_path, monkeypa
     kinds = [(e["event"], e["step"]) for e in events if e["event"].startswith("eval_")]
     assert kinds == [("eval_launched", 2), ("eval_skipped", 4), ("eval_skipped", 6)]
     assert len(calls) == 1 and events[-1]["event"] == "end"
+
+
+def test_failed_launches_keep_no_pruned_checkpoint_alive(tiny_pixart, tmp_path, monkeypatch):
+    """The reviewer's case: reads that never start, then the trainer prunes. No link may survive."""
+    def spawn(argv, **kw):
+        raise OSError("the eval could not start")
+
+    monkeypatch.setattr(pe, "_popen", spawn)
+    out, events = train_tiny(tmp_path, "--keep-last", "2")
+    assert not os.path.exists(os.path.join(out, "0000002.pt")), "the fixture must actually prune"
+    left = [os.path.join(d, f) for d in sorted(os.listdir(out)) if d.startswith("eval_")
+            for f in os.listdir(os.path.join(out, d)) if f.endswith(".pt")]
+    assert left == [], left
+    skips = [e for e in events if e["event"] == "eval_skipped"]
+    assert [e["step"] for e in skips] == [2, 4, 6] and all("could not start" in e["reason"] for e in skips)
 
 
 @pytest.mark.parametrize("how", ["spawn_raises", "child_exits_nonzero"])

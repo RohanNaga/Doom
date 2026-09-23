@@ -358,6 +358,86 @@ def test_a_hanging_finish_is_abandoned_and_the_process_left_free_to_exit(tmp_pat
     assert kw["settings"]["finish_timeout"] == 0.2
 
 
+EXIT_PROBE = """
+import json, sys
+sys.path[:0] = [{repo!r}, {here!r}]
+import wandb_log
+from wandb_stub import stub_wandb
+mod = stub_wandb(fail={fail!r}, exit_hook=True)
+sys.modules["wandb"] = mod
+wandb_log.FINISH_TIMEOUT, wandb_log.CLOSE_MARGIN = 1.0, 1.0
+lg = wandb_log.RunLogger(enabled=True, name="r", results_dir={out!r})
+lg.log_event({{"event": "train", "step": 100, "loss": 0.3}})
+lg.flush(5)
+closed = lg.close()
+print(json.dumps({{"closed": closed, "finished": mod.finished, "released": bool(mod.released),
+                  "calls": [c[0] for c in mod.calls]}}))
+"""
+
+
+@pytest.mark.parametrize("fail", ["init", "log", "finish"])
+def test_a_failed_wandb_call_never_holds_the_process_at_exit(fail, tmp_path):
+    """The SDK registers an exit-time teardown that waits for a run nobody finished. Whatever failed
+    earlier, close() still tries the bounded finish, and a run it could not finish (init or finish
+    raised) has that teardown detached, so the process exits. The stub's teardown waits 60 s."""
+    import subprocess
+    import time
+    script = tmp_path / "probe.py"
+    script.write_text(EXIT_PROBE.format(repo=REPO, here=HERE, fail=fail, out=str(tmp_path)))
+    t = time.monotonic()
+    r = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert time.monotonic() - t < 20, "the process was held at exit"
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    if fail == "log":
+        assert "finish" in got["calls"] and got["finished"], "a failed log must not skip the finish"
+        assert got["closed"] is True
+    else:
+        assert got["closed"] is False and got["released"], "an unfinished run must detach the SDK's teardown"
+
+
+def test_a_failed_log_is_still_finished_under_the_writer_lock(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    mod = stub_wandb(fail="log")
+    held = []
+    real_init = mod.init
+
+    def init(**kw):
+        run = real_init(**kw)
+        real_finish = run.finish
+
+        def finish(*a, **k):
+            other = lock_of(run_dir)
+            held.append(not other.acquire(0))
+            other.release()
+            return real_finish(*a, **k)
+
+        run.finish = finish
+        return run
+
+    mod.init = init
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    assert wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt=str(run_dir / "0010000.pt"),
+                                    out_dir=str(tmp_path / "out")) is None
+    assert held == [True], "the run must be finished, and finished while the lock is held"
+    after = lock_of(run_dir)
+    assert after.acquire(0), "a finished session releases the lock"
+    after.release()
+
+
+def test_a_session_whose_finish_raised_keeps_the_lock_until_the_process_exits(tmp_path, monkeypatch):
+    """A finish that raised leaves W&B's state unknown, as a finish that timed out does."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    mod = stub_wandb(fail="finish")
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    assert wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt=str(run_dir / "0010000.pt"),
+                                    out_dir=str(tmp_path / "out")) is None
+    assert mod.released, "the SDK's teardown must be detached"
+    assert not lock_of(run_dir).acquire(0)
+
+
 def test_a_trainer_whose_wandb_hangs_trains_and_exits_on_time(tiny_pixart, tmp_path, monkeypatch, capsys):
     import threading
     mod = stub_wandb(gate={"init": threading.Event()})     # W&B never comes up
