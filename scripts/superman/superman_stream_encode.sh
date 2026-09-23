@@ -2,7 +2,7 @@
 # Streamed SD 3.5 per-tic encode of the dense corpus on one Superman A4000.
 #
 #   usage: [K=4] [THREADS=6] [DRY=1] [DST_ROOT=..] [TRAIN_IDS=..] [VAL_IDS=..] [TEST_IDS=..] [UNSEEN_IDS=..] \
-#          superman_stream_encode.sh <gpu> <i/n> <train|val|test|unseen|evals|all>
+#          superman_stream_encode.sh <gpu> <i/n> <train|val|test|unseen|evals|all[,...]>
 #
 # The raw episodes live on Spiderman and Superman has no room for them, so each worker pulls K
 # parquets at a time into /home/rohan/Doom/stream/<gpu>/, runs encode_parquet.py on exactly those
@@ -81,11 +81,15 @@ spec() {        # sets SRC, IDS, DST for one corpus
   esac
 }
 
-case $CORPUS in
-  evals) CORPORA="val test unseen" ;;
-  all)   CORPORA="train val test unseen" ;;
-  *)     CORPORA=$CORPUS ;;
-esac
+# a comma list runs its corpora in order, e.g. evals,train puts the held-out sets first
+CORPORA=""
+for c in ${CORPUS//,/ }; do
+  case $c in
+    evals) CORPORA="$CORPORA val test unseen" ;;
+    all)   CORPORA="$CORPORA train val test unseen" ;;
+    *)     spec "$c"; CORPORA="$CORPORA $c" ;;
+  esac
+done
 
 name() { printf 'ep_%05d' "$1"; }
 
