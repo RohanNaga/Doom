@@ -27,7 +27,8 @@
 #
 #   val        arenas ids 6000-6099   25/arena, the in-training validation corpus
 #   test       arenas ids 7000-7099   25/arena, the sealed seen-map row
-#   arenas_678 ids 0-59               20/arena, the unseen-map row
+#   arenas_678 ids 60-119             20/arena, the unseen-map row (UNSEEN_IDS; read from the json,
+#                                     0:60 until 2026-09-22, replaced before any score: see its history)
 #   seen / unseen / unseen2           the stride-4 rows' corpora, re-encoded per tic
 #
 # Rollouts are given in TICS: horizon 256 = the 64 decision steps today's rows roll out, i.e. the
@@ -45,6 +46,9 @@ CKPT=${CKPT:-}
 STEP=${STEP:-}
 BEST=${BEST:-1}
 RESCORE=${RESCORE:-0}
+# shellcheck source=../dense_ids.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../dense_ids.sh"
+UNSEEN_IDS=${UNSEEN_IDS:-$(dense_ids unseen_ids)}
 RC=0
 fail() { RC=1; echo "AFTER_NEXTTIC_STAGE_FAILED $*" >&2; }
 # every stage runs when its output is absent, or when RESCORE=1 says to redo it. The old test was

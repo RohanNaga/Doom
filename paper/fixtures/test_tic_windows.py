@@ -488,7 +488,7 @@ def test_the_module_exports_the_phase_bucket_contract():
 def test_the_dense_split_ranges_are_the_decided_ones():
     s = doom_data.load_dense_split()
     assert s["segments"]["arenas"]["ranges"] == {"train": "0:6000", "val": "6000:7000", "test": "7000:8000"}
-    assert s["segments"]["arenas_678"]["ranges"]["unseen"] == "0:60"
+    assert s["segments"]["arenas_678"]["ranges"]["unseen"] == "60:120"   # 0:60 until 2026-09-22
     assert s["next_tic_runs"]["train_ids"] == "0:2000"
 
 

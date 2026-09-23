@@ -21,6 +21,16 @@ an interrupted write and is reported rather than ignored.
         --expect-ids 6000:6100
     python make_dense_eval_splits.py --latents-dir $D/latents_arnold_dense_pertic_eval/test \
         --expect-ids 7000:7100
+    python make_dense_eval_splits.py --latents-dir $D/latents_arnold_dense_pertic_eval/arenas_678 \
+        --expect-ids 60:120 --refuse-worker-first $D/raw_arnold_dense/arenas_678
+
+**The unseen subset must hold no worker-first episode.** Arnold's weapon-select requests execute only
+in a recorder process's first episode (k = 0; `release/DATASET_CARD.md`), a control regime that
+validation and test never contain. `--refuse-worker-first <raw dir>` reads each expected episode's
+raw `buttons` column and refuses to publish if any of them is k = 0. The rule is the one the
+2026-09-22 review measured with: `transitions.button_width_report(...)["inferred_starts"]`, k from
+the widest request string. An episode with no weapon request at all cannot be classified; it is
+reported and allowed, since nothing in it could have executed.
 """
 import argparse
 import glob
@@ -102,8 +112,49 @@ def check_episode(lat_path, meta_path, latent_channels=None, sample=8, seed=0):
     return bad
 
 
-def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8):
-    """What this directory holds against what it should hold, as a report with no side effects."""
+def worker_first_episodes(parquet_dir, episode_ids):
+    """k per episode from its raw `buttons` column, and which episodes are worker-first (k = 0).
+
+    Returns `{"k": {ep: k or None}, "worker_first": [...], "unclassifiable": [...], "missing": [...]}`.
+    Only the `buttons` column is read, so this costs one column projection per recording.
+    """
+    import pyarrow.parquet as pq
+    from transitions import button_width_report
+    out = {"k": {}, "worker_first": [], "unclassifiable": [], "missing": []}
+    for ep in sorted(int(e) for e in episode_ids):
+        path = os.path.join(parquet_dir, f"ep_{ep:05d}.parquet")
+        if not os.path.isfile(path):
+            out["missing"].append(ep)
+            continue
+        col = pq.read_table(path, columns=["buttons"])["buttons"].to_pylist()
+        k = button_width_report(np.array(col, dtype=object))["inferred_starts"]
+        out["k"][ep] = k
+        if k is None:
+            out["unclassifiable"].append(ep)
+        elif k == 0:
+            out["worker_first"].append(ep)
+    return out
+
+
+def check_no_worker_first(parquet_dir, episode_ids):
+    """Problems, as strings, if any of these episodes is worker-first or has no recording to classify."""
+    r = worker_first_episodes(parquet_dir, episode_ids)
+    bad = []
+    if r["worker_first"]:
+        bad.append(f"{len(r['worker_first'])} worker-first episode(s) (k = 0, weapon-select requests can "
+                   f"execute): {r['worker_first'][:16]}; the unseen subset must hold none")
+    if r["missing"]:
+        bad.append(f"{len(r['missing'])} episode(s) have no recording in {parquet_dir} to classify: "
+                   f"{r['missing'][:8]}")
+    return bad
+
+
+def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8, refuse_worker_first=None):
+    """What this directory holds against what it should hold, as a report with no side effects.
+
+    `refuse_worker_first` is the raw recording directory; with it, every expected episode (every
+    usable one when no ids are expected) is classified, and a worker-first one is a problem.
+    """
     from doom_data import list_latent_episodes
     try:
         found = {ep: (lp, mp) for ep, lp, mp in list_latent_episodes(latents_dir)}
@@ -134,17 +185,23 @@ def validate(latents_dir, expect_ids=None, latent_channels=None, sample=8):
         if report["unexpected"]:
             problems.append(f"{len(report['unexpected'])} episode(s) present but not expected: "
                             f"{report['unexpected'][:8]}")
+    if refuse_worker_first:
+        ids = report.get("expected") or usable
+        wf = worker_first_episodes(refuse_worker_first, ids)
+        report["worker_first"], report["unclassifiable"] = wf["worker_first"], wf["unclassifiable"]
+        problems += check_no_worker_first(refuse_worker_first, ids)
     report["ok"] = not problems
     return report
 
 
-def build(latents_dir, name=None, out=None, expect_ids=None, latent_channels=None, sample=8):
+def build(latents_dir, name=None, out=None, expect_ids=None, latent_channels=None, sample=8,
+          refuse_worker_first=None):
     """Write the canonical split file for a COMPLETE, valid corpus and return (path, contents).
 
     Refuses to publish anything else: a split file is what an evaluator treats as the definition of
     the held-out set, so a partial or wrong-range corpus must not be able to become one.
     """
-    report = validate(latents_dir, expect_ids, latent_channels, sample)
+    report = validate(latents_dir, expect_ids, latent_channels, sample, refuse_worker_first)
     if not report["ok"]:
         raise SystemExit("this corpus cannot be published as an evaluation split:\n  "
                          + "\n  ".join(report["problems"]))
@@ -156,6 +213,7 @@ def build(latents_dir, name=None, out=None, expect_ids=None, latent_channels=Non
                                    "expected_ids": (f"{report['expected'][0]}:{report['expected'][-1] + 1}"
                                                     if report.get("expected") else None),
                                    "subset_key": SUBSET,
+                                   "worker_first_checked": bool(refuse_worker_first),
                                    "note": "every encoded episode of a held-out dense range, each checked as a "
                                            "valid latent/sidecar pair; the key is 'val' for every corpus so the "
                                            "evaluators take one --subset"}}
@@ -180,11 +238,12 @@ def main(args):
     from doom_data import parse_episode_ids
     expect = parse_episode_ids(args.expect_ids) if args.expect_ids else None
     if args.check_only:
-        report = validate(args.latents_dir, expect, args.latent_channels or None, args.sample)
+        report = validate(args.latents_dir, expect, args.latent_channels or None, args.sample,
+                          args.refuse_worker_first or None)
         print(json.dumps(report, indent=1))
         return 0 if report["ok"] else 1
     path, split = build(args.latents_dir, args.name or None, args.out or None, expect,
-                        args.latent_channels or None, args.sample)
+                        args.latent_channels or None, args.sample, args.refuse_worker_first or None)
     print(json.dumps({"wrote": path, "num_episodes": split["meta"]["num_episodes"],
                       "episode_range": split["meta"]["episode_range"], "subset_key": SUBSET,
                       "expected_ids": split["meta"]["expected_ids"]}))
@@ -207,6 +266,10 @@ def build_parser():
                         "episode's own")
     p.add_argument("--sample", type=int, default=8,
                    help="latent rows per episode read back and checked finite (0 skips the read)")
+    p.add_argument("--refuse-worker-first", dest="refuse_worker_first", default="",
+                   help="the RAW recording directory of this corpus; refuse to publish if any expected episode is "
+                        "a recorder process's first episode (k = 0), the only control regime in which Arnold's "
+                        "weapon-select requests execute. Used for the unseen subset")
     p.add_argument("--check-only", dest="check_only", action="store_true",
                    help="print the validation report and write nothing; exit 1 if the corpus is not publishable")
     return p

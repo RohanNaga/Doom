@@ -48,7 +48,11 @@ RAW=$D/raw_arnold_dense
 TRAIN_IDS=${TRAIN_IDS:-0:2000}
 VAL_IDS=${VAL_IDS:-6000:6100}
 TEST_IDS=${TEST_IDS:-7000:7100}
-UNSEEN_IDS=${UNSEEN_IDS:-0:60}
+# the unseen range comes from release/dense_split.json (60:120 since 2026-09-22; see its `history`)
+# shellcheck source=../dense_ids.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../dense_ids.sh"
+UNSEEN_IDS=${UNSEEN_IDS:-$(dense_ids unseen_ids)}
+[ -n "$UNSEEN_IDS" ] || { echo "ENCODE_ALL_FAILED no unseen range: set UNSEEN_IDS or fix release/dense_split.json" >&2; exit 2; }
 
 IFS=, read -r -a CARDS <<< "$GPUS"
 IFS=, read -r -a SPACES <<< "$VAES"
@@ -73,10 +77,12 @@ audit_cmd() {   # audit_cmd <vae>: the sidecar audit of the val corpus against t
        "--audit-parquet-dir $RAW/arenas --episodes 100 --audit-rows 100000" \
        "--canonical $CANON --seed 0"
 }
-split_cmd() {   # split_cmd <vae> <corpus> <ids>
+split_cmd() {   # split_cmd <vae> <corpus> <ids>; the unseen corpus is also refused if it holds a worker-first episode
+  local WF=""
+  [ "$2" = arenas_678 ] && WF=" --refuse-worker-first $RAW/arenas_678"
   echo "$PY $REPO/make_dense_eval_splits.py" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/$2" \
-       "--expect-ids $3 --latent-channels $(channels "$1")"
+       "--expect-ids $3 --latent-channels $(channels "$1")$WF"
 }
 eval_dirs() {   # eval_dirs <vae>: the three evaluation corpora of one latent space
   echo "val $VAL_IDS test $TEST_IDS arenas_678 $UNSEEN_IDS"

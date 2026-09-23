@@ -14,6 +14,8 @@ A second recording, kept separate from the original 17-map corpus (`raw_arnold`,
 
 **Why these maps.** Arenas 2 to 5 are the Arnold paper's training maps and 6 to 8 its test maps (Arnold's README: `--map_ids_train "2,3,4,5" --map_ids_test "6,7,8"`). The split is the agent authors' and was fixed **before looking at any model score of ours**. `deathmatch_simple` is the only named map in prior Doom world-model work — both open GameNGen reproductions use it — which is what would make a number on it comparable to anything published.
 
+**The unseen scoring subset is `arenas_678` ids 60:120** (`release/dense_split.json`, 20 per map). It was declared as 0:60 on 2026-09-21 and replaced on 2026-09-22 before any model was scored on it. `arenas_678` was started three times (16, 20, then 16 workers), and every restart gave every worker a fresh first episode (k = 0), the only kind in which Arnold's weapon-select requests execute (see the `buttons` section below). Measured from the raw `buttons` column, 51 of ids 0:60 are k = 0 and none of 60:120 is. Validation and test hold no k = 0 episode, so 0:60 would have tested map transfer and a control-regime shift at once. `make_dense_eval_splits.py --refuse-worker-first` refuses to publish an unseen corpus that holds one.
+
 An earlier version of this corpus used arenas 3, 10, 12, 13, chosen by reading our own per-map evaluation scores. That selects the training set on the outcome being measured, and Rohan rejected it on Sep 19 2026. 134 episodes of that aborted corpus remain in `$D/raw_arnold_dense4` under corpus id `arnold-train-dense4-v1` and are unused; nothing downstream should read that directory.
 
 ## What a file contains

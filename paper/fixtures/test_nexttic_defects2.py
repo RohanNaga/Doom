@@ -73,6 +73,16 @@ def _real_run(tmp_path, corpus, python=None):
     root = tmp_path / "root"
     for seg in ("arenas", "arenas_678"):
         (root / "raw_arnold_dense" / seg).mkdir(parents=True, exist_ok=True)
+    # the unseen publish classifies every episode from its raw `buttons` column and refuses a
+    # worker-first one (the 2026-09-22 review, H1), so the unseen range needs recordings to read:
+    # nine-character rows, i.e. no weapon request, which is allowed
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from doom_data import parse_episode_ids
+    from test_unseen_subset import split as dense_split
+    for ep in parse_episode_ids(dense_split()["next_tic_runs"]["unseen_ids"]):
+        pq.write_table(pa.table({"buttons": ["100000000"] * 4}),
+                       str(root / "raw_arnold_dense" / "arenas_678" / f"ep_{ep:05d}.parquet"))
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
     (repo / "encode_parquet.py").write_text(STUB_ENCODER)

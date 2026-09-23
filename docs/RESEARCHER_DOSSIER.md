@@ -451,8 +451,11 @@ The fixed split is by episode, with half-open ranges. The full pool is distinct 
 | Approved initial training prefix | `arenas` 0:2000 | 2,000 episodes, 500 per arena | Same prefix for each next-tic backbone |
 | Initial validation subset | `arenas` 6000:6100 | 100 episodes, 25 per arena | Launch/evaluation subset |
 | Initial seen-test subset | `arenas` 7000:7100 | 100 episodes, 25 per arena | Reporting subset |
-| Initial unseen subset | `arenas_678` 0:60 | 60 episodes, 20 per arena | Reporting subset |
-| Full unseen pool | `arenas_678` all | 3,000 episodes, 1,000 per arena | Available pool; JSON operational `unseen` range names only the initial subset |
+| Unseen scoring subset | `arenas_678` 60:120 | 60 episodes, 20 per arena, zero worker-first episodes | Reporting subset since 2026-09-22 |
+| Withdrawn unseen subset | `arenas_678` 0:60 | 51 of 60 worker-first (k = 0) | Declared 2026-09-21, replaced 2026-09-22 before any score; secondary set only, reported with its k strata |
+| Full unseen pool | `arenas_678` all | 3,000 episodes, 1,000 per arena | Never trained on; JSON operational `unseen` range names only the scoring subset |
+
+**Why the unseen subset moved (2026-09-22).** Arnold's weapon-select requests execute only in a recorder process's first episode (k = 0; section 4.3). The review measured k from the raw `buttons` column of ids 0:60 and found 51 worker-first episodes (ids 0 to 24 and 26 to 51), because `arenas_678` was started three times and every restart made a fresh k = 0 episode per worker. Validation and test hold none and the training prefix only 32 (1.6%), so scoring on 0:60 would have mixed map transfer with a control regime the model barely saw. Ids 60:120 hold no k = 0 episode. No model had been scored on either set, so the replacement is not outcome selection. [`release/dense_split.json` `history`; `docs/REVIEW_2026-09-22.md` H1.]
 
 The initial prefix has approximately **10.07M raw tics**. Dividing by global batch **32** gives roughly **315k optimizer updates** for a nominal pass, before valid-window exclusions and repeated sampling are accounted for. The statement in the log that more data cannot help below a pass is too categorical. Additional data can change diversity even when not all examples are consumed. The narrower defensible rationale was storage, encoding cost, and matching the data distribution between rows under a fixed budget. [RC 2026-09-21 01:30.]
 

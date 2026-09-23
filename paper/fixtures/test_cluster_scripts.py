@@ -169,9 +169,10 @@ def test_fetch_takes_exactly_the_id_ranges_the_two_runs_need(tmp_path):
                                first="arenas/ep_06000.parquet", last="arenas/ep_06099.parquet")
     assert rows["test"] == dict(dir="arenas", ids="7000:7100", files=100,
                                 first="arenas/ep_07000.parquet", last="arenas/ep_07099.parquet")
-    assert rows["unseen"] == dict(dir="arenas_678", ids="0:60", files=60,
-                                  first="arenas_678/ep_00000.parquet",
-                                  last="arenas_678/ep_00059.parquet")
+    # 0:60 until 2026-09-22 (51 worker-first episodes); release/dense_split.json `history`
+    assert rows["unseen"] == dict(dir="arenas_678", ids="60:120", files=60,
+                                  first="arenas_678/ep_00060.parquet",
+                                  last="arenas_678/ep_00119.parquet")
 
 
 def test_the_file_list_stops_at_every_range_boundary(tmp_path):
@@ -184,11 +185,11 @@ def test_the_file_list_stops_at_every_range_boundary(tmp_path):
     for present in ("arenas/ep_00000.parquet", "arenas/ep_01999.parquet",
                     "arenas/ep_06000.parquet", "arenas/ep_06099.parquet",
                     "arenas/ep_07000.parquet", "arenas/ep_07099.parquet",
-                    "arenas_678/ep_00000.parquet", "arenas_678/ep_00059.parquet"):
+                    "arenas_678/ep_00060.parquet", "arenas_678/ep_00119.parquet"):
         assert present in files, present
     for absent in ("arenas/ep_02000.parquet", "arenas/ep_05999.parquet",
                    "arenas/ep_06100.parquet", "arenas/ep_07100.parquet",
-                   "arenas_678/ep_00060.parquet"):
+                   "arenas_678/ep_00059.parquet", "arenas_678/ep_00120.parquet"):
         assert absent not in files, f"{absent} is outside the ranges the runs use"
 
 
@@ -271,7 +272,7 @@ def test_the_training_corpus_is_sharded_across_the_named_gpus(tmp_path):
 def test_the_evaluation_corpora_are_encoded_on_one_card(tmp_path):
     out = dry(ENCODE, root=str(tmp_path), GPUS="0,1,2,3", VAES="sd15", EVAL_GPU="3")
     evals = [c for c in encoder_commands(out) if "--episode-ids 0:2000" not in c]
-    assert {"6000:6100", "7000:7100", "0:60"} <= {c.split("--episode-ids ")[1].split()[0] for c in evals}
+    assert {"6000:6100", "7000:7100", "60:120"} <= {c.split("--episode-ids ")[1].split()[0] for c in evals}
     assert all("--device cuda:3" in c for c in evals), evals
     assert all("--shard" not in c for c in evals), "an evaluation corpus was sharded"
 
@@ -306,7 +307,7 @@ def test_the_audit_and_the_split_publish_come_after_the_encodes(tmp_path):
     splits = min(i for i, ln in enumerate(lines) if "make_dense_eval_splits.py" in ln)
     assert last_encode < audit < splits, out
     assert "--audit-only" in out
-    for ids in ("6000:6100", "7000:7100", "0:60"):
+    for ids in ("6000:6100", "7000:7100", "60:120"):
         assert any("make_dense_eval_splits.py" in ln and f"--expect-ids {ids}" in ln for ln in lines), ids
 
 

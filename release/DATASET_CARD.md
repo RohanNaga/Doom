@@ -43,10 +43,16 @@ Fixed by episode id BEFORE any model was trained on this data, and never to be m
 | train | 0 to 5999 | 6,000 |
 | val | 6000 to 6999 | 1,000 |
 | test | 7000 to 7999 | 1,000 |
-| unseen maps | `arenas_678/` (all) | 3,000 |
+| unseen maps | `arenas_678/` (all; never trained on) | 3,000 |
 
 A training run may use a prefix of the train split (the first DoomDiT next-tic runs use a subset because of compute);
 that never changes the split. Split by episode, never by frame.
+
+The first next-tic runs score subsets: val `arenas/` 6000 to 6099, test 7000 to 7099, and unseen `arenas_678/`
+**60 to 119** (20 per map; `next_tic_runs.unseen_ids` and `segments.arenas_678.ranges.unseen` in the json).
+The unseen subset was declared as 0 to 59 on 2026-09-21 and replaced on 2026-09-22, before any model was scored
+on it: 51 of those 60 are worker-first episodes (k = 0, see the weapon-select section below), a control regime that
+validation and test never contain. Ids 60 to 119 hold none. The json's `history` records the measurement.
 
 ## Columns (one row per tic)
 
