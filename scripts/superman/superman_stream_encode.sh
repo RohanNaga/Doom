@@ -8,7 +8,8 @@
 # parquets at a time into /home/rohan/Doom/stream/<gpu>/, runs encode_parquet.py on exactly those
 # files with the arguments `VAE=sd35 encode_nexttic.sh` gives it, and pushes the latents and
 # sidecars into the directory that launcher would have written. The next batch is pulled while the
-# current one encodes, so the card never waits on the network.
+# current one encodes, and each batch ships while the next one encodes, so the card never waits on
+# the network.
 #
 #   corpus  source on Spiderman           ids         destination on Spiderman
 #   train   raw_arnold_dense/arenas       0:2000      latents_arnold_dense_pertic_sd35/arenas
@@ -125,6 +126,55 @@ json.dump(m, open(path, "w"), indent=1)
 P
 }
 
+wait_ship() {    # wait for the ship in flight (encode_corpus's $sp), and stop the worker if it failed
+  [ -n "${sp:-}" ] || return 0
+  wait "$sp"
+  sp=""
+  if [ "$(cat "$src_rc" 2>/dev/null)" != 0 ]; then
+    log "FATAL ship failed twice ($src_rc); its local copies are kept"
+    exit 7
+  fi
+}
+
+ship_batch() {  # ship_batch <out> <shipdir> <b/nb> <corpus> <encode_s> <episode names...>; runs in the background
+  local out=$1 sh=$2 tag=$3 corpus=$4 dt=$5; shift 5
+  local acc=$STATE/episodes_${corpus}_$NN.jsonl n frames=0 ts=$SECONDS
+  rm -rf "$sh"; mkdir -p "$sh"
+  for n in "$@"; do
+    ln "$out/${n}_latents.npy" "$sh/${n}_latents.npy.smpart"
+    ln "$out/${n}_meta.npz" "$sh/${n}_meta.npz"
+    frames=$((frames + $(grep "\"episode\": \"$n\"" "$out/episodes_00.jsonl" | head -1 | sed 's/.*"frames": \([0-9]*\).*/\1/')))
+  done
+  (cd "$sh" && md5sum -- * > "$sh/.sums_sm$GPU")
+  local parts="" ok="" try
+  for n in "$@"; do parts="$parts ${n}_latents.npy.smpart"; done
+  for try in 1 2; do
+    rsync -a -e "$SSH" "$sh/" "$R:$DST/" >> "$sh.rsync.log" 2>&1 \
+      && ok=$(remote "cd $DST && md5sum -c --quiet .sums_sm$GPU && for f in $parts; do \
+           t=\${f%.smpart}; if [ -e \$t ]; then rm -f \$f; echo DUP \$t; else mv \$f \$t; fi; done; \
+           rm -f .sums_sm$GPU; echo SHIP_OK")
+    grep -q SHIP_OK <<< "$ok" && break
+    log "ship attempt $try failed for batch $tag: $(tail -2 "$sh.rsync.log" | tr '\n' ' ') $ok"
+    [ "$try" = 1 ] && sleep 120
+  done
+  if ! grep -q SHIP_OK <<< "$ok"; then echo 7 > "$sh.rc"; return 7; fi
+  for n in "$@"; do
+    grep -q "DUP ${n}_latents.npy" <<< "$ok" && { log "dup $n: Spiderman wrote it first, kept theirs"; continue; }
+    grep "\"episode\": \"$n\"" "$out/episodes_00.jsonl" | head -1 >> "$acc"
+    echo "$n" >> "$W/nship_$corpus"
+  done
+  [ -s "$acc" ] && rsync -a -e "$SSH" "$acc" "$R:$DST/episodes_$NN.jsonl" >> "$sh.rsync.log" 2>&1
+  if [ ! -e "$W/meta_sent_$corpus" ] && [ -s "$out/encode_meta_00.json" ]; then
+    patch_meta "$out/encode_meta_00.json" \
+      && rsync -a -e "$SSH" "$out/encode_meta_00.json" "$R:$DST/encode_meta_$NN.json" >> "$sh.rsync.log" 2>&1 \
+      && rsync -a --ignore-existing -e "$SSH" "$out/canonical_controls.json" "$R:$DST/canonical_controls.json" >> "$sh.rsync.log" 2>&1 \
+      && touch "$W/meta_sent_$corpus"
+  fi
+  log "batch $tag $corpus shipped=$# frames=$frames encode_s=$dt fps=$(( dt > 0 ? frames / dt : 0 )) ship_s=$((SECONDS - ts)) eps=$*"
+  rm -rf "$out" "$sh"
+  echo 0 > "$sh.rc"
+}
+
 encode_corpus() {
   local corpus=$1
   spec "$corpus"
@@ -135,7 +185,6 @@ encode_corpus() {
   mapfile -t todo < <(not_done "${mine[@]}")
   log "corpus=$corpus ids=$IDS mine=${#mine[@]} todo=${#todo[@]} src=$SRC dst=$DST k=$K"
   [ ${#todo[@]} -eq 0 ] && { log "CORPUS_DONE $corpus (nothing to do)"; return 0; }
-  local acc=$STATE/episodes_${corpus}_$NN.jsonl
   if [ "$DRY" = 1 ]; then
     echo "DRY first batch: ${todo[*]:0:$K}"
     echo "DRY encoder: $PY $REPO/encode_parquet.py --in-dir $W/in0 --out-dir $W/out --every-tic --stride 4" \
@@ -145,15 +194,21 @@ encode_corpus() {
     return 0
   fi
   remote "mkdir -p $DST" || { log "FATAL cannot reach Spiderman"; exit 5; }
-  local nb=$(( (${#todo[@]} + K - 1) / K )) b slot=0 fpid=""
+  rm -f "$W/meta_sent_$corpus" "$W/nship_$corpus"
+  local nb=$(( (${#todo[@]} + K - 1) / K )) b slot=0 fpid="" sp="" src_rc="" fails=0
   fetch "$W/in0" "${todo[@]:0:$K}"
-  local meta_sent=0 fails=0 nship=0
   for ((b = 0; b < nb; b++)); do
-    [ -e "$W/STOP" ] && { log "STOP file found, exiting before batch $b of $corpus"; exit 0; }
+    if [ -e "$W/STOP" ]; then
+      log "STOP file found, exiting before batch $b of $corpus"
+      wait_ship; [ -n "$fpid" ] && wait "$fpid"; exit 0
+    fi
     local free
     free=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
-    [ "$free" -lt "$MIN_FREE_GB" ] && { log "FATAL disk ${free}G free < ${MIN_FREE_GB}G"; exit 6; }
-    local IN=$W/in$slot NEXT=$W/in$((1 - slot))
+    if [ "$free" -lt "$MIN_FREE_GB" ]; then
+      log "FATAL disk ${free}G free < ${MIN_FREE_GB}G"
+      wait_ship; [ -n "$fpid" ] && wait "$fpid"; exit 6
+    fi
+    local IN=$W/in$slot NEXT=$W/in$((1 - slot)) OUT=$W/out$slot
     [ -n "$fpid" ] && wait "$fpid"
     fpid=""
     if [ "$(cat "$IN.rc")" != 0 ]; then
@@ -177,68 +232,46 @@ encode_corpus() {
     for id in "${batch[@]}"; do
       printf '%s\n' "${still[@]}" | grep -qx "$id" || { rm -f "$IN/$(name "$id").parquet"; log "skip $(name "$id"): already on Spiderman"; }
     done
-    if [ ${#still[@]} -eq 0 ]; then slot=$((1 - slot)); continue; fi
-    rm -rf "$W/out"; mkdir -p "$W/out"
+    # every slot flip waits for the ship in flight, so the batch after next never clears an OUT still shipping
+    if [ ${#still[@]} -eq 0 ]; then rm -rf "$IN"; wait_ship; slot=$((1 - slot)); continue; fi
+    # OUT was last shipped two batches ago, and that ship was waited for before the previous one began
+    rm -rf "$OUT"; mkdir -p "$OUT"
     local t0=$SECONDS
-    (cd "$REPO" && nice -n 5 "$PY" "$REPO/encode_parquet.py" --in-dir "$IN" --out-dir "$W/out" --every-tic --stride 4 \
+    (cd "$REPO" && nice -n 5 "$PY" "$REPO/encode_parquet.py" --in-dir "$IN" --out-dir "$OUT" --every-tic --stride 4 \
        --canonical "$CANON" --batch-size 64 --decode-threads "$THREADS" --decode-workers 0 \
        --device "cuda:$GPU" --dtype bf16 --cache-dir "$HUB" --decode-check 16 "${VAE_FLAGS[@]}") >> "$ELOG" 2>&1
     local rc=$? dt=$((SECONDS - t0))
+    rm -rf "$IN"
     [ $rc -ne 0 ] && log "encoder exit $rc on batch $b ($(printf '%s ' "${still[@]}")); see $ELOG"
-    # ship what the encoder completed: latents, sidecar and summary line all present
-    rm -rf "$W/ship"; mkdir -p "$W/ship"
-    local shipped=() frames=0
+    # what the encoder completed: latents, sidecar and summary line all present
+    local complete=() n
     for id in "${still[@]}"; do
-      local n; n=$(name "$id")
-      if [ -s "$W/out/${n}_latents.npy" ] && [ -s "$W/out/${n}_meta.npz" ] \
-         && grep -q "\"episode\": \"$n\"" "$W/out/episodes_00.jsonl" 2>/dev/null; then
-        ln "$W/out/${n}_latents.npy" "$W/ship/${n}_latents.npy.smpart"
-        ln "$W/out/${n}_meta.npz" "$W/ship/${n}_meta.npz"
-        shipped+=("$n")
-        frames=$((frames + $(grep "\"episode\": \"$n\"" "$W/out/episodes_00.jsonl" | head -1 | sed 's/.*"frames": \([0-9]*\).*/\1/')))
+      n=$(name "$id")
+      if [ -s "$OUT/${n}_latents.npy" ] && [ -s "$OUT/${n}_meta.npz" ] \
+         && grep -q "\"episode\": \"$n\"" "$OUT/episodes_00.jsonl" 2>/dev/null; then
+        complete+=("$n")
       else
         log "encode incomplete for $n, not shipped"
       fi
     done
-    if [ ${#shipped[@]} -gt 0 ]; then
-      (cd "$W/ship" && md5sum -- * > "$W/ship/.sums_sm$GPU")
-      local parts="" ok=""
-      for n in "${shipped[@]}"; do parts="$parts ${n}_latents.npy.smpart"; done
-      local ts=$SECONDS try
-      for try in 1 2; do
-        rsync -a -e "$SSH" "$W/ship/" "$R:$DST/" >> "$W/ship.rsync.log" 2>&1 \
-          && ok=$(remote "cd $DST && md5sum -c --quiet .sums_sm$GPU && for f in $parts; do \
-               t=\${f%.smpart}; if [ -e \$t ]; then rm -f \$f; echo DUP \$t; else mv \$f \$t; fi; done; \
-               rm -f .sums_sm$GPU; echo SHIP_OK")
-        grep -q SHIP_OK <<< "$ok" && break
-        log "ship attempt $try failed for batch $b: $(tail -2 "$W/ship.rsync.log" | tr '\n' ' ') $ok"
-        [ $try = 1 ] && sleep 120
-      done
-      grep -q SHIP_OK <<< "$ok" || { log "FATAL ship failed twice for batch $b; local copies kept in $W/out"; exit 7; }
-      local n
-      for n in "${shipped[@]}"; do
-        grep -q "DUP ${n}_latents.npy" <<< "$ok" && { log "dup $n: Spiderman wrote it first, kept theirs"; continue; }
-        grep "\"episode\": \"$n\"" "$W/out/episodes_00.jsonl" | head -1 >> "$acc"
-        nship=$((nship + 1))
-      done
-      [ -s "$acc" ] && rsync -a -e "$SSH" "$acc" "$R:$DST/episodes_$NN.jsonl" >> "$W/ship.rsync.log" 2>&1
-      if [ $meta_sent = 0 ] && [ -s "$W/out/encode_meta_00.json" ]; then
-        patch_meta "$W/out/encode_meta_00.json" \
-          && rsync -a -e "$SSH" "$W/out/encode_meta_00.json" "$R:$DST/encode_meta_$NN.json" >> "$W/ship.rsync.log" 2>&1 \
-          && rsync -a --ignore-existing -e "$SSH" "$W/out/canonical_controls.json" "$R:$DST/canonical_controls.json" >> "$W/ship.rsync.log" 2>&1 \
-          && meta_sent=1
-      fi
-      fails=0
-      log "batch $((b + 1))/$nb $corpus shipped=${#shipped[@]} frames=$frames encode_s=$dt fps=$(( dt > 0 ? frames / dt : 0 )) ship_s=$((SECONDS - ts)) eps=${shipped[*]}"
-    else
+    if [ ${#complete[@]} -eq 0 ]; then
       # an encoder that fails every batch (OOM, a broken env) must not churn through the corpus
       fails=$((fails + 1))
-      [ $fails -ge 3 ] && { log "FATAL three consecutive batches shipped nothing; last encoder exit $rc"; exit 8; }
+      [ $fails -ge 3 ] && { log "FATAL three consecutive batches completed nothing; last encoder exit $rc"; wait_ship; exit 8; }
+      wait_ship; slot=$((1 - slot)); continue
     fi
-    rm -rf "$W/out" "$W/ship" "$IN"
+    fails=0
+    # one ship in flight at a time: it overlaps the next batch's encode, never another ship
+    wait_ship
+    src_rc=$W/ship$slot.rc
+    rm -f "$src_rc"
+    ship_batch "$OUT" "$W/ship$slot" "$((b + 1))/$nb" "$corpus" "$dt" "${complete[@]}" &
+    sp=$!
     slot=$((1 - slot))
   done
+  wait_ship
   [ -n "$fpid" ] && wait "$fpid"
+  local nship; nship=$(cat "$W/nship_$corpus" 2>/dev/null | wc -l)
   # CORPUS_DONE only when every episode this shard owned is now on Spiderman
   local left; left=$(not_done "${todo[@]}" | wc -l)
   if [ "$left" -eq 0 ]; then log "CORPUS_DONE $corpus shipped=$nship todo=${#todo[@]}"
@@ -248,7 +281,7 @@ encode_corpus() {
 mkdir -p "$W" "$STATE" "$(dirname "$LOG")"
 exec 9> "$W/.lock"
 flock -n 9 || { echo "another worker holds $W/.lock" >&2; exit 3; }
-rm -rf "$W"/in0 "$W"/in1 "$W"/out "$W"/ship "$W"/STOP
+rm -rf "$W"/in0 "$W"/in1 "$W"/out0 "$W"/out1 "$W"/ship0 "$W"/ship1 "$W"/*.rc "$W"/STOP
 [ "$DRY" = 1 ] || [ -x "$PY" ] || { echo "no python at $PY" >&2; exit 2; }
 log "START corpora=\"$CORPORA\" k=$K threads=$THREADS repo=$REPO git=$(head -c 12 "$B/repo_git.txt" 2>/dev/null) dst_root=$DST_ROOT dry=$DRY"
 T0=$SECONDS
