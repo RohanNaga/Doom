@@ -109,7 +109,9 @@ class EpisodeWindowDataset(Dataset):
         keep = None if episode_ids is None else set(int(e) for e in episode_ids)
         self.episodes = []          # (ep_id, latents_mmap, actions_array)
         self.window_counts = []
-        for ep_id, lat_path, act_path in list_episodes(episodes_dir):
+        listed = list_episodes(episodes_dir)
+        ensure_open_file_budget(len(listed) if keep is None else len(keep))
+        for ep_id, lat_path, act_path in listed:
             if keep is not None and ep_id not in keep:
                 continue
             lat = np.load(lat_path, mmap_mode="r")
@@ -193,6 +195,30 @@ def latent_shape_v2(latent_channels=4):
     return (latent_channels,) + LATENT_HW_V2
 
 
+def ensure_open_file_budget(files_needed, headroom=512):
+    """Raise the soft open-file limit so `files_needed` memory-mapped episodes can stay open.
+
+    A per-tic dataset keeps one memory map per episode for its whole life, so 2,000 training
+    episodes exceed the usual soft limit of 1,024 (Spiderman: soft 1,024, hard 1,048,576) and
+    `np.load(mmap_mode="r")` fails with EMFILE while the dataset is still being built. The soft
+    limit may be raised up to the hard limit without privileges, and loader workers forked
+    afterwards inherit it. Returns the soft limit in force afterwards, or None where the
+    resource module is unavailable.
+    """
+    try:
+        import resource
+    except ImportError:
+        return None
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    want = int(files_needed) + int(headroom)
+    if soft != resource.RLIM_INFINITY and soft < want:
+        new = want if hard == resource.RLIM_INFINITY else min(want, hard)
+        if new > soft:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (new, hard))
+            soft = new
+    return soft
+
+
 def list_latent_episodes(latents_dir):
     """Sorted [(episode_id:int, latents_path, meta_path)] for encode_parquet.py outputs."""
     out = []
@@ -263,7 +289,9 @@ class LatentWindowDataset(Dataset):
         want = latent_shape_v2(latent_channels)
         keep = None if episode_ids is None else set(int(e) for e in episode_ids)
         self.episodes, counts = [], []
-        for ep, lat_path, meta_path in list_latent_episodes(latents_dir):
+        listed = list_latent_episodes(latents_dir)
+        ensure_open_file_budget(len(listed) if keep is None else len(keep))
+        for ep, lat_path, meta_path in listed:
             if keep is not None and ep not in keep:
                 continue
             lat = np.load(lat_path, mmap_mode="r")
@@ -635,7 +663,9 @@ class TicWindowDataset(Dataset):
         candidates = 0
         widths = set()          # executed-control width, checked on every episode and never mixed
         span = self.L + self.horizon
-        for ep, lat_path, meta_path in list_latent_episodes(latents_dir):
+        listed = list_latent_episodes(latents_dir)
+        ensure_open_file_budget(len(listed) if keep is None else len(keep))
+        for ep, lat_path, meta_path in listed:
             if keep is not None and ep not in keep:
                 continue
             lat = np.load(lat_path, mmap_mode="r")

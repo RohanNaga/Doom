@@ -12,6 +12,13 @@ be listed by exactly one shard, and all shards must share one latent contract (V
 scale, shift, channels, batch size, dtype). A missing shard log hid a shard of shifted latents, and
 shards under two scaling contracts passed, before this. Every tensor and statistic must be finite.
 
+Within one directory is not enough (Astra, third review, 2026-09-23): a synthetic train corpus at
+scale 1 and a val corpus at scale 2 each passed. With `--space sd15|sd35` the directory's contract
+must also be the one its latent space's backbone was pretrained in and is evaluated under
+(`space_contracts()`: autoencoder, subfolder, scale, shift, channels, read from the modules that own
+those numbers), and with `--contract-peer <dir>` it must equal the other corpus of the same space on
+every one of those keys. The gates pass both, for train and for val.
+
 For each shard, for a few sampled episodes (`--episodes` restricts which, inside their own shards):
 
   1. Re-encode.  Take one full encoder batch at a random batch boundary and the episode's tail batch
@@ -141,6 +148,93 @@ def contract_problems(metas):
             bad.append(f"shards were encoded under different {k}: "
                        + ", ".join(f"{name}={metas[name][k]!r}" for name in sorted(metas)))
     return bad
+
+
+# the keys that make a latent mean the same thing in two corpora: which autoencoder, how it was
+# normalised, how many channels. Batch size and dtype are execution settings and may differ between
+# the train and the val encode (each shard is re-encoded under its own), so they are compared within
+# a directory only.
+NORMALISATION_KEYS = ("vae_id", "vae_subfolder", "scale", "shift", "channels")
+
+
+def space_contracts():
+    """The latent contract of each latent space: the autoencoder the encoder writes under, its
+    normalisation `(z - shift) * scale`, and the channel count the space's backbone was pretrained in.
+
+    sd15 is `encode_parquet.py`'s default (sd-vae-ft-mse, `doomdit_utils.LATENT_SCALE`, no shift) and
+    the U-Net's 4 channels; sd35 is SD 3.5 Medium's own autoencoder (`verify_sd35.SD35_VAE`) under the
+    subfolder `vae`, 16 channels. The evaluator decodes with the same numbers (`--latent-scale 1.5305
+    --latent-shift 0.0609` for SD 3.5), so a corpus under any other contract trains and scores wrong.
+    """
+    from backbones import BACKBONE_LATENT_CHANNELS, SD35_DEFAULT
+    from doomdit_utils import LATENT_SCALE, LATENT_SHIFT, VAE_NAME
+    from verify_sd35 import SD35_VAE
+    return {"sd15": {"vae_id": VAE_NAME, "vae_subfolder": "", "scale": LATENT_SCALE, "shift": LATENT_SHIFT,
+                     "channels": BACKBONE_LATENT_CHANNELS["unet"]},
+            "sd35": {"vae_id": SD35_DEFAULT, "vae_subfolder": "vae", "scale": SD35_VAE["scaling_factor"],
+                     "shift": SD35_VAE["shift_factor"], "channels": BACKBONE_LATENT_CHANNELS["sd35"]}}
+
+
+def _norm_value(key, v):
+    """One contract value in a comparable form: floats rounded, and a shift of 0 the same as none
+    (`normalize_latents` treats them alike)."""
+    if key in ("scale", "shift"):
+        if v in (None, 0, 0.0):
+            return None if key == "shift" else v
+        return round(float(v), 6)
+    if key == "channels":
+        return None if v is None else int(v)
+    return v or ""
+
+
+def measured_channels(latents_dir):
+    """The channel count of the first stored latent array, for a shard log that does not record it."""
+    from doom_data import list_latent_episodes
+    for _, lat_path, _ in list_latent_episodes(latents_dir):
+        return int(np.load(lat_path, mmap_mode="r").shape[1])
+    return None
+
+
+def normalisation_of(metas, latents_dir):
+    """{key: sorted distinct values} over a directory's shards, channels measured where unrecorded."""
+    measured = None
+    out = {}
+    for k in NORMALISATION_KEYS:
+        vals = set()
+        for m in metas.values():
+            v = m.get(k)
+            if k == "channels" and v is None:
+                measured = measured if measured is not None else measured_channels(latents_dir)
+                v = measured
+            vals.add(_norm_value(k, v))
+        out[k] = sorted(vals, key=repr)
+    return out
+
+
+def expected_problems(metas, latents_dir, space):
+    """One problem per normalisation key on which a directory differs from its space's contract."""
+    want = space_contracts()[space]
+    got = normalisation_of(metas, latents_dir)
+    return [f"{latents_dir} is not the {space} latent contract: {k} is {got[k]!r}, the space needs "
+            f"{_norm_value(k, want[k])!r}" for k in NORMALISATION_KEYS if got[k] != [_norm_value(k, want[k])]]
+
+
+def peer_problems(metas, latents_dir, peer_dir):
+    """One problem per normalisation key on which this corpus and its peer (the other corpus of the
+    same latent space, train against val) disagree; a peer with no readable shard log is a problem."""
+    peer = {}
+    names = sorted(_META.search(os.path.basename(p)).group(1)
+                   for p in glob.glob(os.path.join(peer_dir, "encode_meta_*.json")))
+    for name in names:
+        try:
+            peer[name] = shard_meta(peer_dir, name)
+        except SystemExit as e:
+            return [f"contract peer {peer_dir}: {e}"]
+    if not peer:
+        return [f"contract peer {peer_dir} has no encode_meta_NN.json, so its latent contract is unknown"]
+    mine, theirs = normalisation_of(metas, latents_dir), normalisation_of(peer, peer_dir)
+    return [f"{latents_dir} and its peer {peer_dir} were encoded under different {k}: {mine[k]!r} vs {theirs[k]!r}"
+            for k in NORMALISATION_KEYS if mine[k] != theirs[k]]
 
 
 def load_encoder(meta, device, cache_dir=None):
@@ -293,8 +387,12 @@ def shard_verdict(diffs, identical, total, psnr, fresh_psnr, max_mae=MAX_MAE, ma
 
 def check(latents_dir, parquet_dir, episodes=None, per_shard=2, device="cpu", max_mae=MAX_MAE, max_p99=MAX_P99,
           min_identical=MIN_IDENTICAL, min_shift_margin_db=MIN_SHIFT_MARGIN_DB, seed=0, vae=None, decoder=None,
-          cache_dir=None):
-    """The per-shard report; `ok` is False if coverage, the contracts or any shard fails."""
+          cache_dir=None, space=None, contract_peer=None):
+    """The per-shard report; `ok` is False if coverage, the contracts or any shard fails.
+
+    `space` also requires the latent space's own contract (`space_contracts`), and `contract_peer`
+    equality with the other corpus of that space, on every normalisation key.
+    """
     from doom_data import list_latent_episodes
     files = {ep: (lp, mp) for ep, lp, mp in list_latent_episodes(latents_dir)}
     rng = np.random.RandomState(seed)
@@ -306,7 +404,12 @@ def check(latents_dir, parquet_dir, episodes=None, per_shard=2, device="cpu", ma
         except SystemExit as e:
             coverage.append(str(e))
     contracts = contract_problems(metas)
+    if metas and space:
+        contracts += expected_problems(metas, latents_dir, space)
+    if metas and contract_peer:
+        contracts += peer_problems(metas, latents_dir, contract_peer)
     report = {"latents_dir": latents_dir, "parquet_dir": parquet_dir, "shifts": list(SHIFTS),
+              "space": space, "contract_peer": contract_peer,
               "thresholds": {"max_mae": max_mae, "max_p99": max_p99, "min_identical": min_identical,
                              "min_shift_margin_db": min_shift_margin_db},
               "coverage_problems": coverage, "contract_problems": contracts, "shards": {}}
@@ -358,7 +461,8 @@ def main(args):
     rep = check(args.latents_dir, args.parquet_dir,
                 parse_episode_ids(args.episodes) if args.episodes else None, args.episodes_per_shard,
                 args.device, args.max_mae, args.max_p99, args.min_identical, args.min_shift_margin_db, args.seed,
-                decoder=decoder, cache_dir=args.cache_dir)
+                decoder=decoder, cache_dir=args.cache_dir, space=args.space or None,
+                contract_peer=args.contract_peer or None)
     text = json.dumps(rep, indent=1)
     if args.out:
         with open(args.out, "w") as f:
@@ -397,6 +501,11 @@ def build_parser():
                         "of harmless rounding gives 0%% identical")
     p.add_argument("--min-shift-margin-db", dest="min_shift_margin_db", type=float, default=MIN_SHIFT_MARGIN_DB,
                    help="how far the unshifted alignment's decoded PSNR must exceed every shifted control's")
+    p.add_argument("--space", default="", choices=["", "sd15", "sd35"],
+                   help="also require this latent space's contract (autoencoder, scale, shift, channels)")
+    p.add_argument("--contract-peer", dest="contract_peer", default="",
+                   help="the other corpus of the same latent space (train for val, val for train); its "
+                        "normalisation contract must equal this one's")
     p.add_argument("--decoder", default="", help="decode through this VAE instead of the shard's own")
     p.add_argument("--cache-dir", dest="cache_dir", default=None)
     p.add_argument("--seed", type=int, default=0)

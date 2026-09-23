@@ -446,7 +446,7 @@ def test_a_seal_directory_without_a_record_is_refused_as_a_race(tmp_path):
     selected(tmp_path, root, r)
     (r / "sealed" / "test").mkdir(parents=True)
     proc, calls = run(tmp_path, root, r, CORPORA="test")
-    assert proc.returncode != 0 and "another scoring of it may be running" in proc.stderr
+    assert proc.returncode != 0 and "without a seal record" in proc.stderr and "died between" in proc.stderr
     assert _tf_calls(calls) == []
 
 

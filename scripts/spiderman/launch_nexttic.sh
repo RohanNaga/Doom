@@ -6,7 +6,16 @@
 #
 #   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
-#          [ALLOW_UNGATED=1] [DRY=1] [DOOM_ROOT=..] launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#          [ALLOW_UNGATED=1] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [DRY=1] [DOOM_ROOT=..] \
+#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#
+# RUN_REPO is the checkout the run executes from (`cd $RUN_REPO`) and whose clean HEAD the certificate
+# must name; it defaults to $D/repo. A second checkout (e.g. $D/repo_launch, while an encoder still
+# runs from $D/repo) works only if gates.sh certified that same checkout, with the same RUN_REPO.
+#
+# The interpreter is per backbone: PY_UNET for the 4-channel rows (unet, pixart), PY_SD35 for sd35,
+# each falling back to PY and then to this host's env (~/miniconda3/envs/doom, ~/wanenc: diffusers
+# 0.40 for SD 3.5 lives only in the second). It is part of the certified command.
 #
 # A launch refuses unless $D/GATES_CERT.json (written by scripts/cluster/gates.sh) certifies this
 # backbone's exact command, commit, corpora, encoders and gate results; see "PIN WHAT LAUNCHES".
@@ -85,20 +94,21 @@ NP=$(( $(echo "$GPU" | tr -cd , | wc -c) + 1 ))
 case $BACKBONE in
   unet)
     RUN=040-unet-nexttic; WARM=CompVis/stable-diffusion-v1-4; CH=4
-    PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="" ;;
+    PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; BB_FLAGS="" ;;
   pixart)
     RUN=041-pixart-nexttic; WARM=PixArt-alpha/PixArt-XL-2-512x512; CH=4
-    PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; BB_FLAGS="--action-inject token" ;;
+    PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; BB_FLAGS="--action-inject token" ;;
   sd35)
     # the 16-channel corpus, its own latent directory, and the two deviations this row already carries
     RUN=042-sd35-nexttic; WARM=stabilityai/stable-diffusion-3.5-medium; CH=16
-    PY=${PY:-$HOME/wanenc/bin/python}
+    PY=${PY_SD35:-${PY:-$HOME/wanenc/bin/python}}
     BB_FLAGS="--grad-ckpt --skip-grad-norm 5 --skip-grad-after 3000"
     L=$D/latents_arnold_dense_pertic_sd35/arenas
     LVAL=$D/latents_arnold_dense_pertic_eval_sd35/val ;;
   *) echo "unknown backbone '$BACKBONE' (unet | sd35 | pixart)" >&2; exit 2 ;;
 esac
 R=$D/results_spiderman/$RUN
+RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout the run executes, pinned by the certificate
 
 if [ $(( GLOBAL % (MB * NP) )) -ne 0 ]; then
   echo "per-GPU batch $MB on $NP card(s) cannot reach the global batch of $GLOBAL" >&2; exit 1
@@ -141,7 +151,7 @@ COMMON="--tic-stride 1 --action-history $ACTION_HISTORY --context-frames $CTX --
  $BB_FLAGS $PHASEF $CKPTF $PARTIALF ${EXTRA:-}"
 TRAIN_ARGS="--backbone $BACKBONE --latent-channels $CH --warm-start $WARM --hf-cache $D/hf/hub \
  --results-dir $R $COMMON"
-CMD="cd $D/repo && TMPDIR=$D/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU $LAUNCHER train_wm.py \
+CMD="cd $RUN_REPO && TMPDIR=$D/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU $LAUNCHER train_wm.py \
  $TRAIN_ARGS $INITF $RES >> $D/logs/train_${RUN}.log 2>&1"
 # The command the gate certificate pins: interpreter or accelerate world, then every train_wm.py flag,
 # whitespace-normalised. `--resume` and `--init-from` are per-launch and compared separately.
@@ -151,7 +161,7 @@ CERT_CMD=$(set -f; echo $LAUNCHER train_wm.py $TRAIN_ARGS)
 
 # FIT replaces the launch with a throughput and memory measurement of this exact configuration
 if [ -n "${FIT:-}" ]; then
-  FITCMD="cd $D/repo && TMPDIR=$D/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU $PY train_wm.py \
+  FITCMD="cd $RUN_REPO && TMPDIR=$D/tmp/tmpdir CUDA_VISIBLE_DEVICES=$GPU $PY train_wm.py \
  --backbone $BACKBONE --latent-channels $CH --warm-start $WARM --hf-cache $D/hf/hub \
  --results-dir $R/fitcheck --fit-check $FIT $COMMON"
   [ "$DRY" = 1 ] && { echo "DRY $RUN fit $FITCMD"; exit 0; }
@@ -170,7 +180,7 @@ tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; 
 # PIN WHAT LAUNCHES (docs/REVIEW_2026-09-22.md H3). This used to `git pull` here, after the gates
 # had passed, and a failed pull did not stop the launch. Nothing here changes the checkout now, and
 # the launch refuses unless `$D/GATES_CERT.json` (written by scripts/cluster/gates.sh at GATES_GO)
-# has an entry for THIS backbone whose resolved command, clean commit of $D/repo, training and
+# has an entry for THIS backbone whose resolved command, clean commit of $RUN_REPO, training and
 # validation corpus fingerprints, encoder records and gate results all equal what is here now
 # (gate_certificate.py). A commit-only receipt accepted a changed recipe and let an SD 3.5-only gate
 # run certify a U-Net launch. GATE_RUN=1 marks the gates' own fit, smoke and resume runs, which come
@@ -178,7 +188,7 @@ tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; 
 # through the same check, so neither code nor corpus can change mid-run either.
 CERT=${GATES_CERT:-$D/GATES_CERT.json}
 TOOLS=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-HEAD_SHA=$(git -C "$D/repo" rev-parse HEAD 2>/dev/null) || HEAD_SHA=""
+HEAD_SHA=$(git -C "$RUN_REPO" rev-parse HEAD 2>/dev/null) || HEAD_SHA=""
 refuse() { echo "$RUN not launched: $*" >&2; exit 1; }
 if [ "${GATE_RUN:-0}" = 1 ]; then
   PIN="gate run (the gates are certifying ${HEAD_SHA:-an unversioned checkout})"
@@ -186,7 +196,7 @@ elif [ "${ALLOW_UNGATED:-0}" = 1 ]; then
   PIN="UNGATED (ALLOW_UNGATED=1)"
 else
   WHY=$("$PY" "$TOOLS/gate_certificate.py" check --cert "$CERT" --backbone "$BACKBONE" --command "$CERT_CMD" \
-        --init-from "${INIT:-}" ${RES:+--resuming} --repo "$D/repo" --train-latents "$L" --train-ids "$TRAIN_IDS" \
+        --init-from "${INIT:-}" ${RES:+--resuming} --repo "$RUN_REPO" --train-latents "$L" --train-ids "$TRAIN_IDS" \
         --val-latents "$LVAL" --val-ids "$VAL_IDS" 2>&1 < /dev/null) \
     || refuse "$WHY (ALLOW_UNGATED=1 overrides, and is recorded)"
   PIN="certified by $CERT"

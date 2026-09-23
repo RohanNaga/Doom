@@ -2,15 +2,43 @@
 # Zero to a usable node, step 4 of 5: the launch gates, in order, stopping at the first failure.
 #
 #   usage: [DOOM_ROOT=..] [UNET_GPU=0] [SD35_GPU=1] [VAES=sd15,sd35] [SMOKE_BBS="unet sd35"] \
-#          [FIT=20] [STEPS=300] [WINDOWS=64] [SMOKE_TIMEOUT=7200] [EXPLAIN=<rc>] [DRY=1] gates.sh
+#          [PY_UNET=..] [PY_SD35=..] [PY=..] [FIT=20] [STEPS=300] [WINDOWS=64] [SMOKE_TIMEOUT=7200] \
+#          [EXPLAIN=<rc>] [DRY=1] gates.sh
+#
+#   on Spiderman (the launch may come from a second checkout while an encoder runs from $D/repo;
+#   REPO, the checkout these gates run from, must then be that same checkout):
+#     cd /sata2/data/rnagabhi/doom/repo_launch && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#       RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch UNET_GPU=1 SD35_GPU=2 LAUNCH_STEPS=400000 \
+#       MB_UNET=32 MB_SD35=32 WORKERS=12 PY_UNET=$HOME/miniconda3/envs/doom/bin/python \
+#       PY_SD35=$HOME/wanenc/bin/python bash scripts/cluster/gates.sh
+#
+# At GATES_GO the gates print, per certified backbone, the exact launch to paste (GATES_LAUNCH): `cd
+# $RUN_REPO &&` DOOM_ROOT, RUN_REPO, that backbone's PY_UNET or PY_SD35, MB, WORKERS, STEPS,
+# TRAIN_IDS, VAL_IDS, EXTRA and any other launcher knob set here (CTX, ACTION_HISTORY, PHASE,
+# GRAD_CKPT, ALLOW_PARTIAL, ALLOW_ACCUM, INIT, ACCELERATE), then `bash
+# scripts/spiderman/launch_nexttic.sh <gpu> <backbone>`. Each is first run with CERT_QUERY=1 in an
+# empty environment (`env -i`) and must resolve to the certified command, or the certificate is
+# revoked: a command that needs anything from the operator's shell is not the one printed.
+#
+# Interpreters. Every command of the sd15 space and the U-Net runs under PY_UNET, every command of the
+# sd35 space and SD 3.5 (audits, inventories, the latent alignment that re-encodes with the SD 3.5
+# autoencoder, fit, smoke, probes, readback, certificate) under PY_SD35; each falls back to PY and
+# then to $D/env/bin/python. The launcher is handed the same two, so the certified command names the
+# interpreter the production launch will use.
 #
 # The order is the launch protocol's (`.claude/analyses/astra-prelaunch-audit-2026-09-21.md`, part
 # C). Each gate answers one question, and a failure stops here rather than being carried into a
 # multi-day run:
 #
 #   0 pin                which code is being certified? The commit of $REPO, which must be the
-#                        commit of $D/repo (the checkout the launcher runs) with no tracked change.
-#                        Any old certificate is revoked first; a new one is written only at GATES_GO.
+#                        commit of $RUN_REPO (default $D/repo: the checkout the launcher runs and
+#                        the certificate pins), both with no tracked change. The gates' own fit,
+#                        smoke and resume run from $RUN_REPO too; launch with the same RUN_REPO.
+#                        First the certificate entries of the backbones in SMOKE_BBS are revoked
+#                        (gate_certificate.py revoke, every other backbone's entry stays: the gates
+#                        run staggered, one space while the other row already trains); new ones are
+#                        written only at GATES_GO. A run that fails or is interrupted therefore
+#                        leaves no certificate standing for what it was certifying.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
@@ -31,7 +59,12 @@
 #                        bit identity reported, not required), then decode the stored rows against
 #                        the raw frames with rows shifted -4/-1/+1/+4, all of which the true
 #                        alignment must beat by 3 dB. Every shard log must be present and every
-#                        shard under one latent contract. The tolerances are cross-host calibrated
+#                        shard under one latent contract, and since Astra's third review that
+#                        contract (autoencoder, subfolder, scale, shift, channels) must equal the
+#                        other corpus of the space (`--contract-peer`, train against val) AND the
+#                        space's own (`--space`: sd-vae-ft-mse, 0.18215, no shift, 4 channels; SD 3.5
+#                        Medium's `vae`, 1.5305, 0.0609, 16 channels): train at scale 1 and val at
+#                        scale 2 each passed their own directory. The tolerances are cross-host calibrated
 #                        on ONE 4-channel episode: read the printed MAE, p99 and margin of the SD
 #                        3.5 shards before trusting a pass there.
 #   2 alignment gate     is the control that produced the motion stored on the row the trainer
@@ -54,11 +87,21 @@
 # training samples (`check_emitted_windows.py`: newest control = row r-1, and changing buttons[r]
 # leaves the sample unchanged).
 #
-# The certificate. Every gate that passes appends a result to $D/logs/gates_results.jsonl, scoped to
-# the whole run, one latent space, or one backbone. At GATES_GO, after checking that the checkout did
+# One set of production arguments. The fit, the smoke, the resume and the certificate all go through
+# `launch_nexttic.sh` under the same production settings (`prod_env`: DOOM_ROOT, the interpreter,
+# MB_UNET / MB_SD35 as MB, WORKERS, LAUNCH_STEPS as STEPS, TRAIN_IDS, VAL_IDS and the operator's
+# EXTRA). The fit adds only FIT; the smoke and its resume change only STEPS and append their own
+# `smoke_extra` after the operator's EXTRA (a results directory, validation, checkpoint and snapshot
+# cadence, and the resume's `--resume`), so argparse's last-value rule gives them those settings and
+# every other flag is the production one. Astra's third review reproduced a smoke at lr 5e-5 and 12
+# workers certified as lr 0.1 and 4 workers, because the smoke dropped them.
+#
+# The certificate. Every gate that passes appends a result to this run's own results file,
+# $D/logs/gates_results_<GATES_RUN_ID>.jsonl (a timestamp and the pid unless set), scoped to the
+# whole run, one latent space, or one backbone; a second, staggered run never reads or truncates it. At GATES_GO, after checking that the checkout did
 # not move while the gates ran, `gate_certificate.py write` records for each smoked backbone: its
-# resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under LAUNCH_STEPS, MB_UNET /
-# MB_SD35 and WORKERS, the values launch_runs.sh passes), the commit, the training and validation
+# resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under `prod_env`, the values
+# launch_runs.sh passes), the commit, the training and validation
 # corpus fingerprints, the encoder records and every gate result that applies to it, into
 # $D/GATES_CERT.json. `launch_nexttic.sh` recomputes all of it for the backbone it launches and
 # refuses on any difference; the gates' own fit, smoke and resume runs pass GATE_RUN=1 because they
@@ -90,7 +133,8 @@ SMOKE_TIMEOUT=${SMOKE_TIMEOUT:-7200}
 SMOKE_DIR=${SMOKE_DIR:-$D/results_smoke}
 REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 LAUNCH=${LAUNCH:-$REPO/scripts/spiderman/launch_nexttic.sh}
-PY=${PY:-$D/env/bin/python}
+PY_UNET=${PY_UNET:-${PY:-$D/env/bin/python}}   # the sd15 space and the 4-channel rows
+PY_SD35=${PY_SD35:-${PY:-$D/env/bin/python}}   # the sd35 space and the SD 3.5 row
 RAW=$D/raw_arnold_dense
 VAL_IDS=${VAL_IDS:-6000:6100}
 TRAIN_IDS=${TRAIN_IDS:-0:2000}
@@ -99,8 +143,10 @@ TRAIN_AUDIT_ROWS=${TRAIN_AUDIT_ROWS:-500}
 ALIGN_EPISODES=${ALIGN_EPISODES:-2}   # episodes per encode shard for the stored-latent alignment gate
 EMIT_WINDOWS=${EMIT_WINDOWS:-256}     # real training windows the emitted-window check reads
 CERT=$D/GATES_CERT.json
-RESULTS=$D/logs/gates_results.jsonl
-RUN_REPO=$D/repo              # the checkout launch_nexttic.sh runs (`cd $D/repo`)
+GATES_RUN_ID=${GATES_RUN_ID:-$(date +%Y%m%dT%H%M%S)-$$}
+RESULTS=$D/logs/gates_results_$GATES_RUN_ID.jsonl   # this run's results only
+HERE_REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)   # revocation must not depend on $REPO
+RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout launch_nexttic.sh runs (`cd $RUN_REPO`) and the certificate pins
 # the production launch the certificate pins, with launch_runs.sh's own defaults
 LAUNCH_STEPS=${LAUNCH_STEPS:-400000}
 MB_UNET=${MB_UNET:-32}
@@ -110,6 +156,7 @@ DEFAULT_WORKERS=$(( CORES / 4 ))
 [ "$DEFAULT_WORKERS" -lt 4 ] && DEFAULT_WORKERS=4
 [ "$DEFAULT_WORKERS" -gt 16 ] && DEFAULT_WORKERS=16
 WORKERS=${WORKERS:-$DEFAULT_WORKERS}
+PROD_EXTRA=${EXTRA:-}         # the operator's extra trainer flags: part of the production command
 IFS=, read -r -a SPACES <<< "$VAES"
 
 gate_fail() { echo "GATE_FAILED $1: ${*:2}" >&2; exit "${RC_FAIL:-1}"; }
@@ -128,65 +175,110 @@ suffix()   { [ "$1" = sd35 ] && echo _sd35 || echo ""; }
 bb_space() { [ "$1" = sd35 ] && echo sd35 || echo sd15; }
 bb_gpu()   { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
 bb_chan()  { [ "$1" = sd35 ] && echo 16 || echo 4; }
+space_py() { [ "$1" = sd35 ] && echo "$PY_SD35" || echo "$PY_UNET"; }
+bb_py()    { space_py "$(bb_space "$1")"; }
 run_name() { [ "$1" = sd35 ] && echo 042-sd35-nexttic || echo 040-unet-nexttic; }
 
 audit_cmd() {   # audit_cmd <space>
-  echo "$PY $REPO/check_action_alignment.py --audit-only" \
+  echo "$(space_py "$1") $REPO/check_action_alignment.py --audit-only" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/val" \
        "--audit-parquet-dir $RAW/arenas --episodes 100 --audit-rows 100000" \
        "--canonical $RAW/canonical_controls.json --seed 0"
 }
 train_audit_cmd() {   # train_audit_cmd <space>: the same audit over the training corpus
-  echo "$PY $REPO/check_action_alignment.py --audit-only" \
+  echo "$(space_py "$1") $REPO/check_action_alignment.py --audit-only" \
        "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--audit-parquet-dir $RAW/arenas --episodes $TRAIN_AUDIT_EPISODES --audit-rows $TRAIN_AUDIT_ROWS" \
        "--canonical $RAW/canonical_controls.json --seed 0"
 }
 inventory_cmd() {   # inventory_cmd <space>: rows and tics of every training episode
-  echo "$PY $REPO/make_dense_eval_splits.py --check-only" \
+  echo "$(space_py "$1") $REPO/make_dense_eval_splits.py --check-only" \
        "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--expect-ids $TRAIN_IDS --sample 0 --raw-tics $RAW/arenas"
 }
 space_gpu() { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
 latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shifted-decode, per shard
-  local DIR
-  if [ "$2" = train ]; then DIR=$D/latents_arnold_dense_pertic$(suffix "$1")/arenas
-  else DIR=$D/latents_arnold_dense_pertic_eval$(suffix "$1")/val; fi
-  echo "$PY $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+  local S TRAIN VAL DIR PEER
+  S=$(suffix "$1")
+  TRAIN=$D/latents_arnold_dense_pertic$S/arenas; VAL=$D/latents_arnold_dense_pertic_eval$S/val
+  DIR=$VAL; PEER=$TRAIN
+  [ "$2" = train ] && { DIR=$TRAIN; PEER=$VAL; }
+  # --space and --contract-peer: one latent contract for the space, the backbone's, in train AND val
+  echo "$(space_py "$1") $REPO/check_latent_alignment.py --latents-dir $DIR --parquet-dir $RAW/arenas" \
+       "--space $1 --contract-peer $PEER" \
        "--episodes-per-shard $ALIGN_EPISODES --device cuda:$(space_gpu "$1") --cache-dir $D/hf/hub" \
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
+revoke_cmd() {   # revoke_cmd <backbone>: drop that backbone's certificate entry, keep the others
+  echo "$(bb_py "$1") $HERE_REPO/gate_certificate.py revoke --cert $CERT --backbone $1"
+}
+revoke_mine() {   # revoke every backbone this run certifies; if that fails, revoke everything
+  local BB
+  for BB in $SMOKE_BBS; do
+    # shellcheck disable=SC2046
+    $(revoke_cmd "$BB") > /dev/null 2>&1 || { rm -f "$CERT"; echo "could not revoke $BB alone; removed $CERT" >&2; return 1; }
+  done
+  return 0
+}
 record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, for the certificate
   local detail=${3//\"/}; detail=${detail//\\/}
   printf '{"gate": "%s", "scope": "%s", "status": "ok", "detail": "%s"}\n' "$1" "$2" "$detail" >> "$RESULTS"
 }
 bb_mb() { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
+prod_env() {   # prod_env <backbone>: PROD_ENV=(NAME=VALUE ...), the production launch every gate launch starts from
+  PROD_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
+        TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" EXTRA="$PROD_EXTRA")
+}
+# launcher knobs that change the certified command; the operator's launch repeats any set here
+LAUNCH_KNOBS="CTX ACTION_HISTORY PHASE GRAD_CKPT ALLOW_PARTIAL ALLOW_ACCUM INIT ACCELERATE"
+operator_env() {   # operator_env <backbone>: OP_ENV=(NAME=VALUE ...), everything the operator's launch sets
+  local K
+  OP_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO")
+  if [ "$1" = sd35 ]; then OP_ENV+=(PY_SD35="$PY_SD35"); else OP_ENV+=(PY_UNET="$PY_UNET"); fi
+  OP_ENV+=(MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS")
+  [ -n "$PROD_EXTRA" ] && OP_ENV+=(EXTRA="$PROD_EXTRA")
+  for K in $LAUNCH_KNOBS; do [ -n "${!K:-}" ] && OP_ENV+=("$K=${!K}"); done
+  return 0
+}
+operator_cmd() {   # operator_cmd <backbone>: the launch to paste on this host, shell-quoted
+  local A OUT
+  operator_env "$1"
+  OUT="cd $(printf '%q' "$RUN_REPO") &&"
+  for A in "${OP_ENV[@]}"; do OUT="$OUT ${A%%=*}=$(printf '%q' "${A#*=}")"; done
+  echo "$OUT bash scripts/spiderman/launch_nexttic.sh $(bb_gpu "$1") $1"
+}
+operator_ok() {   # operator_ok <backbone> <certified command>: does the printed launch resolve to it in an empty environment?
+  local GOT
+  operator_env "$1"
+  GOT=$(env -i PATH="$PATH" HOME="$HOME" "${OP_ENV[@]}" CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1") \
+    && [ "$GOT" = "$2" ]
+}
 cert_cmd() {   # cert_cmd <backbone>: the production command, as the launcher resolves it
-  env DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" \
-    CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1"
+  prod_env "$1"
+  env "${PROD_ENV[@]}" CERT_QUERY=1 DRY=0 bash "$LAUNCH" "$(bb_gpu "$1")" "$1"
 }
 bb_latents() {   # bb_latents <backbone> <train|val>
   local S; S=$(suffix "$(bb_space "$1")")
   if [ "$2" = train ]; then echo "$D/latents_arnold_dense_pertic$S/arenas"; else echo "$D/latents_arnold_dense_pertic_eval$S/val"; fi
 }
 cert_write_cmd() {   # cert_write_cmd <backbone> <command>
-  echo "$PY $REPO/gate_certificate.py write --cert $CERT --backbone $1 --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
+  echo "$(bb_py "$1") $REPO/gate_certificate.py write --cert $CERT --backbone $1 --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
        "--repo $RUN_REPO --train-latents $(bb_latents "$1" train) --train-ids $TRAIN_IDS" \
        "--val-latents $(bb_latents "$1" val) --val-ids $VAL_IDS --results $RESULTS --command"
 }
 align_cmd() {   # align_cmd <space>: the yaw gate at the protocol's thresholds
-  echo "$PY $REPO/check_action_alignment.py" \
+  echo "$(space_py "$1") $REPO/check_action_alignment.py" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$(suffix "$1")/val" \
        "--audit-parquet-dir $RAW/arenas --episodes 100 --audit-rows 100000" \
        "--min-yaw 0.25 --min-move 0.05 --min-rows 1000 --min-episodes 20 --min-per-class 100" \
        "--min-accuracy 0.95 --margin 0.20 --bootstrap 1000 --seed 0"
 }
-smoke_extra() { # smoke_extra <backbone>: operational overrides only; the recipe is untouched
-  echo "--results-dir $SMOKE_DIR/$1 --val-every 100 --val-windows 128 --ckpt-every $STEPS" \
+smoke_extra() { # smoke_extra <backbone>: the operator's EXTRA, then the smoke's operational overrides
+  echo "${PROD_EXTRA:+$PROD_EXTRA }--results-dir $SMOKE_DIR/$1 --val-every 100 --val-windows 128 --ckpt-every $STEPS" \
        "--snapshot-every $STEPS --local-snapshots --keep-last 1"
 }
-resume_extra() { # resume_extra <backbone>: the smoke's own overrides, then resume its checkpoint for 10 updates
+resume_extra() { # resume_extra <backbone>: the smoke's EXTRA, then resume its checkpoint for 10 updates
   echo "$(smoke_extra "$1") --resume $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --ckpt-every 10"
 }
 bb_paths() {    # bb_paths <backbone>: where the evaluator and the probe build the backbone from
@@ -201,7 +293,7 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
   EXTRA=$(bb_paths "$1")
   [ "$1" = sd35 ] && EXTRA="$EXTRA --vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae --latent-scale 1.5305 --latent-shift 0.0609"
   [ "$2" = ema ] && EMA=" --use-ema"
-  echo "$PY $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
+  echo "$(bb_py "$1") $REPO/eval_tf.py --backbone $1 --latent-channels $(bb_chan "$1")" \
        "--ckpt $SMOKE_DIR/$1/snap_$(printf '%07d' "$STEPS").pt$EMA --tic-stride 1 --horizon-tics $3" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--split $D/latents_arnold_dense_pertic_eval$S/split_val.json --subset val" \
@@ -211,20 +303,20 @@ readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
 }
 probe_cmd() {   # probe_cmd <backbone>: the conditioning pathways of the smoke's recovery checkpoint
   local S; S=$(suffix "$(bb_space "$1")")
-  echo "$PY $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
+  echo "$(bb_py "$1") $REPO/smoke_probe.py --ckpt $SMOKE_DIR/$1/$(printf '%07d' "$STEPS").pt --backbone $1" \
        "--latent-channels $(bb_chan "$1") --latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--episodes $VAL_IDS --device cuda:$(bb_gpu "$1") --hf-cache $D/hf/hub $(bb_paths "$1")" \
        "--out $D/logs/gate4b_probe_$1.json"
 }
 val_inventory_cmd() {   # val_inventory_cmd <space>: exactly the val ids, rows, tics and split file
   local S; S=$(suffix "$1")
-  echo "$PY $REPO/make_dense_eval_splits.py --check-only" \
+  echo "$(space_py "$1") $REPO/make_dense_eval_splits.py --check-only" \
        "--latents-dir $D/latents_arnold_dense_pertic_eval$S/val" \
        "--expect-ids $VAL_IDS --sample 0 --raw-tics $RAW/arenas" \
        "--split-file $D/latents_arnold_dense_pertic_eval$S/split_val.json"
 }
 windows_cmd() {   # windows_cmd <space>: the emitted-window contract on real training samples
-  echo "$PY $REPO/check_emitted_windows.py --latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
+  echo "$(space_py "$1") $REPO/check_emitted_windows.py --latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--episodes $TRAIN_IDS --windows $EMIT_WINDOWS --context-frames 32" \
        "--latent-channels $( [ "$1" = sd35 ] && echo 16 || echo 4) --out $D/logs/gate1e_windows_$1.json"
 }
@@ -238,14 +330,17 @@ wait_session() {   # wait_session <backbone> <gate label>: until the tmux sessio
     fi
   done
 }
-launcher() {   # launcher <backbone> <extra env assignments as NAME=VALUE ...>
+launcher() {   # launcher <backbone> <overrides of the production settings as NAME=VALUE ...>
   local BB=$1; shift
-  env DRY=$DRY DOOM_ROOT=$D PY="$PY" PY_SD35="$PY" GATE_RUN=1 "$@" bash "$LAUNCH" "$(bb_gpu "$BB")" "$BB"
+  prod_env "$BB"
+  env "${PROD_ENV[@]}" DRY="$DRY" GATE_RUN=1 "$@" bash "$LAUNCH" "$(bb_gpu "$BB")" "$BB"
 }
 
 if [ "$DRY" = 1 ]; then
   echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
-  echo "DRY gate0 pin: revoke $CERT; certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
+  echo "DRY gate0 pin: revoke $CERT entries for $SMOKE_BBS (other backbones' entries stay); certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
+  for BB in $SMOKE_BBS; do echo "DRY gate0 revoke $BB $(revoke_cmd "$BB")"; done
+  echo "DRY results $RESULTS"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1c inventory $V $(inventory_cmd "$V")"; done
@@ -278,13 +373,23 @@ if [ "$DRY" = 1 ]; then
   done
   echo "DRY summary GATES_GO with the fit rates, the smoke checkpoints and the readback PSNR"
   for BB in $SMOKE_BBS; do
-    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<launch_nexttic.sh CERT_QUERY=1 with STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS>\""
+    PROD_CMD=$(cert_cmd "$BB")
+    echo "DRY certificate command $BB $PROD_CMD"
+    echo "DRY launch $BB $(operator_cmd "$BB")"
+    if operator_ok "$BB" "$PROD_CMD"; then echo "DRY launch check $BB: resolves to the certified command in an empty environment"
+    else echo "DRY launch check $BB: MISMATCH, the printed launch does not resolve to the certified command"; fi
+    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<the certificate command above: STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS${PROD_EXTRA:+ EXTRA=$PROD_EXTRA}>\""
   done
   echo "DRY certificate written to $CERT only after checking the checkout did not move"
   exit 0
 fi
 
-[ -x "$PY" ] || gate_fail preflight "no interpreter at $PY (run setup_node.sh first)"
+for V in "${SPACES[@]}"; do
+  [ -x "$(space_py "$V")" ] || gate_fail preflight "no $V interpreter at $(space_py "$V") (run setup_node.sh first)"
+done
+for BB in $SMOKE_BBS; do
+  [ -x "$(bb_py "$BB")" ] || gate_fail preflight "no $BB interpreter at $(bb_py "$BB") (run setup_node.sh first)"
+done
 [ -f "$LAUNCH" ] || gate_fail preflight "no launch_nexttic.sh at $LAUNCH"
 mkdir -p "$SMOKE_DIR" "$D/logs" || gate_fail preflight "cannot write under $D"
 REPORT=$D/GATES.txt
@@ -294,7 +399,7 @@ say() { echo "$*" | tee -a "$REPORT"; }
 # --- gate 0: pin the commit being certified ------------------------------------------------
 # revoked first: a gate run that fails or is interrupted must not leave an older certificate
 # standing for whatever the checkout is now
-rm -f "$CERT"
+revoke_mine
 : > "$RESULTS"
 say "$(date -Iseconds) gate 0: pin"
 COMMIT=$(pin_of "$REPO") || gate_fail "0 pin" "$REPO is not a git checkout, so the gates cannot say which code they certify"
@@ -303,7 +408,9 @@ RUN_COMMIT=$(pin_of "$RUN_REPO") || RUN_COMMIT="none"
   || gate_fail "0 pin" "the launcher runs $RUN_REPO at $RUN_COMMIT but the gates run $REPO at $COMMIT"
 git -C "$REPO" diff --quiet HEAD -- \
   || gate_fail "0 pin" "tracked files in $REPO differ from $COMMIT; commit or discard them, the gates certify a commit"
-say "  certifying $COMMIT ($REPO)"
+git -C "$RUN_REPO" diff --quiet HEAD -- \
+  || gate_fail "0 pin" "tracked files in $RUN_REPO differ from $COMMIT; the launcher would run uncertified code"
+say "  certifying $COMMIT ($REPO, launched from $RUN_REPO)"
 record "0 pin" all "$COMMIT"
 
 # --- gate 1: the sidecar audit ---------------------------------------------------------
@@ -347,7 +454,7 @@ for V in "${SPACES[@]}"; do
     say "$(date -Iseconds) gate 1d: stored-latent alignment, $V $C ($ALIGN_EPISODES episode(s) per shard)"
     # shellcheck disable=SC2046
     $(latent_align_cmd "$V" "$C") > "$D/logs/gate1d_latent_align_${V}_$C.log" 2>&1 \
-      || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, or a shifted alignment scores as well as the true one; see $D/logs/gate1d_latent_align_${V}_$C.json"
+      || gate_fail "1d latent alignment ($V $C)" "a shard's stored latents do not reproduce, a shifted alignment scores as well as the true one, or the corpus is not under the $V contract its peer and backbone share; see $D/logs/gate1d_latent_align_${V}_$C.json"
     say "  $(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
     record "1d latent alignment $C" "space:$V" "$(grep '^shard ' "$D/logs/gate1d_latent_align_${V}_$C.log" | tr '\n' ';')"
   done
@@ -378,7 +485,7 @@ for BB in $SMOKE_BBS; do
   launcher "$BB" FIT="$FIT" > "$D/logs/gate3_fit_$BB.log" 2>&1 \
     || gate_fail "3 fit check ($BB)" "the launch configuration did not run; see $D/logs/gate3_fit_$BB.log"
   FITLOG=$D/results_spiderman/$(run_name "$BB")/fitcheck/log.jsonl
-  NUMS=$("$PY" - "$FITLOG" <<'PY'
+  NUMS=$("$(bb_py "$BB")" - "$FITLOG" <<'PY'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1]) if '"fit_check"' in l]
 if not rows:
@@ -440,7 +547,7 @@ for BB in $SMOKE_BBS; do
   grep -q "resumed weights from $SD/$(printf '%07d' "$STEPS").pt at step $STEPS with optimizer" "$TRAINLOG" \
     || gate_fail "4c resume ($BB)" "the resume did not restore the optimizer, scheduler and EMA from step $STEPS; see $TRAINLOG"
   [ -f "$SD/$(printf '%07d' "$NEXT").pt" ] || gate_fail "4c resume ($BB)" "no checkpoint at step $NEXT"
-  LAST_END=$("$PY" -c "import json,sys; e=[json.loads(l) for l in open(sys.argv[1]) if '\"event\": \"end\"' in l]; print(e[-1]['step'] if e else -1)" "$SD/log.jsonl")
+  LAST_END=$("$(bb_py "$BB")" -c "import json,sys; e=[json.loads(l) for l in open(sys.argv[1]) if '\"event\": \"end\"' in l]; print(e[-1]['step'] if e else -1)" "$SD/log.jsonl")
   [ "$LAST_END" = "$NEXT" ] || gate_fail "4c resume ($BB)" "the resumed run ended at step $LAST_END, not $NEXT"
   record "4c resume" "bb:$BB" "$STEPS -> $NEXT"
 done
@@ -454,7 +561,7 @@ for BB in $SMOKE_BBS; do
   $(readback_cmd "$BB" "$V" "$H") > "$D/logs/gate5_readback_${BB}_${V}_h$H.log" 2>&1 \
     || gate_fail "5 readback ($BB $V h$H)" "eval_tf.py could not score the snapshot; see $D/logs/gate5_readback_${BB}_${V}_h$H.log"
   M=$SMOKE_DIR/$BB/eval_tf_val_${V}_h$H/metrics.json
-  NUMS=$("$PY" - "$M" <<'PY'
+  NUMS=$("$(bb_py "$BB")" - "$M" <<'PY'
 import json, math, sys
 m = json.load(open(sys.argv[1]))
 def num(k):
@@ -479,7 +586,11 @@ for BB in $SMOKE_BBS; do
   PROD_CMD=$(cert_cmd "$BB") || gate_fail "certificate ($BB)" "the launcher could not resolve the production command"
   # shellcheck disable=SC2046
   $(cert_write_cmd "$BB") "$PROD_CMD" >> "$REPORT" 2>&1 \
-    || { rm -f "$CERT"; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+    || { revoke_mine; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+  # the launch printed below must itself resolve to what was just certified, with nothing inherited
+  operator_ok "$BB" "$PROD_CMD" \
+    || { revoke_mine; gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
 done
 say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
+for BB in $SMOKE_BBS; do say "GATES_LAUNCH $BB: $(operator_cmd "$BB")"; done
 say "the gates say the corpus, the configuration and the evaluator agree; the training numbers are still unmeasured"
