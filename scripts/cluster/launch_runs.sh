@@ -2,10 +2,12 @@
 # Zero to a usable node, step 5 of 5: the two next-tic rows, each on its own card, in tmux.
 #
 #   usage: [DOOM_ROOT=..] [UNET_GPU=0] [SD35_GPU=1] [MB_UNET=32] [MB_SD35=32] [WORKERS=..] \
-#          [STEPS=400000] [PY_UNET=..] [PY_SD35=..] [PY=..] [ONLY=unet|sd35] [DRY=1] launch_runs.sh
+#          [STEPS=400000] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [ONLY=unet|sd35] [DRY=1] \
+#          launch_runs.sh
 #
 # PY_UNET runs the U-Net row and PY_SD35 the SD 3.5 row, each falling back to PY and then to the
-# node's one env, $D/env/bin/python; they must be the interpreters gates.sh certified.
+# node's one env, $D/env/bin/python; they must be the interpreters gates.sh certified. RUN_REPO is
+# the checkout the runs execute from (default $D/repo) and must be the one gates.sh certified.
 #
 # ONE CARD PER ROW, and that is the recipe's ceiling, not the card's. The global batch is 32 with
 # no gradient accumulation, so `launch_nexttic.sh` requires micro-batch x cards = 32: a second card
@@ -41,6 +43,7 @@ REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
 LAUNCH=$REPO/scripts/spiderman/launch_nexttic.sh
 PY_UNET=${PY_UNET:-${PY:-$D/env/bin/python}}
 PY_SD35=${PY_SD35:-${PY:-$D/env/bin/python}}
+RUN_REPO=${RUN_REPO:-$D/repo}
 
 CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 16)
 DEFAULT_WORKERS=$(( CORES / 4 ))
@@ -57,7 +60,7 @@ gpu()     { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
 session() { echo "train-$1-nexttic"; }
 
 launcher() {  # launcher <backbone>
-  env DRY=$DRY DOOM_ROOT=$D PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(mb "$1")" WORKERS="$WORKERS" STEPS="$STEPS" \
+  env DRY=$DRY DOOM_ROOT=$D RUN_REPO="$RUN_REPO" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(mb "$1")" WORKERS="$WORKERS" STEPS="$STEPS" \
     bash "$LAUNCH" "$(gpu "$1")" "$1"
 }
 

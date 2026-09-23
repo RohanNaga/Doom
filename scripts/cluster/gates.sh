@@ -16,7 +16,9 @@
 # multi-day run:
 #
 #   0 pin                which code is being certified? The commit of $REPO, which must be the
-#                        commit of $D/repo (the checkout the launcher runs) with no tracked change.
+#                        commit of $RUN_REPO (default $D/repo: the checkout the launcher runs and
+#                        the certificate pins), both with no tracked change. The gates' own fit,
+#                        smoke and resume run from $RUN_REPO too; launch with the same RUN_REPO.
 #                        Any old certificate is revoked first; a new one is written only at GATES_GO.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
@@ -122,7 +124,7 @@ ALIGN_EPISODES=${ALIGN_EPISODES:-2}   # episodes per encode shard for the stored
 EMIT_WINDOWS=${EMIT_WINDOWS:-256}     # real training windows the emitted-window check reads
 CERT=$D/GATES_CERT.json
 RESULTS=$D/logs/gates_results.jsonl
-RUN_REPO=$D/repo              # the checkout launch_nexttic.sh runs (`cd $D/repo`)
+RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout launch_nexttic.sh runs (`cd $RUN_REPO`) and the certificate pins
 # the production launch the certificate pins, with launch_runs.sh's own defaults
 LAUNCH_STEPS=${LAUNCH_STEPS:-400000}
 MB_UNET=${MB_UNET:-32}
@@ -192,7 +194,7 @@ record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, f
 }
 bb_mb() { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
 prod_env() {   # prod_env <backbone>: PROD_ENV=(NAME=VALUE ...), the production launch every gate launch starts from
-  PROD_ENV=(DOOM_ROOT="$D" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
+  PROD_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
         TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" EXTRA="$PROD_EXTRA")
 }
 cert_cmd() {   # cert_cmd <backbone>: the production command, as the launcher resolves it
@@ -343,7 +345,9 @@ RUN_COMMIT=$(pin_of "$RUN_REPO") || RUN_COMMIT="none"
   || gate_fail "0 pin" "the launcher runs $RUN_REPO at $RUN_COMMIT but the gates run $REPO at $COMMIT"
 git -C "$REPO" diff --quiet HEAD -- \
   || gate_fail "0 pin" "tracked files in $REPO differ from $COMMIT; commit or discard them, the gates certify a commit"
-say "  certifying $COMMIT ($REPO)"
+git -C "$RUN_REPO" diff --quiet HEAD -- \
+  || gate_fail "0 pin" "tracked files in $RUN_REPO differ from $COMMIT; the launcher would run uncertified code"
+say "  certifying $COMMIT ($REPO, launched from $RUN_REPO)"
 record "0 pin" all "$COMMIT"
 
 # --- gate 1: the sidecar audit ---------------------------------------------------------

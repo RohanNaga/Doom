@@ -12,6 +12,8 @@
      smoke, resume and certificate now resolve from one set of production arguments.
   4. One interpreter per backbone (PY_UNET, PY_SD35, falling back to PY): Spiderman runs the 4-channel
      rows in the doom env and SD 3.5 in ~/wanenc, and the gates ran every sd35 command under one PY.
+  5. RUN_REPO: the launch may come from a second checkout ($D/repo_launch) while an encoder still runs
+     from $D/repo; the launcher cds into it, the certificate pins its HEAD and gate 0 checks it.
 
 Everything here is a dry run or a stub run: nothing encodes, trains or touches a GPU.
 
@@ -407,3 +409,67 @@ def test_launch_runs_passes_each_rows_interpreter(tmp_path):
     assert len(rows) == 2
     assert f"{U} train_wm.py" in [r for r in rows if "--backbone unet" in r][0]
     assert f"{S} train_wm.py" in [r for r in rows if "--backbone sd35" in r][0]
+
+
+# ---------------------------------------------------------------------------------------
+# 5. RUN_REPO: the checkout the launch runs, when it is not $D/repo
+# ---------------------------------------------------------------------------------------
+
+def test_the_launcher_runs_and_the_gates_certify_run_repo(tmp_path):
+    other = str(tmp_path / "repo_launch")
+    for extra in ({}, {"FIT": "20"}):
+        out = _launch_dry(tmp_path, "unet", RUN_REPO=other, **extra)
+        assert f"cd {other} && " in out and f"cd {tmp_path}/repo " not in out, out
+    assert f"cd {tmp_path}/repo && " in _launch_dry(tmp_path, "unet"), "the default is no longer $D/repo"
+    lines = _gates_dry(tmp_path, RUN_REPO=other)
+    assert any(ln.startswith("DRY gate0 pin") and f"equal {other}'s HEAD" in ln for ln in lines)
+    certs = [ln for ln in lines if "gate_certificate.py write" in ln]
+    assert certs and all(f"--repo {other} " in ln for ln in certs)
+    launches = [ln for ln in lines if "train_wm.py" in ln and ln.startswith("DRY 04")]
+    assert len(launches) == 6 and all(f"cd {other} && " in ln for ln in launches)
+
+
+def test_a_launch_from_a_second_checkout_is_checked_against_that_checkout(tmp_path):
+    """The certificate pins RUN_REPO's HEAD; with the default the launcher checks $D/repo instead,
+    which here is at another commit, and refuses."""
+    import gate_certificate as gc
+    from test_launch_pin import TRAIN_IDS, VAL_IDS, cert_command, checkout, git, launch, root_for_launch
+    root, sha, bindir = root_for_launch(tmp_path)
+    second = root / "repo_launch"
+    checkout(second)
+    git(second, "commit", "-q", "--allow-empty", "-m", "launch checkout")
+    head = git(second, "rev-parse", "HEAD")
+    assert head != sha
+    results = tmp_path / "results.jsonl"
+    import json
+    results.write_text("\n".join(json.dumps({"gate": g, "scope": "all", "status": "ok", "detail": ""})
+                                 for g in gc.REQUIRED_GATES) + "\n")
+    now = gc.identity("unet", cert_command(tmp_path, root, bindir, "unet"), "", str(second),
+                      str(root / "latents_arnold_dense_pertic/arenas"), TRAIN_IDS,
+                      str(root / "latents_arnold_dense_pertic_eval/val"), VAL_IDS)
+    gc.write(str(root / "GATES_CERT.json"), "unet", "sd15", "0", now, str(results))
+    p, started = launch(tmp_path, root, bindir)
+    assert p.returncode != 0 and "the gates certified" in p.stderr and started == []
+    p, started = launch(tmp_path, root, bindir, RUN_REPO=str(second))
+    assert p.returncode == 0, p.stderr
+    assert len(started) == 1 and f"cd {second} && " in started[0]
+    assert f"commit {head}" in (root / "logs" / "resumes.log").read_text()
+
+
+def test_gate_zero_pins_run_repo(tmp_path):
+    """Gate 0 passes when the gates' checkout and RUN_REPO agree, although $D/repo does not exist;
+    the run then stops at gate 1 because the stand-in interpreter fails."""
+    from test_launch_pin import checkout
+    root = tmp_path / "root"
+    root.mkdir()
+    second = tmp_path / "repo_launch"
+    sha = checkout(second)
+    e = {k: v for k, v in os.environ.items() if k not in GATE_KNOBS}
+    e.update({"DOOM_ROOT": str(root), "PY": "/usr/bin/false", "REPO": str(second), "RUN_REPO": str(second),
+              "LAUNCH": LAUNCH})
+    p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
+    assert "GATE_FAILED 0 pin" not in p.stderr and "GATE_FAILED 1 sidecar audit" in p.stderr, p.stderr
+    assert f"certifying {sha}" in p.stdout
+    (second / "train_wm.py").write_text("# dirty\n")
+    p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
+    assert "GATE_FAILED 0 pin" in p.stderr
