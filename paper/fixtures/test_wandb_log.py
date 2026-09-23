@@ -594,8 +594,9 @@ def test_without_wandb_run_nothing_is_imported(monkeypatch, tmp_path):
 
 def test_an_evaluation_survives_a_wandb_outage(monkeypatch, tmp_path, capsys):
     monkeypatch.setitem(sys.modules, "wandb", stub_wandb(fail="init"))
-    assert wandb_log.log_evaluation(eval_args(), "live_h1", EVAL_TF_METRICS, ckpt="snap_0010000.pt",
-                                    out_dir=str(tmp_path)) is None
+    # the checkpoint path must lie under tmp_path: its directory is where the writer lock goes
+    assert wandb_log.log_evaluation(eval_args(), "live_h1", EVAL_TF_METRICS,
+                                    ckpt=str(tmp_path / "snap_0010000.pt"), out_dir=str(tmp_path)) is None
     assert len([ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("wandb:")]) == 1
 
 
