@@ -357,10 +357,12 @@ def test_a_read_left_running_by_a_previous_trainer_process_is_seen(tmp_path, mon
 FAKE_PYTHON = """#!/bin/bash
 # stands in for the evaluators: exits $FAIL_CODE when its arguments mention $FAIL_ON, else 0; when
 # they mention $HANG_ON it writes its pid to $HANG_FILE and waits to be stopped, like a read still
-# running, and with $IGNORE_STOP set it ignores TERM and HUP as a stuck read would
+# running, and with $IGNORE_STOP set it ignores TERM and HUP as a stuck read would. With
+# $WORKER_FILE set it first starts a child of its own, as a DataLoader worker, and writes its pid there
 case "$*" in *"$FAIL_ON"*) exit "$FAIL_CODE" ;; esac
 if [ -n "$HANG_ON" ]; then case "$*" in *"$HANG_ON"*)
   [ -n "$IGNORE_STOP" ] && trap '' TERM HUP
+  if [ -n "$WORKER_FILE" ]; then sleep 60 & echo $! > "$WORKER_FILE.tmp" && mv "$WORKER_FILE.tmp" "$WORKER_FILE"; fi
   echo $$ > "$HANG_FILE.tmp" && mv "$HANG_FILE.tmp" "$HANG_FILE"; exec sleep 60 ;; esac; fi
 exit 0
 """
@@ -508,6 +510,32 @@ def test_a_stop_sent_to_the_wrapper_alone_stops_its_evaluator_first(tmp_path, mo
     assert ev.launch(10000) is not None
     fin = [e for e in rec.events if e["event"] == "eval_finished"]
     assert len(fin) == 1 and fin[0]["ok"] is False and "status.json" in fin[0]["reason"]
+
+
+@pytest.mark.parametrize("ignore", [False, True])
+def test_a_stop_takes_the_evaluators_own_workers_with_it(tmp_path, monkeypatch, ignore):
+    """A DataLoader worker is a child of the evaluator, and a stop sent to the evaluator's pid alone
+    left it running. The wrapper runs each evaluator in a process group of its own and stops the
+    whole group: TERM, the bounded wait, then KILL."""
+    import signal
+    import time
+    monkeypatch.setattr(pe, "STOP_WAIT", 1.0)
+    workers = tmp_path / "worker"
+    env = {"WORKER_FILE": str(workers), **({"IGNORE_STOP": "1"} if ignore else {})}
+    args, ev, rec, p, child = start_hanging_read(tmp_path, monkeypatch, **env)
+    worker = wait_for_read(workers)
+    try:
+        assert not gone(worker)
+        os.kill(p.pid, signal.SIGTERM)
+        assert p.wait(timeout=30) == 143
+        deadline = time.monotonic() + 10                  # an orphaned worker is reaped by init
+        while not (gone(child) and gone(worker)) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert gone(child) and gone(worker), "the evaluator's own worker outlived the stop"
+    finally:
+        for pid in (child, worker):
+            if not gone(pid):
+                os.kill(pid, signal.SIGKILL)
 
 
 def test_an_evaluator_that_ignores_the_stop_is_killed_after_the_bound(tmp_path, monkeypatch):
