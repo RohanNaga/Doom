@@ -334,6 +334,125 @@ def test_a_read_left_running_by_a_previous_trainer_process_is_seen(tmp_path, mon
     assert rec.events[-1]["event"] == "eval_skipped"
 
 
+# ---------------------------------------------------------------------------------------
+# the wrapper's exit status, and the trainer noticing it
+# ---------------------------------------------------------------------------------------
+
+FAKE_PYTHON = """#!/bin/bash
+# stands in for the evaluators: exits $FAIL_CODE when its arguments mention $FAIL_ON, else 0
+case "$*" in *"$FAIL_ON"*) exit "$FAIL_CODE" ;; esac
+exit 0
+"""
+
+
+def fake_python(tmp_path):
+    p = tmp_path / "fake_python"
+    p.write_text(FAKE_PYTHON)
+    p.chmod(0o755)
+    return str(p)
+
+
+def run_wrapper(spawner, fail_on="nothing-fails", code=3):
+    import subprocess
+    argv, kw = spawner.calls[-1]
+    env = {**os.environ, "FAIL_ON": fail_on, "FAIL_CODE": str(code)}
+    r = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=60)
+    status = json.load(open(os.path.join(os.path.dirname(argv[1]), "status.json")))
+    return r.returncode, status
+
+
+def wrapper_evaluator(tmp_path, monkeypatch, sp):
+    import torch
+    args = run_args(tmp_path)
+    monkeypatch.setattr(pe, "default_split", lambda d: str(tmp_path / "split_val.json"))
+    (tmp_path / "split_val.json").write_text(json.dumps({"val": [6000, 6001]}))
+    monkeypatch.setattr(pe, "_popen", sp)
+    rec = Recorder()
+    ev = pe.PeriodicEval(args, 4, torch.device("cpu"), rec, wandb_run=None, python=fake_python(tmp_path))
+    return args, ev, rec
+
+
+def test_the_wrapper_records_every_exit_status_and_fails_if_any_did(tmp_path, monkeypatch):
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    rc, status = run_wrapper(sp, fail_on="smoke_probe.py", code=3)
+    assert rc != 0, "the wrapper exited 0 although the probe failed"
+    assert status["step"] == 5000 and status["ok"] is False
+    assert status["commands"] == {"tf_live_h1": 0, "tf_ema_h1": 0, "tf_live_h4": 0, "tf_ema_h4": 0, "probe": 3}
+    assert not os.path.exists(os.path.join(args.results_dir, "eval_0005000", "0005000.pt")), "link not removed"
+
+
+def test_a_clean_read_exits_zero(tmp_path, monkeypatch):
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    rc, status = run_wrapper(sp)
+    assert rc == 0 and status["ok"] is True and set(status["commands"].values()) == {0}
+
+
+def test_a_failed_checkpoint_copy_is_a_failed_read(tmp_path, monkeypatch):
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    os.remove(os.path.join(args.results_dir, "0005000.pt"))        # gone before the copy could run
+    rc, status = run_wrapper(sp)
+    assert rc != 0 and status["ok"] is False and status["commands"]["copy"] != 0
+
+
+def test_the_trainer_records_eval_finished_when_it_next_looks(tmp_path, monkeypatch):
+    sp = Spawner(alive=True)
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
+    ev.launch(5000)
+    out = os.path.join(args.results_dir, "eval_0005000")
+    with open(os.path.join(out, "status.json"), "w") as f:
+        json.dump({"step": 5000, "commands": {"tf_live_h1": 0, "probe": 3}, "ok": False}, f)
+    ev.proc.code = 1                                   # the wrapper has exited; nobody waited for it
+    ev.launch(10000)
+    kinds = [(e["event"], e["step"]) for e in rec.events]
+    assert kinds == [("eval_launched", 5000), ("eval_finished", 5000), ("eval_launched", 10000)]
+    fin = rec.events[1]
+    assert fin["returncode"] == 1 and fin["ok"] is False and fin["commands"] == {"tf_live_h1": 0, "probe": 3}
+
+
+def test_a_read_that_left_no_status_is_reported_as_failed(tmp_path, monkeypatch):
+    sp = Spawner(alive=True)
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
+    ev.launch(5000)
+    ev.proc.code = -9                                  # killed before it could write status.json
+    ev.launch(10000)
+    fin = [e for e in rec.events if e["event"] == "eval_finished"][0]
+    assert fin["ok"] is False and fin["returncode"] == -9 and "status.json" in fin["reason"]
+
+
+def test_a_read_a_previous_trainer_process_left_is_reported_once_it_has_ended(tmp_path, monkeypatch):
+    import subprocess
+    sp = Spawner()
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0010000.pt", "snap_0010000.pt")
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    out = os.path.join(args.results_dir, "eval_0005000")
+    os.makedirs(out)
+    with open(os.path.join(out, "status.json"), "w") as f:
+        json.dump({"step": 5000, "commands": {"tf_live_h1": 0}, "ok": True}, f)
+    with open(os.path.join(args.results_dir, pe.PID_FILE), "w") as f:
+        json.dump({"pid": dead.pid, "step": 5000, "script": os.path.join(out, "run.sh"), "out": out}, f)
+    assert ev.launch(10000) is not None
+    kinds = [(e["event"], e["step"]) for e in rec.events]
+    assert kinds == [("eval_finished", 5000), ("eval_launched", 10000)]
+    assert rec.events[0]["ok"] is True and rec.events[0]["returncode"] is None
+
+
 @pytest.mark.parametrize("problem", ["no_checkpoint", "spawn_fails", "no_split"])
 def test_nothing_about_a_read_can_raise_into_the_trainer(tmp_path, monkeypatch, problem):
     sp = Spawner(fail=OSError("fork failed") if problem == "spawn_fails" else None)
@@ -435,7 +554,13 @@ def test_a_failing_read_never_affects_the_trainer(tiny_pixart, tmp_path, monkeyp
 
     monkeypatch.setattr(pe, "_popen", spawn)
     out, events = train_tiny(tmp_path)
-    kinds = [e["event"] for e in events if e["event"].startswith("eval_")]
-    assert kinds == (["eval_skipped"] * 3 if how == "spawn_raises" else ["eval_launched"] * 3)
+    kinds = [(e["event"], e["step"]) for e in events if e["event"].startswith("eval_")]
+    if how == "spawn_raises":
+        assert kinds == [("eval_skipped", 2), ("eval_skipped", 4), ("eval_skipped", 6)]
+    else:
+        # each failed read is noticed, without waiting, when the next one is due
+        assert kinds == [("eval_launched", 2), ("eval_finished", 2), ("eval_launched", 4),
+                         ("eval_finished", 4), ("eval_launched", 6)]
+        assert all(e["ok"] is False and e["returncode"] == 2 for e in events if e["event"] == "eval_finished")
     assert events[-1]["event"] == "end" and events[-1]["step"] == 6
     assert os.path.isfile(os.path.join(out, "best.pt")) and os.path.isfile(os.path.join(out, "0000006.pt"))

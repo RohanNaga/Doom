@@ -15,7 +15,10 @@ goes to `eval_<step>/launch.log`.
 The trainer never waits for the child and never fails because of it: every problem (no checkpoint
 file, no split file, a spawn that fails) becomes an `eval_skipped` event with the reason, and a
 second read is refused while the previous one of this run is alive, so reads never pile up on the
-evaluation card. `eval_launched` records the child's pid.
+evaluation card. `eval_launched` records the child's pid. The wrapper writes each command's exit
+code to `eval_<step>/status.json` and exits non-zero if any failed; the trainer records
+`eval_finished` (its exit code, `ok`, the per-command codes) the next time a read is due, by
+polling, never by waiting.
 
 The checkpoint read is the compact snapshot (`snap_<step>.pt`, bf16 live and EMA, never pruned)
 when the step is also a snapshot step, else the recovery checkpoint (`<step>.pt`). The read opens
@@ -195,20 +198,35 @@ def pin_checkpoint(ckpt, out, snapshot):
         return dst, ckpt, True
 
 
+STATUS_FILE = "status.json"
+
+
 def write_script(path, run, step, cmds, copy_from=None, pinned=None, remove_pinned=False):
-    """`run.sh`: the copy of the checkpoint if one is needed, every read in order with its exit code
-    logged (one failing does not stop the rest), then the removal of the read's own checkpoint link."""
+    """`run.sh`: the copy of the checkpoint if one is needed, every read in order (one failing does
+    not stop the rest), the removal of the read's own checkpoint link, then `status.json`.
+
+    `status.json` holds each command's exit code and `ok`, and the wrapper exits 1 if any command
+    failed, so the trainer can report a failed read (`eval_finished`) instead of assuming it worked.
+    """
+    status = os.path.join(os.path.dirname(path), STATUS_FILE)
     lines = ["#!/bin/bash", f"# periodic evaluation of {run} at step {step}, launched by train_wm.py --eval-every",
-             f"cd {shlex.quote(HERE)}"]
+             'CODES=""', "FAILED=0",
+             'note() { CODES="$CODES${CODES:+, }\\"$1\\": $2"; [ "$2" -eq 0 ] || FAILED=1; '
+             'echo "$(date -Iseconds) exit $2 $1"; }',
+             f"cd {shlex.quote(HERE)} || FAILED=1"]
     if copy_from:
         tmp = pinned + ".tmp"
         lines += ['echo "$(date -Iseconds) copying the checkpoint (no hard link possible)"',
-                  f"cp {shlex.quote(copy_from)} {shlex.quote(tmp)} && mv {shlex.quote(tmp)} {shlex.quote(pinned)}"]
+                  f"cp {shlex.quote(copy_from)} {shlex.quote(tmp)} && mv {shlex.quote(tmp)} {shlex.quote(pinned)}",
+                  "note copy $?"]
     for label, argv in cmds:
-        lines += [f'echo "$(date -Iseconds) start {label}"', shlex.join(argv),
-                  f'echo "$(date -Iseconds) exit $? {label}"']
+        lines += [f'echo "$(date -Iseconds) start {label}"', shlex.join(argv), f"note {label} $?"]
     if remove_pinned:
         lines.append(f"rm -f {shlex.quote(pinned)}")
+    ok = '$([ "$FAILED" -eq 0 ] && echo true || echo false)'
+    lines += [f"printf '{{\"step\": {int(step)}, \"commands\": {{%s}}, \"ok\": %s}}\\n' \"$CODES\" \"{ok}\" "
+              f"> {shlex.quote(status + '.tmp')} && mv {shlex.quote(status + '.tmp')} {shlex.quote(status)}",
+              'exit "$FAILED"']
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
     return path
@@ -236,31 +254,55 @@ class PeriodicEval:
         self.args, self.latent_channels, self.train_device = args, latent_channels, train_device
         self.log, self.wandb_run, self.python = log, wandb_run, python
         self.every = int(args.eval_every or 0)
-        self.proc = None
+        self.proc = self.current = None      # the read this process started, and its pid-file record
         self.pid_file = os.path.join(args.results_dir, PID_FILE)
 
     def due(self, step):
         return self.every > 0 and step > 0 and step % self.every == 0
 
     def running(self):
-        """The pid of this run's read that is still alive, or None."""
+        """The pid of this run's read that is still alive, or None. Never waits: a read found ended is
+        reported (`eval_finished`) here, which is the next time a read is due."""
         if self.proc is not None:
-            if self.proc.poll() is None:       # poll() also reaps a finished child
+            code = self.proc.poll()            # also reaps the finished child
+            if code is None:
                 return self.proc.pid
-            self.proc = None
-            try:
-                os.remove(self.pid_file)
-            except OSError:
-                pass
+            self._finished(self.current, code)
+            self.proc = self.current = None
             return None
-        # no read started by this process: the pid file names one a previous trainer process left running
+        # no read started by this process: the pid file names one a previous trainer process started
         try:
             with open(self.pid_file) as f:
                 rec = json.load(f)
         except (OSError, ValueError):
             return None
         pid = rec.get("pid")
-        return pid if pid and _alive(pid, rec.get("script") or "") else None
+        if pid and _alive(pid, rec.get("script") or ""):
+            return pid
+        self._finished(rec, None)              # not our child, so its exit code is only in status.json
+        return None
+
+    def _finished(self, rec, returncode):
+        """Record `eval_finished` for an ended read: its exit code when this process started it, and
+        each command's from the wrapper's status.json; a read without one was killed or cut short."""
+        rec = rec or {}
+        step = rec.get("step")
+        out = rec.get("out") or (eval_dir(self.args.results_dir, step) if isinstance(step, int) else None)
+        try:
+            with open(os.path.join(out, STATUS_FILE)) as f:
+                status = json.load(f)
+        except (OSError, ValueError, TypeError):
+            status = None
+        if status is None:
+            self.log(event="eval_finished", step=step, returncode=returncode, ok=False, commands=None, out=out,
+                     reason=f"no {STATUS_FILE} in {out}: the read was killed, or ended before writing it")
+        else:
+            self.log(event="eval_finished", step=step, returncode=returncode, out=out,
+                     ok=bool(status.get("ok")) and returncode in (None, 0), commands=status.get("commands"))
+        try:
+            os.remove(self.pid_file)
+        except OSError:
+            pass
 
     def launch(self, step):
         """Start the read of `step` and return its pid, or record why not and return None. Never raises."""
@@ -298,8 +340,9 @@ class PeriodicEval:
         with open(os.path.join(out, "launch.log"), "ab") as logf:
             self.proc = _popen(["bash", script], stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                env=env, cwd=HERE, start_new_session=True, close_fds=True)
+        self.current = {"pid": self.proc.pid, "step": step, "script": script, "out": out}
         with open(self.pid_file, "w") as f:
-            json.dump({"pid": self.proc.pid, "step": step, "script": script}, f)
+            json.dump(self.current, f)
         self.log(event="eval_launched", step=step, pid=self.proc.pid, ckpt=ckpt,
                  device=self.args.eval_device or "the training card", out=out)
         return self.proc.pid
