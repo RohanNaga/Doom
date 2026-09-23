@@ -21,6 +21,9 @@
 #                  `selection.json`, scores ONLY the selected checkpoint and variant, and records each
 #                  corpus in `$R/test_scored_at`. A corpus already recorded there is refused unless
 #                  FORCE_TEST=1. Test rollouts happen here and only when CORPORA names test.
+#                  arenas_678 is refused with a decoder that cannot back an unseen-map claim
+#                  (decoder_provenance.py; every decoder tuned before 2026-09-22 is one) unless
+#                  UNSEEN_CLAIM=dynamics-only asks for the weaker label, which is then recorded.
 #
 # A CORPORA that mixes val with a sealed corpus is refused: the two stages score different
 # checkpoints by construction. CKPT and STEP apply to the validation stage only.
@@ -155,14 +158,22 @@ SUBSET=val
 # `ls` of two paths reports success when only one exists, which is how the SD 3.5 row silently
 # scored against the stock decoder on Sep 20 2026.
 if [ "$CH" = 16 ]; then TUNED=$D/vae_decoder_sd35_lpips/vae; STOCK="--vae-path stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae"
-else TUNED=$D/vae_decoder_arnold_lpips/vae; STOCK=""; fi
+  STOCK_ID=stabilityai/stable-diffusion-3.5-medium
+else TUNED=$D/vae_decoder_arnold_lpips/vae; STOCK=""; STOCK_ID=stock; fi
 if [ -f "$TUNED/diffusion_pytorch_model.safetensors" ] || [ -f "$TUNED/diffusion_pytorch_model.bin" ]; then
   VAE="--vae-path $TUNED"; USED="tuned: $TUNED"; DEC_PATH=$TUNED; DEC_KIND=tuned
 else
   VAE="$STOCK"; USED="stock fallback (the tuned decoder at $TUNED has no weights)"
-  DEC_PATH=${STOCK:-stock}; DEC_KIND=stock
+  DEC_PATH=$STOCK_ID; DEC_KIND=stock
 fi
-DEC_TAG="$DEC_KIND:$(echo "$DEC_PATH" | tr ' ' '+')"
+DEC_TAG="$DEC_KIND:$DEC_PATH"
+# The decoder's registry name, content hash and provenance (decoder_provenance.py; the decoders
+# tuned before 2026-09-22 are `provenance: unknown, corpus: all maps` in release/decoder_registry.json).
+# Filled in once the interpreter may run; every score directory records it.
+DEC_INFO=unrecorded
+# the unseen-map claim a score of arenas_678 may make with this decoder: `system` when the decoder
+# never saw the unseen maps or a held-out episode, `dynamics-only` when UNSEEN_CLAIM says so
+CLAIM=""
 # finetune_decoder.py writes metrics.json one level above the `vae` directory, with a `provenance`
 # block naming the corpus the decoder was tuned on and the loss it was tuned under. A score is only
 # readable next to that: a decoder that saw arenas 6-8 defeats an unseen-map claim whatever the
@@ -173,7 +184,9 @@ prov() {   # prov <score-dir> <key>: say which decoder and which checkpoint prod
   {
     echo "decoder_kind=$DEC_KIND"
     echo "decoder_path=$DEC_PATH"
+    echo "decoder=$DEC_INFO"
     echo "decoder_metrics=$DEC_METRICS"
+    [ -n "$CLAIM" ] && echo "unseen_claim=$CLAIM"
     echo "score_key=$2"
     echo "recorded=$(date -Iseconds)"
   } > "$1/decoder_provenance.txt"
@@ -328,6 +341,10 @@ export CUDA_VISIBLE_DEVICES=$GPU HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 # the code under a live run (docs/REVIEW_2026-09-22.md H3). The commit is recorded instead.
 cd "$D/repo" || { echo "AFTER_NEXTTIC_FAILED $RUN: no checkout at $D/repo" >&2; exit 2; }
 echo "$(date -Iseconds) evaluating with code at $(git rev-parse HEAD 2>/dev/null || echo unversioned)" >> "$LOG"
+DEC_INFO=$("$PY" "$D/repo/decoder_provenance.py" show "$DEC_PATH" < /dev/null 2>/dev/null) || DEC_INFO=""
+DEC_INFO=${DEC_INFO:-unrecorded}
+# the key carries the decoder's content hash, so re-tuned weights under the same path rescore
+DEC_TAG="$DEC_TAG:$(echo "$DEC_INFO" | tr ' ' '\n' | sed -n 's/^identity=//p')"
 echo "$(date -Iseconds) decoder_used $USED" | tee -a "$R/decoder_used.txt"
 
 # --- stage 1: validation ----------------------------------------------------------------------
@@ -412,7 +429,19 @@ if [ "$STAGE" = sealed ]; then
       continue
     fi
     corpus_ok "$S" || continue
-    echo "$S started $(date -Iseconds) ckpt=$PICK step=$PICK_STEP sha256=$PICK_SHA variant=$PICK_VARIANT selection_sha256=$SEL_SHA" >> "$SCORED"
+    CLAIM=""
+    if [ "$S" = arenas_678 ]; then
+      # an unseen-map number is about the whole system: a decoder that saw arenas 6-8, a held-out
+      # episode, or whose training frames are unknown cannot back it (docs/REVIEW_2026-09-22.md H4)
+      if "$PY" "$D/repo/decoder_provenance.py" check "$DEC_PATH" --claim unseen-map \
+           > "$D/logs/${RUN}_decoder_claim.txt" 2>&1 < /dev/null; then CLAIM=system
+      elif [ "${UNSEEN_CLAIM:-}" = dynamics-only ]; then CLAIM=dynamics-only
+      else
+        fail "arenas_678: this decoder cannot back an unseen-map claim ($(head -c 300 "$D/logs/${RUN}_decoder_claim.txt")). UNSEEN_CLAIM=dynamics-only scores it as 'unseen by the dynamics model' and records that label"
+        continue
+      fi
+    fi
+    echo "$S started $(date -Iseconds) ckpt=$PICK step=$PICK_STEP sha256=$PICK_SHA variant=$PICK_VARIANT selection_sha256=$SEL_SHA${CLAIM:+ unseen_claim=$CLAIM}" >> "$SCORED"
     BEFORE=$RC; RC=0
     tf "$S" "$R/eval_tf_$S" "$PICK" "$PICK_STEP" "$PICK_SHA" "$PICK_VARIANT" 1 "$NUM_WINDOWS"
     tf "$S" "$R/eval_tf_${S}_h4" "$PICK" "$PICK_STEP" "$PICK_SHA" "$PICK_VARIANT" 4 "$NUM_WINDOWS"

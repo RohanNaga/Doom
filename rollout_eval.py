@@ -383,6 +383,9 @@ def do_score(args):
             out[f"psnr@{hh}"] = float(psnr_h[hh - 1] / N); out[f"lpips@{hh}"] = float(lpips_h[hh - 1] / N)
             out[f"copy_seed_psnr@{hh}"] = float(copy_h[hh - 1] / N)
     out["reference"] = "raw" if raw is not None else "decoded_gt"
+    # which decoder every decoded number went through, and whether it may back an unseen-map claim
+    from eval_tf import decoder_record
+    out["decoder"] = decoder_record(args)
     out["decoded_note"] = ("psnr/lpips/copy_seed_psnr compare DECODED prediction against DECODED ground-truth "
                            "latent, which is a different target per autoencoder; the *_raw keys compare against "
                            "the game's own frames and are the ones to report")

@@ -15,6 +15,11 @@ reconstruction ceiling of a candidate latent space is measured under an identica
 to decode into memory, and `--max-steps` / `--max-hours` / `--ckpt-every-hours` turn the run
 into a budgeted one that leaves an hourly checkpoint behind. Everything else is unchanged.
 
+`provenance.json`, written beside `metrics.json` and inside every saved decoder directory, lists
+the exact episode ids (and maps) the decoder trained on. `decoder_provenance.py` reads it to decide
+whether a score made with this decoder may claim unseen maps. A streamed tune of the dense corpus
+must name its episodes with `--stream-ids`, inside the segment's train range.
+
 Usage:
     python finetune_decoder.py --in-dir raw_arnold --split split_arnold.json \
         --out-dir vae_decoder_arnold --train-frames 50000 --val-frames 2000 --epochs 2 --device cuda:3
@@ -23,7 +28,7 @@ Usage:
         --latent-channels 16 --scaling-factor 0.3611 --shift-factor 0.1159 ...
 
     python finetune_decoder.py --in-dir raw_arnold --split split_arnold.json \
-        --stream-dir raw_arnold_dense/arenas --stream-frames 400000 --stream-episodes 2000 \
+        --stream-dir raw_arnold_dense/arenas --stream-ids 0:6000 --stream-frames 400000 --stream-episodes 2000 \
         --workers 8 --max-steps 12000 --max-hours 4 --ckpt-every-hours 1 --lpips-weight 0 ...
 """
 import argparse
@@ -131,7 +136,12 @@ def load_frames(items):
     return [frames[k] for k in items]
 
 
-def sample_row_groups(parquet_dir, n_frames, seed, max_episodes=0):
+def episode_of(path):
+    """The id in `ep_XXXXX.parquet`."""
+    return int(os.path.basename(path).split("_")[1].split(".")[0])
+
+
+def sample_row_groups(parquet_dir, n_frames, seed, max_episodes=0, episode_ids=None):
     """Sample whole parquet row groups of a corpus until they hold `n_frames` frames.
 
     Returns `(groups, n_frames_selected, n_episodes_touched)` where `groups` is a list of
@@ -139,11 +149,19 @@ def sample_row_groups(parquet_dir, n_frames, seed, max_episodes=0):
     writes `row_group_size=256`: one row group is about 7.7 MB of PNG, so reading a group to
     reach a single random frame would read the corpus tens of times over. `max_episodes` caps
     how many episode files are opened for metadata, which is one seek each.
+
+    `episode_ids` restricts the files to those ids BEFORE anything is drawn. It used to take every
+    file in the directory, which for the dense `arenas` segment meant validation and test episodes
+    (docs/REVIEW_2026-09-22.md H4). `None` keeps every file, and the draw is then unchanged.
     """
     import pyarrow.parquet as pq
     files = sorted(glob.glob(os.path.join(parquet_dir, "ep_*.parquet")))
+    if episode_ids is not None:
+        keep = {int(e) for e in episode_ids}
+        files = [p for p in files if episode_of(p) in keep]
     if not files:
-        raise SystemExit(f"no ep_*.parquet under {parquet_dir}")
+        raise SystemExit(f"no ep_*.parquet under {parquet_dir}"
+                         + (" among the requested episode ids" if episode_ids is not None else ""))
     rng = random.Random(seed)
     if max_episodes and max_episodes < len(files):
         files = sorted(rng.sample(files, max_episodes))
@@ -159,6 +177,73 @@ def sample_row_groups(parquet_dir, n_frames, seed, max_episodes=0):
         picked.append((path, g))
         total += rows
     return picked, total, len({p for p, _ in picked})
+
+
+def stream_episode_ids(stream_dir, spec):
+    """The episode ids a streamed tune may draw from, or None for every file of a non-dense corpus.
+
+    A directory named after a segment of `release/dense_split.json` is the dense corpus, and there
+    the ids are required and must lie outside that segment's validation and test ranges; the unseen
+    segment is refused outright. A decoder that saw held-out episodes or unseen maps cannot back an
+    unseen-map claim, and the 2026-09-22 review found the planned dense tune would have done both.
+    """
+    from doom_data import check_dense_training_ids, load_dense_split, parse_episode_ids
+    ids = parse_episode_ids(spec) if spec else None
+    split = load_dense_split()
+    seg = os.path.basename(os.path.normpath(stream_dir))
+    if seg in split["segments"]:
+        ranges = split["segments"][seg]["ranges"]
+        if "train" not in ranges:
+            raise SystemExit(f"{stream_dir} is the unseen segment {seg}: a decoder tuned on it can never back "
+                             "an unseen-map claim, so it is not a tuning corpus")
+        if ids is None:
+            raise SystemExit(f"{stream_dir} is the dense {seg} segment, which holds validation and test "
+                             f"episodes: pass --stream-ids (its train range is {ranges['train']})")
+        try:
+            check_dense_training_ids(split, seg, ids)
+        except ValueError as e:
+            raise SystemExit(f"--stream-ids {spec}: {e}")
+    return ids
+
+
+def _maps_of(paths):
+    """Sorted map ids of these recordings, from each file's first `map_id`."""
+    import pyarrow.parquet as pq
+    maps = set()
+    for p in paths:
+        col = pq.read_table(p, columns=["map_id"])["map_id"]
+        if len(col):
+            maps.add(int(col[0].as_py()))
+    return sorted(maps)
+
+
+def training_episodes(corpus_dir, ids, groups=None):
+    """One `train_episodes` entry: directory, dense segment (or None), exact ids and maps.
+
+    Maps of a dense segment follow from the id (`record_arnold.py:322-323`); any other corpus is
+    read from its files, so a 17-map corpus that contains the unseen arenas says so.
+    """
+    from doom_data import dense_episode_map, load_dense_split
+    split = load_dense_split()
+    seg = os.path.basename(os.path.normpath(corpus_dir))
+    ids = sorted(int(e) for e in ids)
+    if seg in split["segments"]:
+        maps = sorted({dense_episode_map(split["segments"][seg]["maps"], e) for e in ids})
+    else:
+        seg = None
+        maps = _maps_of([os.path.join(corpus_dir, f"ep_{e:05d}.parquet") for e in ids])
+    entry = {"dir": corpus_dir, "segment": seg, "ids": ids, "maps": maps}
+    if groups is not None:
+        entry["row_groups"] = [[os.path.basename(p), int(g)] for p, g in groups]
+    return entry
+
+
+def write_provenance(path, record):
+    """`provenance.json` in a directory, atomically."""
+    tmp = os.path.join(path, f"provenance.json.tmp.{os.getpid()}")
+    with open(tmp, "w") as f:
+        json.dump(record, f, indent=1)
+    os.replace(tmp, os.path.join(path, "provenance.json"))
 
 
 class RowGroupFrames(torch.utils.data.IterableDataset):
@@ -293,13 +378,27 @@ def main(args):
         if args.max_steps <= 0:
             raise SystemExit("--stream-dir needs --max-steps: the stream has no epoch to end on")
         t0 = time.time()
+        allowed = stream_episode_ids(args.stream_dir, args.stream_ids)
         groups, n_frames, n_eps = sample_row_groups(args.stream_dir, args.stream_frames, args.seed,
-                                                    args.stream_episodes)
+                                                    args.stream_episodes, allowed)
         stream = RowGroupFrames(groups, args.stream_buffer, args.seed)
         stream_info = {"dir": args.stream_dir, "row_groups": len(groups), "frames": n_frames,
                        "episodes": n_eps, "buffer": args.stream_buffer, "workers": args.workers,
-                       "index_seconds": time.time() - t0}
+                       "index_seconds": time.time() - t0, "episode_ids_allowed": args.stream_ids or "all"}
         print("stream:", json.dumps(stream_info), flush=True)
+    # the exact episodes this decoder trains on: an unseen-map claim is refused for a decoder that saw
+    # a held-out episode or an unseen map (decoder_provenance.py), so they are written down, not implied
+    if stream is not None:
+        train_eps = [training_episodes(args.stream_dir, {episode_of(p) for p, _ in groups}, groups)]
+    else:
+        present = [e for e in split["train"] if os.path.exists(os.path.join(args.in_dir, f"ep_{e:05d}.parquet"))]
+        train_eps = [training_episodes(args.in_dir, present)]
+    provenance = {"provenance": "recorded", "recorded_by": "finetune_decoder.py",
+                  "corpus": "; ".join(f"{t['dir']} ({len(t['ids'])} episodes, maps {t['maps']})" for t in train_eps),
+                  "train_episodes": train_eps,
+                  "validation_frames": {"dir": args.in_dir, "split": args.split, "ids": sorted(split["val"])},
+                  "loss": "mse" if args.lpips_weight <= 0 else f"mse + {args.lpips_weight} lpips",
+                  "vae_source": args.vae_id or "sd-vae-ft-mse"}
 
     vae = build_vae(args.vae_id, args.vae_subfolder, device, args.cache_dir,
                     args.latent_channels, args.scaling_factor, args.shift_factor)
@@ -342,17 +441,21 @@ def main(args):
                        # tuned on and what it was tuned for. An unseen-map claim is about the whole
                        # system, so a decoder that saw arenas 6-8 defeats it whatever the denoiser
                        # was initialised from.
-                       "provenance": {"train_corpus": args.in_dir, "split": args.split,
-                                      "split_subset": "train", "vae_source": args.vae_id or "sd-vae-ft-mse",
-                                      "loss": ("mse" if args.lpips_weight <= 0
-                                               else f"mse + {args.lpips_weight} lpips"),
-                                      "mse_rows": int(args.mse_rows), "lpips_rows": 240},
+                       # `split_subset` was always "train", including for a streamed tune whose
+                       # frames never came from the split; `train_episodes` is the exact record
+                       "provenance": {"train_corpus": args.stream_dir or args.in_dir, "split": args.split,
+                                      "split_subset": "val (validation frames only)" if args.stream_dir
+                                      else "train", "vae_source": args.vae_id or "sd-vae-ft-mse",
+                                      "loss": provenance["loss"],
+                                      "mse_rows": int(args.mse_rows), "lpips_rows": 240,
+                                      "train_episodes": provenance["train_episodes"]},
                        "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
                        "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
                        "presentations": step * eff, "stream": stream_info, "stopped": stopped,
                        "train_seconds": time.time() - t_train,
                        "peak_mem_gb": torch.cuda.max_memory_allocated() / 2**30 if device != "cpu" else None},
                       f, indent=1)
+        write_provenance(args.out_dir, provenance)
 
     for ep in range(epochs):
         order = None if stream is not None else np.random.RandomState(ep).permutation(len(train_frames))
@@ -402,7 +505,7 @@ def main(args):
                 m = evaluate(vae, val_frames, device, lpips_fn)
                 history.append({"step": step, "hour_ckpt": hours_saved, **m})
                 print(f"hour {hours_saved} at step {step}:", json.dumps(m), flush=True)
-                save_vae(vae, args.out_dir, args.channels_last, f"vae_h{hours_saved}")
+                write_provenance(save_vae(vae, args.out_dir, args.channels_last, f"vae_h{hours_saved}"), provenance)
                 write_metrics(m)
                 vae.decoder.train()
             if args.max_hours and elapsed >= args.max_hours * 3600:
@@ -416,11 +519,11 @@ def main(args):
         print(f"epoch {ep + 1}:", json.dumps(mid), flush=True)
         # Checkpoint every epoch: the tune costs about 2.5 card-hours and the only thing that
         # makes those hours unrecoverable is having no weights on disk when something raises.
-        save_vae(vae, args.out_dir, args.channels_last)
+        write_provenance(save_vae(vae, args.out_dir, args.channels_last), provenance)
         write_metrics(mid)
     after = evaluate(vae, val_frames, device, lpips_fn)
     print("after:", json.dumps(after), flush=True)
-    save_vae(vae, args.out_dir, args.channels_last)
+    write_provenance(save_vae(vae, args.out_dir, args.channels_last), provenance)
     write_metrics(after)
     print("DONE", flush=True)
 
@@ -452,6 +555,10 @@ def build_parser():
                                                     "instead of the cached in-memory sample")
     p.add_argument("--stream-frames", type=int, default=400000, help="distinct frames to sample for the stream")
     p.add_argument("--stream-episodes", type=int, default=0, help="cap on episode files opened (0 = all)")
+    p.add_argument("--stream-ids", dest="stream_ids", default="",
+                   help="episode ids the stream may draw from, as A:B or a comma list. Required for a dense "
+                        "segment directory (arenas: its train range, 0:6000), where it must avoid validation "
+                        "and test; the unseen segment is refused. Empty keeps every file of any other corpus")
     p.add_argument("--stream-buffer", type=int, default=4096, help="per-worker shuffle buffer, in frames")
     p.add_argument("--workers", type=int, default=0, help="DataLoader workers for --stream-dir")
     p.add_argument("--max-steps", type=int, default=0, help="update budget and LR decay horizon; required with --stream-dir")

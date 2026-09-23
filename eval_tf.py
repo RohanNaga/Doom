@@ -102,6 +102,21 @@ def load_model(args, device, latent_channels, trained):
     return model.to(device).eval(), ck.get("step", "?"), checkpoint_objective(ck, args.objective)
 
 
+def decoder_record(args):
+    """The decoder a score was decoded through: name, identity and provenance, written beside it.
+
+    From `decoder_provenance.describe`, which reads the decoder's own `provenance.json` or the
+    registry (`release/decoder_registry.json`). A decoder tuned on the unseen maps defeats an
+    unseen-map claim however the dynamics model was trained, so every number has to name it.
+    """
+    from decoder_provenance import describe
+    from doomdit_utils import VAE_NAME
+    path = args.vae_path or VAE_NAME
+    if args.vae_subfolder and os.path.isdir(os.path.join(path, args.vae_subfolder)):
+        path = os.path.join(path, args.vae_subfolder)
+    return describe(path)
+
+
 class HorizonOne(torch.utils.data.Dataset):
     """A (context, target, action) dataset presented as the one-step case of the horizon contract.
 
@@ -330,6 +345,7 @@ def main(args):
                          "resolved_objective": objective, "checkpoint_interface": trained,
                          "horizon_tics": K, "game_time_tics": K * tic_stride,
                          "window_validity": getattr(ds, "summary", None)}
+    summary["decoder"] = decoder_record(args)
     json.dump(summary, open(os.path.join(args.out_dir, "metrics.json"), "w"), indent=1)
     with open(os.path.join(args.out_dir, "per_window.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)

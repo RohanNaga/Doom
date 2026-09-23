@@ -89,8 +89,9 @@ def test_the_padded_rows_carry_their_documented_share_of_the_loss():
 
 def test_the_provenance_block_names_the_corpus_and_the_loss():
     src = open(os.path.join(REPO, "finetune_decoder.py")).read()
-    assert '"provenance": {"train_corpus": args.in_dir' in src
-    for key in ('"split": args.split', '"mse_rows"', '"lpips_rows": 240', '"loss"'):
+    # a streamed tune trains on the stream, not on --in-dir (docs/REVIEW_2026-09-22.md H4)
+    assert '"provenance": {"train_corpus": args.stream_dir or args.in_dir' in src
+    for key in ('"split": args.split', '"mse_rows"', '"lpips_rows": 240', '"loss"', '"train_episodes"'):
         assert key in src, key
 
 

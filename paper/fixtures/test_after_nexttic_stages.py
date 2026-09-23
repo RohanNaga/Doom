@@ -37,15 +37,16 @@ RUN = "040-unet-nexttic"
 STUB_PY = '''#!/usr/bin/env python3
 """Stands in for the real evaluation scripts: records its argv and writes the output file.
 
-`select_checkpoint.py` is run for real (STUB_REAL_PY, STUB_REPO) when the test names them: the
-selection logic is what those tests are about. `make_dense_eval_splits.py --check-only` fails for the
+`select_checkpoint.py` and `decoder_provenance.py` are run for real (STUB_REAL_PY, STUB_REPO) when
+the test names them: the selection and the decoder's claim are what those tests are about.
+`make_dense_eval_splits.py --check-only` fails for the
 corpora named in STUB_CHECK_FAIL. The checkpoint hash is STUB_SHA, or a name-derived fake.
 """
 import json, os, re, sys
 script = os.path.basename(sys.argv[1])
 with open(os.environ["STUB_LOG"], "a") as f:
     f.write(" ".join(sys.argv[1:]) + "\\n")
-if script == "select_checkpoint.py" and os.environ.get("STUB_REAL_PY"):
+if script in ("select_checkpoint.py", "decoder_provenance.py") and os.environ.get("STUB_REAL_PY"):
     real = os.path.join(os.environ["STUB_REPO"], script)
     os.execv(os.environ["STUB_REAL_PY"], [os.environ["STUB_REAL_PY"], real] + sys.argv[2:])
 def arg(name):
