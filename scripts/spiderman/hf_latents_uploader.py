@@ -2,7 +2,8 @@
 
 Runs on Spiderman's CPU in tmux `hf-latents-6000` (Rohan, Sep 23 2026). Every 10 minutes:
 
-  rolling   ids 2000:5999 of the two training directories (sd15/arenas, sd35/arenas): finished pairs
+  rolling   ids 2000:5999 under $LATENTS_ROLLING_ROOT (default $D/ext_2000_6000, Hub folders
+            sd15/arenas_2000_6000 and sd35/arenas_2000_6000): finished pairs
             (`ep_XXXXX_latents.npy` + `_meta.npz`) that pass the row check are uploaded in commits of
             about 100 episodes; every uploaded file's byte size is then read back from the Hub tree API
             and compared, and only then are the LOCAL files deleted. Each episode gets one line in the
@@ -45,9 +46,18 @@ META_PATTERNS = ["encode_meta_*.json", "episodes_*.jsonl", "canonical_controls.j
 EP = re.compile(r"^ep_(\d{5})_latents\.npy$")
 FAILED = set()          # (dir, id) row-check failures already logged
 
-TRAIN = {   # the only directories anything is ever deleted from, and only ids 2000:5999
+TRAIN = {   # the frozen 0:2000 paper-row corpora: uploaded once, never deleted from
     "sd15": dict(dir=f"{D}/latents_arnold_dense_pertic/arenas", repo="sd15/arenas", ch=4, raw=RAW),
     "sd35": dict(dir=f"{D}/latents_arnold_dense_pertic_sd35/arenas", repo="sd35/arenas", ch=16, raw=RAW),
+}
+# The 2000:6000 sets live under their own tree (Sep 23 2026): the launch certificates pin every shard
+# log in the 0:2000 directories, so Superman's phase 2 and 3 write elsewhere, and these are the only
+# directories anything is ever deleted from. They go to their own Hub folders too, so their shard
+# logs (encode_meta_1N.json from Superman's cards) never overwrite the 0:2000 sets' files.
+ROLLING_ROOT = os.environ.get("LATENTS_ROLLING_ROOT", f"{D}/ext_2000_6000")
+ROLLING = {
+    "sd15": dict(dir=f"{ROLLING_ROOT}/latents_arnold_dense_pertic/arenas", repo="sd15/arenas_2000_6000", ch=4, raw=RAW),
+    "sd35": dict(dir=f"{ROLLING_ROOT}/latents_arnold_dense_pertic_sd35/arenas", repo="sd35/arenas_2000_6000", ch=16, raw=RAW),
 }
 EVAL_ROOT = f"{D}/latents_arnold_dense_pertic_eval_sd35"
 EVALS = {
@@ -200,7 +210,7 @@ def upload_batch(api, spec, ids, delete, label):
     """Upload `ids` of one directory, verify sizes on the Hub, record them, and optionally delete."""
     d, folder = spec["dir"], spec["repo"]
     for i in ids:       # the deletion guard lives next to the only code that deletes
-        if delete and not (2000 <= i < 6000 and d in (TRAIN["sd15"]["dir"], TRAIN["sd35"]["dir"])):
+        if delete and not (2000 <= i < 6000 and d in (ROLLING["sd15"]["dir"], ROLLING["sd35"]["dir"])):
             raise SystemExit(f"refusing to delete id {i} in {d}")
     provenance(d, folder)
     names = [n for i in ids for n in (f"ep_{i:05d}_latents.npy", f"ep_{i:05d}_meta.npz")]
@@ -275,8 +285,10 @@ def finish_deletions(spec):
 
 
 def cycle(api, st):
-    # rolling uploads with local deletion: training ids 2000:5999 only
-    for space, spec in TRAIN.items():
+    # rolling uploads with local deletion: training ids 2000:5999 only, from the separate tree
+    for space, spec in ROLLING.items():
+        if not os.path.isdir(spec["dir"]):
+            continue
         finish_deletions(spec)
         ids, newest = pending(spec, 2000, 6000)
         while len(ids) >= BATCH or (ids and time.time() - newest > QUIET_S):
