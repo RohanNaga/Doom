@@ -219,6 +219,7 @@ prov() {   # prov <score-dir> <key>: say which decoder and which checkpoint prod
     echo "decoder=$DEC_INFO"
     echo "decoder_metrics=$DEC_METRICS"
     echo "checkout=$RUN_REPO code=$CODE"
+    echo "interpreter=$PY"
     [ -n "$CLAIM" ] && echo "unseen_claim=$CLAIM"
     echo "score_key=$2"
     echo "recorded=$(date -Iseconds)"
