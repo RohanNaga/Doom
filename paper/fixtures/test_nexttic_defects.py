@@ -134,8 +134,9 @@ def test_every_flag_after_nexttic_passes_exists_in_the_target_parser(backbone):
 
 def test_the_rollout_call_gets_no_parquet_dir():
     """The ROLLOUT phase reads latents only. The SCORE phase does take the raw recordings: they are
-    the primary reference for the drift curve and for FVD."""
-    out = _dry("after_nexttic.sh", ["3", "unet"])
+    the primary reference for the drift curve and for FVD. Rollouts belong to the sealed test stage
+    (docs/REVIEW_2026-09-22.md H2), so that is the plan read here."""
+    out = _dry("after_nexttic.sh", ["3", "unet"], CORPORA="test")
     roll = [ln for ln in out.splitlines() if "rollout_eval.py" in ln and "--score" not in ln]
     assert roll and all("--parquet-dir" not in ln for ln in roll)
     score = [ln for ln in out.splitlines() if "rollout_eval.py" in ln and "--score" in ln]
@@ -145,7 +146,7 @@ def test_the_rollout_call_gets_no_parquet_dir():
 
 
 def test_one_subset_key_is_used_everywhere():
-    out = _dry("after_nexttic.sh", ["3", "unet"])
+    out = _dry("after_nexttic.sh", ["3", "unet"]) + _dry("after_nexttic.sh", ["3", "unet"], CORPORA="test")
     for ln in out.splitlines():
         if "--score" in ln:
             continue          # the scoring pass reads the saved rollouts, so it takes no corpus
@@ -179,7 +180,8 @@ def test_every_corpus_uses_the_same_subset_key(tmp_path):
 
 def test_the_evaluation_script_reads_the_files_the_encoder_writes():
     """The names have to line up, or after_nexttic.sh waits on a file nobody creates."""
-    out = _dry("after_nexttic.sh", ["3", "unet"])
+    out = _dry("after_nexttic.sh", ["3", "unet"]) + _dry("after_nexttic.sh", ["3", "unet"],
+                                                         CORPORA="test arenas_678")
     for name in ("split_val.json", "split_test.json", "split_arenas_678.json"):
         assert name in out, name
     enc = _dry("encode_nexttic.sh", [], CORPUS="evals")
@@ -207,9 +209,11 @@ def test_rollout_noise_is_keyed_by_window_and_step():
 
 
 def test_the_rollout_passes_its_own_noise_to_the_sampler():
+    # the sampler call now goes through timestep_spacing.sample (review M1), whose default IS
+    # diffusion.ddim_sample; the call spans several lines, so read it up to its closing parenthesis
     src = open(os.path.join(REPO, "rollout_eval.py")).read()
-    call = src[src.index("x = diffusion.ddim_sample"):]
-    call = call[:call.index("\n")]
+    call = src[src.index("x = sample_spaced("):]
+    call = call[:call.index("noise_fn=nfn)")]
     assert "noise=noise" in call, "ddim_sample is still drawing from the global generator"
 
 

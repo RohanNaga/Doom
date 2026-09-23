@@ -7,17 +7,25 @@
 # MSE alone at batch 2,048 for as many steps as the denoiser, and its footage's stock ceiling is
 # only 0.7 dB above ours, so a much higher ceiling should be reachable here. This run changes three
 # things at once, deliberately, because that is the recipe being tested: MSE only, frames streamed
-# uniformly from the dense four-arena corpus instead of a 50k cached sample, and a card-filling
+# uniformly from the training ids of the dense four-arena corpus instead of a 50k cached sample, and a card-filling
 # batch for four GPU-hours instead of 2.5.
 #
 # The validation frames stay the cached 2,000 of the 17-map corpus, so the loss curve is comparable
 # to the earlier tunes, and an hourly checkpoint turns the run into a curve of ceiling against
 # presentations rather than one number.
 #
-#   usage: decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
+#   usage: [TRAIN_IDS=0:6000] decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
 #   fit:   FIT=1 decoder_mse.sh <gpu> <micro-batch> 60
+#
+# TRAINING IDS ONLY (docs/REVIEW_2026-09-22.md H4). The stream used to sample row groups from every
+# file in raw_arnold_dense/arenas, validation 6000:7000 and test 7000:8000 included, while recording
+# `split_subset: "train"`. `--stream-ids $TRAIN_IDS` (default 0:6000, the dense train range) now
+# restricts it, `finetune_decoder.py` refuses ids that reach into val or test, and the exact episode
+# ids and row groups used are written to provenance.json beside the decoder. The validation frames
+# are still the cached 17-map sample: they only measure the decoder and never train it.
 set -u
 GPU=${1:?gpu}; MB=${2:?micro batch}; STEPS=${3:?max steps}; HOURS=${4:-4.0}
+TRAIN_IDS=${TRAIN_IDS:-0:6000}
 D=/sata2/data/rnagabhi/doom
 REPO=${REPO:-$D/tmp/levers/repo}
 PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}
@@ -39,7 +47,7 @@ echo "=== $(date -u) mse decoder tune, micro $MB, $STEPS steps, ${HOURS}h, out $
 nice -n 15 $PY finetune_decoder.py \
   --in-dir $D/raw_arnold --split $D/split_arnold.json --frame-cache $D/frame_cache \
   --val-frames $VAL --stride 4 --out-dir $OUT \
-  --stream-dir $D/raw_arnold_dense/arenas --stream-frames 400000 --stream-episodes $EPS \
+  --stream-dir $D/raw_arnold_dense/arenas --stream-ids "$TRAIN_IDS" --stream-frames 400000 --stream-episodes $EPS \
   --stream-buffer 8192 --workers 8 --seed 0 \
   --max-steps $STEPS $HRS --batch-size $MB --accum 1 --channels-last \
   --lr 1e-5 --lpips-weight 0 --report-lpips --val-every 2000 --device cuda:0

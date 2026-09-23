@@ -139,7 +139,13 @@ def main(args):
         torch.cuda.empty_cache()
 
     names = [s.split("=", 1)[0] for s in args.decoder]
+    from decoder_provenance import describe
+    from doomdit_utils import VAE_NAME
     out = {"decoders": {n: s.split("=", 1)[1] for n, s in zip(names, args.decoder)},
+           # which weights each column is, by content hash, and what each was tuned on: a ceiling
+           # is only readable next to the decoder's training episodes (docs/REVIEW_2026-09-22.md H4)
+           "decoder_provenance": {n: describe(s.split("=", 1)[1].partition("#")[0] or VAE_NAME)
+                                  for n, s in zip(names, args.decoder)},
            "latent_contracts": contracts, "baseline": args.baseline, "metrics": {}, "paired": {},
            "config": vars(args), "score_seconds": time.time() - t0,
            "peak_mem_gb": torch.cuda.max_memory_allocated() / 2**30 if device != "cpu" else None}

@@ -2,7 +2,7 @@
 
 > Draft 1, Sep 8, 2026. Rendered version with diagrams: https://claude.ai/code/artifact/3a3e186d-5dcc-400c-9d26-27417ebfd086 (private artifact). Companion: `REQUIREMENTS.md`. This file is the text of record; the artifact adds figures.
 
-One question drives the design: what changes when the U-Net in a GameNGen-style Doom world model is replaced by a Diffusion Transformer, with everything the two backbones see held identical. Every stage before the backbone is shared and frozen; every stage after it is shared and applied the same way to both.
+One question drives the design: what changes when the U-Net in a GameNGen-style Doom world model is replaced by a Diffusion Transformer, with everything the two backbones see held identical. Every stage before the backbone is shared and frozen; every stage after it is shared and applied the same way to both. Read the result as a system comparison under that shared recipe: the pretrained starts also differ in size, pretraining objective, autoencoder and conditioning path, so the backbone is not the only thing that differs between rows (review 2026-09-22, H5).
 
 ```mermaid
 flowchart LR

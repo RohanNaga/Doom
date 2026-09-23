@@ -1,6 +1,6 @@
 # DoomDiT
 
-A controlled comparison of a Diffusion Transformer (DiT-XL/2) against the Stable Diffusion 1.4 U-Net as the backbone of a GameNGen-style Doom world model, with data, latents, conditioning, objective, and compute held identical between the two. Companion release: a lossless, per-tic, 320x240 ViZDoom deathmatch dataset with pose and HUD state, recorded with the Arnold agent on 17 maps.
+A system comparison, under one shared recipe, of pretrained diffusion backbones (a Diffusion Transformer, DiT-XL/2, against the Stable Diffusion 1.4 U-Net, and later rows) as the core of a GameNGen-style Doom world model. Data, training objective, schedule and compute budget are shared; the starts still differ in size, pretraining objective, autoencoder and conditioning path, so a row difference is not an architecture effect alone. Companion release: a lossless, per-tic, 320x240 ViZDoom deathmatch dataset with pose and HUD state, recorded with the Arnold agent on 17 maps.
 
 Start with `RESEARCH_CONTEXT.md` (where the project is), `REQUIREMENTS.md` (what the paper needs), and `TECHNICAL_PLAN.md` (every design decision and why).
 

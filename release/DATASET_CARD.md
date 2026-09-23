@@ -30,8 +30,10 @@ Recorded September 2026 at CMU for the DoomDiT project (Rohan Nagabhirava, Keert
 | `arnold_eval/{seen,unseen,unseen2}/` | seen: the 15 training maps of `arnold/`; unseen: arenas 16, 17; unseen2: 13 curated maps | 60 / 20 / 130 | | 50 GB | the seeded evaluation corpora every reported DoomDiT number was scored on |
 
 Every episode is one parquet file, `ep_XXXXX.parquet`, 150 game-seconds (about 5,000 tics, about 260 MB),
-with the episode's provenance in the parquet schema metadata (key `doomdit_episode`: corpus id, episode id,
-map id, WAD, seeds, kills, deaths). Episode ids in `arenas/` cycle through the four maps
+with the episode's provenance in the parquet schema metadata (key `doomdit_episode`). A default per-tic file carries
+`seed_scheme`, `corpus_id`, `episode_id`, `map_id` and `seeds`; `engine_map_id`, `map_id_offset`, `wad`,
+`init_game_commands`, `bots` and `stored_tic_stride` appear only when the recorder option that needs them was used.
+Per-episode kills and deaths are in `worker_*.jsonl`, not in the metadata. Episode ids in `arenas/` cycle through the four maps
 (`map = [2,3,4,5][id % 4]`), so every id range is map-balanced.
 
 ## Fixed split (`dense_split.json`)
@@ -43,14 +45,21 @@ Fixed by episode id BEFORE any model was trained on this data, and never to be m
 | train | 0 to 5999 | 6,000 |
 | val | 6000 to 6999 | 1,000 |
 | test | 7000 to 7999 | 1,000 |
-| unseen maps | `arenas_678/` (all) | 3,000 |
+| unseen maps | `arenas_678/` (all; never trained on) | 3,000 |
 
 A training run may use a prefix of the train split (the first DoomDiT next-tic runs use a subset because of compute);
 that never changes the split. Split by episode, never by frame.
 
+The first next-tic runs score subsets: val `arenas/` 6000 to 6099, test 7000 to 7099, and unseen `arenas_678/`
+**60 to 119** (20 per map; `next_tic_runs.unseen_ids` and `segments.arenas_678.ranges.unseen` in the json).
+The unseen subset was declared as 0 to 59 on 2026-09-21 and replaced on 2026-09-22, before any model was scored
+on it: 51 of those 60 are worker-first episodes (k = 0, see the weapon-select section below), a control regime that
+validation and test never contain. Ids 60 to 119 hold none. The json's `history` records the measurement.
+
 ## Columns (one row per tic)
 
-`tic` (int, engine tic inside the episode), `action` (int, Arnold's requested action id, 0 to 28), `buttons` (string of
+`tic` (int, the recorder's own counter: it steps by exactly 1 per stored row, including across a respawn, and the
+roughly 39 engine tics of each death and respawn are never recorded, so it is not the engine's tic), `action` (int, Arnold's requested action id, 0 to 28), `buttons` (string of
 0/1, Arnold's REQUESTED control list, one character per entry in `buttons.json` order; **9 characters normally,
 longer when Arnold appends a weapon-select press**, and the engine executes only the first 19 entries, so the
 executed control is `buttons[:19]` right-padded with 0 — see the next section), `health`, `ammo`,
@@ -62,7 +71,8 @@ not the action id, is the ground-truth control.
 Row semantics: row `i` holds the frame at tic `i` and the control applied FROM tic `i` TO tic `i+1`
 (the recorder stores, then steps). A world model predicting frame `i+1` from frames up to `i` is conditioned on
 `buttons[i]`. Arnold chooses a new action every 4 tics and holds it, so controls repeat in runs of 4;
-a new life starts wherever `deaths` increments (the tic counter keeps running through a death).
+a new life starts wherever `deaths` increments. The `tic` column does not jump there (see above), so a window that
+must stay inside one life has to test `deaths`, not a gap in `tic`.
 
 ## Variable-width `buttons`, and the weapon switches Arnold asked for but never got
 
@@ -132,7 +142,8 @@ encoded before this is repaired in place, with no re-encoding, by `encode_parque
 ## Files
 
 - `dense_split.json`: the split above.
-- `index_arenas.parquet`, `index_arenas_678.parquet`: one row per episode (id, map, tics, kills, deaths, bytes, md5).
+- `index_arenas.parquet`, `index_arenas_678.parquet`: one row per episode (id, map, tics, bytes, md5). Their `kills` and
+  `deaths` columns are -1 placeholders in all 11,000 rows; the real per-episode values are in `worker_*.jsonl`.
 - `md5_*.txt`: md5 of every parquet file, for verification after download.
 - `canonical_controls.json`: the modal executed button vector per action id over train ids 0:2000, used to mark
   agent-decision rows (`is_decision`) when the corpus is encoded.
@@ -157,7 +168,10 @@ fetches training ids 0 to 999; check every file against `md5_arenas.txt`.
 
 Recorder, encoder and training code: https://github.com/RohanNaga/Doom (`record_arnold.py`; `release/DENSE_CORPUS.md`
 documents the corpus). Every episode is seeded by a stable hash of (corpus id, episode id), so a recording is
-bit-for-bit reproducible with the same Arnold checkpoint (`vizdoom_2017_track2.pth`), ViZDoom build and WADs.
+bit-for-bit reproducible with the same Arnold checkpoint (`vizdoom_2017_track2.pth`), ViZDoom build and WADs, and
+the same recorder start history: whether an episode was its worker's first since a start changes the executed control
+(only a first episode, k = 0, can execute a weapon select), so re-recording an episode as a process's first episode
+would execute switches the published copy did not. `worker_*.jsonl` and `RECORDING_LOG.txt` hold that history.
 `arenas/` was recorded on one machine (32 workers) and `arenas_678/` on another and streamed; both by the same
 recorder at git `103b15e` or later. Assets are Freedoom (BSD licence); the scenario WADs are Arnold's.
 

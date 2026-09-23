@@ -205,13 +205,16 @@ def test_the_evaluation_script_scores_at_tic_spacing_and_at_equal_game_time(tmp_
 
 
 def test_the_evaluation_script_covers_the_dense_and_the_original_corpora(tmp_path):
-    out = dry(AFTER, ["3", "unet"], root=str(tmp_path))
-    for corpus in ("val", "test", "arenas_678", "seen", "unseen", "unseen2"):
+    """Validation is its own stage; the sealed corpora are scored in another invocation, after
+    --select (docs/REVIEW_2026-09-22.md H2)."""
+    assert "eval_tf val " in dry(AFTER, ["3", "unet"], root=str(tmp_path))
+    out = dry(AFTER, ["3", "unet"], root=str(tmp_path), CORPORA="test arenas_678 seen unseen unseen2")
+    for corpus in ("test", "arenas_678", "seen", "unseen", "unseen2"):
         assert f"eval_tf {corpus} " in out, f"{corpus} is not scored"
 
 
 def test_the_rollout_horizon_is_given_in_tics(tmp_path):
-    out = dry(AFTER, ["3", "unet"], root=str(tmp_path))
+    out = dry(AFTER, ["3", "unet"], root=str(tmp_path), CORPORA="test")
     assert "--horizon 256" in out, "256 tics is the 64 decision steps the stride-4 rows roll out"
 
 

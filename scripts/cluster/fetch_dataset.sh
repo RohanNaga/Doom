@@ -13,7 +13,11 @@
 #   train   arenas      0:2000     2,000 episodes, 500 per arena
 #   val     arenas      6000:6100    100 episodes,  25 per arena
 #   test    arenas      7000:7100    100 episodes,  25 per arena
-#   unseen  arenas_678  0:60          60 episodes,  20 per arena
+#   unseen  arenas_678  60:120        60 episodes,  20 per arena
+#
+# The unseen range is read from `release/dense_split.json` (`scripts/dense_ids.sh`). It was 0:60 until
+# 2026-09-22 and was replaced before any model was scored, because 51 of those 60 are worker-first
+# episodes whose weapon selects execute (the json's `history` has the measurement).
 #
 # The ranges are `release/dense_split.json`, fixed before anything was scored, and they are exactly
 # map-balanced because `record_arnold.py:322` assigns `map_ids[episode_id % len(map_ids)]`. The
@@ -50,7 +54,10 @@ OUT=$D/raw_arnold_dense
 TRAIN_IDS=${TRAIN_IDS:-0:2000}
 VAL_IDS=${VAL_IDS:-6000:6100}
 TEST_IDS=${TEST_IDS:-7000:7100}
-UNSEEN_IDS=${UNSEEN_IDS:-0:60}
+# shellcheck source=../dense_ids.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../dense_ids.sh"
+UNSEEN_IDS=${UNSEEN_IDS:-$(dense_ids unseen_ids)}
+[ -n "$UNSEEN_IDS" ] || { echo "FETCH_DATASET_FAILED no unseen range: set UNSEEN_IDS or fix release/dense_split.json" >&2; exit 1; }
 META="dense_split.json canonical_controls.json md5_arenas.txt md5_arenas_678.txt README.md arenas/README.md arenas_678/README.md"
 
 die() { echo "FETCH_DATASET_FAILED $*" >&2; exit 1; }

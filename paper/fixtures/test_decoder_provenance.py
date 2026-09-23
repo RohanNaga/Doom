@@ -89,8 +89,9 @@ def test_the_padded_rows_carry_their_documented_share_of_the_loss():
 
 def test_the_provenance_block_names_the_corpus_and_the_loss():
     src = open(os.path.join(REPO, "finetune_decoder.py")).read()
-    assert '"provenance": {"train_corpus": args.in_dir' in src
-    for key in ('"split": args.split', '"mse_rows"', '"lpips_rows": 240', '"loss"'):
+    # a streamed tune trains on the stream, not on --in-dir (docs/REVIEW_2026-09-22.md H4)
+    assert '"provenance": {"train_corpus": args.stream_dir or args.in_dir' in src
+    for key in ('"split": args.split', '"mse_rows"', '"lpips_rows": 240', '"loss"', '"train_episodes"'):
         assert key in src, key
 
 
@@ -121,8 +122,12 @@ def test_an_lpips_tune_says_so(tmp_path, monkeypatch):
 # every score records which decoder made it
 # ---------------------------------------------------------------------------------------
 
-def _run_launcher(tmp_path, tuned=False, **env):
-    """Run the evaluation launcher for real with a stub python, as the other launcher tests do."""
+def _run_launcher(tmp_path, tuned=False, sealed=False, **env):
+    """Run the evaluation launcher for real with a stub python, as the other launcher tests do.
+
+    `sealed=True` runs the validation selection first and then the test stage, which is the only
+    stage that rolls out (the old script rolled out on test even under CORPORA=val).
+    """
     from test_after_nexttic_stages import STUB_PY, _root, RUN
     root, r = _root(tmp_path)
     if tuned:
@@ -138,27 +143,34 @@ def _run_launcher(tmp_path, tuned=False, **env):
     import rollout_eval
     e = {**os.environ, "DOOM_ROOT": str(root), "PY": str(py), "PY_SD35": str(py),
          "STUB_LOG": str(log), "STUB_PICK": str(r / "snap_0290000.pt"),
-         "STUB_SCORE_FILE": rollout_eval.SCORE_FILE,
+         "STUB_SCORE_FILE": rollout_eval.SCORE_FILE, "STUB_REAL_PY": sys.executable, "STUB_REPO": REPO,
          "CORPORA": "val", "CKPT": str(r / "snap_0290000.pt"), **env}
-    proc = subprocess.run(["bash", AFTER, "0", "unet"], capture_output=True, text=True, env=e,
-                          timeout=90)
-    assert proc.returncode == 0, proc.stderr
+    runs = [(["--select"], {"CORPORA": "val", "CKPT": ""}), ([], {"CORPORA": "test", "CKPT": ""})] \
+        if sealed else [([], {})]
+    for args, extra in runs:
+        proc = subprocess.run(["bash", AFTER, "0", "unet", *args], capture_output=True, text=True,
+                              env={**e, **extra}, timeout=120)
+        assert proc.returncode == 0, proc.stderr
     return root, r, RUN
 
 
 def test_a_stock_fallback_is_recorded_next_to_every_score(tmp_path):
     root, r, _ = _run_launcher(tmp_path, tuned=False)
-    for name in ("eval_tf_val", "eval_tf_val_ema", "eval_tf_val_best", "eval_tf_val_h4",
-                 "rollout_metrics_test"):
+    for name in ("eval_tf_val", "eval_tf_val_ema", "eval_tf_val_best", "eval_tf_val_h4"):
         text = (r / name / "decoder_provenance.txt").read_text()
         assert "decoder_kind=stock" in text, name
-        assert "step=290000" in text, name
+        want = "step=41000" if name.endswith("_best") else "step=290000"
+        assert want in text, name
+    root, r, _ = _run_launcher(tmp_path / "sealed", tuned=False, sealed=True)
+    for name in ("eval_tf_test", "eval_tf_test_h4", "rollout_metrics_test"):
+        text = (r / name / "decoder_provenance.txt").read_text()
+        assert "decoder_kind=stock" in text and "step=290000" in text, name
 
 
 def test_the_tuned_decoder_s_own_metrics_travel_with_the_scores(tmp_path):
-    root, r, _ = _run_launcher(tmp_path, tuned=True)
+    root, r, _ = _run_launcher(tmp_path, tuned=True, sealed=True)
     import json
-    for name in ("eval_tf_val", "rollout_metrics_test"):
+    for name in ("eval_tf_test", "rollout_metrics_test"):
         text = (r / name / "decoder_provenance.txt").read_text()
         assert "decoder_kind=tuned" in text, name
         assert "vae_decoder_arnold_lpips/vae" in text, name
@@ -169,6 +181,5 @@ def test_the_tuned_decoder_s_own_metrics_travel_with_the_scores(tmp_path):
 
 def test_the_launcher_writes_the_provenance_beside_each_score_dir():
     text = open(AFTER).read()
-    assert text.count('prov "$OUT"') == 1 and text.count('prov "$OUT4"') == 1
-    assert 'prov "$R/rollout_metrics_test"' in text
+    assert text.count('prov "$OUT" "$KEY"') == 1 and text.count('prov "$M" "$KEY"') == 1
     assert "DEC_METRICS=$(dirname \"$TUNED\")/metrics.json" in text
