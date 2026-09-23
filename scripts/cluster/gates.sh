@@ -38,7 +38,12 @@
 #                        (gate_certificate.py revoke, every other backbone's entry stays: the gates
 #                        run staggered, one space while the other row already trains); new ones are
 #                        written only at GATES_GO. A run that fails or is interrupted therefore
-#                        leaves no certificate standing for what it was certifying.
+#                        leaves no certificate standing for what it was certifying. A revocation
+#                        that fails under the backbone's interpreter is retried under the gates'
+#                        other interpreters (PY_UNET, PY_SD35, PY, $D/env/bin/python); if none can
+#                        run it, the gates stop before any gate runs and the file is left exactly
+#                        as it was. Another backbone's entry is never deleted: a stale entry of this
+#                        backbone still pins its own commit and corpora, so it certifies nothing new.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
@@ -213,13 +218,24 @@ pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
 revoke_cmd() {   # revoke_cmd <backbone>: drop that backbone's certificate entry, keep the others
   echo "$(bb_py "$1") $HERE_REPO/gate_certificate.py revoke --cert $CERT --backbone $1"
 }
-revoke_mine() {   # revoke every backbone this run certifies; if that fails, revoke everything
-  local BB
-  for BB in $SMOKE_BBS; do
-    # shellcheck disable=SC2046
-    $(revoke_cmd "$BB") > /dev/null 2>&1 || { rm -f "$CERT"; echo "could not revoke $BB alone; removed $CERT" >&2; return 1; }
+revoke_one() {   # revoke_one <backbone>: under its interpreter, then each fallback; 0 once one succeeds
+  local P TRIED=""
+  [ -e "$CERT" ] || return 0      # no certificate, nothing standing to revoke
+  for P in "$(bb_py "$1")" "$PY_UNET" "$PY_SD35" "${PY:-}" "$D/env/bin/python"; do
+    [ -n "$P" ] && [ -x "$P" ] || continue
+    case " $TRIED " in *" $P "*) continue ;; esac
+    TRIED="$TRIED $P"
+    "$P" "$HERE_REPO/gate_certificate.py" revoke --cert "$CERT" --backbone "$1" > /dev/null 2>&1 && return 0
   done
-  return 0
+  echo "could not revoke $1 in $CERT under any of:$TRIED" >&2
+  return 1
+}
+revoke_mine() {   # revoke every backbone this run certifies; never touch another backbone's entry
+  local BB BAD=""
+  for BB in $SMOKE_BBS; do revoke_one "$BB" || BAD="$BAD $BB"; done
+  [ -z "$BAD" ] && return 0
+  REVOKE_FAILED=${BAD# }
+  return 1
 }
 record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, for the certificate
   local detail=${3//\"/}; detail=${detail//\\/}
@@ -339,7 +355,7 @@ launcher() {   # launcher <backbone> <overrides of the production settings as NA
 if [ "$DRY" = 1 ]; then
   echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
   echo "DRY gate0 pin: revoke $CERT entries for $SMOKE_BBS (other backbones' entries stay); certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
-  for BB in $SMOKE_BBS; do echo "DRY gate0 revoke $BB $(revoke_cmd "$BB")"; done
+  for BB in $SMOKE_BBS; do echo "DRY gate0 revoke $BB $(revoke_cmd "$BB") (retried under PY_UNET, PY_SD35, PY, $D/env/bin/python; if none can, stop here and leave $CERT untouched)"; done
   echo "DRY results $RESULTS"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
   for V in "${SPACES[@]}"; do echo "DRY gate1 train audit $V $(train_audit_cmd "$V")"; done
@@ -399,7 +415,8 @@ say() { echo "$*" | tee -a "$REPORT"; }
 # --- gate 0: pin the commit being certified ------------------------------------------------
 # revoked first: a gate run that fails or is interrupted must not leave an older certificate
 # standing for whatever the checkout is now
-revoke_mine
+revoke_mine \
+  || gate_fail "0 revoke" "the certificate entry of $REVOKE_FAILED could not be revoked; $CERT is left untouched and no gate ran. Fix the interpreters (PY_UNET, PY_SD35, PY) and rerun"
 : > "$RESULTS"
 say "$(date -Iseconds) gate 0: pin"
 COMMIT=$(pin_of "$REPO") || gate_fail "0 pin" "$REPO is not a git checkout, so the gates cannot say which code they certify"
@@ -586,10 +603,12 @@ for BB in $SMOKE_BBS; do
   PROD_CMD=$(cert_cmd "$BB") || gate_fail "certificate ($BB)" "the launcher could not resolve the production command"
   # shellcheck disable=SC2046
   $(cert_write_cmd "$BB") "$PROD_CMD" >> "$REPORT" 2>&1 \
-    || { revoke_mine; gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
+    || { revoke_mine || echo "revocation failed for $REVOKE_FAILED; those entries may stand from this run" >&2
+         gate_fail "certificate ($BB)" "gate_certificate.py refused to certify $BB; see $REPORT"; }
   # the launch printed below must itself resolve to what was just certified, with nothing inherited
   operator_ok "$BB" "$PROD_CMD" \
-    || { revoke_mine; gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
+    || { revoke_mine || echo "revocation failed for $REVOKE_FAILED; those entries may stand from this run" >&2
+         gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
 done
 say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
 for BB in $SMOKE_BBS; do say "GATES_LAUNCH $BB: $(operator_cmd "$BB")"; done
