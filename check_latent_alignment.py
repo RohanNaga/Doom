@@ -18,19 +18,27 @@ For each shard, for a few sampled episodes (`--episodes` restricts which, inside
      (the short last batch, where cuDNN sees a different shape), read the raw frames at the tics the
      sidecar names, and encode them exactly as `encode_parquet.encode_batch` did, with the settings
      recorded in that shard's `encode_meta_NN.json` (VAE, scale, shift, batch size, dtype). Compare
-     with the stored rows: max and mean absolute difference, and the fraction bit-identical.
+     with the stored rows: mean (MAE), RMS, 99th-percentile and max absolute difference, and the
+     fraction bit-identical.
   2. Decode.  Decode the stored latents through one decoder and score `vae_psnr` against the raw
      frames, unshifted and with the stored rows deliberately shifted by -4, -1, +1 and +4. The
-     unshifted alignment must score best. This is an ALERT, not a certificate: a low-motion stretch
-     can make neighbours nearly tie, which is why it is one of two tests and why it is per shard.
+     unshifted alignment must beat EVERY shifted control by a margin.
 
-A shard fails if its mean absolute difference exceeds `--max-abs-diff` (1e-3, the Sep 20 batch-size
-measurement's scale), if fewer than `--min-identical` (0.5) of its re-encoded values are
-bit-identical at the recorded batch size, or if any shifted control scores at least as well as the
-unshifted alignment. Every shard is reported on its own; nothing is only pooled.
+A shard passes only if its MAE is finite and at most `--max-mae`, its 99th-percentile difference is
+at most `--max-p99`, and the unshifted `vae_psnr` exceeds the best shifted control by at least
+`--min-shift-margin-db`. `--min-identical` defaults to 0: bit identity is reported, not required,
+because harmless rounding breaks it (one fp16 ULP on every value gives MAE 2.4e-4 and 0% identical)
+while a real misalignment moves the MAE by orders of magnitude and collapses the margin. Every shard
+is reported on its own; nothing is only pooled.
 
-Re-encoding on different hardware than the corpus was written on can lower the identical fraction
-without anything being wrong; read the mean difference and the shifted controls first in that case.
+Calibration of the defaults. Same host and batch (Sep 20): MAE 1.45e-5. Across hosts (A4000 with
+cuDNN 9.10 against A6000 with cuDNN 9.24, measured 2026-09-23 on ONE 4-channel episode): RMS 2.5e-3 of
+latent values (0.3% of the latent standard deviation), p99 |diff| 0.011, 67% bit-identical, decoded
+PSNR within 0.001 dB. Hence `--max-mae 5e-3` and `--max-p99 2e-2`, which admit that cross-host
+rounding. The tolerance rests on one 4-channel episode: re-check it on the 16-channel SD 3.5 corpus at
+gate time (the printed MAE, p99 and margin per shard are what to read), and tighten it when the corpus
+is re-encoded on the host that wrote it. The 3 dB margin is a floor for a moving scene; a
+near-static stretch can make neighbours tie, which fails the shard rather than certifying it.
 
     python check_latent_alignment.py --latents-dir $D/latents_arnold_dense_pertic/arenas \\
         --parquet-dir $D/raw_arnold_dense/arenas --device cuda:0 --out $D/logs/latent_align_train.json
@@ -47,6 +55,10 @@ import numpy as np
 import torch
 
 SHIFTS = (-4, -1, 0, 1, 4)
+MAX_MAE = 5e-3              # cross-host calibrated; see the module docstring
+MAX_P99 = 2e-2
+MIN_IDENTICAL = 0.0
+MIN_SHIFT_MARGIN_DB = 3.0
 FRAME_ROWS = 240
 _SHARD = re.compile(r"episodes_(\d+)\.jsonl$")
 _META = re.compile(r"encode_meta_(\d+)\.json$")
@@ -240,36 +252,48 @@ def _finite(x):
     return x is not None and math.isfinite(x)
 
 
-def shard_verdict(diffs, identical, total, psnr, fresh_psnr, max_abs_diff, min_identical):
+def shard_verdict(diffs, identical, total, psnr, fresh_psnr, max_mae=MAX_MAE, max_p99=MAX_P99,
+                  min_identical=MIN_IDENTICAL, min_shift_margin_db=MIN_SHIFT_MARGIN_DB):
     """(statistics, problems) of one shard's pooled samples; any non-finite statistic is a problem."""
     problems = []
-    mean_diff = float(diffs.mean()) if diffs.size else float("nan")
-    max_diff = float(diffs.max()) if diffs.size else float("nan")
+    d = diffs.astype(np.float64)
+    mae = float(d.mean()) if d.size else float("nan")
+    rms = float(np.sqrt((d ** 2).mean())) if d.size else float("nan")
+    p99 = float(np.percentile(d, 99)) if d.size else float("nan")
+    max_diff = float(d.max()) if d.size else float("nan")
     frac = identical / total if total else float("nan")
     vae_psnr = {f"{s:+d}" if s else "0": (float(np.mean(v)) if v else None) for s, v in psnr.items()}
     reenc = float(np.mean(fresh_psnr)) if fresh_psnr else None
-    stats = {"max_abs_diff": max_diff, "mean_abs_diff": mean_diff, "fraction_identical": frac,
-             "vae_psnr": vae_psnr, "vae_psnr_reencoded": reenc}
-    bad = [k for k, v in (("mean_abs_diff", mean_diff), ("max_abs_diff", max_diff), ("fraction_identical", frac),
-                          ("vae_psnr_reencoded", reenc), *((f"vae_psnr[{k}]", v) for k, v in vae_psnr.items()))
+    shifted = [v for k, v in vae_psnr.items() if k != "0"]
+    margin = (vae_psnr["0"] - max(shifted)) if all(_finite(v) for v in shifted + [vae_psnr["0"]]) else None
+    stats = {"mean_abs_diff": mae, "rms_diff": rms, "p99_abs_diff": p99, "max_abs_diff": max_diff,
+             "fraction_identical": frac, "vae_psnr": vae_psnr, "vae_psnr_reencoded": reenc,
+             "shift_margin_db": margin}
+    bad = [k for k, v in (("mean_abs_diff", mae), ("rms_diff", rms), ("p99_abs_diff", p99),
+                          ("max_abs_diff", max_diff), ("fraction_identical", frac), ("vae_psnr_reencoded", reenc),
+                          ("shift_margin_db", margin), *((f"vae_psnr[{k}]", v) for k, v in vae_psnr.items()))
            if not _finite(v)]
     if bad:
         problems.append(f"non-finite or missing statistics: {bad}")
         return stats, problems
-    if mean_diff > max_abs_diff:
-        problems.append(f"mean |re-encoded - stored| {mean_diff:.3g} > {max_abs_diff:g}")
+    if mae > max_mae:
+        problems.append(f"mean |re-encoded - stored| {mae:.3g} > --max-mae {max_mae:g}")
+    if p99 > max_p99:
+        problems.append(f"p99 |re-encoded - stored| {p99:.3g} > --max-p99 {max_p99:g}")
     if frac < min_identical:
-        problems.append(f"only {frac:.1%} of re-encoded values are bit-identical (need {min_identical:.0%})")
-    base = vae_psnr["0"]
-    worse = [k for k, v in vae_psnr.items() if k != "0" and v >= base]
-    if worse:
-        problems.append(f"shifted stored rows {worse} score vae_psnr at least as high as the unshifted "
-                        f"alignment ({base:.2f} dB): the latents may be off by rows against their sidecar")
+        problems.append(f"only {frac:.1%} of re-encoded values are bit-identical (--min-identical {min_identical:.0%})")
+    if margin < min_shift_margin_db:
+        best = max((k for k in vae_psnr if k != "0"), key=lambda k: vae_psnr[k])
+        problems.append(f"the unshifted alignment ({vae_psnr['0']:.2f} dB) beats the best shifted control "
+                        f"({best}: {vae_psnr[best]:.2f} dB) by {margin:.2f} dB, under the "
+                        f"{min_shift_margin_db:g} dB margin: the latents may be off by rows against their sidecar, "
+                        "or the sampled stretch is too static to tell")
     return stats, problems
 
 
-def check(latents_dir, parquet_dir, episodes=None, per_shard=2, device="cpu", max_abs_diff=1e-3,
-          min_identical=0.5, seed=0, vae=None, decoder=None, cache_dir=None):
+def check(latents_dir, parquet_dir, episodes=None, per_shard=2, device="cpu", max_mae=MAX_MAE, max_p99=MAX_P99,
+          min_identical=MIN_IDENTICAL, min_shift_margin_db=MIN_SHIFT_MARGIN_DB, seed=0, vae=None, decoder=None,
+          cache_dir=None):
     """The per-shard report; `ok` is False if coverage, the contracts or any shard fails."""
     from doom_data import list_latent_episodes
     files = {ep: (lp, mp) for ep, lp, mp in list_latent_episodes(latents_dir)}
@@ -283,7 +307,8 @@ def check(latents_dir, parquet_dir, episodes=None, per_shard=2, device="cpu", ma
             coverage.append(str(e))
     contracts = contract_problems(metas)
     report = {"latents_dir": latents_dir, "parquet_dir": parquet_dir, "shifts": list(SHIFTS),
-              "max_abs_diff_allowed": max_abs_diff, "min_identical": min_identical,
+              "thresholds": {"max_mae": max_mae, "max_p99": max_p99, "min_identical": min_identical,
+                             "min_shift_margin_db": min_shift_margin_db},
               "coverage_problems": coverage, "contract_problems": contracts, "shards": {}}
     for shard, ids in shards.items():
         if shard not in metas:
@@ -309,7 +334,7 @@ def check(latents_dir, parquet_dir, episodes=None, per_shard=2, device="cpu", ma
         if not picked:
             problems.append(f"shard {shard} has no encoded episode to check")
         stats, verdict = shard_verdict(np.concatenate(diffs) if diffs else np.zeros(0, np.float32), ident, tot,
-                                       psnr, fresh_psnr, max_abs_diff, min_identical)
+                                       psnr, fresh_psnr, max_mae, max_p99, min_identical, min_shift_margin_db)
         if diffs:
             problems += verdict
         report["shards"][shard] = {"episodes": picked, "rows": rows, "encode_meta": meta["path"],
@@ -332,8 +357,8 @@ def main(args):
         decoder = build_vae(args.decoder, "", args.device, args.cache_dir)
     rep = check(args.latents_dir, args.parquet_dir,
                 parse_episode_ids(args.episodes) if args.episodes else None, args.episodes_per_shard,
-                args.device, args.max_abs_diff, args.min_identical, args.seed, decoder=decoder,
-                cache_dir=args.cache_dir)
+                args.device, args.max_mae, args.max_p99, args.min_identical, args.min_shift_margin_db, args.seed,
+                decoder=decoder, cache_dir=args.cache_dir)
     text = json.dumps(rep, indent=1)
     if args.out:
         with open(args.out, "w") as f:
@@ -341,9 +366,15 @@ def main(args):
     print(text)
     for p in rep["coverage_problems"] + rep["contract_problems"]:
         print(f"corpus FAILED: {p}")
+    t = rep["thresholds"]
+    print(f"thresholds: max_mae={t['max_mae']:g} max_p99={t['max_p99']:g} min_identical={t['min_identical']:g} "
+          f"min_shift_margin_db={t['min_shift_margin_db']:g} (cross-host calibrated on one 4-channel episode; "
+          "re-check on the SD 3.5 corpus)")
     for name, s in rep["shards"].items():
-        print(f"shard {name}: {'ok' if s['ok'] else 'FAILED'} mean_abs_diff={fmt(s['mean_abs_diff'], '.3g')} "
-              f"identical={fmt(s['fraction_identical'], '.1%')} vae_psnr={s['vae_psnr']}")
+        print(f"shard {name}: {'ok' if s['ok'] else 'FAILED'} mae={fmt(s.get('mean_abs_diff'), '.3g')} "
+              f"rms={fmt(s.get('rms_diff'), '.3g')} p99={fmt(s.get('p99_abs_diff'), '.3g')} "
+              f"max={fmt(s.get('max_abs_diff'), '.3g')} identical={fmt(s.get('fraction_identical'), '.1%')} "
+              f"margin_db={fmt(s.get('shift_margin_db'), '.2f')} vae_psnr={s.get('vae_psnr')}")
     return 0 if rep["ok"] else 2
 
 
@@ -356,10 +387,16 @@ def build_parser():
                         "log, and is checked under its own shard's settings")
     p.add_argument("--episodes-per-shard", dest="episodes_per_shard", type=int, default=2)
     p.add_argument("--device", default="cuda:0", help="where to re-encode and decode; cpu works, slowly")
-    p.add_argument("--max-abs-diff", dest="max_abs_diff", type=float, default=1e-3,
-                   help="largest allowed MEAN absolute difference between re-encoded and stored latents")
-    p.add_argument("--min-identical", dest="min_identical", type=float, default=0.5,
-                   help="smallest allowed fraction of bit-identical values at the recorded batch size")
+    p.add_argument("--max-mae", "--max-abs-diff", dest="max_mae", type=float, default=MAX_MAE,
+                   help="largest allowed MEAN absolute difference between re-encoded and stored latents "
+                        "(cross-host calibrated: 2.5e-3 RMS measured A4000 against A6000; same host 1.45e-5)")
+    p.add_argument("--max-p99", dest="max_p99", type=float, default=MAX_P99,
+                   help="largest allowed 99th-percentile absolute difference (cross-host measured 0.011)")
+    p.add_argument("--min-identical", dest="min_identical", type=float, default=MIN_IDENTICAL,
+                   help="smallest allowed fraction of bit-identical values; 0 by default, because one fp16 ULP "
+                        "of harmless rounding gives 0%% identical")
+    p.add_argument("--min-shift-margin-db", dest="min_shift_margin_db", type=float, default=MIN_SHIFT_MARGIN_DB,
+                   help="how far the unshifted alignment's decoded PSNR must exceed every shifted control's")
     p.add_argument("--decoder", default="", help="decode through this VAE instead of the shard's own")
     p.add_argument("--cache-dir", dest="cache_dir", default=None)
     p.add_argument("--seed", type=int, default=0)

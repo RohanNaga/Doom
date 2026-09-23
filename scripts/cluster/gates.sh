@@ -27,11 +27,13 @@
 #   1d latent alignment  do the stored latents belong to the rows their sidecars describe?
 #                        `check_latent_alignment.py`, per encode shard of train and val: re-encode
 #                        a full batch and the tail batch of ALIGN_EPISODES episodes with the
-#                        shard's recorded encoder settings and compare (mean |diff| <= 1e-3, at
-#                        least half bit-identical), then decode the stored rows against the raw
-#                        frames with rows shifted -4/-1/+1/+4, which must all score worse than
-#                        the true alignment. Re-encoding on a different GPU model than the corpus
-#                        was written on can lower the identical fraction by itself.
+#                        shard's recorded encoder settings and compare (MAE <= 5e-3, p99 <= 2e-2;
+#                        bit identity reported, not required), then decode the stored rows against
+#                        the raw frames with rows shifted -4/-1/+1/+4, all of which the true
+#                        alignment must beat by 3 dB. Every shard log must be present and every
+#                        shard under one latent contract. The tolerances are cross-host calibrated
+#                        on ONE 4-channel episode: read the printed MAE, p99 and margin of the SD
+#                        3.5 shards before trusting a pass there.
 #   2 alignment gate     is the control that produced the motion stored on the row the trainer
 #                        reads? Yaw-gated, shifts -1/0/+1, on val 6000:6100. Exit 0 aligned, 2
 #                        misaligned, 3 inconclusive. Exit 3 is NOT approval.

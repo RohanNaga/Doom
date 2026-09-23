@@ -51,6 +51,9 @@ def frame(i):
     return np.stack([r, g, b], -1).astype(np.uint8)
 
 
+FROZEN = frame(0)       # a scene that never moves: every shifted control ties with the true alignment
+
+
 def write_recording(path, ep, n=T):
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -141,14 +144,57 @@ def test_perturbed_latents_fail_the_difference_thresholds(tmp_path):
     s = rep["shards"]["00"]
     assert not s["ok"]
     text = " ".join(s["problems"])
-    assert "mean |re-encoded - stored|" in text and "bit-identical" in text
+    assert "mean |re-encoded - stored|" in text and "p99 |re-encoded - stored|" in text
+    assert "bit-identical" not in text, "bit identity is reported, not required, by default"
     assert rep["shards"]["01"]["ok"]
 
 
 def test_the_thresholds_are_the_callers(tmp_path):
     lat, raw = corpus(tmp_path, perturb_shard=0)
-    rep = run(lat, raw, max_abs_diff=1.0, min_identical=0.0)
+    rep = run(lat, raw, max_mae=1.0, max_p99=1.0)
     assert rep["shards"]["00"]["ok"], rep["shards"]["00"]["problems"]
+
+
+def test_one_fp16_ulp_of_rounding_passes_although_nothing_is_bit_identical(tmp_path):
+    """Astra's counterexample to the first version: harmless rounding gave 0% identical and failed."""
+    lat, raw = corpus(tmp_path, shards=((0, 1),))
+    for ep in (0, 1):
+        path = os.path.join(lat, f"ep_{ep:05d}_latents.npy")
+        z = np.load(path)
+        np.save(path, np.nextafter(z, np.float16(np.inf)).astype(np.float16))
+    rep = run(lat, raw)
+    s = rep["shards"]["00"]
+    assert s["ok"], s["problems"]
+    assert s["fraction_identical"] == 0.0 and 0 < s["mean_abs_diff"] < cla.MAX_MAE
+    old = run(lat, raw, min_identical=0.5)
+    assert not old["shards"]["00"]["ok"], "the old identity floor must still be reachable on request"
+
+
+def test_a_static_stretch_fails_the_margin_rather_than_certifying(tmp_path, monkeypatch):
+    """Frames that do not move make every shifted control tie with the true alignment."""
+    monkeypatch.setattr(sys.modules[__name__], "frame", lambda i: FROZEN)
+    lat, raw = corpus(tmp_path, shards=((0,),))
+    rep = run(lat, raw)
+    s = rep["shards"]["00"]
+    assert not s["ok"] and s["shift_margin_db"] < cla.MIN_SHIFT_MARGIN_DB
+    assert any("margin" in p for p in s["problems"])
+
+
+def test_a_moving_corpus_clears_the_margin_by_more_than_three_db(tmp_path):
+    rep = run(*corpus(tmp_path))
+    for s in rep["shards"].values():
+        assert s["shift_margin_db"] >= 3.0, s["vae_psnr"]
+        assert {"rms_diff", "p99_abs_diff", "max_abs_diff"} <= set(s)
+
+
+def test_the_thresholds_are_printed_with_the_values(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cla, "load_encoder", lambda meta, device, cache_dir=None: StubVAE())
+    lat, raw = corpus(tmp_path)
+    cla.main(cla.build_parser().parse_args(["--latents-dir", lat, "--parquet-dir", raw, "--device", "cpu"]))
+    out = capsys.readouterr().out
+    assert "thresholds: max_mae=0.005 max_p99=0.02 min_identical=0 min_shift_margin_db=3" in out
+    assert "re-check on the SD 3.5 corpus" in out
+    assert "shard 00: ok mae=" in out and "p99=" in out and "margin_db=" in out
 
 
 def test_the_tail_batch_is_always_checked():
@@ -267,9 +313,15 @@ def test_the_cli_exits_nonzero_on_a_failing_shard_and_writes_the_report(tmp_path
     assert cla.main(args) == 0
 
 
-def test_the_defaults_are_the_sep20_measurement():
+def test_the_defaults_are_the_cross_host_calibration():
     a = cla.build_parser().parse_args(["--latents-dir", "x", "--parquet-dir", "y"])
-    assert a.max_abs_diff == 1e-3 and a.min_identical == 0.5 and a.episodes_per_shard == 2
+    assert a.max_mae == 5e-3 and a.max_p99 == 2e-2 and a.min_identical == 0.0
+    assert a.min_shift_margin_db == 3.0 and a.episodes_per_shard == 2
+    # the old spelling still reaches the same threshold
+    assert cla.build_parser().parse_args(["--latents-dir", "x", "--parquet-dir", "y",
+                                          "--max-abs-diff", "1e-3"]).max_mae == 1e-3
+    doc = cla.__doc__
+    assert "1.45e-5" in doc and "2.5e-3" in doc and "0.011" in doc and "67%" in doc and "SD 3.5" in doc
 
 
 def test_the_gates_run_it_per_space_on_train_and_val(tmp_path):
