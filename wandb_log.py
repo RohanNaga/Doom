@@ -24,14 +24,28 @@ Rules the logger keeps:
   * **Never raises into the caller.** Any W&B failure (import, init, log, finish) is reported once
     on stderr and the logger switches itself off, so a W&B outage cannot stop a run. `log.jsonl`
     stays the record; the W&B run is a live view of it.
+  * **Never blocks the caller.** `wandb.init`, `run.log` and `run.finish` all run on the logger's
+    own daemon thread. The caller builds the row (pure Python on host floats) and appends it to a
+    bounded queue under a lock held for microseconds; when the queue is full the OLDEST row is
+    dropped, and the drops are counted on stderr. Shutdown is bounded: W&B's own `finish_timeout`
+    is set, `close()` waits at most `FINISH_TIMEOUT + CLOSE_MARGIN`, and on a timeout it says so
+    once and unregisters the SDK's exit-time teardown, so the process can exit and release its GPU.
+    Only `import wandb` runs on the caller's thread (local work, before the timed loop): importing
+    on a thread while DataLoader workers fork could leave a module import lock held in the child.
   * **One writer per run id.** W&B's resume docs: "Unexpected results will occur if multiple
     processes use the same `id` concurrently." The trainer owns `<run>`; evaluators write to their
     own run `<run>-eval` in group `<run>`, which W&B overlays with the trainer's run in one panel.
-    Evaluations of one training run should therefore not run concurrently either.
+    Two evaluations of one training run take turns on `<run>-eval` under a writer lock, and one
+    that waits longer than `LOCK_WAIT` writes to `<run>-eval-<pid>` in the same group instead (see
+    `log_evaluation`).
 """
+import collections
+import fcntl
 import os
 import re
 import sys
+import threading
+import time
 
 DEFAULT_PROJECT = "doomdit-nexttic"
 TICS_PER_S = 35.0
@@ -43,6 +57,11 @@ EVAL_TF_KEYS = (("psnr_raw", "psnr"), ("lpips_raw", "lpips"), ("persist_psnr_raw
                 ("recon_lpips_raw", "recon_lpips"))
 CKPT_STEP = re.compile(r"^(?:snap_)?(\d+)\.pt$")
 EVAL_SUFFIX = "-eval"
+EVAL_DIR = re.compile(r"^eval_\d+$")
+LOCK_WAIT = 180.0         # seconds a second evaluator waits for `<run>-eval` before taking its own id
+QUEUE_ROWS = 10000        # rows waiting for W&B; a train row every 100 steps makes this days of backlog
+FINISH_TIMEOUT = 30.0     # seconds W&B may spend finishing a run (its own `finish_timeout`)
+CLOSE_MARGIN = 10.0       # close() waits FINISH_TIMEOUT plus this, then gives the run up
 
 
 def _num(v):
@@ -152,15 +171,19 @@ def eval_run_names(run):
     return base + EVAL_SUFFIX, base
 
 
-def _settings(wandb):
-    """Keep W&B off the trainer's stdout (no console capture) and out of system sampling."""
-    try:
-        return wandb.Settings(console="off", _disable_stats=True)
-    except Exception:
-        return None
+def _settings(wandb, finish_timeout):
+    """No console capture (W&B must not wrap the trainer's stdout), no system sampling, and a
+    bounded finish: `finish_timeout` also bounds the SDK's own exit-time teardown."""
+    for kw in ({"console": "off", "_disable_stats": True, "finish_timeout": finish_timeout},
+               {"console": "off", "_disable_stats": True}):     # an SDK older than `finish_timeout`
+        try:
+            return wandb.Settings(**kw)
+        except Exception:
+            continue
+    return None
 
 
-def open_run(wandb, project, entity, run_id, name, group, config, wandb_dir):
+def open_run(wandb, project, entity, run_id, name, group, config, wandb_dir, finish_timeout=None):
     """The one place a W&B run is opened: resumable by id, every series against the custom `step` axis.
 
     `resume="allow"` makes a restarted trainer (or a later evaluation) continue the same run. Each
@@ -169,59 +192,127 @@ def open_run(wandb, project, entity, run_id, name, group, config, wandb_dir):
     write into the trainer's own run, and can replace this function once it is verified on a
     rendered run.
     """
+    ft = FINISH_TIMEOUT if finish_timeout is None else finish_timeout
     run = wandb.init(project=project, entity=entity, id=run_id, name=name, group=group, resume="allow",
-                     config=config or {}, dir=wandb_dir, settings=_settings(wandb))
+                     config=config or {}, dir=wandb_dir, settings=_settings(wandb, ft))
     run.define_metric("step")
     run.define_metric("*", step_metric="step")
     return run
+
+
+def _release_exit_hook(wandb):
+    """Unregister the SDK's exit-time teardown, which waits for W&B's service process without a bound.
+
+    SDK 0.30 registers it in `service_connection._start_and_connect_service` and hands its
+    unregistration to the connection as `_cleanup` (`wandb.sdk.wandb_setup._singleton._connection`).
+    This is SDK-internal, so it is best effort: on any other layout nothing happens, and W&B's own
+    `finish_timeout` still bounds the teardown. The service process then finishes, or not, on its
+    own; what is not uploaded stays under `.wandb/` for `wandb sync`.
+    """
+    try:
+        conn = wandb.sdk.wandb_setup._singleton._connection
+        cleanup = getattr(conn, "_cleanup", None)
+        if cleanup:
+            cleanup()
+            conn._cleanup = None
+            return True
+    except Exception:
+        pass
+    return False
 
 
 class RunLogger:
     """A W&B run fed from the trainer's events or an evaluator's summary; a no-op unless enabled.
 
     `name` is the run's W&B id and display name (the trainer uses its results directory's name) and
-    `group` defaults to it. W&B's local files go to `<results_dir>/.wandb`. Every public method
-    returns the row it logged (without `step`) or None, and never raises.
+    `group` defaults to it. W&B's local files go to `<results_dir>/.wandb`. `log_event` and
+    `log_eval` return the row they queued (without `step`) or None; nothing here raises, and only
+    `close()` ever waits, for at most `FINISH_TIMEOUT + CLOSE_MARGIN` seconds.
     """
 
     def __init__(self, enabled=False, name=None, project=DEFAULT_PROJECT, entity=None, config=None,
-                 results_dir=None, group=None):
+                 results_dir=None, group=None, queue_rows=None):
         self.name = name or None
-        self.run = None
-        self._reported = False
+        self._wandb = self._thread = None
+        self._items, self._rows, self._cap = collections.deque(), 0, int(queue_rows or QUEUE_ROWS)
+        self._cv = threading.Condition()
+        self._failed, self._closed = threading.Event(), False
+        self._report_lock, self._reported, self._dropped = threading.Lock(), False, 0
         self._t0, self._global_batch, self._windows, self._last_train_loss = None, 32, None, None
-        if enabled and self.name:
-            self._guard("opening the W&B run", self._open, project, entity, group or self.name, config,
-                        results_dir)
+        if not (enabled and self.name):
+            return
+        try:
+            import wandb          # on this thread, on purpose: see "Never blocks the caller"
+        except Exception as exc:
+            self._fail("importing wandb", exc)
+            return
+        self._wandb = wandb
+        self._thread = threading.Thread(target=self._work, name=f"wandb-{self.name}", daemon=True,
+                                        args=(project, entity, group or self.name, config, results_dir))
+        self._thread.start()
 
     @property
     def active(self):
-        return self.run is not None
+        """True while rows are still accepted: enabled, not failed, not closed."""
+        return self._thread is not None and not self._closed and not self._failed.is_set()
 
-    def _open(self, project, entity, group, config, results_dir):
-        import wandb
-        wandb_dir = os.path.join(results_dir or ".", ".wandb")
-        os.makedirs(wandb_dir, exist_ok=True)
-        self.run = open_run(wandb, project, entity, self.name, self.name, group, config, wandb_dir)
+    @property
+    def failed(self):
+        """True once any W&B call has failed (reported once on stderr)."""
+        return self._failed.is_set()
 
-    def _guard(self, what, fn, *a):
-        try:
-            return fn(*a)
-        except Exception as exc:
-            self.run = None
-            if not self._reported:
-                self._reported = True
-                print(f"wandb: {what} failed ({type(exc).__name__}: {exc}); W&B logging is off for the rest "
-                      "of this process, log.jsonl stays the record", file=sys.stderr, flush=True)
-            return None
+    # --- the caller's side: build the row, queue it, never wait -----------------------------------
+
+    def _say(self, msg):
+        print(f"wandb: {msg}", file=sys.stderr, flush=True)
+
+    def _fail(self, what, exc):
+        self._failed.set()
+        with self._report_lock:
+            first, self._reported = not self._reported, True
+        if first:
+            self._say(f"{what} failed ({type(exc).__name__}: {exc}); W&B logging is off for the rest of this "
+                      "process, log.jsonl stays the record")
+
+    def _put(self, kind, payload=None):
+        dropped_first = False
+        with self._cv:
+            if kind == "log":
+                if self._rows >= self._cap:
+                    for i, item in enumerate(self._items):      # the oldest ROW, never a control item
+                        if item[0] == "log":
+                            del self._items[i]
+                            break
+                    self._rows -= 1
+                    self._dropped += 1
+                    dropped_first = self._dropped == 1
+                self._rows += 1
+            self._items.append((kind, payload))
+            self._cv.notify()
+        if dropped_first:
+            self._say(f"the queue of {self._cap} rows is full (W&B is slower than training); dropping the "
+                      "oldest rows, the total is reported when the run closes")
 
     def log_event(self, e):
-        """Log one trainer event (a `log.jsonl` line as a dict) under the sidecar's series; `end` closes the run."""
-        if self.run is None:
+        """Queue one trainer event (a `log.jsonl` line as a dict) under the sidecar's series; `end` closes the run."""
+        if self._thread is None or self._closed:
             return None
-        return self._guard(f"logging a {e.get('event')} event", self._log_event, e)
+        if self._failed.is_set():
+            if e.get("event") == "end":
+                self.close()
+            return None
+        try:
+            row = self._row_of(e)
+        except Exception as exc:
+            self._fail(f"mapping a {e.get('event')} event", exc)
+            return None
+        if row:
+            self._put("log", {"step": e["step"], **row})
+        if e.get("event") == "end":
+            self.close()
+        return row or None
 
-    def _log_event(self, e):
+    def _row_of(self, e):
         kind, step = e.get("event"), e.get("step")
         if kind == "start":
             if _num(e.get("time")):
@@ -231,7 +322,7 @@ class RunLogger:
             ds = e.get("dataset_summary") or {}
             if isinstance(ds.get("windows"), int):
                 self._windows = ds["windows"]
-            return None
+            return {}
         row = {}
         if isinstance(step, int):
             if kind == "train":
@@ -242,29 +333,87 @@ class RunLogger:
                 row = val_row(e)
                 if _num(e.get("val_loss")) and self._last_train_loss is not None:
                     row["val/loss_minus_train"] = e["val_loss"] - self._last_train_loss
-        if row:
-            self.run.log({"step": step, **row})
-        if kind == "end":
-            self.close()
-        return row or None
+        return row
 
     def log_eval(self, step, tag, metrics):
-        """Log one evaluator summary at training step `step` under `eval/<tag>/...`."""
-        if self.run is None:
+        """Queue one evaluator summary at training step `step` under `eval/<tag>/...`."""
+        if not self.active:
             return None
-        return self._guard(f"logging the {tag} evaluation", self._log_eval, int(step), tag, metrics)
-
-    def _log_eval(self, step, tag, metrics):
-        row = eval_row(tag, metrics)
+        try:
+            row = eval_row(tag, metrics)
+        except Exception as exc:
+            self._fail(f"mapping the {tag} evaluation", exc)
+            return None
         if row:
-            self.run.log({"step": step, **row})
+            self._put("log", {"step": int(step), **row})
         return row or None
 
-    def close(self):
-        """Finish the run; safe to call more than once."""
-        run, self.run = self.run, None
-        if run is not None:
-            self._guard("finishing the W&B run", run.finish)
+    def flush(self, timeout=10.0):
+        """Wait until everything queued so far has reached W&B (or been dropped); False on a timeout."""
+        if not self.active:
+            return False
+        done = threading.Event()
+        self._put("flush", done)
+        return done.wait(timeout)
+
+    def close(self, timeout=None):
+        """Finish the run, waiting at most `timeout` (default FINISH_TIMEOUT + CLOSE_MARGIN) seconds.
+
+        True when the run finished in time (or there was none). On a timeout it says so once,
+        unregisters the SDK's exit-time teardown and returns False: the daemon thread keeps trying,
+        but nothing holds the process at exit. Safe to call more than once.
+        """
+        if self._thread is None or self._closed:
+            return True
+        self._closed = True
+        self._put("close")
+        wait = FINISH_TIMEOUT + CLOSE_MARGIN if timeout is None else timeout
+        self._thread.join(wait)
+        finished = not self._thread.is_alive()
+        if self._dropped:
+            self._say(f"dropped {self._dropped} rows in total while the queue was full; log.jsonl has all of them")
+        if not finished:
+            _release_exit_hook(self._wandb)
+            self._say(f"the run did not finish within {wait:.0f}s; it is left to W&B's background thread and "
+                      "this process is free to exit (unsent rows stay under .wandb/ for `wandb sync`)")
+        return finished
+
+    # --- the logger's own thread: every W&B call ----------------------------------------------------
+
+    def _get(self):
+        with self._cv:
+            while not self._items:
+                self._cv.wait()
+            kind, payload = self._items.popleft()
+            if kind == "log":
+                self._rows -= 1
+            return kind, payload
+
+    def _work(self, project, entity, group, config, results_dir):
+        run = None
+        try:
+            wandb_dir = os.path.join(results_dir or ".", ".wandb")
+            os.makedirs(wandb_dir, exist_ok=True)
+            run = open_run(self._wandb, project, entity, self.name, self.name, group, config, wandb_dir,
+                           FINISH_TIMEOUT)
+        except Exception as exc:
+            self._fail("opening the W&B run", exc)
+        while True:
+            kind, payload = self._get()
+            if kind == "flush":
+                payload.set()
+            elif kind == "close":
+                if run is not None and not self._failed.is_set():
+                    try:
+                        run.finish()
+                    except Exception as exc:
+                        self._fail("finishing the W&B run", exc)
+                return
+            elif run is not None and not self._failed.is_set():
+                try:
+                    run.log(payload)
+                except Exception as exc:
+                    self._fail("logging a row", exc)
 
 
 def add_eval_args(p):
@@ -281,11 +430,92 @@ def add_eval_args(p):
     return p
 
 
+def run_dir_of(ckpt, fallback=None):
+    """The training run's directory, where its evaluation run's writer lock lives.
+
+    The checkpoint's own directory, or its parent when the checkpoint is a periodic read's link in
+    `eval_<step>/`, so the periodic read and a steward's read of `<run>/snap_*.pt` meet on one lock.
+    Without a checkpoint path, or when that directory is not on this machine (a rollout scored
+    elsewhere records the path it was rolled out from), `fallback`: the evaluator's output directory.
+    """
+    if ckpt:
+        d = os.path.dirname(os.path.abspath(str(ckpt)))
+        d = os.path.dirname(d) if EVAL_DIR.match(os.path.basename(d)) else d
+        if os.path.isdir(d):
+            return d
+    return os.path.abspath(fallback or ".")
+
+
+def lock_path(run_dir, project, run_id):
+    """The lock file of one W&B run id in one project, under the training run's directory."""
+    return os.path.join(run_dir, ".wandb_writer_" + re.sub(r"[^A-Za-z0-9._-]", "_", f"{project}__{run_id}") + ".lock")
+
+
+class WriterLock:
+    """An exclusive `flock` on one file: one W&B writer per (project, run id) on this machine.
+
+    `flock` belongs to the open file, so the kernel drops it when the holder exits, crashed or not;
+    a stale lock file is harmless. The holder's pid is written into it for the waiting side's message.
+    """
+
+    def __init__(self, path):
+        self.path, self.fd, self.error = path, None, None
+
+    def holder(self):
+        try:
+            with open(self.path) as f:
+                return f.read().strip() or "?"
+        except OSError:
+            return "?"
+
+    def acquire(self, wait):
+        """True once the lock is held; False after `wait` seconds, or at once (with `error` set) if the
+        lock file cannot be opened."""
+        try:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        except OSError as exc:
+            self.error = exc
+            return False
+        deadline = time.monotonic() + max(0.0, wait)
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    os.close(fd)
+                    return False
+                time.sleep(min(0.2, left))
+                continue
+            self.fd = fd
+            try:
+                os.ftruncate(fd, 0)
+                os.write(fd, f"{os.getpid()}\n".encode())
+            except OSError:
+                pass
+            return True
+
+    def release(self):
+        if self.fd is not None:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            finally:
+                os.close(self.fd)
+                self.fd = None
+
+
 def log_evaluation(args, tag, metrics, ckpt=None, recorded_step=None, out_dir=None):
     """Append one evaluator summary to `<run>-eval` at its checkpoint's step, then close the run.
 
     A no-op without `--wandb-run`. Returns the row logged (without `step`) or None, and never raises:
     an evaluation's metrics file is its record, and W&B is only the live view of it.
+
+    One writer per run id: the whole W&B session (open, log, finish) runs under `WriterLock` on
+    `lock_path(run_dir_of(ckpt), project, run id)`. A second evaluator of the same run (a steward's
+    read beside the trainer's periodic one) waits up to `LOCK_WAIT` seconds, then logs to
+    `<run>-eval-<pid>` in the same group and says so, so nothing is lost and no id has two writers.
+    A session that does not finish in time keeps the lock until this process exits.
     """
     run = getattr(args, "wandb_run", "") or ""
     if not run:
@@ -295,9 +525,19 @@ def log_evaluation(args, tag, metrics, ckpt=None, recorded_step=None, out_dir=No
         print(f"wandb: cannot tell which training step {ckpt!r} holds; pass --wandb-step. Nothing logged",
               file=sys.stderr, flush=True)
         return None
+    project = getattr(args, "wandb_project", DEFAULT_PROJECT)
     run_id, group = eval_run_names(run)
-    lg = RunLogger(enabled=True, name=run_id, group=group, project=getattr(args, "wandb_project", DEFAULT_PROJECT),
+    lock = WriterLock(lock_path(run_dir_of(ckpt, out_dir), project, run_id))
+    if not lock.acquire(LOCK_WAIT):
+        own = f"{run_id}-{os.getpid()}"
+        why = (f"cannot open its writer lock {lock.path} ({lock.error})" if lock.error else
+               f"{run_id} has had another writer (pid {lock.holder()}, {lock.path}) for over {LOCK_WAIT:.0f}s")
+        print(f"wandb: {why}; this evaluation goes to {own} in group {group} instead", file=sys.stderr, flush=True)
+        run_id = own
+    lg = RunLogger(enabled=True, name=run_id, group=group, project=project,
                    entity=getattr(args, "wandb_entity", None), config={"trainer_run": group}, results_dir=out_dir)
     row = lg.log_eval(step, tag, metrics)
-    lg.close()
-    return row
+    finished = lg.close()
+    if finished:
+        lock.release()          # otherwise W&B is still finishing: the lock goes when this process exits
+    return row if finished and not lg.failed else None

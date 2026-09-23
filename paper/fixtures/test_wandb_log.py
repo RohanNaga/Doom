@@ -119,7 +119,7 @@ def test_a_logger_without_a_run_name_stays_off(wb):
 def test_the_run_resumes_by_name_under_a_custom_step_axis(wb, tmp_path):
     lg = wandb_log.RunLogger(enabled=True, name="040-unet-nexttic", project="doomdit-nexttic", entity="me",
                              config={"lr": 5e-5, "git": "abc"}, results_dir=str(tmp_path))
-    assert lg.active
+    assert lg.active and lg.flush(5), "the run is opened on the logger's own thread"
     (kind, _, kw), *rest = wb.calls
     assert kind == "init"
     assert kw["project"] == "doomdit-nexttic" and kw["entity"] == "me"
@@ -129,6 +129,7 @@ def test_the_run_resumes_by_name_under_a_custom_step_axis(wb, tmp_path):
     assert kw["config"] == {"lr": 5e-5, "git": "abc"}
     assert kw["dir"] == str(tmp_path / ".wandb") and os.path.isdir(kw["dir"])
     assert kw["settings"]["console"] == "off", "W&B must not wrap the trainer's stdout"
+    assert kw["settings"]["finish_timeout"] == wandb_log.FINISH_TIMEOUT, "W&B's own finish must be bounded too"
     assert ("define_metric", ("step",), {}) in rest
     assert ("define_metric", ("*",), {"step_metric": "step"}) in rest
 
@@ -221,6 +222,7 @@ def test_evaluator_reads_give_the_sidecars_series(tmp_path, monkeypatch):
     lg = wandb_log.RunLogger(enabled=True, name="run-eval", results_dir=str(tmp_path / "native"))
     for tag, m in (("ema_h4", EVAL_TF_METRICS), ("live_h1", EVAL_TF_METRICS), ("probe", PROBE_REPORT)):
         lg.log_eval(10000, tag, m)
+    assert lg.close()
     key = lambda row: sorted(row)   # noqa: E731
     assert sorted(logged(native), key=key) == sorted(expected, key=key)
     live = [r for r in logged(native) if "eval/live_h1/psnr" in r][0]
@@ -234,6 +236,7 @@ def test_any_other_evaluator_is_flattened_generically(wb, tmp_path):
                                         "decoder": {"name": "sd-vae-ft-mse"}, "scored_at": [4, 32]})
     assert row == {"eval/rollout/psnr@4": 20.1, "eval/rollout/lpips@4": 0.3,
                    "eval/rollout/scored_at/0": 4, "eval/rollout/scored_at/1": 32}
+    assert lg.close()
     assert logged(wb) == [{"step": 5000, **row}]
 
 
@@ -275,6 +278,97 @@ def test_the_logger_closes_once_on_end_and_ignores_later_events(wb, tmp_path):
     lg.log_event({"event": "train", "step": 3000, "loss": 0.1, "time": T0 + 2000})
     lg.close()
     assert len(logged(wb)) == n and [c[0] for c in wb.calls].count("finish") == 1
+
+
+# ---------------------------------------------------------------------------------------
+# W&B never blocks the caller: its own thread, a bounded queue, a bounded shutdown
+# ---------------------------------------------------------------------------------------
+
+def train_events(n, first=100):
+    return [{"event": "train", "step": first + 100 * i, "loss": 0.3, "lr": 5e-5, "steps_per_s": 1.8,
+             "time": T0 + i} for i in range(n)]
+
+
+def timed(fn):
+    import time
+    t = time.monotonic()
+    fn()
+    return time.monotonic() - t
+
+
+def test_a_hanging_init_never_blocks_the_caller(tmp_path, monkeypatch):
+    import threading
+    gate = threading.Event()
+    mod = stub_wandb(gate={"init": gate})
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    lg = None
+
+    def open_and_log():
+        nonlocal lg
+        lg = wandb_log.RunLogger(enabled=True, name="r", results_dir=str(tmp_path))
+        for e in [sample_events()[0]] + train_events(50):
+            lg.log_event(e)
+
+    assert timed(open_and_log) < 0.5, "wandb.init ran on the caller's thread"
+    assert logged(mod) == []
+    gate.set()
+    assert lg.close()
+    assert [r["step"] for r in logged(mod)] == [100 + 100 * i for i in range(50)], "rows arrive in order"
+
+
+def test_a_slow_log_never_blocks_the_caller(tmp_path, monkeypatch):
+    mod = stub_wandb(delay={"log": 0.05})
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    lg = wandb_log.RunLogger(enabled=True, name="r", results_dir=str(tmp_path))
+    assert timed(lambda: [lg.log_event(e) for e in train_events(40)]) < 0.5, "run.log ran on the caller's thread"
+    assert lg.close() and len(logged(mod)) == 40
+
+
+def test_a_full_queue_drops_the_oldest_rows_and_counts_them(tmp_path, monkeypatch, capsys):
+    import threading
+    gate = threading.Event()
+    mod = stub_wandb(gate={"init": gate})
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    lg = wandb_log.RunLogger(enabled=True, name="r", results_dir=str(tmp_path), queue_rows=5)
+    assert timed(lambda: [lg.log_event(e) for e in train_events(20)]) < 0.5
+    gate.set()
+    assert lg.close()
+    assert [r["step"] for r in logged(mod)] == [1600, 1700, 1800, 1900, 2000], "the NEWEST rows survive"
+    err = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("wandb:")]
+    assert len(err) == 2 and "5 rows" in err[0] and "15" in err[1], err
+
+
+def test_a_hanging_finish_is_abandoned_and_the_process_left_free_to_exit(tmp_path, monkeypatch, capsys):
+    """The SDK's finish is unbounded by default and its atexit teardown waits for the service
+    process. After the bounded wait the logger gives up, says so once, and unregisters that
+    teardown, so the trainer's process can exit and release its GPU."""
+    import threading
+    mod = stub_wandb(gate={"finish": threading.Event()})
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    monkeypatch.setattr(wandb_log, "FINISH_TIMEOUT", 0.2)
+    monkeypatch.setattr(wandb_log, "CLOSE_MARGIN", 0.1)
+    lg = wandb_log.RunLogger(enabled=True, name="r", results_dir=str(tmp_path))
+    for e in train_events(3):
+        lg.log_event(e)
+    assert timed(lambda: lg.log_event({"event": "end", "step": 300, "time": T0 + 9})) < 2.0
+    assert not lg.active and mod.released, "the SDK's exit-time teardown is still registered"
+    err = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("wandb:")]
+    assert len(err) == 1 and "free to exit" in err[0], err
+    (kw,) = inits(mod)
+    assert kw["settings"]["finish_timeout"] == 0.2
+
+
+def test_a_trainer_whose_wandb_hangs_trains_and_exits_on_time(tiny_pixart, tmp_path, monkeypatch, capsys):
+    import threading
+    mod = stub_wandb(gate={"init": threading.Event()})     # W&B never comes up
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    monkeypatch.setattr(wandb_log, "FINISH_TIMEOUT", 0.2)
+    monkeypatch.setattr(wandb_log, "CLOSE_MARGIN", 0.1)
+    out = train_tiny(tmp_path)
+    events = jsonl(os.path.join(out, "log.jsonl"))
+    assert events[-1]["event"] == "end" and os.path.isfile(os.path.join(out, "best.pt"))
+    assert logged(mod) == [] and mod.released
+    assert any("free to exit" in ln for ln in capsys.readouterr().err.splitlines())
 
 
 # ---------------------------------------------------------------------------------------
@@ -363,8 +457,9 @@ def test_the_trainer_streams_every_event_after_writing_it(tiny_pixart, tmp_path,
     class OrderedRun(FakeRun):
         def log(self, row, **k):
             # the line for this event must already be in log.jsonl when W&B is handed it
-            last = jsonl(os.path.join(out, "log.jsonl"))[-1]
-            seen_on_disk.append(last["step"] == row["step"] and last["event"] in ("train", "val"))
+            kind = "val" if "val/loss" in row else "train"
+            on_disk = {(e["event"], e.get("step")) for e in jsonl(os.path.join(out, "log.jsonl"))}
+            seen_on_disk.append((kind, row["step"]) in on_disk)
             super().log(row, **k)
 
     real_init = mod.init
@@ -499,8 +594,9 @@ def test_without_wandb_run_nothing_is_imported(monkeypatch, tmp_path):
 
 def test_an_evaluation_survives_a_wandb_outage(monkeypatch, tmp_path, capsys):
     monkeypatch.setitem(sys.modules, "wandb", stub_wandb(fail="init"))
-    assert wandb_log.log_evaluation(eval_args(), "live_h1", EVAL_TF_METRICS, ckpt="snap_0010000.pt",
-                                    out_dir=str(tmp_path)) is None
+    # the checkpoint path must lie under tmp_path: its directory is where the writer lock goes
+    assert wandb_log.log_evaluation(eval_args(), "live_h1", EVAL_TF_METRICS,
+                                    ckpt=str(tmp_path / "snap_0010000.pt"), out_dir=str(tmp_path)) is None
     assert len([ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("wandb:")]) == 1
 
 
@@ -509,3 +605,91 @@ def test_an_evaluation_survives_a_wandb_outage(monkeypatch, tmp_path, capsys):
 def test_eval_tf_tags_its_read_by_weights_and_horizon(use_ema, horizon, tag):
     import eval_tf
     assert eval_tf.wandb_tag(types.SimpleNamespace(use_ema=use_ema, horizon_tics=horizon)) == tag
+
+
+# ---------------------------------------------------------------------------------------
+# one writer per evaluation run: a lock per (project, run id) in the training run's directory
+# ---------------------------------------------------------------------------------------
+
+def lock_of(run_dir, run_id="040-unet-nexttic-eval", project="doomdit-nexttic"):
+    return wandb_log.WriterLock(wandb_log.lock_path(str(run_dir), project, run_id))
+
+
+def test_the_periodic_read_and_a_standalone_evaluator_share_one_lock(tmp_path):
+    r = str(tmp_path / "040-unet-nexttic")
+    os.makedirs(f"{r}/eval_0005000")
+    assert wandb_log.run_dir_of(f"{r}/eval_0005000/0005000.pt") == r, "the periodic read's own link"
+    assert wandb_log.run_dir_of(f"{r}/snap_0010000.pt") == r, "a steward's read of the run's snapshot"
+    assert wandb_log.run_dir_of(None, f"{r}/rollout_metrics") == f"{r}/rollout_metrics"
+    # a rollout scored on another machine records a checkpoint path that does not exist here
+    assert wandb_log.run_dir_of("/elsewhere/run/snap_0010000.pt", f"{r}/rollout_metrics") == f"{r}/rollout_metrics"
+    assert wandb_log.lock_path(r, "p", "a-eval") != wandb_log.lock_path(r, "q", "a-eval")
+
+
+def test_the_lock_is_held_for_the_whole_session(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    mod = stub_wandb()
+    held = []
+    real_init = mod.init
+
+    def init(**kw):
+        other = lock_of(run_dir)
+        held.append(not other.acquire(0))      # someone (the evaluator) holds it while W&B is open
+        other.release()
+        return real_init(**kw)
+
+    mod.init = init
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    assert wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt=str(run_dir / "0010000.pt"),
+                                    out_dir=str(tmp_path / "out"))
+    assert held == [True]
+    after = lock_of(run_dir)
+    assert after.acquire(0), "the lock must be released once the session has finished"
+    after.release()
+
+
+def test_a_second_writer_waits_then_takes_its_own_id_in_the_same_group(wb, tmp_path, monkeypatch, capsys):
+    import time
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    first = lock_of(run_dir)
+    assert first.acquire(0)                                   # the periodic read is writing
+    monkeypatch.setattr(wandb_log, "LOCK_WAIT", 0.3)
+    t = time.monotonic()
+    wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt=str(run_dir / "snap_0010000.pt"),
+                             out_dir=str(tmp_path / "out"))
+    assert time.monotonic() - t >= 0.3, "it must wait before giving up on the shared id"
+    first.release()
+    (kw,) = inits(wb)
+    own = f"040-unet-nexttic-eval-{os.getpid()}"
+    assert kw["id"] == kw["name"] == own and kw["group"] == "040-unet-nexttic"
+    assert own in capsys.readouterr().err
+
+
+def test_a_writer_that_gets_the_lock_in_time_uses_the_shared_id(wb, tmp_path, monkeypatch):
+    import threading
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    first = lock_of(run_dir)
+    assert first.acquire(0)
+    threading.Timer(0.3, first.release).start()
+    monkeypatch.setattr(wandb_log, "LOCK_WAIT", 10.0)
+    wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt=str(run_dir / "snap_0010000.pt"),
+                             out_dir=str(tmp_path / "out"))
+    (kw,) = inits(wb)
+    assert kw["id"] == "040-unet-nexttic-eval"
+
+
+def test_a_session_that_does_not_finish_keeps_the_lock_until_the_process_exits(tmp_path, monkeypatch):
+    """Releasing the lock while W&B is still finishing would let a second writer open the same id."""
+    import threading
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.setitem(sys.modules, "wandb", stub_wandb(gate={"finish": threading.Event()}))
+    monkeypatch.setattr(wandb_log, "FINISH_TIMEOUT", 0.1)
+    monkeypatch.setattr(wandb_log, "CLOSE_MARGIN", 0.1)
+    wandb_log.log_evaluation(eval_args(), "probe", PROBE_REPORT, ckpt=str(run_dir / "snap_0010000.pt"),
+                             out_dir=str(tmp_path / "out"))
+    other = lock_of(run_dir)
+    assert not other.acquire(0)

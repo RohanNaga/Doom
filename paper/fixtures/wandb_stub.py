@@ -2,43 +2,70 @@
 
 Inject it with `monkeypatch.setitem(sys.modules, "wandb", stub_wandb())`; the code under test then
 imports it as it would import the real package.
+
+`fail` makes one call raise; `gate` makes calls wait on a `threading.Event` (a W&B that hangs until
+the test lets it go); `delay` makes every call of a method sleep. `mod.released` records whether the
+logger unregistered the SDK's exit-time teardown, which is reached as
+`wandb.sdk.wandb_setup._singleton._connection._cleanup` in SDK 0.30.
 """
+import threading
+import time
 import types
+
+HANG = 60.0     # the longest a gated call waits before giving up, so a broken test cannot hang the suite
 
 
 class FakeRun:
     """Records what a W&B run was asked to do; `fail` names the method that raises."""
 
-    def __init__(self, calls, fail=None):
-        self.calls, self.fail = calls, fail
+    def __init__(self, calls, fail=None, gate=None, delay=None):
+        self.calls, self.fail, self.gate, self.delay = calls, fail, gate or {}, delay or {}
+
+    def _wait(self, name):
+        if name in self.gate:
+            self.gate[name].wait(HANG)
+        if name in self.delay:
+            time.sleep(self.delay[name])
 
     def define_metric(self, *a, **k):
         self.calls.append(("define_metric", a, k))
 
     def log(self, row, **k):
+        self._wait("log")
         if self.fail == "log":
             raise RuntimeError("W&B is unreachable")
         self.calls.append(("log", dict(row), k))
 
     def finish(self, *a, **k):
+        self._wait("finish")
         if self.fail == "finish":
             raise RuntimeError("W&B is unreachable")
         self.calls.append(("finish", a, k))
 
 
-def stub_wandb(fail=None):
-    """A `wandb` module that records calls. `fail` in {"init", "log", "finish"} makes that call raise."""
+def stub_wandb(fail=None, gate=None, delay=None):
+    """A `wandb` module that records calls. `fail` in {"init", "log", "finish"} makes that call raise;
+    `gate` and `delay` map the same names to an Event to wait on and to seconds to sleep."""
     mod = types.ModuleType("wandb")
     mod.calls = []
+    mod.released = []
+    gate, delay = gate or {}, delay or {}
 
     def init(**kw):
         mod.calls.append(("init", (), kw))
+        if "init" in gate:
+            gate["init"].wait(HANG)
+        if "init" in delay:
+            time.sleep(delay["init"])
         if fail == "init":
             raise RuntimeError("W&B is down")
-        return FakeRun(mod.calls, fail)
+        return FakeRun(mod.calls, fail, gate, delay)
 
     mod.init = init
     mod.Settings = lambda **kw: dict(kw)
+    conn = types.SimpleNamespace(_cleanup=lambda: mod.released.append(threading.current_thread().name))
+    mod.sdk = types.SimpleNamespace(wandb_setup=types.SimpleNamespace(
+        _singleton=types.SimpleNamespace(_connection=conn)))
     return mod
 
 

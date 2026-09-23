@@ -161,10 +161,75 @@ def test_a_recovery_step_reads_the_recovery_checkpoint_and_a_snapshot_step_the_s
     args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
     make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
     ev.launch(5000)
-    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {os.path.join(args.results_dir, "0005000.pt")}
+    (ck,) = {flag(c, "--ckpt") for c in script_commands(sp)}
+    assert ck == os.path.join(args.results_dir, "eval_0005000", "0005000.pt")
+    assert os.path.samefile(ck, os.path.join(args.results_dir, "0005000.pt"))
     ev.launch(10000)
-    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {os.path.join(args.results_dir, "snap_0010000.pt")}
-    assert [e["event"] for e in rec.events] == ["eval_launched", "eval_launched"]
+    (ck,) = {flag(c, "--ckpt") for c in script_commands(sp)}
+    assert ck == os.path.join(args.results_dir, "eval_0010000", "snap_0010000.pt")
+    assert os.path.samefile(ck, os.path.join(args.results_dir, "snap_0010000.pt"))
+    assert [e["event"] for e in rec.events if e["event"] != "eval_finished"] == ["eval_launched", "eval_launched"]
+
+
+def script_lines(spawner):
+    argv, _ = spawner.calls[-1]
+    return open(argv[1]).read().splitlines()
+
+
+def test_the_read_holds_a_hard_link_that_pruning_cannot_remove(tmp_path, monkeypatch):
+    """Pruning a recovery checkpoint under a read that is still on it raised FileNotFoundError. The
+    read now opens a hard link in its own directory, which the trainer's pruning (top-level
+    `NNNNNNN.pt` only) never lists, and the wrapper removes the link when it exits."""
+    sp = Spawner()
+    args, ev, _ = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    with open(os.path.join(args.results_dir, "0005000.pt"), "wb") as f:
+        f.write(b"weights")
+    ev.launch(5000)
+    link = os.path.join(args.results_dir, "eval_0005000", "0005000.pt")
+    os.remove(os.path.join(args.results_dir, "0005000.pt"))          # what the trainer's pruning does
+    with open(link, "rb") as f:
+        assert f.read() == b"weights"
+    lines = script_lines(sp)
+    trap = [ln for ln in lines if ln.startswith("trap ") and ln.endswith(" EXIT")]
+    assert len(trap) == 1 and link in trap[0], "the wrapper removes the link when it exits, after every read"
+    assert not any(ln.startswith("rm ") for ln in lines), "nothing removes the link while a read may need it"
+
+
+def test_a_link_that_cannot_be_made_is_a_copy_made_before_the_reads(tmp_path, monkeypatch):
+    """The copy runs in the detached wrapper, not on the training thread: a recovery checkpoint of the
+    SD 3.5 row is 35 GB, and copying it inline would stall training for minutes."""
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner()
+    args, ev, _ = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    src = os.path.join(args.results_dir, "0005000.pt")
+    dst = os.path.join(args.results_dir, "eval_0005000", "0005000.pt")
+    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {dst}
+    lines = script_lines(sp)
+    cp = [i for i, ln in enumerate(lines) if ln.startswith("cp ") and src in ln and dst in ln]
+    first_read = min(i for i, ln in enumerate(lines) if "eval_tf.py" in ln)
+    assert cp and cp[0] < first_read
+    assert any(ln.startswith("trap ") and dst in ln and dst + ".tmp" in ln for ln in lines)
+
+
+def test_a_snapshot_that_cannot_be_linked_is_read_in_place(tmp_path, monkeypatch):
+    """Snapshots are never pruned, so they need no copy."""
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner()
+    args, ev, _ = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0010000.pt", "snap_0010000.pt")
+    ev.launch(10000)
+    snap = os.path.join(args.results_dir, "snap_0010000.pt")
+    assert {flag(c, "--ckpt") for c in script_commands(sp)} == {snap}
+    assert not any(ln.startswith(("cp ", "rm ", "trap ")) for ln in script_lines(sp)), "never remove the snapshot"
 
 
 def test_one_detached_process_runs_four_reads_then_the_probe(tmp_path, monkeypatch):
@@ -269,6 +334,202 @@ def test_a_read_left_running_by_a_previous_trainer_process_is_seen(tmp_path, mon
     assert rec.events[-1]["event"] == "eval_skipped"
 
 
+# ---------------------------------------------------------------------------------------
+# the wrapper's exit status, and the trainer noticing it
+# ---------------------------------------------------------------------------------------
+
+FAKE_PYTHON = """#!/bin/bash
+# stands in for the evaluators: exits $FAIL_CODE when its arguments mention $FAIL_ON, else 0; when
+# they mention $HANG_ON it touches $HANG_FILE and waits to be stopped, like a read still running
+case "$*" in *"$FAIL_ON"*) exit "$FAIL_CODE" ;; esac
+if [ -n "$HANG_ON" ]; then case "$*" in *"$HANG_ON"*) touch "$HANG_FILE"; exec sleep 60 ;; esac; fi
+exit 0
+"""
+
+
+def fake_python(tmp_path):
+    p = tmp_path / "fake_python"
+    p.write_text(FAKE_PYTHON)
+    p.chmod(0o755)
+    return str(p)
+
+
+def run_wrapper(spawner, fail_on="nothing-fails", code=3, **env):
+    import subprocess
+    argv, kw = spawner.calls[-1]
+    env = {**os.environ, "FAIL_ON": fail_on, "FAIL_CODE": str(code), **env}
+    r = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=60)
+    status = json.load(open(os.path.join(os.path.dirname(argv[1]), "status.json")))
+    return r.returncode, status
+
+
+def wrapper_evaluator(tmp_path, monkeypatch, sp):
+    import torch
+    args = run_args(tmp_path)
+    monkeypatch.setattr(pe, "default_split", lambda d: str(tmp_path / "split_val.json"))
+    (tmp_path / "split_val.json").write_text(json.dumps({"val": [6000, 6001]}))
+    monkeypatch.setattr(pe, "_popen", sp)
+    rec = Recorder()
+    ev = pe.PeriodicEval(args, 4, torch.device("cpu"), rec, wandb_run=None, python=fake_python(tmp_path))
+    return args, ev, rec
+
+
+def test_the_wrapper_records_every_exit_status_and_fails_if_any_did(tmp_path, monkeypatch):
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    rc, status = run_wrapper(sp, fail_on="smoke_probe.py", code=3)
+    assert rc != 0, "the wrapper exited 0 although the probe failed"
+    assert status["step"] == 5000 and status["ok"] is False
+    assert status["commands"] == {"tf_live_h1": 0, "tf_ema_h1": 0, "tf_live_h4": 0, "tf_ema_h4": 0, "probe": 3}
+    assert not os.path.exists(os.path.join(args.results_dir, "eval_0005000", "0005000.pt")), "link not removed"
+
+
+def test_a_clean_read_exits_zero(tmp_path, monkeypatch):
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    rc, status = run_wrapper(sp)
+    assert rc == 0 and status["ok"] is True and set(status["commands"].values()) == {0}
+
+
+def test_a_failed_checkpoint_copy_is_a_failed_read(tmp_path, monkeypatch):
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    os.remove(os.path.join(args.results_dir, "0005000.pt"))        # gone before the copy could run
+    rc, status = run_wrapper(sp)
+    assert rc != 0 and status["ok"] is False and status["commands"]["copy"] != 0
+
+
+def test_a_wrapper_stopped_mid_read_still_removes_its_link(tmp_path, monkeypatch):
+    """A read stopped by a signal (a steward's `kill`, a hangup) must not leave its link behind: the
+    link keeps a pruned recovery checkpoint's bytes on disk, 35 GB for the SD 3.5 row."""
+    import signal
+    import subprocess
+    import time
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    out = os.path.join(args.results_dir, "eval_0005000")
+    link = os.path.join(out, "0005000.pt")
+    reading = tmp_path / "reading"
+    argv, _ = sp.calls[-1]
+    p = subprocess.Popen(argv, env={**os.environ, "FAIL_ON": "nothing-fails", "FAIL_CODE": "3",
+                                    "HANG_ON": "tf_ema_h1", "HANG_FILE": str(reading)},
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 30
+    while not reading.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert reading.exists() and os.path.exists(link), "the read must be on its link when it is stopped"
+    os.killpg(p.pid, signal.SIGTERM)
+    assert p.wait(timeout=30) != 0
+    assert not os.path.exists(link), "the stopped wrapper left its checkpoint link behind"
+    assert not os.path.exists(os.path.join(out, "status.json")), "a stopped read has no status to report"
+
+
+def test_a_copy_cut_short_leaves_no_partial_file(tmp_path, monkeypatch):
+    """Where no link can be made the wrapper copies the checkpoint; a copy that fails part way (a full
+    disk) must not leave its partial file behind to keep the disk full."""
+    def no_links(src, dst):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(pe.os, "link", no_links)
+    sp = Spawner()
+    args, ev, _ = wrapper_evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt")
+    ev.launch(5000)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "cp").write_text('#!/bin/bash\necho partial > "$2"\nexit 1\n')    # part of the file, then an error
+    (bin_dir / "cp").chmod(0o755)
+    rc, status = run_wrapper(sp, PATH=f"{bin_dir}:{os.environ['PATH']}")
+    assert rc != 0 and status["commands"]["copy"] != 0
+    out = os.path.join(args.results_dir, "eval_0005000")
+    assert not [f for f in os.listdir(out) if ".pt" in f], os.listdir(out)
+
+
+def test_the_trainer_records_eval_finished_when_it_next_looks(tmp_path, monkeypatch):
+    sp = Spawner(alive=True)
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
+    ev.launch(5000)
+    out = os.path.join(args.results_dir, "eval_0005000")
+    with open(os.path.join(out, "status.json"), "w") as f:
+        json.dump({"step": 5000, "commands": {"tf_live_h1": 0, "probe": 3}, "ok": False}, f)
+    ev.proc.code = 1                                   # the wrapper has exited; nobody waited for it
+    ev.launch(10000)
+    kinds = [(e["event"], e["step"]) for e in rec.events]
+    assert kinds == [("eval_launched", 5000), ("eval_finished", 5000), ("eval_launched", 10000)]
+    fin = rec.events[1]
+    assert fin["returncode"] == 1 and fin["ok"] is False and fin["commands"] == {"tf_live_h1": 0, "probe": 3}
+
+
+def test_a_read_that_left_no_status_is_reported_as_failed(tmp_path, monkeypatch):
+    sp = Spawner(alive=True)
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
+    ev.launch(5000)
+    ev.proc.code = -9                                  # killed before it could write status.json
+    ev.launch(10000)
+    fin = [e for e in rec.events if e["event"] == "eval_finished"][0]
+    assert fin["ok"] is False and fin["returncode"] == -9 and "status.json" in fin["reason"]
+
+
+def test_a_read_a_previous_trainer_process_left_is_reported_once_it_has_ended(tmp_path, monkeypatch):
+    import subprocess
+    sp = Spawner()
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0010000.pt", "snap_0010000.pt")
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    out = os.path.join(args.results_dir, "eval_0005000")
+    os.makedirs(out)
+    with open(os.path.join(out, "status.json"), "w") as f:
+        json.dump({"step": 5000, "commands": {"tf_live_h1": 0}, "ok": True}, f)
+    with open(os.path.join(args.results_dir, pe.PID_FILE), "w") as f:
+        json.dump({"pid": dead.pid, "step": 5000, "script": os.path.join(out, "run.sh"), "out": out}, f)
+    assert ev.launch(10000) is not None
+    kinds = [(e["event"], e["step"]) for e in rec.events]
+    assert kinds == [("eval_finished", 5000), ("eval_launched", 10000)]
+    assert rec.events[0]["ok"] is True and rec.events[0]["returncode"] is None
+
+
+def test_a_step_read_again_does_not_report_the_earlier_reads_status(tmp_path, monkeypatch):
+    """A step read twice (a resume from an earlier checkpoint) must not report the first read's
+    status.json for a second read that ended without writing its own."""
+    import subprocess
+    sp = Spawner()
+    args, ev, rec = evaluator(tmp_path, monkeypatch, sp)
+    make_ckpts(args, "0005000.pt", "0010000.pt", "snap_0010000.pt")
+    out = os.path.join(args.results_dir, "eval_0005000")
+    os.makedirs(out)
+    with open(os.path.join(out, "status.json"), "w") as f:
+        json.dump({"step": 5000, "commands": {"tf_live_h1": 0}, "ok": True}, f)       # the earlier read's
+    ev.launch(5000)
+    assert not os.path.exists(os.path.join(out, "status.json"))
+    # the trainer restarts, and finds the second read gone without a status.json
+    dead = subprocess.Popen(["true"])
+    dead.wait()
+    pid_file = os.path.join(args.results_dir, pe.PID_FILE)
+    with open(pid_file) as f:
+        r = json.load(f)
+    with open(pid_file, "w") as f:
+        json.dump({**r, "pid": dead.pid}, f)
+    ev.proc = ev.current = None
+    ev.launch(10000)
+    (fin,) = [e for e in rec.events if e["event"] == "eval_finished"]
+    assert fin["step"] == 5000 and fin["ok"] is False and "status.json" in fin["reason"]
+
+
 @pytest.mark.parametrize("problem", ["no_checkpoint", "spawn_fails", "no_split"])
 def test_nothing_about_a_read_can_raise_into_the_trainer(tmp_path, monkeypatch, problem):
     sp = Spawner(fail=OSError("fork failed") if problem == "spawn_fails" else None)
@@ -340,6 +601,18 @@ def test_the_trainer_launches_at_each_multiple_after_its_checkpoint(tiny_pixart,
     assert events[-1]["event"] == "end"
 
 
+def test_the_trainers_pruning_leaves_every_reads_checkpoint_in_place(tiny_pixart, tmp_path, monkeypatch):
+    """With --keep-last 2 the trainer deletes 0000002.pt at step 6. Every read's own link survives
+    that (the stub reads never run, so no wrapper has removed its link yet)."""
+    import torch
+    monkeypatch.setattr(pe, "_popen", lambda argv, **kw: FakeProc(8000, 0))
+    out, events = train_tiny(tmp_path, "--keep-last", "2")
+    assert not os.path.exists(os.path.join(out, "0000002.pt")), "the fixture must actually prune"
+    for step in (2, 4, 6):
+        link = os.path.join(out, f"eval_{step:07d}", f"{step:07d}.pt")
+        assert torch.load(link, map_location="cpu", weights_only=False)["step"] == step
+
+
 def test_the_trainer_skips_while_a_read_is_alive(tiny_pixart, tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(pe, "_popen", lambda argv, **kw: calls.append(argv) or FakeProc(6000 + len(calls), None))
@@ -358,7 +631,13 @@ def test_a_failing_read_never_affects_the_trainer(tiny_pixart, tmp_path, monkeyp
 
     monkeypatch.setattr(pe, "_popen", spawn)
     out, events = train_tiny(tmp_path)
-    kinds = [e["event"] for e in events if e["event"].startswith("eval_")]
-    assert kinds == (["eval_skipped"] * 3 if how == "spawn_raises" else ["eval_launched"] * 3)
+    kinds = [(e["event"], e["step"]) for e in events if e["event"].startswith("eval_")]
+    if how == "spawn_raises":
+        assert kinds == [("eval_skipped", 2), ("eval_skipped", 4), ("eval_skipped", 6)]
+    else:
+        # each failed read is noticed, without waiting, when the next one is due
+        assert kinds == [("eval_launched", 2), ("eval_finished", 2), ("eval_launched", 4),
+                         ("eval_finished", 4), ("eval_launched", 6)]
+        assert all(e["ok"] is False and e["returncode"] == 2 for e in events if e["event"] == "eval_finished")
     assert events[-1]["event"] == "end" and events[-1]["step"] == 6
     assert os.path.isfile(os.path.join(out, "best.pt")) and os.path.isfile(os.path.join(out, "0000006.pt"))
