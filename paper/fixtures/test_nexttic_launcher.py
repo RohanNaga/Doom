@@ -76,6 +76,26 @@ def test_the_recipe_is_the_one_the_stride4_rows_used(backbone, tmp_path):
 
 
 @pytest.mark.parametrize("backbone", BACKBONES)
+def test_every_row_streams_to_wandb_from_launch(backbone, tmp_path):
+    """Live curves are mandatory (CLAUDE.md): streaming is the trainer's default, so the launch passes
+    nothing for it, and the header tells the operator the env needs the package first."""
+    out = dry(LAUNCH, ["2", backbone], root=str(tmp_path))
+    assert "--no-wandb" not in out
+    src = open(LAUNCH).read()
+    assert "pip install wandb" in src and "wandb login" in src
+
+
+@pytest.mark.parametrize("backbone", BACKBONES)
+def test_every_row_reads_its_own_checkpoints_every_5000_steps_on_card_3(backbone, tmp_path):
+    out = dry(LAUNCH, ["2", backbone], root=str(tmp_path))
+    assert "--eval-every 5000 --eval-device cuda:3" in out
+    assert f"--eval-parquet-dir {tmp_path}/raw_arnold_dense/arenas" in out
+    assert "--eval-every 0 " in dry(LAUNCH, ["2", backbone], root=str(tmp_path), EVAL_EVERY="0")
+    src = " ".join(open(LAUNCH).read().split())
+    assert "EVAL_EVERY=5000 EVAL_DEVICE=cuda:3" in src
+
+
+@pytest.mark.parametrize("backbone", BACKBONES)
 def test_a_hand_stop_at_any_snapshot_leaves_something_to_evaluate(backbone, tmp_path):
     """The run is stopped at the freeze, not at --steps, so snapshots must be kept locally."""
     out = dry(LAUNCH, ["2", backbone], root=str(tmp_path))

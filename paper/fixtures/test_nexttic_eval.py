@@ -222,6 +222,22 @@ def _run_eval(tmp_path, corpus, ckpt_args, extra):
     return json.load(open(os.path.join(out, "metrics.json")))
 
 
+def test_the_loader_takes_its_worker_count_from_the_command_line(pertic_eval_corpus, tiny_hub, tmp_path, monkeypatch):
+    """The loader's workers are the evaluator's own child processes; the trainer's periodic reads run
+    with none, so a stopped read leaves nothing behind. The default stays 2."""
+    base = ["--ckpt", "c.pt", "--backbone", "unet", "--latents-dir", "l", "--split", "s.json", "--out-dir", "o"]
+    assert eval_tf.build_parser().parse_args(base).num_workers == 2
+    seen, real = [], eval_tf.DataLoader
+
+    def loader(*a, **kw):
+        seen.append(kw.get("num_workers"))
+        return real(*a, **kw)
+
+    monkeypatch.setattr(eval_tf, "DataLoader", loader)
+    m = _run_eval(tmp_path, pertic_eval_corpus, {"tic_stride": 1}, ["--num-workers", "0"])
+    assert seen == [0] and m["psnr_dec"]["n"] == 4
+
+
 def test_a_per_tic_checkpoint_is_scored_on_per_tic_windows(pertic_eval_corpus, tiny_hub, tmp_path):
     m = _run_eval(tmp_path, pertic_eval_corpus, {"tic_stride": 1}, [])
     assert m["config"]["checkpoint_interface"]["tic_stride"] == 1
@@ -258,6 +274,24 @@ def test_four_tics_forward_is_scored_four_tics_later(pertic_eval_corpus, tiny_hu
     assert m["config"]["horizon_tics"] == 4 and m["config"]["game_time_tics"] == 4
     assert m["config"]["window_validity"]["horizon"] == 4
     assert np.isfinite(m["psnr_dec"]["mean"]) and np.isfinite(m["persist_psnr_raw"]["mean"])
+
+
+def test_the_read_is_appended_to_the_runs_wandb_eval_run(pertic_eval_corpus, tiny_hub, tmp_path, monkeypatch):
+    """`--wandb-run` logs the raw PSNR, LPIPS and persistence floor at the checkpoint's step; `best.pt`
+    carries no step in its name, so the step the checkpoint records (7) is used."""
+    from wandb_stub import inits, logged, stub_wandb
+    wb = stub_wandb()
+    monkeypatch.setitem(sys.modules, "wandb", wb)
+    m = _run_eval(tmp_path, pertic_eval_corpus, {"tic_stride": 1},
+                  ["--horizon-tics", "4", "--wandb-run", "040-unet-nexttic"])
+    (kw,) = inits(wb)
+    assert kw["id"] == "040-unet-nexttic-eval" and kw["group"] == "040-unet-nexttic"
+    (row,) = logged(wb)
+    assert row["step"] == 7
+    assert row["eval/live_h4/psnr"] == m["psnr_raw"]["mean"]
+    assert row["eval/live_h4/persist_psnr"] == m["persist_psnr_raw"]["mean"]
+    assert row["eval/live_h4/psnr_over_persistence"] == pytest.approx(
+        m["psnr_raw"]["mean"] - m["persist_psnr_raw"]["mean"])
 
 
 def test_the_horizon_floor_is_the_gap_k_floor(pertic_eval_corpus, tiny_hub, tmp_path):

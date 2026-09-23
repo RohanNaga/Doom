@@ -136,7 +136,7 @@ def test_requirements_cover_everything_the_repo_imports():
     text = source_of(REQUIREMENTS)
     for pkg in ("torch", "torchvision", "numpy", "diffusers", "transformers", "accelerate",
                 "pyarrow", "pillow", "lpips", "scipy", "timm", "huggingface_hub", "hf_xet",
-                "safetensors"):
+                "safetensors", "wandb"):
         assert re.search(rf"^{pkg}\b", text, re.M | re.I), f"{pkg} is not pinned in requirements.txt"
 
 

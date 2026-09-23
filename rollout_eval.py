@@ -12,6 +12,9 @@ optional IDM action-following accuracy per horizon, and decoded clips for FVD.
         --num-rollouts 256 --horizon 64 --out results/010-dit-l32/rollouts_val.npz
     python rollout_eval.py --score --rollouts results/010-dit-l32/rollouts_val.npz \
         --idm results/idm/idm.pt --out-dir results/010-dit-l32/rollout_metrics
+
+`--score --wandb-run <training run>` also appends drift.json's scalars (psnr@H, the raw floors, the
+IDM means) to the W&B run `<training run>-eval` as eval/rollout/..., at the rolled-out checkpoint's step.
 """
 import argparse
 import json
@@ -29,6 +32,7 @@ from doomdit_utils import (LATENT_SCALE, VAE_NAME, build_vae, denormalize_latent
                            load_world_model_state)
 from timestep_spacing import SPACINGS
 from timestep_spacing import sample as sample_spaced
+from wandb_log import add_eval_args, log_evaluation
 
 
 def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_channels=None, tic_stride=4):
@@ -537,6 +541,9 @@ def do_score(args):
         clips.save(args.out_dir, "clips_u8_raw", gt="raw_gt", stride=stride)
         clips.close()
     print(json.dumps({k: v for k, v in out.items() if not isinstance(v, list)}, indent=1))
+    # the checkpoint this rollout came from: --ckpt when given here, else the one the rollout pass recorded
+    log_evaluation(args, "rollout", out, ckpt=args.ckpt or cfg.get("ckpt"), recorded_step=cfg.get("step"),
+                   out_dir=args.out_dir)
 
 
 def build_parser():
@@ -587,7 +594,8 @@ def build_parser():
                         "against the game's own frames, keyed by recorded tic, with raw copy-seed and copy-last "
                         "persistence floors and raw FVD reference clips. Those *_raw keys are the primary ones: "
                         "the decoded-latent reference is a different target distribution per autoencoder")
-    return p
+    # --score logs drift.json's scalars under eval/rollout/ (the --rollout pass has no metrics to log)
+    return add_eval_args(p)
 
 
 if __name__ == "__main__":

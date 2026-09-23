@@ -232,6 +232,33 @@ def test_the_probe_cli_reads_a_checkpoint_the_trainer_would_write(tmp_path, monk
     assert (tmp_path / "probe.json").is_file()
 
 
+def test_the_probe_is_appended_to_the_runs_wandb_eval_run(tmp_path, monkeypatch):
+    """`--wandb-run` logs the report at the step in the checkpoint's filename (0000300.pt)."""
+    from diffusers import PixArtTransformer2DModel as P
+    from wandb_stub import inits, logged, stub_wandb
+    monkeypatch.setattr(P, "from_pretrained", classmethod(lambda cls, *a, **k: cls(**TINY_PIXART)))
+    monkeypatch.setattr(P, "load_config", classmethod(lambda cls, *a, **k: dict(TINY_PIXART)))
+    wb = stub_wandb()
+    monkeypatch.setitem(sys.modules, "wandb", wb)
+    m = pixart_model()
+    ck = trained(m, 4)
+    ck["args"].update({"action_dropout": 0.0, "tic_stride": 1, "resolved_control_bits": BITS})
+    path = tmp_path / "0000300.pt"
+    torch.save(ck, str(path))
+    d = corpus(tmp_path / "val", (6000,))
+    a = sp.build_parser().parse_args(["--ckpt", str(path), "--backbone", "pixart", "--pixart-path",
+                                      backbones.PIXART_DEFAULT, "--latents-dir", d, "--episodes", "6000:6001",
+                                      "--latent-channels", "4", "--context-frames", str(CTX), "--num-actions", "3",
+                                      "--noise-buckets", "4", "--batch", "2", "--device", "cpu",
+                                      "--out", str(tmp_path / "probe.json"), "--wandb-run", "040-unet-nexttic"])
+    assert sp.main(a) == 0
+    (kw,) = inits(wb)
+    assert kw["id"] == "040-unet-nexttic-eval" and kw["dir"] == str(tmp_path / ".wandb")
+    (row,) = logged(wb)
+    assert row["step"] == 300
+    assert "eval/probe/probe/loss" in row and "eval/probe/probe/newest_control_sensitivity" in row
+
+
 def test_the_probe_groups_name_the_real_modules():
     """The names the probe looks for are the ones backbones.py defines."""
     src = open(os.path.join(REPO, "backbones.py")).read()

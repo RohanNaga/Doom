@@ -8,6 +8,9 @@ MSE, HUD-crop PSNR, the copy-last-frame baseline, and the VAE ceiling.
 
     python eval_tf.py --ckpt results/010-dit-l32/best.pt --backbone dit --latents-dir data/latents_arnold \
         --parquet-dir raw_arnold --split data/split_arnold.json --subset val --num-windows 2048 --out-dir eval/dit_val
+
+`--wandb-run <training run>` also appends the raw PSNR, LPIPS and persistence floor to the W&B run
+`<training run>-eval` as eval/<live|ema>_h<H>/..., at the step in the checkpoint's filename.
 """
 import argparse
 import csv
@@ -29,6 +32,7 @@ from doom_data import LatentWindowDataset, load_split
 from doomdit_utils import LATENT_SCALE, build_vae, denormalize_latents, load_world_model_state
 from timestep_spacing import SPACINGS
 from timestep_spacing import sample as sample_spaced
+from wandb_log import add_eval_args, log_evaluation
 
 HUD_ROWS = 32
 
@@ -102,6 +106,11 @@ def load_model(args, device, latent_channels, trained):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     load_world_model_state(model, ck, args.use_ema)
     return model.to(device).eval(), ck.get("step", "?"), checkpoint_objective(ck, args.objective)
+
+
+def wandb_tag(args):
+    """This read's W&B series prefix: `live_h<H>` or `ema_h<H>`, the tags the sidecar uses."""
+    return f"{'ema' if args.use_ema else 'live'}_h{max(1, int(args.horizon_tics))}"
 
 
 def decoder_record(args):
@@ -251,7 +260,8 @@ def main(args):
                                    latent_channels=latent_channels)
         ds, windows = base, HorizonOne(base)
     idx = draw_windows(len(ds), args.num_windows, args.seed)
-    loader = DataLoader(Subset(windows, idx.tolist()), batch_size=args.batch_size, shuffle=False, num_workers=2)
+    loader = DataLoader(Subset(windows, idx.tolist()), batch_size=args.batch_size, shuffle=False,
+                        num_workers=args.num_workers)
     raw = RawFrames(args.parquet_dir) if args.parquet_dir else None
     print(f"{args.subset}: {len(ds.episodes)} episodes, {len(ds):,} windows, evaluating {len(idx)}, step {step}, "
           f"objective {objective}, tic stride {tic_stride}, horizon {K} tic(s) = {K * tic_stride} tic(s) of game time")
@@ -362,6 +372,7 @@ def main(args):
     with open(os.path.join(args.out_dir, "per_window.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
     print(json.dumps({k: v for k, v in summary.items() if k not in ("config", "per_map")}, indent=1))
+    log_evaluation(args, wandb_tag(args), summary, ckpt=args.ckpt, recorded_step=step, out_dir=args.out_dir)
 
 
 def build_parser():
@@ -393,6 +404,9 @@ def build_parser():
     p.add_argument("--subset", default="val", choices=["val", "train", "unseen_map"])
     p.add_argument("--num-windows", type=int, default=2048)
     p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--num-workers", type=int, default=2,
+                   help="DataLoader worker processes; 0 loads in this process, which the trainer's periodic reads "
+                        "use so that a stopped read leaves no workers behind")
     p.add_argument("--steps", type=int, default=50)
     p.add_argument("--timestep-spacing", dest="timestep_spacing", choices=SPACINGS, default="linear",
                    help="which trained timesteps the DDIM sampler visits (timestep_spacing.py). linear, the default, "
@@ -412,7 +426,7 @@ def build_parser():
     p.add_argument("--save-images", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-dir", required=True)
-    return p
+    return add_eval_args(p)
 
 
 if __name__ == "__main__":
