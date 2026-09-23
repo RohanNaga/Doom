@@ -35,8 +35,9 @@ import time
 
 # every gate a backbone's certificate must carry, each with status ok
 REQUIRED_GATES = ("0 pin", "1 sidecar audit val", "1 sidecar audit train", "1c inventory train",
-                  "1d latent alignment train", "1d latent alignment val", "2 alignment",
-                  "3 fit", "4 smoke", "5 readback")
+                  "1c inventory val", "1d latent alignment train", "1d latent alignment val",
+                  "1e emitted windows", "2 alignment", "3 fit", "4 smoke", "4b smoke probes", "4c resume",
+                  "5 readback")
 ENCODER_FIELDS = ("git", "vae_id", "vae_subfolder", "scaling_factor_applied", "shift_factor_applied")
 
 

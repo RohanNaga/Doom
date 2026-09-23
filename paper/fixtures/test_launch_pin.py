@@ -310,7 +310,8 @@ def test_the_training_corpus_sidecars_are_audited_in_both_spaces(tmp_path):
 
 def test_every_training_episode_is_checked_for_rows_and_tics(tmp_path):
     lines = gates_dry(tmp_path, VAES="sd15,sd35")
-    inv = [ln for ln in lines if "make_dense_eval_splits.py" in ln and "--raw-tics" in ln]
+    # the training corpus's; the val corpus's exact inventory is pinned in test_gate_probes.py
+    inv = [ln for ln in lines if ln.startswith("DRY gate1c inventory ") and "--raw-tics" in ln]
     assert len(inv) == 2, inv
     for ln in inv:
         assert "--check-only" in ln and "--expect-ids 0:2000" in ln and "--sample 0" in ln
