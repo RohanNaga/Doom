@@ -175,6 +175,7 @@ def main():
             config = json.load(f)
     run = wandb.init(project=a.project, entity=a.entity, id=name, name=name, resume="allow", config=config,
                      dir=os.path.join(a.run_dir, ".wandb"), settings=wandb.Settings(_disable_stats=True))
+    run.define_metric("step")
     run.define_metric("*", step_metric="step")
 
     state = {"offset": 0, "last_step": -1, "steward_seen": []}
@@ -189,14 +190,15 @@ def main():
             events, state["offset"] = read_events(log_path, state["offset"])
             for e in events:
                 kind, step = e.get("event"), e.get("step")
-                if not isinstance(step, int):
-                    continue
                 if kind == "start":
                     t0 = e.get("time") if isinstance(e.get("time"), (int, float)) else t0
                     gb = e.get("global_batch") if isinstance(e.get("global_batch"), int) else gb
                     ds = e.get("dataset_summary") or {}
                     windows = ds.get("windows") if isinstance(ds.get("windows"), int) else windows
                     state.update({"t0": t0, "gb": gb, "windows": windows})
+                    continue
+                if not isinstance(step, int):
+                    continue
                 row = train_row(e, t0, gb, windows) if kind == "train" else val_row(e) if kind == "val" else {}
                 if kind == "val" and isinstance(e.get("val_loss"), (int, float)) and last_train_loss is not None:
                     row["val/loss_minus_train"] = e["val_loss"] - last_train_loss
@@ -205,10 +207,10 @@ def main():
                 if kind == "end":
                     ended = True
                 if row and step > state["last_step"] - 1:
-                    run.log({"step": step, **row}, step=step)
+                    run.log({"step": step, **row})
                     state["last_step"] = max(state["last_step"], step)
         for step, row, path in steward_rows(a.run_dir, seen):
-            run.log({"step": step, **row}, step=step)
+            run.log({"step": step, **row})
             seen.add(path)
         state["steward_seen"] = sorted(seen)
         tmp = state_path + ".tmp"
