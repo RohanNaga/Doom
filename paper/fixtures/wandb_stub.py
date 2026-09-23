@@ -7,7 +7,12 @@ imports it as it would import the real package.
 the test lets it go); `delay` makes every call of a method sleep. `mod.released` records whether the
 logger unregistered the SDK's exit-time teardown, which is reached as
 `wandb.sdk.wandb_setup._singleton._connection._cleanup` in SDK 0.30.
+
+`exit_hook=True` also registers that teardown the way SDK 0.30 does, at the start of `init` and before
+anything can fail: at interpreter exit it waits (for `HANG` seconds) unless the run was finished or
+the teardown was unregistered. Use it only in a subprocess, never in the test process itself.
 """
+import atexit
 import threading
 import time
 import types
@@ -18,8 +23,9 @@ HANG = 60.0     # the longest a gated call waits before giving up, so a broken t
 class FakeRun:
     """Records what a W&B run was asked to do; `fail` names the method that raises."""
 
-    def __init__(self, calls, fail=None, gate=None, delay=None):
+    def __init__(self, calls, fail=None, gate=None, delay=None, on_finish=None):
         self.calls, self.fail, self.gate, self.delay = calls, fail, gate or {}, delay or {}
+        self.on_finish = on_finish
 
     def _wait(self, name):
         if name in self.gate:
@@ -41,29 +47,47 @@ class FakeRun:
         if self.fail == "finish":
             raise RuntimeError("W&B is unreachable")
         self.calls.append(("finish", a, k))
+        if self.on_finish:
+            self.on_finish()
 
 
-def stub_wandb(fail=None, gate=None, delay=None):
+def stub_wandb(fail=None, gate=None, delay=None, exit_hook=False):
     """A `wandb` module that records calls. `fail` in {"init", "log", "finish"} makes that call raise;
-    `gate` and `delay` map the same names to an Event to wait on and to seconds to sleep."""
+    `gate` and `delay` map the same names to an Event to wait on and to seconds to sleep; `exit_hook`
+    registers the SDK-shaped exit-time teardown (see the module docstring)."""
     mod = types.ModuleType("wandb")
     mod.calls = []
     mod.released = []
+    mod.finished = False
     gate, delay = gate or {}, delay or {}
+
+    def teardown():
+        if not mod.finished:
+            time.sleep(HANG)        # the SDK waiting on its service for a run nobody finished
+
+    def finished():
+        mod.finished = True
 
     def init(**kw):
         mod.calls.append(("init", (), kw))
+        if exit_hook:
+            atexit.unregister(teardown)
+            atexit.register(teardown)
         if "init" in gate:
             gate["init"].wait(HANG)
         if "init" in delay:
             time.sleep(delay["init"])
         if fail == "init":
             raise RuntimeError("W&B is down")
-        return FakeRun(mod.calls, fail, gate, delay)
+        return FakeRun(mod.calls, fail, gate, delay, on_finish=finished)
+
+    def cleanup():
+        mod.released.append(threading.current_thread().name)
+        atexit.unregister(teardown)
 
     mod.init = init
     mod.Settings = lambda **kw: dict(kw)
-    conn = types.SimpleNamespace(_cleanup=lambda: mod.released.append(threading.current_thread().name))
+    conn = types.SimpleNamespace(_cleanup=cleanup)
     mod.sdk = types.SimpleNamespace(wandb_setup=types.SimpleNamespace(
         _singleton=types.SimpleNamespace(_connection=conn)))
     return mod
