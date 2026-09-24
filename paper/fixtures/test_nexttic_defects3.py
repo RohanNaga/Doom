@@ -412,10 +412,12 @@ def _launch_dry(tmp_path, backbone, **env):
 
 
 def test_the_launcher_takes_each_backbones_interpreter(tmp_path):
-    for knobs, want in (({"PY_UNET": U, "PY_SD35": S}, {"unet": U, "pixart": U, "sd35": S}),
-                        ({"PY": "/opt/p/python"}, {"unet": "/opt/p/python", "sd35": "/opt/p/python"}),
+    for knobs, want in (({"PY_UNET": U, "PY_SD35": S}, {"unet": U, "pixart": U, "dit": U, "sd35": S}),
+                        ({"PY": "/opt/p/python"}, {"unet": "/opt/p/python", "dit": "/opt/p/python",
+                                                   "sd35": "/opt/p/python"}),
                         ({"PY": "/opt/p/python", "PY_SD35": S}, {"unet": "/opt/p/python", "sd35": S}),
                         ({}, {"unet": f"{tmp_path}/home/miniconda3/envs/doom/bin/python",
+                              "dit": f"{tmp_path}/home/miniconda3/envs/doom/bin/python",
                               "sd35": f"{tmp_path}/home/wanenc/bin/python"})):
         for bb, py in want.items():
             for extra in ({}, {"CERT_QUERY": "1"}, {"FIT": "20"}):

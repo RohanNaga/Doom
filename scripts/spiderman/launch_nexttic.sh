@@ -8,13 +8,13 @@
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
 #          [ALLOW_UNGATED=1] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [DRY=1] [DOOM_ROOT=..] \
 #          [EVAL_EVERY=5000] [EVAL_DEVICE=cuda:3] \
-#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart | dit>
 #
 # RUN_REPO is the checkout the run executes from (`cd $RUN_REPO`) and whose clean HEAD the certificate
 # must name; it defaults to $D/repo. A second checkout (e.g. $D/repo_launch, while an encoder still
 # runs from $D/repo) works only if gates.sh certified that same checkout, with the same RUN_REPO.
 #
-# The interpreter is per backbone: PY_UNET for the 4-channel rows (unet, pixart), PY_SD35 for sd35,
+# The interpreter is per backbone: PY_UNET for the 4-channel rows (unet, pixart, dit), PY_SD35 for sd35,
 # each falling back to PY and then to this host's env (~/miniconda3/envs/doom, ~/wanenc: diffusers
 # 0.40 for SD 3.5 lives only in the second). It is part of the certified command.
 #
@@ -26,7 +26,7 @@
 # IS the global batch of 32 and there is no gradient accumulation. The launcher refuses MB * cards != 32
 # rather than quietly accumulating; ALLOW_ACCUM=1 overrides it and says so in the resume log. The SD 3.5
 # row measured 36.4 GB at micro-batch 32 with --grad-ckpt, so 32 is known to fit there; GRAD_CKPT=1 turns
-# checkpointing on for the U-Net or PixArt if a fit check says 32 does not fit without it.
+# checkpointing on for the U-Net, PixArt or DiT if a fit check says 32 does not fit without it.
 #
 # FIT=<steps> runs `--fit-check <steps>` with these exact arguments instead of launching, and prints
 # updates/s and peak allocated and reserved memory. Run it before every multi-hour launch; that is the
@@ -84,7 +84,16 @@
 # Starting weights are the row's PUBLIC PRETRAINED weights, as every other row in the paper (Rohan,
 # Sep 20 2026: purity of the warm-start comparison). INIT=<checkpoint.pt> instead starts from one of
 # our own finished runs' weights with a fresh optimizer and step 0, which is a different experiment
-# and is recorded in config.json as init_from.
+# and is recorded in config.json as init_from. The DiT's are the ImageNet DiT-XL/2-256 checkpoint at
+# $D/weights/DiT-XL-2-256x256.pt, the local file the stride-4 DiT rows (030, the seed-1 row, the
+# context sweep) started from; train_wm.py loads it through backbones.load_imagenet_warm_start.
+#
+# THE DIT'S ACTION HISTORY IS A BAG, NOT A SEQUENCE. The DiT has no cross-attention, so its 32
+# control tokens are averaged into the adaLN vector (backbones.DiTWorldModel). The MLP acts per token
+# and the learned positions are added before the mean, so the DiT sees which controls occurred in the
+# last 32 tics but not their order, including which one carries the last context frame into the
+# target. The other backbones attend over the sequence. ACTION_HISTORY=0 gives the DiT the single
+# requested action id instead, as the stride-4 DiT rows had.
 #
 # PHASE=1 adds tics_since_decision conditioning (the target tic's position inside the 4-tic held
 # action run). Off by default: it is an extra conditioning signal no prior work uses, so it belongs
@@ -93,7 +102,7 @@
 # DRY=1 prints the command and stops before every side effect; DOOM_ROOT repoints the data root.
 set -u
 GPU=${1:?gpu}
-BACKBONE=${2:?backbone (unet | sd35 | pixart)}
+BACKBONE=${2:?backbone (unet | sd35 | pixart | dit)}
 D=${DOOM_ROOT:-/sata2/data/rnagabhi/doom}
 DRY=${DRY:-0}
 STEPS=${STEPS:-400000}
@@ -125,7 +134,11 @@ case $BACKBONE in
     BB_FLAGS="--grad-ckpt --skip-grad-norm 5 --skip-grad-after 3000"
     L=$D/latents_arnold_dense_pertic_sd35/arenas
     LVAL=$D/latents_arnold_dense_pertic_eval_sd35/val ;;
-  *) echo "unknown backbone '$BACKBONE' (unet | sd35 | pixart)" >&2; exit 2 ;;
+  dit)
+    # the local ImageNet checkpoint the stride-4 DiT rows started from; no DiT-only trainer flag
+    RUN=043-dit-nexttic; WARM=$D/weights/DiT-XL-2-256x256.pt; CH=4
+    PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; BB_FLAGS="" ;;
+  *) echo "unknown backbone '$BACKBONE' (unet | sd35 | pixart | dit)" >&2; exit 2 ;;
 esac
 R=$D/results_spiderman/$RUN
 RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout the run executes, pinned by the certificate

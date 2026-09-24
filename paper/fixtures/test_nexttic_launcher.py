@@ -22,7 +22,7 @@ SCRIPTS = os.path.join(REPO, "scripts", "spiderman")
 LAUNCH = os.path.join(SCRIPTS, "launch_nexttic.sh")
 AFTER = os.path.join(SCRIPTS, "after_nexttic.sh")
 ENCODE = os.path.join(SCRIPTS, "encode_nexttic.sh")
-BACKBONES = ("unet", "sd35", "pixart")
+BACKBONES = ("unet", "sd35", "pixart", "dit")
 
 
 def dry(script, args=(), **env):
@@ -106,7 +106,7 @@ def test_a_hand_stop_at_any_snapshot_leaves_something_to_evaluate(backbone, tmp_
 def test_only_sd35_gets_gradient_checkpointing_and_the_spike_guard(tmp_path):
     flags = {b: dry(LAUNCH, ["2", b], root=str(tmp_path)) for b in BACKBONES}
     assert "--grad-ckpt" in flags["sd35"] and "--skip-grad-norm 5" in flags["sd35"]
-    for b in ("unet", "pixart"):
+    for b in ("unet", "pixart", "dit"):
         assert "--grad-ckpt" not in flags[b], f"{b} must not pay the 30% checkpointing cost"
         assert "--skip-grad-norm" not in flags[b]
 
@@ -182,7 +182,7 @@ def test_two_cards_split_the_global_batch_without_accumulation(tmp_path):
 
 
 def test_gradient_checkpointing_can_be_turned_on_for_the_four_channel_rows(tmp_path):
-    for b in ("unet", "pixart"):
+    for b in ("unet", "pixart", "dit"):
         assert "--grad-ckpt" not in dry(LAUNCH, ["2", b], root=str(tmp_path))
         assert "--grad-ckpt" in dry(LAUNCH, ["2", b], root=str(tmp_path), GRAD_CKPT="1")
     # sd35 already has it; the knob must not double it
@@ -211,6 +211,7 @@ def test_a_half_encoded_corpus_is_refused_unless_asked_for(tmp_path):
 def test_an_unknown_backbone_is_refused():
     r = dry_fail(LAUNCH, ["2", "wan"])
     assert r.returncode != 0 and "unknown backbone" in r.stderr
+    assert all(b in r.stderr for b in BACKBONES), r.stderr
 
 
 # ---------------------------------------------------------------------------------------
