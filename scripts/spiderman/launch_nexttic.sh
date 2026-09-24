@@ -7,8 +7,20 @@
 #   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
 #          [ALLOW_UNGATED=1] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [DRY=1] [DOOM_ROOT=..] \
-#          [EVAL_EVERY=5000] [EVAL_DEVICE=cuda:3] \
+#          [EVAL_EVERY=5000] [EVAL_DEVICE=cuda:3] [RUN_NAME=<run>] [RUN_QUERY=1] \
 #          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart | dit>
+#
+# THE RUN. Each backbone has a default run name, its results directory under $D/results_spiderman:
+# 040-unet-nexttic, 041-pixart-nexttic, 042-sd35-nexttic, 043-dit-nexttic. RUN_NAME=<run> replaces it
+# everywhere the run is named: the results directory (so its W&B run and resume checkpoints), the
+# train log $D/logs/train_<run>.log, the tmux session and the certificate entry. A second run of one
+# backbone with other settings takes its own name, e.g. RUN_NAME=044-unet-nexttic-reqaction
+# ACTION_HISTORY=0. A run name is letters, digits, `_` and `-`, and never a bare backbone name (those
+# key the certificate entries written before run keys). The tmux session is train-<run> with the
+# numeric prefix dropped, so the defaults keep the sessions the live runs use (train-unet-nexttic,
+# train-sd35-nexttic) and 044-unet-nexttic-reqaction trains in train-unet-nexttic-reqaction.
+# RUN_QUERY=1 prints `<run> <session>` and stops; gates.sh and launch_runs.sh name runs and sessions
+# from it.
 #
 # RUN_REPO is the checkout the run executes from (`cd $RUN_REPO`) and whose clean HEAD the certificate
 # must name; it defaults to $D/repo. A second checkout (e.g. $D/repo_launch, while an encoder still
@@ -19,7 +31,7 @@
 # 0.40 for SD 3.5 lives only in the second). It is part of the certified command.
 #
 # A launch refuses unless $D/GATES_CERT.json (written by scripts/cluster/gates.sh) certifies this
-# backbone's exact command, commit, corpora, encoders and gate results; see "PIN WHAT LAUNCHES".
+# run's exact command, commit, corpora, encoders and gate results; see "PIN WHAT LAUNCHES".
 # CERT_QUERY=1 prints the command the certificate pins and stops.
 #
 # FILL THE CARD (CLAUDE.md, Rohan Sep 17 2026). Every job uses the whole card it holds: the micro-batch
@@ -140,6 +152,14 @@ case $BACKBONE in
     PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; BB_FLAGS="" ;;
   *) echo "unknown backbone '$BACKBONE' (unet | sd35 | pixart | dit)" >&2; exit 2 ;;
 esac
+RUN=${RUN_NAME:-$RUN}
+case $RUN in
+  -*|*[!A-Za-z0-9_-]*|dit|unet|pixart|unidiffuser|sd35)
+    echo "RUN_NAME '$RUN' must be letters, digits, _ and -, not starting with -, and not a backbone name" >&2; exit 2 ;;
+esac
+# train-<run> without its numeric prefix: the default runs keep the sessions they always had
+if [[ $RUN =~ ^[0-9]+-(.+)$ ]]; then SESSION=train-${BASH_REMATCH[1]}; else SESSION=train-$RUN; fi
+[ "${RUN_QUERY:-0}" = 1 ] && { echo "$RUN $SESSION"; exit 0; }
 R=$D/results_spiderman/$RUN
 RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout the run executes, pinned by the certificate
 
@@ -206,7 +226,7 @@ fi
 
 [ "$DRY" = 1 ] && { echo "DRY $RUN $CMD"; exit 0; }
 
-tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; exit 0; }
+tmux has-session -t "$SESSION" 2>/dev/null && { echo "$RUN alive"; exit 0; }
 [ -f $R/log.jsonl ] && grep -q "\"event\": \"end\"" $R/log.jsonl && { echo "$RUN finished"; exit 0; }
 [ -d $L ] || { echo "per-tic training latents missing at $L (run encode_nexttic.sh)" >&2; exit 1; }
 [ -d $LVAL ] || { echo "per-tic validation latents missing at $LVAL (run encode_nexttic.sh CORPUS=val)" >&2; exit 1; }
@@ -214,7 +234,7 @@ tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; 
 # PIN WHAT LAUNCHES (docs/REVIEW_2026-09-22.md H3). This used to `git pull` here, after the gates
 # had passed, and a failed pull did not stop the launch. Nothing here changes the checkout now, and
 # the launch refuses unless `$D/GATES_CERT.json` (written by scripts/cluster/gates.sh at GATES_GO)
-# has an entry for THIS backbone whose resolved command, clean commit of $RUN_REPO, training and
+# has an entry for THIS run, of this backbone, whose resolved command, clean commit of $RUN_REPO, training and
 # validation corpus fingerprints, encoder records and gate results all equal what is here now
 # (gate_certificate.py). A commit-only receipt accepted a changed recipe and let an SD 3.5-only gate
 # run certify a U-Net launch. GATE_RUN=1 marks the gates' own fit, smoke and resume runs, which come
@@ -229,7 +249,7 @@ if [ "${GATE_RUN:-0}" = 1 ]; then
 elif [ "${ALLOW_UNGATED:-0}" = 1 ]; then
   PIN="UNGATED (ALLOW_UNGATED=1)"
 else
-  WHY=$("$PY" "$TOOLS/gate_certificate.py" check --cert "$CERT" --backbone "$BACKBONE" --command "$CERT_CMD" \
+  WHY=$("$PY" "$TOOLS/gate_certificate.py" check --cert "$CERT" --backbone "$BACKBONE" --run "$RUN" --command "$CERT_CMD" \
         --init-from "${INIT:-}" ${RES:+--resuming} --repo "$RUN_REPO" --train-latents "$L" --train-ids "$TRAIN_IDS" \
         --val-latents "$LVAL" --val-ids "$VAL_IDS" 2>&1 < /dev/null) \
     || refuse "$WHY (ALLOW_UNGATED=1 overrides, and is recorded)"
@@ -238,5 +258,5 @@ fi
 
 export TMPDIR=$D/tmp/tmpdir; mkdir -p $TMPDIR $R $D/logs
 echo "$(date -Iseconds) launching $RUN on gpu $GPU (world $NP, micro $MB, ids $TRAIN_IDS, steps $STEPS) ${INITF:-pretrained warm start} $RES commit ${HEAD_SHA:-?} $PIN" >> $D/logs/resumes.log
-tmux new-session -d -s train-$BACKBONE-nexttic "$CMD"
+tmux new-session -d -s "$SESSION" "$CMD"
 echo "$RUN launched on gpu $GPU (world $NP, per-gpu batch $MB)"

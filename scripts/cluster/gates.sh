@@ -196,7 +196,13 @@ on_card()  { echo "env CUDA_VISIBLE_DEVICES=$1"; }   # on_card <card>: the prefi
 bb_chan()  { [ "$1" = sd35 ] && echo 16 || echo 4; }
 space_py() { [ "$1" = sd35 ] && echo "$PY_SD35" || echo "$PY_UNET"; }
 bb_py()    { space_py "$(bb_space "$1")"; }
-run_name() { [ "$1" = sd35 ] && echo 042-sd35-nexttic || echo 040-unet-nexttic; }
+run_query() {   # run_query <backbone>: `<run> <session>` as the launcher resolves them (RUN_NAME, else its default)
+  local OUT
+  OUT=$(RUN_QUERY=1 bash "$LAUNCH" 0 "$1") && [ -n "$OUT" ] || { echo "the launcher names no run for $1" >&2; return 1; }
+  echo "$OUT"
+}
+run_name()     { local Q; Q=$(run_query "$1") && echo "${Q%% *}"; }
+session_name() { local Q; Q=$(run_query "$1") && echo "${Q#* }"; }
 
 audit_cmd() {   # audit_cmd <space>
   echo "$(space_py "$1") $REPO/check_action_alignment.py --audit-only" \
@@ -229,22 +235,23 @@ latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shi
        "--out $D/logs/gate1d_latent_align_$1_$2.json"
 }
 pin_of() { git -C "$1" rev-parse HEAD 2>/dev/null; }
-revoke_cmd() {   # revoke_cmd <backbone>: drop that backbone's certificate entry, keep the others
-  echo "$(bb_py "$1") $HERE_REPO/gate_certificate.py revoke --cert $CERT --backbone $1"
+revoke_cmd() {   # revoke_cmd <backbone>: drop the certificate entry of that backbone's run, keep the others
+  echo "$(bb_py "$1") $HERE_REPO/gate_certificate.py revoke --cert $CERT --backbone $1 --run $(run_name "$1")"
 }
 revoke_one() {   # revoke_one <backbone>: under its interpreter, then each fallback; 0 once one succeeds
-  local P TRIED=""
+  local P RUN TRIED=""
   [ -e "$CERT" ] || return 0      # no certificate, nothing standing to revoke
+  RUN=$(run_name "$1") || { echo "cannot name the $1 run, so its entry in $CERT cannot be revoked" >&2; return 1; }
   for P in "$(bb_py "$1")" "$PY_UNET" "$PY_SD35" "${PY:-}" "$D/env/bin/python"; do
     [ -n "$P" ] && [ -x "$P" ] || continue
     case " $TRIED " in *" $P "*) continue ;; esac
     TRIED="$TRIED $P"
-    "$P" "$HERE_REPO/gate_certificate.py" revoke --cert "$CERT" --backbone "$1" > /dev/null 2>&1 && return 0
+    "$P" "$HERE_REPO/gate_certificate.py" revoke --cert "$CERT" --backbone "$1" --run "$RUN" > /dev/null 2>&1 && return 0
   done
-  echo "could not revoke $1 in $CERT under any of:$TRIED" >&2
+  echo "could not revoke $RUN ($1) in $CERT under any of:$TRIED" >&2
   return 1
 }
-revoke_mine() {   # revoke every backbone this run certifies; never touch another backbone's entry
+revoke_mine() {   # revoke the run of every backbone this gate run certifies; never touch another entry
   local BB BAD=""
   for BB in $SMOKE_BBS; do revoke_one "$BB" || BAD="$BAD $BB"; done
   [ -z "$BAD" ] && return 0
@@ -293,7 +300,7 @@ bb_latents() {   # bb_latents <backbone> <train|val>
   if [ "$2" = train ]; then echo "$D/latents_arnold_dense_pertic$S/arenas"; else echo "$D/latents_arnold_dense_pertic_eval$S/val"; fi
 }
 cert_write_cmd() {   # cert_write_cmd <backbone> <command>
-  echo "$(bb_py "$1") $REPO/gate_certificate.py write --cert $CERT --backbone $1 --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
+  echo "$(bb_py "$1") $REPO/gate_certificate.py write --cert $CERT --backbone $1 --run $(run_name "$1") --space $(bb_space "$1") --gpu $(bb_gpu "$1")" \
        "--repo $RUN_REPO --train-latents $(bb_latents "$1" train) --train-ids $TRAIN_IDS" \
        "--val-latents $(bb_latents "$1" val) --val-ids $VAL_IDS --results $RESULTS --command"
 }
@@ -353,8 +360,9 @@ windows_cmd() {   # windows_cmd <space>: the emitted-window contract on real tra
        "--episodes $TRAIN_IDS --windows $EMIT_WINDOWS --context-frames 32" \
        "--latent-channels $( [ "$1" = sd35 ] && echo 16 || echo 4) --out $D/logs/gate1e_windows_$1.json"
 }
-wait_session() {   # wait_session <backbone> <gate label>: until the tmux session ends, or the timeout
-  local SESSION=train-$1-nexttic WAITED=0
+wait_session() {   # wait_session <backbone> <gate label>: until the run's tmux session ends, or the timeout
+  local SESSION WAITED=0
+  SESSION=$(session_name "$1") || gate_fail "$2 ($1)" "the launcher names no session for $1"
   while tmux has-session -t "$SESSION" 2>/dev/null; do
     sleep 20; WAITED=$(( WAITED + 20 ))
     if [ "$WAITED" -ge "$SMOKE_TIMEOUT" ]; then
@@ -537,7 +545,7 @@ done
 # --- gate 4: the 300-step real-data smoke -------------------------------------------------
 for BB in $SMOKE_BBS; do
   SD=$SMOKE_DIR/$BB
-  SESSION=train-$BB-nexttic
+  SESSION=$(session_name "$BB") || gate_fail "4 smoke ($BB)" "the launcher names no session for $BB"
   PROD=$D/results_spiderman/$(run_name "$BB")
   # the launcher derives --resume from the PRODUCTION directory, so a smoke run after a launch
   # would carry that run's weights and optimizer into the smoke: gate before launching
