@@ -1,9 +1,22 @@
 #!/bin/bash
 # Zero to a usable node, step 4 of 5: the launch gates, in order, stopping at the first failure.
 #
-#   usage: [DOOM_ROOT=..] [UNET_GPU=0] [SD35_GPU=1] [VAES=sd15,sd35] [SMOKE_BBS="unet sd35"] \
+#   usage: [DOOM_ROOT=..] [UNET_GPU=0] [SD35_GPU=1] [DIT_GPU=$UNET_GPU] [PIXART_GPU=$UNET_GPU] \
+#          [VAES=sd15,sd35] [SMOKE_BBS="unet sd35"] [RUN_NAME=<run>] [ACTION_HISTORY=32] \
+#          [MB_UNET=32] [MB_SD35=32] [MB_DIT=32] [MB_PIXART=32] [LAUNCH_STEPS=400000] [WORKERS=..] \
 #          [PY_UNET=..] [PY_SD35=..] [PY=..] [FIT=20] [STEPS=300] [WINDOWS=64] [SMOKE_TIMEOUT=7200] \
 #          [EXPLAIN=<rc>] [DRY=1] gates.sh
+#
+# Backbones and runs. SMOKE_BBS names the backbones to certify, any of unet, sd35, dit and pixart.
+# unet, dit and pixart are 4-channel rows in the sd15 latent space, each on its own card knob
+# (UNET_GPU, DIT_GPU, PIXART_GPU; the last two default to UNET_GPU) with its own micro-batch knob
+# (MB_UNET, MB_DIT, MB_PIXART); sd35 is the 16-channel row on SD35_GPU with MB_SD35. Each backbone
+# certifies ONE run: its default (040-unet-nexttic, 041-pixart-nexttic, 042-sd35-nexttic,
+# 043-dit-nexttic) or RUN_NAME, which is refused unless SMOKE_BBS names exactly one backbone. The run
+# names the production directory the fit writes under, the tmux session the gates wait on and the
+# certificate entry; launch_nexttic.sh resolves it (RUN_QUERY=1), so the gates and the launch cannot
+# disagree. ACTION_HISTORY (default 32, the launcher's) reaches the fit, the smoke, the resume and the
+# certified command, and the printed launch repeats it.
 #
 #   on Spiderman (the launch may come from a second checkout while an encoder runs from $D/repo;
 #   REPO, the checkout these gates run from, must then be that same checkout):
@@ -13,22 +26,23 @@
 #       PY_SD35=$HOME/wanenc/bin/python bash scripts/cluster/gates.sh
 #
 # At GATES_GO the gates print, per certified backbone, the exact launch to paste (GATES_LAUNCH): `cd
-# $RUN_REPO &&` DOOM_ROOT, RUN_REPO, that backbone's PY_UNET or PY_SD35, MB, WORKERS, STEPS,
-# TRAIN_IDS, VAL_IDS, EXTRA and any other launcher knob set here (CTX, ACTION_HISTORY, PHASE,
-# GRAD_CKPT, ALLOW_PARTIAL, ALLOW_ACCUM, INIT, ACCELERATE, EVAL_EVERY, EVAL_DEVICE), then `bash
+# $RUN_REPO &&` DOOM_ROOT, RUN_REPO, RUN_NAME when set, that backbone's PY_UNET or PY_SD35, MB,
+# WORKERS, STEPS, TRAIN_IDS, VAL_IDS, ACTION_HISTORY, EXTRA and any other launcher knob set here (CTX,
+# PHASE, GRAD_CKPT, ALLOW_PARTIAL, ALLOW_ACCUM, INIT, ACCELERATE, EVAL_EVERY, EVAL_DEVICE), then `bash
 # scripts/spiderman/launch_nexttic.sh <gpu> <backbone>`. Each is first run with CERT_QUERY=1 in an
 # empty environment (`env -i`) and must resolve to the certified command, or the certificate is
 # revoked: a command that needs anything from the operator's shell is not the one printed.
 #
 # Cards. Every GPU step runs under `CUDA_VISIBLE_DEVICES=<its card>` and addresses that card as
-# cuda:0, the launcher's own convention: the sd15 space and the U-Net on UNET_GPU, the sd35 space and
-# SD 3.5 on SD35_GPU. That covers the latent alignment (1d), the fit, smoke and resume (3, 4, 4c, set
+# cuda:0, the launcher's own convention: each backbone on its own card knob, the sd35 space on
+# SD35_GPU and the sd15 space on the card of the first 4-channel backbone in SMOKE_BBS (UNET_GPU when
+# none is). That covers the latent alignment (1d), the fit, smoke and resume (3, 4, 4c, set
 # inside launch_nexttic.sh), the probes (4b) and the readback (5), whose eval_tf.py takes the first
 # visible card: with every card visible it ran on GPU 0, another user's on Spiderman. No process of the
 # gates can see a card it was not given. The audits, inventories, alignment and window checks use no
 # CUDA.
 #
-# Interpreters. Every command of the sd15 space and the U-Net runs under PY_UNET, every command of the
+# Interpreters. Every command of the sd15 space and the 4-channel rows runs under PY_UNET, every command of the
 # sd35 space and SD 3.5 (audits, inventories, the latent alignment that re-encodes with the SD 3.5
 # autoencoder, fit, smoke, probes, readback, certificate) under PY_SD35; each falls back to PY and
 # then to $D/env/bin/python. The launcher is handed the same two, so the certified command names the
@@ -42,16 +56,17 @@
 #                        commit of $RUN_REPO (default $D/repo: the checkout the launcher runs and
 #                        the certificate pins), both with no tracked change. The gates' own fit,
 #                        smoke and resume run from $RUN_REPO too; launch with the same RUN_REPO.
-#                        First the certificate entries of the backbones in SMOKE_BBS are revoked
-#                        (gate_certificate.py revoke, every other backbone's entry stays: the gates
+#                        First the certificate entries of the runs of SMOKE_BBS are revoked
+#                        (gate_certificate.py revoke --run, every other entry stays: the gates
 #                        run staggered, one space while the other row already trains); new ones are
 #                        written only at GATES_GO. A run that fails or is interrupted therefore
 #                        leaves no certificate standing for what it was certifying. A revocation
 #                        that fails under the backbone's interpreter is retried under the gates'
 #                        other interpreters (PY_UNET, PY_SD35, PY, $D/env/bin/python); if none can
 #                        run it, the gates stop before any gate runs and the file is left exactly
-#                        as it was. Another backbone's entry is never deleted: a stale entry of this
-#                        backbone still pins its own commit and corpora, so it certifies nothing new.
+#                        as it was. Another run's entry is never deleted, nor one keyed by a backbone
+#                        name (written before run keys, and read by the runs certified then): a stale
+#                        entry still pins its own commit and corpora, so it certifies nothing new.
 #   1 sidecar audit      do the encoded sidecars equal the raw parquet, tic for tic, in both
 #                        latent spaces? `check_action_alignment.py --audit-only`, which is the
 #                        audit alone: the yaw scorer can return inconclusive for physics reasons
@@ -102,8 +117,9 @@
 #
 # One set of production arguments. The fit, the smoke, the resume and the certificate all go through
 # `launch_nexttic.sh` under the same production settings (`prod_env`: DOOM_ROOT, the interpreter,
-# MB_UNET / MB_SD35 as MB, WORKERS, LAUNCH_STEPS as STEPS, TRAIN_IDS, VAL_IDS and the operator's
-# EXTRA). The fit adds only FIT and `--no-wandb`; the smoke and its resume change only STEPS and append
+# the backbone's MB_UNET, MB_SD35, MB_DIT or MB_PIXART as MB, WORKERS, LAUNCH_STEPS as STEPS,
+# TRAIN_IDS, VAL_IDS, ACTION_HISTORY, RUN_NAME and the operator's EXTRA). The fit adds only FIT and
+# `--no-wandb`; the smoke and its resume change only STEPS and append
 # their own `smoke_extra` after the operator's EXTRA (a results directory, validation, checkpoint and
 # snapshot cadence, `--no-wandb`, and the resume's `--resume`), so argparse's last-value rule gives
 # them those settings and every other flag is the production one. Astra's third review reproduced a
@@ -117,11 +133,12 @@
 # The certificate. Every gate that passes appends a result to this run's own results file,
 # $D/logs/gates_results_<GATES_RUN_ID>.jsonl (a timestamp and the pid unless set), scoped to the
 # whole run, one latent space, or one backbone; a second, staggered run never reads or truncates it. At GATES_GO, after checking that the checkout did
-# not move while the gates ran, `gate_certificate.py write` records for each smoked backbone: its
+# not move while the gates ran, `gate_certificate.py write` records for each smoked backbone, under
+# its run's name: its
 # resolved PRODUCTION launch command (launch_nexttic.sh CERT_QUERY=1 under `prod_env`, the values
 # launch_runs.sh passes), the commit, the training and validation
 # corpus fingerprints, the encoder records and every gate result that applies to it, into
-# $D/GATES_CERT.json. `launch_nexttic.sh` recomputes all of it for the backbone it launches and
+# $D/GATES_CERT.json. `launch_nexttic.sh` recomputes all of it for the run it launches and
 # refuses on any difference; the gates' own fit, smoke and resume runs pass GATE_RUN=1 because they
 # come before the certificate exists. A backbone whose latent space was not gated cannot be written.
 #
@@ -144,6 +161,10 @@ VAES=${VAES:-sd15,sd35}
 SMOKE_BBS=${SMOKE_BBS:-unet sd35}
 UNET_GPU=${UNET_GPU:-0}
 SD35_GPU=${SD35_GPU:-1}
+DIT_GPU=${DIT_GPU:-$UNET_GPU}         # the other 4-channel rows share the U-Net's card unless given their own
+PIXART_GPU=${PIXART_GPU:-$UNET_GPU}
+RUN_NAME=${RUN_NAME:-}                # one run's name instead of its backbone's default; one backbone only
+ACTION_HISTORY=${ACTION_HISTORY:-32}  # the launcher's default; 0 conditions on the requested action id
 FIT=${FIT:-20}
 STEPS=${STEPS:-300}
 WINDOWS=${WINDOWS:-64}
@@ -169,6 +190,8 @@ RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout launch_nexttic.sh runs (`cd $RUN_
 LAUNCH_STEPS=${LAUNCH_STEPS:-400000}
 MB_UNET=${MB_UNET:-32}
 MB_SD35=${MB_SD35:-32}
+MB_DIT=${MB_DIT:-32}
+MB_PIXART=${MB_PIXART:-32}
 CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 16)
 DEFAULT_WORKERS=$(( CORES / 4 ))
 [ "$DEFAULT_WORKERS" -lt 4 ] && DEFAULT_WORKERS=4
@@ -190,15 +213,16 @@ explain() {   # how check_action_alignment.py's exit code is read
 [ -n "${EXPLAIN:-}" ] && { explain "$EXPLAIN"; exit 0; }
 
 suffix()   { [ "$1" = sd35 ] && echo _sd35 || echo ""; }
-bb_space() { [ "$1" = sd35 ] && echo sd35 || echo sd15; }
-bb_gpu()   { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
+bb_space() { case $1 in sd35) echo sd35 ;; unet|dit|pixart) echo sd15 ;; esac; }
+bb_gpu()   { case $1 in sd35) echo "$SD35_GPU" ;; unet) echo "$UNET_GPU" ;; dit) echo "$DIT_GPU" ;; pixart) echo "$PIXART_GPU" ;; esac; }
 on_card()  { echo "env CUDA_VISIBLE_DEVICES=$1"; }   # on_card <card>: the prefix of a GPU step; it sees cuda:0 only
-bb_chan()  { [ "$1" = sd35 ] && echo 16 || echo 4; }
+bb_chan()  { [ "$(bb_space "$1")" = sd35 ] && echo 16 || echo 4; }
 space_py() { [ "$1" = sd35 ] && echo "$PY_SD35" || echo "$PY_UNET"; }
 bb_py()    { space_py "$(bb_space "$1")"; }
 run_query() {   # run_query <backbone>: `<run> <session>` as the launcher resolves them (RUN_NAME, else its default)
   local OUT
-  OUT=$(RUN_QUERY=1 bash "$LAUNCH" 0 "$1") && [ -n "$OUT" ] || { echo "the launcher names no run for $1" >&2; return 1; }
+  OUT=$(RUN_NAME="$RUN_NAME" RUN_QUERY=1 bash "$LAUNCH" 0 "$1") && [ -n "$OUT" ] \
+    || { echo "the launcher names no run for $1${RUN_NAME:+ (RUN_NAME=$RUN_NAME)}" >&2; return 1; }
   echo "$OUT"
 }
 run_name()     { local Q; Q=$(run_query "$1") && echo "${Q%% *}"; }
@@ -221,7 +245,11 @@ inventory_cmd() {   # inventory_cmd <space>: rows and tics of every training epi
        "--latents-dir $D/latents_arnold_dense_pertic$(suffix "$1")/arenas" \
        "--expect-ids $TRAIN_IDS --sample 0 --raw-tics $RAW/arenas"
 }
-space_gpu() { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
+space_gpu() {   # space_gpu <space>: the card of the first smoked backbone of that space, else the space's default
+  local BB
+  for BB in $SMOKE_BBS; do [ "$(bb_space "$BB")" = "$1" ] && { bb_gpu "$BB"; return 0; }; done
+  if [ "$1" = sd35 ]; then echo "$SD35_GPU"; else echo "$UNET_GPU"; fi
+}
 latent_align_cmd() {   # latent_align_cmd <space> <train|val>: re-encode and shifted-decode, per shard
   local S TRAIN VAL DIR PEER
   S=$(suffix "$1")
@@ -262,18 +290,21 @@ record() {   # record <gate> <all | space:V | bb:B> <detail>: one passed gate, f
   local detail=${3//\"/}; detail=${detail//\\/}
   printf '{"gate": "%s", "scope": "%s", "status": "ok", "detail": "%s"}\n' "$1" "$2" "$detail" >> "$RESULTS"
 }
-bb_mb() { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
+bb_mb() { case $1 in sd35) echo "$MB_SD35" ;; unet) echo "$MB_UNET" ;; dit) echo "$MB_DIT" ;; pixart) echo "$MB_PIXART" ;; esac; }
 prod_env() {   # prod_env <backbone>: PROD_ENV=(NAME=VALUE ...), the production launch every gate launch starts from
-  PROD_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS"
-        TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" EXTRA="$PROD_EXTRA")
+  PROD_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO" RUN_NAME="$RUN_NAME" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(bb_mb "$1")"
+        WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS" ACTION_HISTORY="$ACTION_HISTORY"
+        EXTRA="$PROD_EXTRA")
 }
 # launcher knobs that change the certified command; the operator's launch repeats any set here
-LAUNCH_KNOBS="CTX ACTION_HISTORY PHASE GRAD_CKPT ALLOW_PARTIAL ALLOW_ACCUM INIT ACCELERATE EVAL_EVERY EVAL_DEVICE"
+LAUNCH_KNOBS="CTX PHASE GRAD_CKPT ALLOW_PARTIAL ALLOW_ACCUM INIT ACCELERATE EVAL_EVERY EVAL_DEVICE"
 operator_env() {   # operator_env <backbone>: OP_ENV=(NAME=VALUE ...), everything the operator's launch sets
   local K
   OP_ENV=(DOOM_ROOT="$D" RUN_REPO="$RUN_REPO")
+  [ -n "$RUN_NAME" ] && OP_ENV+=(RUN_NAME="$RUN_NAME")
   if [ "$1" = sd35 ]; then OP_ENV+=(PY_SD35="$PY_SD35"); else OP_ENV+=(PY_UNET="$PY_UNET"); fi
-  OP_ENV+=(MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS")
+  OP_ENV+=(MB="$(bb_mb "$1")" WORKERS="$WORKERS" STEPS="$LAUNCH_STEPS" TRAIN_IDS="$TRAIN_IDS" VAL_IDS="$VAL_IDS"
+           ACTION_HISTORY="$ACTION_HISTORY")
   [ -n "$PROD_EXTRA" ] && OP_ENV+=(EXTRA="$PROD_EXTRA")
   for K in $LAUNCH_KNOBS; do [ -n "${!K:-}" ] && OP_ENV+=("$K=${!K}"); done
   return 0
@@ -325,6 +356,8 @@ bb_paths() {    # bb_paths <backbone>: where the evaluator and the probe build t
   case $1 in
     sd35) echo "--sd35-path stabilityai/stable-diffusion-3.5-medium" ;;
     unet) echo "--sd-path CompVis/stable-diffusion-v1-4" ;;
+    pixart) echo "--pixart-path PixArt-alpha/PixArt-XL-2-512x512" ;;
+    dit) ;;   # built from local code; the checkpoint holds every weight
   esac
 }
 readback_cmd() {  # readback_cmd <backbone> <live|ema> <horizon>
@@ -377,9 +410,22 @@ launcher() {   # launcher <backbone> <overrides of the production settings as NA
   env "${PROD_ENV[@]}" DRY="$DRY" GATE_RUN=1 "$@" bash "$LAUNCH" "$(bb_gpu "$BB")" "$BB"
 }
 
+# what is certified: known backbones, one run each, RUN_NAME for exactly one
+for BB in $SMOKE_BBS; do
+  case $BB in unet|sd35|dit|pixart) ;; *) gate_fail preflight "unknown backbone '$BB' in SMOKE_BBS (unet | sd35 | dit | pixart)" ;; esac
+done
+# shellcheck disable=SC2086
+[ -n "$RUN_NAME" ] && [ "$(set -- $SMOKE_BBS; echo $#)" != 1 ] \
+  && gate_fail preflight "RUN_NAME=$RUN_NAME names one run, but SMOKE_BBS is '$SMOKE_BBS'; gate one backbone under a RUN_NAME"
+RUNS=""
+for BB in $SMOKE_BBS; do
+  RN=$(run_name "$BB") || gate_fail preflight "launch_nexttic.sh names no run for $BB${RUN_NAME:+ (RUN_NAME=$RUN_NAME)}"
+  RUNS="${RUNS:+$RUNS }$RN"
+done
+
 if [ "$DRY" = 1 ]; then
-  echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU"
-  echo "DRY gate0 pin: revoke $CERT entries for $SMOKE_BBS (other backbones' entries stay); certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
+  echo "DRY gates root=$D spaces=${SPACES[*]} smoke=$SMOKE_BBS runs=$RUNS unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU dit_gpu=$DIT_GPU pixart_gpu=$PIXART_GPU action_history=$ACTION_HISTORY"
+  echo "DRY gate0 pin: revoke $CERT entries of the runs $RUNS for $SMOKE_BBS (other backbones' entries stay, as do other runs' and the backbone-keyed ones written before run keys); certify git -C $REPO rev-parse HEAD, which must equal $RUN_REPO's HEAD with no tracked change"
   for BB in $SMOKE_BBS; do echo "DRY gate0 revoke $BB $(revoke_cmd "$BB") (retried under PY_UNET, PY_SD35, PY, $D/env/bin/python; if none can, stop here and leave $CERT untouched)"; done
   echo "DRY results $RESULTS"
   for V in "${SPACES[@]}"; do echo "DRY gate1 audit $V $(audit_cmd "$V")"; done
@@ -419,7 +465,7 @@ if [ "$DRY" = 1 ]; then
     echo "DRY launch $BB $(operator_cmd "$BB")"
     if operator_ok "$BB" "$PROD_CMD"; then echo "DRY launch check $BB: resolves to the certified command in an empty environment"
     else echo "DRY launch check $BB: MISMATCH, the printed launch does not resolve to the certified command"; fi
-    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<the certificate command above: STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS${PROD_EXTRA:+ EXTRA=$PROD_EXTRA}>\""
+    echo "DRY certificate $BB $(cert_write_cmd "$BB") \"<the certificate command above: STEPS=$LAUNCH_STEPS MB=$(bb_mb "$BB") WORKERS=$WORKERS ACTION_HISTORY=$ACTION_HISTORY${RUN_NAME:+ RUN_NAME=$RUN_NAME}${PROD_EXTRA:+ EXTRA=$PROD_EXTRA}>\""
   done
   echo "DRY certificate written to $CERT only after checking the checkout did not move"
   exit 0
@@ -635,6 +681,6 @@ for BB in $SMOKE_BBS; do
     || { revoke_mine || echo "revocation failed for $REVOKE_FAILED; those entries may stand from this run" >&2
          gate_fail "certificate ($BB)" "the printed launch does not resolve to the certified command in an empty environment: $(operator_cmd "$BB")"; }
 done
-say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS certificate=$CERT"
+say "GATES_GO $(date -Iseconds) commit=$COMMIT root=$D spaces=${SPACES[*]} smoked=$SMOKE_BBS runs=$RUNS certificate=$CERT"
 for BB in $SMOKE_BBS; do say "GATES_LAUNCH $BB: $(operator_cmd "$BB")"; done
 say "the gates say the corpus, the configuration and the evaluator agree; the training numbers are still unmeasured"

@@ -281,7 +281,7 @@ SMOKE_FLAGS = {"--steps", "--results-dir", "--val-every", "--val-windows", "--ck
 # what an operator may have exported that gates.sh reads; each test sets its own
 GATE_KNOBS = ("WORKERS", "MB", "MB_UNET", "MB_SD35", "STEPS", "LAUNCH_STEPS", "EXTRA", "PY", "PY_UNET", "PY_SD35",
               "RUN_REPO", "REPO", "ALLOW_ACCUM", "GATES_RUN_ID", "EVAL_EVERY", "EVAL_DEVICE", "RUN_NAME",
-              "ACTION_HISTORY")
+              "ACTION_HISTORY", "DIT_GPU", "PIXART_GPU", "MB_DIT", "MB_PIXART")
 
 
 def _gates_dry(tmp_path, **env):

@@ -15,9 +15,11 @@ nothing trains or touches a GPU.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
+import pytest
 import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,7 +28,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, HERE)
 
 import gate_certificate as gc  # noqa: E402
-from test_nexttic_defects3 import GATE_KNOBS, U, _launch_dry  # noqa: E402
+from test_nexttic_defects3 import GATE_KNOBS, S, U, _launch_dry  # noqa: E402
 
 SCRIPTS = os.path.join(REPO, "scripts", "spiderman")
 
@@ -243,7 +245,6 @@ def _legacy(root):
 
 
 def test_run_keyed_writes_and_revocations_leave_the_legacy_entries_as_they_were(tmp_path):
-    import pytest
     from test_launch_pin import certify, root_for_launch
     root, sha, bindir = root_for_launch(tmp_path)
     legacy = _legacy(root)
@@ -356,3 +357,166 @@ def test_status_asks_tmux_for_each_runs_own_session(tmp_path):
     assert p.returncode == 0, p.stderr
     asked = [ln.split()[-1] for ln in log.read_text().splitlines() if "has-session" in ln]
     assert asked == [_query(bb, **env).stdout.split()[1] for bb, env in runs.values()], asked
+
+
+# ---------------------------------------------------------------------------------------
+# 3. the gates certify one named run of any of the four backbones
+# ---------------------------------------------------------------------------------------
+
+def _runs(lines):
+    return [ln for ln in lines if ln.startswith("DRY ") and re.search(r"\.py\b", ln)]
+
+
+def test_a_dit_gate_run_uses_the_dit_card_micro_batch_and_the_four_channel_interpreter(tmp_path):
+    from test_nexttic_defects3 import _gates_dry, _launch_line, _operator
+    lines = _gates_dry(tmp_path, SMOKE_BBS="dit", VAES="sd15", UNET_GPU="1", DIT_GPU="3", MB_DIT="16",
+                       ALLOW_ACCUM="1", PY_UNET=U, PY_SD35=S)
+    text = "\n".join(lines)
+    for marker in ("DRY gate3 fit dit", "DRY gate4 smoke dit", "DRY gate4c resume dit"):
+        ln = _launch_line(lines, marker)
+        assert "CUDA_VISIBLE_DEVICES=3 " in ln and "--per-gpu-batch 16 " in ln and "--backbone dit " in ln, marker
+        assert "--action-history 32 " in ln, marker
+    gpu = [ln for ln in lines if ln.startswith(("DRY gate1d", "DRY gate4b", "DRY gate5"))]
+    assert len(gpu) == 2 + 1 + 4 and all("env CUDA_VISIBLE_DEVICES=3 " in ln for ln in gpu), gpu
+    runs = _runs(lines)
+    assert runs and all(U in ln and S not in ln for ln in runs), [ln for ln in runs if U not in ln][:3]
+    assert f"{tmp_path}/results_spiderman/043-dit-nexttic/fitcheck/log.jsonl" in text
+    write = next(ln for ln in lines if "gate_certificate.py write" in ln)
+    assert "--backbone dit --run 043-dit-nexttic --space sd15 --gpu 3 " in write
+    cd, env, args = _operator(lines, "dit")
+    assert args == ["3", "dit"] and env["MB"] == "16" and env["PY_UNET"] == U and env["ACTION_HISTORY"] == "32"
+    assert "RUN_NAME" not in env and "PY_SD35" not in env
+    assert "DRY launch check dit: resolves to the certified command" in text
+
+
+def test_a_pixart_gate_run_uses_its_own_card_and_rebuilds_pixart_for_the_readback(tmp_path):
+    from test_nexttic_defects3 import _gates_dry, _launch_line, _operator
+    lines = _gates_dry(tmp_path, SMOKE_BBS="pixart", VAES="sd15", UNET_GPU="1", PIXART_GPU="4", MB_PIXART="32")
+    fit = _launch_line(lines, "DRY gate3 fit pixart")
+    assert "CUDA_VISIBLE_DEVICES=4 " in fit and "--action-inject token" in fit
+    reads = [ln for ln in lines if ln.startswith("DRY gate5 readback pixart")]
+    assert len(reads) == 4 and all("--pixart-path PixArt-alpha/PixArt-XL-2-512x512" in ln for ln in reads)
+    assert _operator(lines, "pixart")[2] == ["4", "pixart"]
+    assert "DRY launch check pixart: resolves to the certified command" in "\n".join(lines)
+    write = next(ln for ln in lines if "gate_certificate.py write" in ln)
+    assert "--backbone pixart --run 041-pixart-nexttic --space sd15 --gpu 4 " in write
+
+
+def test_the_pixart_gate_run_is_the_unet_gate_run_with_pixarts_names(tmp_path):
+    """Every gate the 040 U-Net passed, the 041 PixArt passes the same way: the two DRY transcripts
+    agree line for line once the backbone's name, run, warm start and evaluator source are swapped,
+    and the PixArt row's one extra trainer flag (`--action-inject token`, the injection every PixArt
+    row trained with) is set aside."""
+    from test_nexttic_defects3 import _gates_dry
+    knobs = {"VAES": "sd15", "UNET_GPU": "1", "PIXART_GPU": "1", "GATES_RUN_ID": "same", "PY_UNET": U}
+    unet = _gates_dry(tmp_path, SMOKE_BBS="unet", **knobs)
+    pixart = _gates_dry(tmp_path, SMOKE_BBS="pixart", **knobs)
+    swap = (("--pixart-path PixArt-alpha/PixArt-XL-2-512x512", "--sd-path CompVis/stable-diffusion-v1-4"),
+            ("--warm-start PixArt-alpha/PixArt-XL-2-512x512", "--warm-start CompVis/stable-diffusion-v1-4"),
+            (" --action-inject token", ""), ("041-pixart-nexttic", "040-unet-nexttic"),
+            ("train-pixart-nexttic", "train-unet-nexttic"), ("pixart", "unet"))
+
+    def plain(ln):   # pytest names the directory after this test; the empty BB_FLAGS leaves double spaces
+        return " ".join(ln.replace(str(tmp_path), "<root>").split())
+
+    def as_unet(ln):
+        ln = plain(ln)
+        for a, b in swap:
+            ln = ln.replace(a, b)
+        return ln
+    body = [ln for ln in pixart if not ln.startswith("DRY gates ")]
+    assert [as_unet(ln) for ln in body] == [plain(ln) for ln in unet if not ln.startswith("DRY gates ")]
+    assert sum("--action-inject token" in ln for ln in body) == 4, "fit, smoke, resume and certificate"
+
+
+def test_the_new_card_and_micro_batch_knobs_default_to_the_unets_card_and_32(tmp_path):
+    from test_nexttic_defects3 import _gates_dry, _operator
+    for bb in ("dit", "pixart"):
+        lines = _gates_dry(tmp_path, SMOKE_BBS=bb, VAES="sd15", UNET_GPU="5")
+        cd, env, args = _operator(lines, bb)
+        assert args == ["5", bb] and env["MB"] == "32", (bb, env, args)
+
+
+def test_the_reqaction_gate_run_certifies_exactly_that_launch(tmp_path):
+    from test_nexttic_defects3 import _args, _cert_line, _gates_dry, _launch_line, _operator
+    lines = _gates_dry(tmp_path, SMOKE_BBS="unet", VAES="sd15", **REQ)
+    text = "\n".join(lines)
+    assert "040-unet-nexttic" not in text, [ln for ln in lines if "040-unet-nexttic" in ln][:3]
+    for marker in ("DRY gate3 fit unet", "DRY gate4 smoke unet", "DRY gate4c resume unet"):
+        assert "--action-history 0 " in _launch_line(lines, marker), marker
+    assert f"{tmp_path}/results_spiderman/044-unet-nexttic-reqaction/fitcheck/log.jsonl" in text
+    assert f"{tmp_path}/results_spiderman/044-unet-nexttic-reqaction/log.jsonl exists" in text
+    cert = _args(_cert_line(lines, "unet")) + " "
+    assert "--action-history 0 " in cert
+    assert f"--results-dir {tmp_path}/results_spiderman/044-unet-nexttic-reqaction " in cert
+    write = next(ln for ln in lines if "gate_certificate.py write" in ln)
+    assert "--run 044-unet-nexttic-reqaction " in write
+    assert "ACTION_HISTORY=0 RUN_NAME=044-unet-nexttic-reqaction" in write
+    revoke = next(ln for ln in lines if ln.startswith("DRY gate0 revoke unet "))
+    assert "--run 044-unet-nexttic-reqaction " in revoke
+    cd, env, args = _operator(lines, "unet")
+    assert env["RUN_NAME"] == "044-unet-nexttic-reqaction" and env["ACTION_HISTORY"] == "0"
+    assert "DRY launch check unet: resolves to the certified command" in text
+    head = next(ln for ln in lines if ln.startswith("DRY gates "))
+    assert "runs=044-unet-nexttic-reqaction " in head and "action_history=0" in head
+
+
+def test_a_run_name_for_two_backbones_or_an_unknown_backbone_is_refused(tmp_path):
+    for env, why in (({"SMOKE_BBS": "unet sd35", **REQ}, "RUN_NAME"), ({"SMOKE_BBS": "unet wan"}, "unknown backbone"),
+                     ({"SMOKE_BBS": "unet", "RUN_NAME": "unet"}, "names no run")):
+        e = _clean(DRY="1", DOOM_ROOT=str(tmp_path), **env)
+        p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
+        assert p.returncode != 0 and "GATE_FAILED preflight" in p.stderr and why in p.stderr, (env, p.stderr)
+
+
+def _gate_results(root, run_id, backbone):
+    """Every required gate passed, in the scopes a gate run records for one 4-channel backbone."""
+    rows = []
+    for g in gc.REQUIRED_GATES:
+        scope = "all" if g in ("0 pin", "2 alignment") else ("space:sd15" if g.startswith("1") else f"bb:{backbone}")
+        rows.append({"gate": g, "scope": scope, "status": "ok", "detail": ""})
+    (root / "logs").mkdir(exist_ok=True)
+    (root / "logs" / f"gates_results_{run_id}.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+
+@pytest.mark.parametrize("backbone,env,run", [("dit", {}, "043-dit-nexttic"),
+                                              ("unet", REQ, "044-unet-nexttic-reqaction"),
+                                              ("pixart", {}, "041-pixart-nexttic")])
+def test_the_printed_certificate_and_launch_work_beside_the_live_entries(tmp_path, backbone, env, run):
+    """End to end on a throwaway root holding the live runs' entries as the older code wrote them: run
+    the certificate write the gates print, then the launch they print (fake tmux). It launches exactly
+    that run, the live entries are untouched, and a failed gate run of it revokes only its own entry."""
+    import shlex
+    from test_launch_pin import TRAIN_IDS, VAL_IDS, root_for_launch
+    from test_nexttic_defects3 import _cert_line, _gates_dry, _operator
+    root, sha, bindir = root_for_launch(tmp_path)
+    legacy = _legacy(root)
+    cert = root / "GATES_CERT.json"
+    knobs = {"RUN_REPO": str(root / "repo"), "UNET_GPU": "1", "DIT_GPU": "1", "PIXART_GPU": "1",
+             "PY_UNET": sys.executable, "PY_SD35": sys.executable, "TRAIN_IDS": TRAIN_IDS, "VAL_IDS": VAL_IDS,
+             "LAUNCH": LAUNCH,
+             "SMOKE_BBS": backbone, "VAES": "sd15", "GATES_RUN_ID": "e2e", **env}
+    lines = _gates_dry(root, **knobs)
+    _gate_results(root, "e2e", backbone)
+    printed = next(ln for ln in lines if ln.startswith(f"DRY certificate {backbone} ") and " write " in ln)
+    write = shlex.split(printed[len(f"DRY certificate {backbone} "):].split(' "<the certificate command', 1)[0])
+    command = _cert_line(lines, backbone)[len(f"DRY certificate command {backbone} "):]
+    p = subprocess.run([*write, command], capture_output=True, text=True, timeout=120, cwd=REPO)
+    assert p.returncode == 0, p.stderr + p.stdout
+    held = json.loads(cert.read_text())["backbones"]
+    assert set(held) == {"unet", "sd35", run} and {k: held[k] for k in ("unet", "sd35")} == legacy
+    assert held[run]["backbone"] == backbone and held[run]["run"] == run
+    cd, op, args = _operator(lines, backbone)
+    log = tmp_path / "tmux.log"
+    base = {"PATH": f"{bindir}:{os.environ['PATH']}", "HOME": str(tmp_path / "home"), "TMUX_LOG": str(log)}
+    p = subprocess.run(["bash", LAUNCH, *args], capture_output=True, text=True, env={**base, **op}, timeout=120)
+    assert p.returncode == 0, p.stderr
+    started = [ln for ln in log.read_text().splitlines() if "new-session" in ln]
+    assert len(started) == 1 and f"--results-dir {root}/results_spiderman/{run} " in started[0]
+    assert f"-s {_query(backbone, **env).stdout.split()[1]} " in started[0]
+    # a later gate run of the same run fails at gate 0 and revokes that run's entry, nothing else
+    (root / "repo" / "train_wm.py").write_text("# dirty\n")
+    e = _clean(DOOM_ROOT=str(root), REPO=str(root / "repo"), **{k: v for k, v in knobs.items() if k != "GATES_RUN_ID"})
+    p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=120)
+    assert p.returncode != 0 and "GATE_FAILED 0 pin" in p.stderr, p.stderr
+    assert json.loads(cert.read_text())["backbones"] == legacy
