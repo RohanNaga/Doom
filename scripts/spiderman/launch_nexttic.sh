@@ -7,26 +7,60 @@
 #   usage: [MB=32] [WORKERS=12] [STEPS=400000] [TRAIN_IDS=0:2000] [ACTION_HISTORY=32] [INIT=..] \
 #          [PHASE=1] [GRAD_CKPT=1] [FIT=20] [ALLOW_ACCUM=1] [ALLOW_PARTIAL=1] [GATE_RUN=1] \
 #          [ALLOW_UNGATED=1] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [DRY=1] [DOOM_ROOT=..] \
-#          [EVAL_EVERY=5000] [EVAL_DEVICE=cuda:3] \
-#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart>
+#          [EVAL_EVERY=5000] [EVAL_DEVICE=cuda:3] [RUN_NAME=<run>] [RUN_QUERY=1] \
+#          launch_nexttic.sh <gpu | gpu,gpu> <unet | sd35 | pixart | dit>
+#
+# THE RUN. Each backbone has a default run name, its results directory under $D/results_spiderman:
+# 040-unet-nexttic, 041-pixart-nexttic, 042-sd35-nexttic, 043-dit-nexttic. RUN_NAME=<run> replaces it
+# everywhere the run is named: the results directory (so its W&B run and resume checkpoints), the
+# train log $D/logs/train_<run>.log, the tmux session and the certificate entry. A second run of one
+# backbone with other settings takes its own name, e.g. RUN_NAME=044-unet-nexttic-reqaction
+# ACTION_HISTORY=0. A run name is letters, digits, `_` and `-`, and never a bare backbone name (those
+# key the certificate entries written before run keys). The tmux session is train-<run> with the
+# numeric prefix dropped, so the defaults keep the sessions the live runs use (train-unet-nexttic,
+# train-sd35-nexttic) and 044-unet-nexttic-reqaction trains in train-unet-nexttic-reqaction.
+# RUN_QUERY=1 prints `<run> <session>` and stops; gates.sh and launch_runs.sh name runs and sessions
+# from it.
+#
+# The next three rows on Spiderman (PixArt first) launch from the GATES_LAUNCH line their own gate
+# run prints (the invocations are in scripts/cluster/gates.sh), which resolve to:
+#
+#   cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#     RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 PY_UNET=$HOME/miniconda3/envs/doom/bin/python \
+#     MB=32 WORKERS=12 STEPS=200000 TRAIN_IDS=0:2000 VAL_IDS=6000:6100 ACTION_HISTORY=32 \
+#     EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 bash scripts/spiderman/launch_nexttic.sh 1 pixart
+#
+#   cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#     RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 PY_UNET=$HOME/miniconda3/envs/doom/bin/python \
+#     MB=32 WORKERS=12 STEPS=200000 TRAIN_IDS=0:2000 VAL_IDS=6000:6100 ACTION_HISTORY=32 \
+#     EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 bash scripts/spiderman/launch_nexttic.sh 1 dit
+#
+#   cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#     RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 RUN_NAME=044-unet-nexttic-reqaction \
+#     PY_UNET=$HOME/miniconda3/envs/doom/bin/python MB=32 WORKERS=12 STEPS=200000 TRAIN_IDS=0:2000 \
+#     VAL_IDS=6000:6100 ACTION_HISTORY=0 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+#     bash scripts/spiderman/launch_nexttic.sh 1 unet
+#
+# Paste the printed lines, not these: the printed ones are checked against the certificate.
 #
 # RUN_REPO is the checkout the run executes from (`cd $RUN_REPO`) and whose clean HEAD the certificate
 # must name; it defaults to $D/repo. A second checkout (e.g. $D/repo_launch, while an encoder still
 # runs from $D/repo) works only if gates.sh certified that same checkout, with the same RUN_REPO.
 #
-# The interpreter is per backbone: PY_UNET for the 4-channel rows (unet, pixart), PY_SD35 for sd35,
+# The interpreter is per backbone: PY_UNET for the 4-channel rows (unet, pixart, dit), PY_SD35 for sd35,
 # each falling back to PY and then to this host's env (~/miniconda3/envs/doom, ~/wanenc: diffusers
 # 0.40 for SD 3.5 lives only in the second). It is part of the certified command.
 #
 # A launch refuses unless $D/GATES_CERT.json (written by scripts/cluster/gates.sh) certifies this
-# backbone's exact command, commit, corpora, encoders and gate results; see "PIN WHAT LAUNCHES".
+# run's exact command, commit, corpora, encoders and gate results; see "PIN WHAT LAUNCHES".
 # CERT_QUERY=1 prints the command the certificate pins and stops.
 #
 # FILL THE CARD (CLAUDE.md, Rohan Sep 17 2026). Every job uses the whole card it holds: the micro-batch
 # IS the global batch of 32 and there is no gradient accumulation. The launcher refuses MB * cards != 32
 # rather than quietly accumulating; ALLOW_ACCUM=1 overrides it and says so in the resume log. The SD 3.5
 # row measured 36.4 GB at micro-batch 32 with --grad-ckpt, so 32 is known to fit there; GRAD_CKPT=1 turns
-# checkpointing on for the U-Net or PixArt if a fit check says 32 does not fit without it.
+# checkpointing on for the U-Net, PixArt or DiT if a fit check says 32 does not fit without it. PixArt
+# measured 26.4 GB at micro-batch 32 without it on a Spiderman A6000 (Sep 14, the stride-4 row).
 #
 # FIT=<steps> runs `--fit-check <steps>` with these exact arguments instead of launching, and prints
 # updates/s and peak allocated and reserved memory. Run it before every multi-hour launch; that is the
@@ -84,7 +118,16 @@
 # Starting weights are the row's PUBLIC PRETRAINED weights, as every other row in the paper (Rohan,
 # Sep 20 2026: purity of the warm-start comparison). INIT=<checkpoint.pt> instead starts from one of
 # our own finished runs' weights with a fresh optimizer and step 0, which is a different experiment
-# and is recorded in config.json as init_from.
+# and is recorded in config.json as init_from. The DiT's are the ImageNet DiT-XL/2-256 checkpoint at
+# $D/weights/DiT-XL-2-256x256.pt, the local file the stride-4 DiT rows (030, the seed-1 row, the
+# context sweep) started from; train_wm.py loads it through backbones.load_imagenet_warm_start.
+#
+# THE DIT'S ACTION HISTORY IS A BAG, NOT A SEQUENCE. The DiT has no cross-attention, so its 32
+# control tokens are averaged into the adaLN vector (backbones.DiTWorldModel). The MLP acts per token
+# and the learned positions are added before the mean, so the DiT sees which controls occurred in the
+# last 32 tics but not their order, including which one carries the last context frame into the
+# target. The other backbones attend over the sequence. ACTION_HISTORY=0 gives the DiT the single
+# requested action id instead, as the stride-4 DiT rows had.
 #
 # PHASE=1 adds tics_since_decision conditioning (the target tic's position inside the 4-tic held
 # action run). Off by default: it is an extra conditioning signal no prior work uses, so it belongs
@@ -93,7 +136,7 @@
 # DRY=1 prints the command and stops before every side effect; DOOM_ROOT repoints the data root.
 set -u
 GPU=${1:?gpu}
-BACKBONE=${2:?backbone (unet | sd35 | pixart)}
+BACKBONE=${2:?backbone (unet | sd35 | pixart | dit)}
 D=${DOOM_ROOT:-/sata2/data/rnagabhi/doom}
 DRY=${DRY:-0}
 STEPS=${STEPS:-400000}
@@ -125,8 +168,20 @@ case $BACKBONE in
     BB_FLAGS="--grad-ckpt --skip-grad-norm 5 --skip-grad-after 3000"
     L=$D/latents_arnold_dense_pertic_sd35/arenas
     LVAL=$D/latents_arnold_dense_pertic_eval_sd35/val ;;
-  *) echo "unknown backbone '$BACKBONE' (unet | sd35 | pixart)" >&2; exit 2 ;;
+  dit)
+    # the local ImageNet checkpoint the stride-4 DiT rows started from; no DiT-only trainer flag
+    RUN=043-dit-nexttic; WARM=$D/weights/DiT-XL-2-256x256.pt; CH=4
+    PY=${PY_UNET:-${PY:-$HOME/miniconda3/envs/doom/bin/python}}; BB_FLAGS="" ;;
+  *) echo "unknown backbone '$BACKBONE' (unet | sd35 | pixart | dit)" >&2; exit 2 ;;
 esac
+RUN=${RUN_NAME:-$RUN}
+case $RUN in
+  -*|*[!A-Za-z0-9_-]*|dit|unet|pixart|unidiffuser|sd35)
+    echo "RUN_NAME '$RUN' must be letters, digits, _ and -, not starting with -, and not a backbone name" >&2; exit 2 ;;
+esac
+# train-<run> without its numeric prefix: the default runs keep the sessions they always had
+if [[ $RUN =~ ^[0-9]+-(.+)$ ]]; then SESSION=train-${BASH_REMATCH[1]}; else SESSION=train-$RUN; fi
+[ "${RUN_QUERY:-0}" = 1 ] && { echo "$RUN $SESSION"; exit 0; }
 R=$D/results_spiderman/$RUN
 RUN_REPO=${RUN_REPO:-$D/repo}   # the checkout the run executes, pinned by the certificate
 
@@ -193,7 +248,7 @@ fi
 
 [ "$DRY" = 1 ] && { echo "DRY $RUN $CMD"; exit 0; }
 
-tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; exit 0; }
+tmux has-session -t "$SESSION" 2>/dev/null && { echo "$RUN alive"; exit 0; }
 [ -f $R/log.jsonl ] && grep -q "\"event\": \"end\"" $R/log.jsonl && { echo "$RUN finished"; exit 0; }
 [ -d $L ] || { echo "per-tic training latents missing at $L (run encode_nexttic.sh)" >&2; exit 1; }
 [ -d $LVAL ] || { echo "per-tic validation latents missing at $LVAL (run encode_nexttic.sh CORPUS=val)" >&2; exit 1; }
@@ -201,7 +256,7 @@ tmux has-session -t train-$BACKBONE-nexttic 2>/dev/null && { echo "$RUN alive"; 
 # PIN WHAT LAUNCHES (docs/REVIEW_2026-09-22.md H3). This used to `git pull` here, after the gates
 # had passed, and a failed pull did not stop the launch. Nothing here changes the checkout now, and
 # the launch refuses unless `$D/GATES_CERT.json` (written by scripts/cluster/gates.sh at GATES_GO)
-# has an entry for THIS backbone whose resolved command, clean commit of $RUN_REPO, training and
+# has an entry for THIS run, of this backbone, whose resolved command, clean commit of $RUN_REPO, training and
 # validation corpus fingerprints, encoder records and gate results all equal what is here now
 # (gate_certificate.py). A commit-only receipt accepted a changed recipe and let an SD 3.5-only gate
 # run certify a U-Net launch. GATE_RUN=1 marks the gates' own fit, smoke and resume runs, which come
@@ -216,7 +271,7 @@ if [ "${GATE_RUN:-0}" = 1 ]; then
 elif [ "${ALLOW_UNGATED:-0}" = 1 ]; then
   PIN="UNGATED (ALLOW_UNGATED=1)"
 else
-  WHY=$("$PY" "$TOOLS/gate_certificate.py" check --cert "$CERT" --backbone "$BACKBONE" --command "$CERT_CMD" \
+  WHY=$("$PY" "$TOOLS/gate_certificate.py" check --cert "$CERT" --backbone "$BACKBONE" --run "$RUN" --command "$CERT_CMD" \
         --init-from "${INIT:-}" ${RES:+--resuming} --repo "$RUN_REPO" --train-latents "$L" --train-ids "$TRAIN_IDS" \
         --val-latents "$LVAL" --val-ids "$VAL_IDS" 2>&1 < /dev/null) \
     || refuse "$WHY (ALLOW_UNGATED=1 overrides, and is recorded)"
@@ -225,5 +280,5 @@ fi
 
 export TMPDIR=$D/tmp/tmpdir; mkdir -p $TMPDIR $R $D/logs
 echo "$(date -Iseconds) launching $RUN on gpu $GPU (world $NP, micro $MB, ids $TRAIN_IDS, steps $STEPS) ${INITF:-pretrained warm start} $RES commit ${HEAD_SHA:-?} $PIN" >> $D/logs/resumes.log
-tmux new-session -d -s train-$BACKBONE-nexttic "$CMD"
+tmux new-session -d -s "$SESSION" "$CMD"
 echo "$RUN launched on gpu $GPU (world $NP, per-gpu batch $MB)"

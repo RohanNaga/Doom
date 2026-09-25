@@ -63,7 +63,7 @@ def test_a_revocation_that_fails_under_the_backbones_interpreter_retries_and_kee
     assert p.returncode != 0 and "GATE_FAILED 1 sidecar audit" in p.stderr, p.stderr
     cert = root / "GATES_CERT.json"
     assert cert.is_file(), "a failed sd35 revocation deleted the certificate"
-    assert set(json.loads(cert.read_text())["backbones"]) == {"unet"}, \
+    assert set(json.loads(cert.read_text())["backbones"]) == {"040-unet-nexttic"}, \
         "sd35 must be revoked (by a fallback interpreter) and the U-Net entry kept"
 
 

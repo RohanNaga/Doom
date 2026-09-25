@@ -280,7 +280,8 @@ SMOKE_FLAGS = {"--steps", "--results-dir", "--val-every", "--val-windows", "--ck
                "--local-snapshots", "--keep-last", "--no-wandb", "--eval-every"}
 # what an operator may have exported that gates.sh reads; each test sets its own
 GATE_KNOBS = ("WORKERS", "MB", "MB_UNET", "MB_SD35", "STEPS", "LAUNCH_STEPS", "EXTRA", "PY", "PY_UNET", "PY_SD35",
-              "RUN_REPO", "REPO", "ALLOW_ACCUM", "GATES_RUN_ID", "EVAL_EVERY", "EVAL_DEVICE")
+              "RUN_REPO", "REPO", "ALLOW_ACCUM", "GATES_RUN_ID", "EVAL_EVERY", "EVAL_DEVICE", "RUN_NAME",
+              "ACTION_HISTORY", "DIT_GPU", "PIXART_GPU", "MB_DIT", "MB_PIXART")
 
 
 def _gates_dry(tmp_path, **env):
@@ -412,10 +413,12 @@ def _launch_dry(tmp_path, backbone, **env):
 
 
 def test_the_launcher_takes_each_backbones_interpreter(tmp_path):
-    for knobs, want in (({"PY_UNET": U, "PY_SD35": S}, {"unet": U, "pixart": U, "sd35": S}),
-                        ({"PY": "/opt/p/python"}, {"unet": "/opt/p/python", "sd35": "/opt/p/python"}),
+    for knobs, want in (({"PY_UNET": U, "PY_SD35": S}, {"unet": U, "pixart": U, "dit": U, "sd35": S}),
+                        ({"PY": "/opt/p/python"}, {"unet": "/opt/p/python", "dit": "/opt/p/python",
+                                                   "sd35": "/opt/p/python"}),
                         ({"PY": "/opt/p/python", "PY_SD35": S}, {"unet": "/opt/p/python", "sd35": S}),
                         ({}, {"unet": f"{tmp_path}/home/miniconda3/envs/doom/bin/python",
+                              "dit": f"{tmp_path}/home/miniconda3/envs/doom/bin/python",
                               "sd35": f"{tmp_path}/home/wanenc/bin/python"})):
         for bb, py in want.items():
             for extra in ({}, {"CERT_QUERY": "1"}, {"FIT": "20"}):
@@ -497,7 +500,7 @@ def test_a_launch_from_a_second_checkout_is_checked_against_that_checkout(tmp_pa
     now = gc.identity("unet", cert_command(tmp_path, root, bindir, "unet"), "", str(second),
                       str(root / "latents_arnold_dense_pertic/arenas"), TRAIN_IDS,
                       str(root / "latents_arnold_dense_pertic_eval/val"), VAL_IDS)
-    gc.write(str(root / "GATES_CERT.json"), "unet", "sd15", "0", now, str(results))
+    gc.write(str(root / "GATES_CERT.json"), "unet", "sd15", "0", now, str(results), run="040-unet-nexttic")
     p, started = launch(tmp_path, root, bindir)
     assert p.returncode != 0 and "the gates certified" in p.stderr and started == []
     p, started = launch(tmp_path, root, bindir, RUN_REPO=str(second))
@@ -582,7 +585,7 @@ def test_the_printed_command_launches_against_a_real_certificate(tmp_path):
     now = gc.identity("unet", _cert_line(lines, "unet")[len("DRY certificate command unet "):], "",
                       str(root / "repo"), str(root / "latents_arnold_dense_pertic/arenas"), TRAIN_IDS,
                       str(root / "latents_arnold_dense_pertic_eval/val"), VAL_IDS)
-    gc.write(str(root / "GATES_CERT.json"), "unet", "sd15", "1", now, str(results))
+    gc.write(str(root / "GATES_CERT.json"), "unet", "sd15", "1", now, str(results), run="040-unet-nexttic")
     cd, env, args = _operator(lines, "unet")
     log = tmp_path / "tmux.log"
     base = {"PATH": f"{bindir}:{os.environ['PATH']}", "HOME": str(tmp_path / "home"), "TMUX_LOG": str(log)}
@@ -612,15 +615,16 @@ def test_revoke_removes_one_backbone_and_keeps_the_others(tmp_path):
     from test_launch_pin import launch
     root, bindir = _both_certified(tmp_path)
     cert = str(root / "GATES_CERT.json")
-    gc.main(gc.build_parser().parse_args(["revoke", "--cert", cert, "--backbone", "sd35"]))
-    assert set(json.load(open(cert))["backbones"]) == {"unet"}
+    gc.main(gc.build_parser().parse_args(["revoke", "--cert", cert, "--backbone", "sd35", "--run", "042-sd35-nexttic"]))
+    assert set(json.load(open(cert))["backbones"]) == {"040-unet-nexttic"}
     p, started = launch(tmp_path, root, bindir, backbone="unet")
     assert p.returncode == 0 and started, p.stderr
     p, started = launch(tmp_path, root, bindir, backbone="sd35")
     assert p.returncode != 0 and "certifies no sd35 launch" in p.stderr
-    gc.main(gc.build_parser().parse_args(["revoke", "--cert", cert, "--backbone", "unet"]))
+    unet = ["revoke", "--cert", cert, "--backbone", "unet", "--run", "040-unet-nexttic"]
+    gc.main(gc.build_parser().parse_args(unet))
     assert not os.path.exists(cert), "a certificate with no entry left must not stand"
-    gc.main(gc.build_parser().parse_args(["revoke", "--cert", cert, "--backbone", "unet"]))   # idempotent
+    gc.main(gc.build_parser().parse_args(unet))   # idempotent
 
 
 def test_a_second_gate_run_keeps_the_running_backbones_certificate(tmp_path):
@@ -634,7 +638,7 @@ def test_a_second_gate_run_keeps_the_running_backbones_certificate(tmp_path):
               "VAES": "sd35", "SMOKE_BBS": "sd35"})
     p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=60)
     assert p.returncode != 0 and "GATE_FAILED 0 pin" in p.stderr
-    assert set(json.load(open(root / "GATES_CERT.json"))["backbones"]) == {"unet"}, \
+    assert set(json.load(open(root / "GATES_CERT.json"))["backbones"]) == {"040-unet-nexttic"}, \
         "the run revoked a backbone it was not certifying"
 
 

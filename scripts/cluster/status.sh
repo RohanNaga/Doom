@@ -28,7 +28,8 @@ fi
 
 for R in $RUNS; do
   LOG=$D/results_spiderman/$R/log.jsonl
-  SESSION=train-$(echo "$R" | cut -d- -f2)-nexttic
+  # train-<run> without its numeric prefix, the session launch_nexttic.sh gives the run
+  if [[ $R =~ ^[0-9]+-(.+)$ ]]; then SESSION=train-${BASH_REMATCH[1]}; else SESSION=train-$R; fi
   ALIVE=no
   command -v tmux >/dev/null 2>&1 && tmux has-session -t "$SESSION" 2>/dev/null && ALIVE=yes
   if [ ! -f "$LOG" ]; then

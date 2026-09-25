@@ -2,8 +2,13 @@
 # Zero to a usable node, step 5 of 5: the two next-tic rows, each on its own card, in tmux.
 #
 #   usage: [DOOM_ROOT=..] [UNET_GPU=0] [SD35_GPU=1] [MB_UNET=32] [MB_SD35=32] [WORKERS=..] \
-#          [STEPS=400000] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [ONLY=unet|sd35] [DRY=1] \
-#          launch_runs.sh
+#          [STEPS=400000] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [ONLY=unet|sd35] \
+#          [RUN_NAME=<run> with ONLY] [DRY=1] launch_runs.sh
+#
+# The rows here are 040-unet-nexttic and 042-sd35-nexttic. The next three Spiderman rows,
+# 041-pixart-nexttic, 043-dit-nexttic and 044-unet-nexttic-reqaction, are not launched from here: each
+# gate run prints its own GATES_LAUNCH line, and that line is the launch (invocations in
+# scripts/cluster/gates.sh, the resulting launches in scripts/spiderman/launch_nexttic.sh).
 #
 # PY_UNET runs the U-Net row and PY_SD35 the SD 3.5 row, each falling back to PY and then to the
 # node's one env, $D/env/bin/python; they must be the interpreters gates.sh certified. RUN_REPO is
@@ -22,9 +27,13 @@
 # loader is seek-bound, so each run gets about a quarter of the cores, clamped to 4..16. Two runs
 # share the box, so half the cores stay for the encoders, the evaluators and the OS.
 #
-# Stopping: `tmux kill-session -t train-unet-nexttic`. Never `pkill -f` on a pattern from the
-# command line; the tmux server carries the first session's whole command string in its own
+# Stopping: `tmux kill-session -t train-unet-nexttic`. The session is train-<run> without the run's
+# numeric prefix, as launch_nexttic.sh names it (RUN_QUERY=1 prints it). Never `pkill -f` on a pattern
+# from the command line; the tmux server carries the first session's whole command string in its own
 # arguments and a pattern match kills every session on the machine.
+#
+# RUN_NAME (launch_nexttic.sh's run-name override) names ONE run, so it is refused unless ONLY names
+# one row; otherwise both rows would share one results directory and one session.
 #
 # Resuming: run this again. The launcher resumes from the newest recovery checkpoint in the run
 # directory and refuses to start a second copy of a live session.
@@ -57,7 +66,7 @@ die() { echo "LAUNCH_RUNS_FAILED $*" >&2; exit 1; }
 mb()      { [ "$1" = sd35 ] && echo "$MB_SD35" || echo "$MB_UNET"; }
 py()      { [ "$1" = sd35 ] && echo "$PY_SD35" || echo "$PY_UNET"; }
 gpu()     { [ "$1" = sd35 ] && echo "$SD35_GPU" || echo "$UNET_GPU"; }
-session() { echo "train-$1-nexttic"; }
+session() { local Q; Q=$(RUN_QUERY=1 bash "$LAUNCH" 0 "$1") && echo "${Q#* }"; }   # the launcher's name
 
 launcher() {  # launcher <backbone>
   env DRY=$DRY DOOM_ROOT=$D RUN_REPO="$RUN_REPO" PY_UNET="$PY_UNET" PY_SD35="$PY_SD35" MB="$(mb "$1")" WORKERS="$WORKERS" STEPS="$STEPS" \
@@ -65,6 +74,9 @@ launcher() {  # launcher <backbone>
 }
 
 ROWS=${ONLY:-"unet sd35"}
+# shellcheck disable=SC2086
+[ -n "${RUN_NAME:-}" ] && [ "$(set -- $ROWS; echo $#)" != 1 ] \
+  && die "RUN_NAME=$RUN_NAME names one run but would reach every row ($ROWS); set ONLY to that row"
 
 if [ "$DRY" = 1 ]; then
   echo "DRY launch_runs root=$D unet_gpu=$UNET_GPU sd35_gpu=$SD35_GPU workers=$WORKERS cores=$CORES steps=$STEPS"
@@ -89,4 +101,4 @@ for BB in $ROWS; do
   launcher "$BB" || { RC=$?; echo "LAUNCH_RUNS_FAILED $BB rc=$RC" >&2; }
 done
 [ $RC -eq 0 ] || exit $RC
-echo "LAUNCH_RUNS_DONE $(date -Iseconds); watch with scripts/cluster/status.sh, stop with tmux kill-session -t $(session unet)"
+echo "LAUNCH_RUNS_DONE $(date -Iseconds); watch with scripts/cluster/status.sh, stop a row with tmux kill-session -t <$(for BB in $ROWS; do session "$BB"; done | paste -sd'|' -)>"

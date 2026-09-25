@@ -1,9 +1,11 @@
-"""The launch certificate: what the gates passed, per backbone, and the check that a launch is exactly that.
+"""The launch certificate: what the gates passed, per run, and the check that a launch is exactly that.
 
 The first version of the pin (a commit hash in `$D/GATES_COMMIT`) was too weak: it accepted a launch
 whose recipe had changed after the gates, and an SD 3.5-only gate run certified a U-Net launch. The
 certificate is now a JSON file, written by `scripts/cluster/gates.sh` at GATES_GO, with one entry per
-backbone the gates smoked. Each entry records
+run the gates smoked, keyed by the run's name (`launch_nexttic.sh`'s results directory, e.g.
+`040-unet-nexttic`, or its RUN_NAME such as `044-unet-nexttic-reqaction`), so two runs of one backbone
+with different settings hold certificates at once. Each entry records
 
   * `command`     the resolved launch command, every flag, as `launch_nexttic.sh CERT_QUERY=1` prints
                   it (`--resume` and `--init-from` are left out: they are per-launch, and `init_from`
@@ -16,21 +18,26 @@ backbone the gates smoked. Each entry records
   * `gates`       the result of every gate that applies to this backbone (its own fit, smoke, probes
                   and readback; its latent space's audits; the corpus-wide ones), each `ok`.
 
-`launch_nexttic.sh` recomputes all of it for THE backbone it is launching and refuses on any
-difference, a missing entry, or a gate that is absent or not ok. `ALLOW_UNGATED=1` bypasses the check
-and is recorded in `resumes.log`.
+`launch_nexttic.sh` recomputes all of it for THE run it is launching and refuses on any difference,
+a missing entry, an entry of another backbone, or a gate that is absent or not ok. `ALLOW_UNGATED=1`
+bypasses the check and is recorded in `resumes.log`.
 
-Entries are per backbone, and so is revocation: `revoke --backbone B` removes B's entry and keeps the
-others (the file goes when no entry is left). A gate run revokes only the backbones it is about to
-certify, because the gates run staggered (the U-Net certified and training, SD 3.5 gated hours later)
-and deleting the whole file made the running U-Net's next resume refuse. Every read-modify-write of
-the file holds an exclusive lock on `<cert>.lock`.
+Entries are per run, and so is revocation: `revoke --run R` removes R's entry and keeps the others
+(the file goes when no entry is left). A gate run revokes only the runs it is about to certify,
+because the gates run staggered (the U-Net certified and training, SD 3.5 gated hours later) and
+deleting the whole file made the running U-Net's next resume refuse. Every read-modify-write of the
+file holds an exclusive lock on `<cert>.lock`.
 
-    python gate_certificate.py write --cert $D/GATES_CERT.json --backbone unet --space sd15 \\
-        --command "<CERT_QUERY output>" --repo $D/repo --train-latents ... --train-ids 0:2000 \\
-        --val-latents ... --val-ids 6000:6100 --results $D/logs/gates_results_<run>.jsonl
-    python gate_certificate.py check --cert $D/GATES_CERT.json --backbone unet --command "..." ...
-    python gate_certificate.py revoke --cert $D/GATES_CERT.json --backbone sd35
+Before Sep 24 2026 entries were keyed by backbone (`unet`, `sd35`), and the runs certified then
+(040-unet-nexttic, 042-sd35-nexttic) resume from that code, which reads those keys. This code never
+writes or revokes a key that is a backbone name (LEGACY_KEYS), so such an entry stays exactly as its
+own code wrote it, and the file is never deleted while any entry is left.
+
+    python gate_certificate.py write --cert $D/GATES_CERT.json --backbone unet --run 040-unet-nexttic \\
+        --space sd15 --command "<CERT_QUERY output>" --repo $D/repo --train-latents ... \\
+        --train-ids 0:2000 --val-latents ... --val-ids 6000:6100 --results $D/logs/gates_results_<id>.jsonl
+    python gate_certificate.py check --cert $D/GATES_CERT.json --backbone unet --run 040-unet-nexttic ...
+    python gate_certificate.py revoke --cert $D/GATES_CERT.json --backbone sd35 --run 042-sd35-nexttic
 """
 import argparse
 import contextlib
@@ -48,6 +55,8 @@ REQUIRED_GATES = ("0 pin", "1 sidecar audit val", "1 sidecar audit train", "1c i
                   "1e emitted windows", "2 alignment", "3 fit", "4 smoke", "4b smoke probes", "4c resume",
                   "5 readback")
 ENCODER_FIELDS = ("git", "vae_id", "vae_subfolder", "scaling_factor_applied", "shift_factor_applied")
+# the keys of the backbone-keyed entries written before run keys (backbones.BACKBONES); never a run's
+LEGACY_KEYS = ("dit", "unet", "pixart", "unidiffuser", "sd35")
 
 
 def git_state(repo):
@@ -190,31 +199,41 @@ def _replace(cert_path, cert):
     os.replace(tmp, cert_path)
 
 
-def write(cert_path, backbone, space, gpu, now, results_path):
-    """Add or replace one backbone's entry, atomically, refusing if its gates did not all pass."""
+def run_key(run):
+    """A run name as a certificate key; a backbone name is refused, it keys an older code's entry."""
+    if not run or run in LEGACY_KEYS:
+        raise SystemExit(f"--run {run!r} is not a run name: the entries keyed by a backbone name belong "
+                         "to the code before run keys, which the runs certified then still read")
+    return run
+
+
+def write(cert_path, backbone, space, gpu, now, results_path, *, run):
+    """Add or replace one run's entry, atomically, refusing if its backbone's gates did not all pass."""
+    run = run_key(run)
     gates = gate_results(results_path, backbone, space)
     problems = gate_problems(gates)
     if problems:
-        raise SystemExit(f"{backbone} cannot be certified: " + "; ".join(problems))
+        raise SystemExit(f"{run} ({backbone}) cannot be certified: " + "; ".join(problems))
     if not now["commit"] or not now["clean"]:
-        raise SystemExit(f"{backbone} cannot be certified: the checkout is not a clean git commit")
+        raise SystemExit(f"{run} ({backbone}) cannot be certified: the checkout is not a clean git commit")
     with locked(cert_path):
         cert = load(cert_path)
-        cert.setdefault("backbones", {})[backbone] = {**now, "space": space, "gpu": gpu, "gates": gates,
-                                                      "certified_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+        cert.setdefault("backbones", {})[run] = {**now, "run": run, "space": space, "gpu": gpu, "gates": gates,
+                                                 "certified_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
         cert["written_by"] = "scripts/cluster/gates.sh"
         _replace(cert_path, cert)
     return cert
 
 
-def revoke(cert_path, backbone):
-    """Remove one backbone's entry and keep every other; remove the file when none is left.
+def revoke(cert_path, run):
+    """Remove one run's entry and keep every other; remove the file when none is left.
     Returns whether an entry was removed. A missing or unreadable certificate certifies nothing."""
+    run = run_key(run)
     if not os.path.exists(cert_path):
         return False
     with locked(cert_path):
         cert = load(cert_path)
-        gone = cert.get("backbones", {}).pop(backbone, None) is not None
+        gone = cert.get("backbones", {}).pop(run, None) is not None
         if cert.get("backbones"):
             _replace(cert_path, cert)
         else:
@@ -224,8 +243,9 @@ def revoke(cert_path, backbone):
 
 def main(args):
     if args.cmd == "revoke":
-        gone = revoke(args.cert, args.backbone)
-        print(f"REVOKED {args.backbone} in {args.cert}" if gone else f"no {args.backbone} entry in {args.cert}")
+        gone = revoke(args.cert, args.run)
+        print(f"REVOKED {args.run} ({args.backbone}) in {args.cert}" if gone
+              else f"no {args.run} entry in {args.cert}")
         return 0
     missing = [n for n in ("command", "repo", "train_latents", "train_ids", "val_latents", "val_ids")
                if not getattr(args, n)]
@@ -234,22 +254,26 @@ def main(args):
     now = identity(args.backbone, args.command, args.init_from, args.repo, args.train_latents, args.train_ids,
                    args.val_latents, args.val_ids)
     if args.cmd == "write":
-        write(args.cert, args.backbone, args.space, args.gpu, now, args.results)
-        print(f"CERTIFIED {args.backbone} commit={now['commit']} into {args.cert}")
+        write(args.cert, args.backbone, args.space, args.gpu, now, args.results, run=args.run)
+        print(f"CERTIFIED {args.run} ({args.backbone}) commit={now['commit']} into {args.cert}")
         return 0
     if not os.path.isfile(args.cert):
         print(f"no gate certificate at {args.cert}: run scripts/cluster/gates.sh first")
         return 1
-    entry = load(args.cert).get("backbones", {}).get(args.backbone)
+    held = load(args.cert).get("backbones", {})
+    entry = held.get(args.run)
     if entry is None:
-        print(f"{args.cert} certifies no {args.backbone} launch (it has: "
-              f"{sorted(load(args.cert).get('backbones', {}))}); run the gates for {args.backbone}")
+        print(f"{args.cert} certifies no {args.backbone} launch named {args.run} (it has: {sorted(held)}); "
+              f"run the gates for {args.run}")
+        return 1
+    if entry.get("backbone") != args.backbone:
+        print(f"{args.cert} certifies {args.run} as a {entry.get('backbone')} launch, not a {args.backbone} one")
         return 1
     bad = compare(entry, now, args.resuming)
     if bad:
-        print(f"{args.backbone} launch is not the certified one:\n  " + "\n  ".join(bad))
+        print(f"{args.run} ({args.backbone}) launch is not the certified one:\n  " + "\n  ".join(bad))
         return 1
-    print(f"CERTIFIED {args.backbone} commit={now['commit']} certified_at={entry.get('certified_at')}")
+    print(f"CERTIFIED {args.run} ({args.backbone}) commit={now['commit']} certified_at={entry.get('certified_at')}")
     return 0
 
 
@@ -258,6 +282,8 @@ def build_parser():
     p.add_argument("cmd", choices=["write", "check", "revoke"])
     p.add_argument("--cert", required=True)
     p.add_argument("--backbone", required=True)
+    p.add_argument("--run", required=True,
+                   help="the entry's key: the run name launch_nexttic.sh resolves (RUN_QUERY=1), never a backbone name")
     p.add_argument("--space", default="", help="write: the backbone's latent space (sd15 or sd35)")
     p.add_argument("--gpu", default="", help="write: recorded for information, not compared")
     # required by write and check, not by revoke (checked in main)

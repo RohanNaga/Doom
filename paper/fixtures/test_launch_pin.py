@@ -107,6 +107,14 @@ def launch(tmp_path, root, bindir, backbone="unet", **env):
     return p, [c for c in calls if c.startswith("tmux new-session")]
 
 
+def run_of(backbone="unet", **env):
+    """The run launch_nexttic.sh names for this backbone (RUN_NAME, else its default): the certificate key."""
+    e = {**os.environ, "DRY": "1", "DOOM_ROOT": "/nonexistent-run-query", "RUN_QUERY": "1", **env}
+    p = subprocess.run(["bash", LAUNCH, "0", backbone], capture_output=True, text=True, env=e, timeout=60)
+    assert p.returncode == 0, p.stderr
+    return p.stdout.split()[0]
+
+
 def cert_command(tmp_path, root, bindir, backbone="unet", **env):
     """What the gates record: the launcher's own CERT_QUERY output."""
     e = launcher_env(root, bindir, tmp_path / "q.log", CERT_QUERY="1", **env)
@@ -133,7 +141,7 @@ def certify(tmp_path, root, bindir, backbones=("unet",), drop_gate=None, failed_
         now = gc.identity(bb, cert_command(tmp_path, root, bindir, bb, **env), env.get("INIT", ""),
                           str(root / "repo"), str(root / f"latents_arnold_dense_pertic{suf}/arenas"), TRAIN_IDS,
                           str(root / f"latents_arnold_dense_pertic_eval{suf}/val"), VAL_IDS)
-        gc.write(str(root / "GATES_CERT.json"), bb, space, "0", now, str(results))
+        gc.write(str(root / "GATES_CERT.json"), bb, space, "0", now, str(results), run=run_of(bb, **env))
 
 
 def code_lines(path):
@@ -234,10 +242,10 @@ def test_a_missing_or_failed_gate_cannot_be_certified_or_launched(tmp_path, how)
     # and a certificate edited to carry one is refused at launch
     certify(tmp_path, root, bindir)
     cert = json.loads((root / "GATES_CERT.json").read_text())
-    gates = cert["backbones"]["unet"]["gates"]
-    cert["backbones"]["unet"]["gates"] = ([g for g in gates if g["gate"] != "5 readback"] if how == "dropped"
-                                          else [{**g, "status": "failed"} if g["gate"] == "5 readback" else g
-                                                for g in gates])
+    gates = cert["backbones"]["040-unet-nexttic"]["gates"]
+    cert["backbones"]["040-unet-nexttic"]["gates"] = (
+        [g for g in gates if g["gate"] != "5 readback"] if how == "dropped"
+        else [{**g, "status": "failed"} if g["gate"] == "5 readback" else g for g in gates])
     (root / "GATES_CERT.json").write_text(json.dumps(cert))
     p, started = launch(tmp_path, root, bindir)
     assert p.returncode != 0 and "5 readback" in p.stderr
@@ -353,7 +361,7 @@ def test_a_dirty_checkout_fails_gate_zero_and_revokes_the_old_certificate(tmp_pa
     root = tmp_path / "root"
     root.mkdir()
     checkout(root / "repo")
-    (root / "GATES_CERT.json").write_text('{"backbones": {"unet": {}}}')
+    (root / "GATES_CERT.json").write_text('{"backbones": {"040-unet-nexttic": {}}}')
     (root / "repo" / "train_wm.py").write_text("# dirty\n")
     # a real interpreter: revocation is `gate_certificate.py revoke` on the backbones being certified
     e = {**os.environ, "DOOM_ROOT": str(root), "PY": sys.executable, "REPO": str(root / "repo"),
