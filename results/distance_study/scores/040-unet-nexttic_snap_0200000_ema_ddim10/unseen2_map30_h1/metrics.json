@@ -1,0 +1,274 @@
+{
+ "psnr_dec": {
+  "mean": 21.91118825227022,
+  "sem": 0.17253299900531557,
+  "n": 256
+ },
+ "lpips_dec": {
+  "mean": 0.3552671815850772,
+  "sem": 0.008683118488903907,
+  "n": 256
+ },
+ "copy_psnr_dec": {
+  "mean": 21.547259408980608,
+  "sem": 0.2603199726280226,
+  "n": 256
+ },
+ "latent_mse": {
+  "mean": 0.2686727207765216,
+  "sem": 0.005711011366898123,
+  "n": 256
+ },
+ "hud_psnr_dec": {
+  "mean": 23.626487381756306,
+  "sem": 0.06941017762646266,
+  "n": 256
+ },
+ "psnr_raw": {
+  "mean": 19.765787303447723,
+  "sem": 0.12991260566319798,
+  "n": 256
+ },
+ "lpips_raw": {
+  "mean": 0.3916540802747477,
+  "sem": 0.009240385917830244,
+  "n": 256
+ },
+ "copy_psnr_raw": {
+  "mean": 19.267115335911512,
+  "sem": 0.16591243891340296,
+  "n": 256
+ },
+ "vae_psnr": {
+  "mean": 23.504544220864773,
+  "sem": 0.09227234085485278,
+  "n": 256
+ },
+ "vae_lpips": {
+  "mean": 0.07452946038392838,
+  "sem": 0.0018248138771839535,
+  "n": 256
+ },
+ "hud_psnr_raw": {
+  "mean": 17.296417847275734,
+  "sem": 0.009561125427017907,
+  "n": 256
+ },
+ "hud_vae_psnr": {
+  "mean": 17.203225761651993,
+  "sem": 0.009272615904309691,
+  "n": 256
+ },
+ "persist_psnr_raw": {
+  "mean": 20.51220764219761,
+  "sem": 0.2749870365556973,
+  "n": 256
+ },
+ "persist_lpips_raw": {
+  "mean": 0.22635358280240325,
+  "sem": 0.007009419522026449,
+  "n": 256
+ },
+ "persist_hud_psnr_raw": {
+  "mean": 97.20834009349346,
+  "sem": 0.8251211021197107,
+  "n": 256
+ },
+ "per_map": {
+  "30": {
+   "psnr_dec": 21.91118825227022,
+   "lpips_dec": 0.3552671815850772
+  }
+ },
+ "per_tics_since_decision": {
+  "0": {
+   "psnr_dec": {
+    "mean": 22.191478990528683,
+    "sem": 0.3368831771856505,
+    "n": 73
+   },
+   "lpips_dec": {
+    "mean": 0.3405989821847171,
+    "sem": 0.016504314333828214,
+    "n": 73
+   },
+   "psnr_raw": {
+    "mean": 19.987135273136506,
+    "sem": 0.25028505723626393,
+    "n": 73
+   },
+   "persist_psnr_raw": {
+    "mean": 20.97996183944075,
+    "sem": 0.5508952973863303,
+    "n": 73
+   },
+   "windows": 73
+  },
+  "1": {
+   "psnr_dec": {
+    "mean": 21.64230661543589,
+    "sem": 0.3416271315682611,
+    "n": 63
+   },
+   "lpips_dec": {
+    "mean": 0.37495573160667267,
+    "sem": 0.016958639893068787,
+    "n": 63
+   },
+   "psnr_raw": {
+    "mean": 19.610053032163588,
+    "sem": 0.2652849715943763,
+    "n": 63
+   },
+   "persist_psnr_raw": {
+    "mean": 19.949648024543883,
+    "sem": 0.4883245408086088,
+    "n": 63
+   },
+   "windows": 63
+  },
+  "2": {
+   "psnr_dec": {
+    "mean": 21.581666357376996,
+    "sem": 0.30527751054572716,
+    "n": 68
+   },
+   "lpips_dec": {
+    "mean": 0.3725731055087903,
+    "sem": 0.01619049111267189,
+    "n": 68
+   },
+   "psnr_raw": {
+    "mean": 19.47023569836336,
+    "sem": 0.2410734800594694,
+    "n": 68
+   },
+   "persist_psnr_raw": {
+    "mean": 20.10976614671595,
+    "sem": 0.508294400959733,
+    "n": 68
+   },
+   "windows": 68
+  },
+  "3": {
+   "psnr_dec": {
+    "mean": 22.22635310303931,
+    "sem": 0.4133166630833454,
+    "n": 51
+   },
+   "lpips_dec": {
+    "mean": 0.3305133031863792,
+    "sem": 0.0205204690489236,
+    "n": 51
+   },
+   "psnr_raw": {
+    "mean": 19.98729227103439,
+    "sem": 0.2891943837273087,
+    "n": 51
+   },
+   "persist_psnr_raw": {
+    "mean": 21.062646155263863,
+    "sem": 0.6773539644316033,
+    "n": 51
+   },
+   "windows": 51
+  },
+  "4": {
+   "psnr_dec": {
+    "mean": 24.723588943481445,
+    "sem": NaN,
+    "n": 1
+   },
+   "lpips_dec": {
+    "mean": 0.27131205797195435,
+    "sem": NaN,
+    "n": 1
+   },
+   "psnr_raw": {
+    "mean": 22.21940040588379,
+    "sem": NaN,
+    "n": 1
+   },
+   "persist_psnr_raw": {
+    "mean": 21.101064682006836,
+    "sem": NaN,
+    "n": 1
+   },
+   "windows": 1
+  }
+ },
+ "sampling_frames_per_s": 8.491228946445444,
+ "config": {
+  "ckpt": "/sata2/data/rnagabhi/doom/results_spiderman/040-unet-nexttic/snap_0200000.pt",
+  "backbone": "unet",
+  "latent_channels": 4,
+  "use_ema": true,
+  "objective": "auto",
+  "context_frames": 32,
+  "num_actions": 29,
+  "noise_buckets": 10,
+  "infer_noise": 0.0,
+  "train_noise_max": 0.7,
+  "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_eval_pertic/unseen2",
+  "parquet_dir": "/sata2/data/rnagabhi/doom/raw_arnold_eval/unseen2",
+  "stride": 4,
+  "tic_stride": 1,
+  "action_history": null,
+  "horizon_tics": 1,
+  "split": "/sata2/data/rnagabhi/doom/repo_distance/results/distance_study/splits/split_unseen2_map30.json",
+  "subset": "val",
+  "num_windows": 256,
+  "batch_size": 16,
+  "num_workers": 0,
+  "steps": 10,
+  "timestep_spacing": "linear",
+  "eta": 0.0,
+  "lpips_net": "alex",
+  "vae_path": "",
+  "vae_subfolder": "",
+  "latent_scale": 0.18215,
+  "latent_shift": null,
+  "sd_path": "CompVis/stable-diffusion-v1-4",
+  "pixart_path": "PixArt-alpha/PixArt-XL-2-512x512",
+  "unidiffuser_path": "thu-ml/unidiffuser-v1",
+  "sd35_path": "stabilityai/stable-diffusion-3.5-medium",
+  "hf_cache": "/sata2/data/rnagabhi/doom/hf/hub",
+  "save_images": 3,
+  "seed": 0,
+  "out_dir": "/sata2/data/rnagabhi/doom/results_spiderman/distance_study/040-unet-nexttic/snap_0200000_ema_ddim10/unseen2_map30_h1",
+  "wandb_run": "",
+  "wandb_project": "doomdit-nexttic",
+  "wandb_entity": null,
+  "wandb_step": null,
+  "step": 200000,
+  "resolved_latent_channels": 4,
+  "resolved_objective": "v",
+  "checkpoint_interface": {
+   "tic_stride": 1,
+   "action_history": 32,
+   "phase_buckets": 0,
+   "control_bits": 19
+  },
+  "game_time_tics": 1,
+  "window_validity": {
+   "episodes": 10,
+   "context_frames": 32,
+   "horizon": 1,
+   "candidate_windows": 52150,
+   "windows": 52150,
+   "excluded_windows": 0,
+   "excluded_fraction": 0.0,
+   "control_bits": 19
+  }
+ },
+ "decoder": {
+  "name": "stabilityai/sd-vae-ft-mse",
+  "path": "stabilityai/sd-vae-ft-mse",
+  "identity": "hub:stabilityai/sd-vae-ft-mse",
+  "provenance": "public",
+  "corpus": "none: published weights, never tuned on Doom frames",
+  "provenance_source": "registry:stabilityai/sd-vae-ft-mse",
+  "unseen_map_claim": "ok",
+  "unseen_map_problems": []
+ }
+}

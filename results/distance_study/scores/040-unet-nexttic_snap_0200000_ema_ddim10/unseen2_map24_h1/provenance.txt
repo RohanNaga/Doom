@@ -1,0 +1,5 @@
+checkout=/sata2/data/rnagabhi/doom/repo_distance code=6a33311ffb7a37b977eb5b0318618b79064c0a63
+interpreter=/home/rnagabhi/miniconda3/envs/doom/bin/python
+decoder=stock:stabilityai/sd-vae-ft-mse
+score_key=ckpt=/sata2/data/rnagabhi/doom/results_spiderman/040-unet-nexttic/snap_0200000.pt step=200000 sha256=0728fb73086c00da7bb2b40eb843fbde7836b0dfae8e38adbc9b7300ef8fd9cb variant=ema space=sd1 split_sha256=be5ee3d8b6a5114c59c4b2ef8b48b5021ac0a9d7ec9fff3e86cefec2d1f32465 horizon=1 windows=256 seed=0 sampler=ddim10 decoder=stock:stabilityai/sd-vae-ft-mse latents=/sata2/data/rnagabhi/doom/latents_arnold_eval_pertic/unseen2 raw=/sata2/data/rnagabhi/doom/raw_arnold_eval/unseen2
+recorded=2026-09-25T14:02:24+00:00
