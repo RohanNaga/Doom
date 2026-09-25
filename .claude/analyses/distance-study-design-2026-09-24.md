@@ -121,3 +121,96 @@ Never claimed: causation, or maps beyond these arenas and curated campaign maps.
 2. A GPU 3 slot for the scoring pass after the encode drains.
 
 The seeded corpus's 60 seen-map episodes (maps 1 to 15, 4 each) are in tonight's encode. For the new rows, maps 1 and 9 to 15 are unseen, which adds 8 points in the arena cluster (hence n = 30); maps 2 to 8 serve as a cross-corpus replication, not as extra points.
+
+## 7. How to run
+
+On Spiderman, in this order. Steps 1 to 5 are CPU only and run beside the latents; step 6 needs GPU 3; step 7 is CPU. Run each long step inside its own tmux session and stop it with `tmux kill-session -t <name>`, never with a pattern kill.
+
+**0. A clean checkout.** `$D/repo` is the live runs' checkout and is never pulled (`after_nexttic.sh:481`), so the study runs from a clean clone of main taken after this work merges, as `repo_launch2` was.
+
+```bash
+D=/sata2/data/rnagabhi/doom
+PY=$HOME/miniconda3/envs/doom/bin/python
+R=$D/repo_distance
+git clone -q https://github.com/RohanNaga/Doom.git $R && git -C $R rev-parse HEAD
+cd $R
+O=$R/results/distance_study
+L1=$D/latents_arnold_dense_pertic;       E1=$D/latents_arnold_dense_pertic_eval;       S1=$D/latents_arnold_eval_pertic
+L35=$D/latents_arnold_dense_pertic_sd35; E35=$D/latents_arnold_dense_pertic_eval_sd35; S35=$D/latents_arnold_eval_pertic_sd35
+```
+
+**1. Smoke run** (a few minutes; two episodes per map, 100 directions, a throwaway root):
+
+```bash
+$PY distance_study.py clouds --space sd1 --out $D/tmp/distance_smoke --limit 2 \
+  --reference $L1/arenas --reference-ids 0:2000 --draw 1 --eval val=$E1/val --eval unseen2=$S1/unseen2
+$PY distance_study.py clouds --space sd1 --out $D/tmp/distance_smoke --limit 2 \
+  --reference $L1/arenas --reference-ids 0:2000 --draw 2
+$PY distance_study.py distances --space sd1 --out $D/tmp/distance_smoke --projections 100 --bootstrap 5
+```
+
+**2. Clouds.** SD 1.x draws the frames: 50 seeded episodes per training map from ids 0:2000 (draw 1 the reference, draw 2 the disjoint floor draw), and 250 frames per episode, 25 per motion decile. SD 3.5 and pixels are read at exactly those episodes and tics (`--frames-from`), so the three spaces differ only in the features. About 1.3 GB written in all (SD 1.x about 140 MB, SD 3.5 about 550 MB, pixels about 650 MB).
+
+```bash
+tmux new -d -s distance-clouds "cd $R && ( set -e
+$PY distance_study.py clouds --space sd1 --out $O --reference $L1/arenas --reference-ids 0:2000 --draw 1 \
+  --eval val=$E1/val --eval arenas_678=$E1/arenas_678 --eval seen=$S1/seen --eval unseen=$S1/unseen --eval unseen2=$S1/unseen2
+$PY distance_study.py clouds --space sd1 --out $O --reference $L1/arenas --reference-ids 0:2000 --draw 2
+$PY distance_study.py clouds --space sd35 --out $O --frames-from $O/clouds/sd1 --reference $L35/arenas --draw 1 \
+  --eval val=$E35/val --eval arenas_678=$E35/arenas_678 --eval seen=$S35/seen --eval unseen=$S35/unseen --eval unseen2=$S35/unseen2
+$PY distance_study.py clouds --space sd35 --out $O --frames-from $O/clouds/sd1 --reference $L35/arenas --draw 2
+$PY distance_study.py clouds --space pixels --out $O --frames-from $O/clouds/sd1 --reference $D/raw_arnold_dense/arenas --draw 1 \
+  --eval val=$D/raw_arnold_dense/arenas --eval arenas_678=$D/raw_arnold_dense/arenas_678 \
+  --eval seen=$D/raw_arnold_eval/seen --eval unseen=$D/raw_arnold_eval/unseen --eval unseen2=$D/raw_arnold_eval/unseen2
+$PY distance_study.py clouds --space pixels --out $O --frames-from $O/clouds/sd1 --reference $D/raw_arnold_dense/arenas --draw 2
+) >> $D/logs/distance_clouds.log 2>&1"
+```
+
+**3. Per-map split files** for the scoring pass (one per primary map; the seeded corpus's copies of maps 2 to 8 are replications and get none):
+
+```bash
+$PY distance_study.py splits --out $O --eval val=$E1/val --eval arenas_678=$E1/arenas_678 \
+  --eval seen=$S1/seen --eval unseen=$S1/unseen --eval unseen2=$S1/unseen2
+```
+
+**4. Distances, validation and bootstrap**, one space at a time (measured on a laptop CPU: about 25 minutes for the map, episode and floor distances, 20 for the best mixture and 50 for 200 bootstrap redraws per space):
+
+```bash
+tmux new -d -s distance-sw "cd $R && for S in sd1 sd35 pixels; do $PY distance_study.py distances --space \$S --out $O --bootstrap 200; done >> $D/logs/distance_sw.log 2>&1"
+```
+
+Read `checks` and `primary_arm` in `$O/distances_sd1.json` before going on: check (v) decides whether the motion or the uniform arm is primary.
+
+**5. Freeze the distances before any per-map score exists.** Copy the small outputs back and commit them; each JSON already carries the commit and the SHA-256 of `distance_study.py`.
+
+```bash
+# on the laptop, in the repo (Spiderman is rnagabhi@128.2.204.110; connect as the run-server skill says)
+rsync -a rnagabhi@128.2.204.110:/sata2/data/rnagabhi/doom/repo_distance/results/distance_study/ results/distance_study/ \
+  --include='distances_*.json' --include='per_episode_*.csv' --include='bootstrap_*.npz' --include='splits/***' --exclude='*'
+git add -f results/distance_study && git commit -m "freeze the distance study distances"
+```
+
+**6. Score the maps on GPU 3** (check `nvidia-smi` first). The U-Net 200k EMA at one and four tics, then SD 3.5's latest snapshot at one tic, then its four-tic reads when the card allows. Every read is resumable, so the same command continues after an interruption. `DRY=1` in front of any of these prints every command instead.
+
+```bash
+SD35=$(ls $D/results_spiderman/042-sd35-nexttic/snap_*.pt | tail -1)
+tmux new -d -s distance-score "cd $R && (
+CUDA_VISIBLE_DEVICES=3 RUN_REPO=$R CKPT=$D/results_spiderman/040-unet-nexttic/snap_0200000.pt bash scripts/spiderman/score_distance_maps.sh 3 unet
+CUDA_VISIBLE_DEVICES=3 RUN_REPO=$R CKPT=$SD35 HORIZONS=1 bash scripts/spiderman/score_distance_maps.sh 3 sd35
+CUDA_VISIBLE_DEVICES=3 RUN_REPO=$R CKPT=$SD35 HORIZONS=4 bash scripts/spiderman/score_distance_maps.sh 3 sd35
+) >> $D/logs/distance_score.log 2>&1"
+tail -f $D/logs/distance_040-unet-nexttic_sd1.log     # frames/s of the first map is printed as it finishes
+```
+
+Outputs land in `$D/results_spiderman/distance_study/<run>/<snapshot>_ema_ddim10/<set>_map<NN>_h<K>/`. The scorer never passes `--wandb-run` (section 6, item 2).
+
+**7. Statistics, appendix table and figure** (needs matplotlib in the interpreter; otherwise run it on the laptop from a mirror of the two score directories):
+
+```bash
+$PY paper/make_distance_figure.py --distances $O/distances_sd1.json \
+  --row unet=$D/results_spiderman/distance_study/040-unet-nexttic/snap_0200000_ema_ddim10 \
+  --row sd35=$D/results_spiderman/distance_study/042-sd35-nexttic/$(basename $SD35 .pt)_ema_ddim10 \
+  --space pixels=$O/distances_pixels.json --space sd35=$O/distances_sd35.json --out $O/figure
+```
+
+It writes `stats.json` (the primary partial Spearman with its bootstrap CI and permutation p, leave-one-map-out, within-cluster, per-row, per-space and secondary reads, and the section 5 verdict), `distance_table.md`, and `distance_gain.{png,svg}` with a dark variant `distance_gain_dark.{png,svg}`.
