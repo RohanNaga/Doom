@@ -1,0 +1,274 @@
+{
+ "psnr_dec": {
+  "mean": 16.70741357654333,
+  "sem": 0.10458657592631086,
+  "n": 256
+ },
+ "lpips_dec": {
+  "mean": 0.40990785002941266,
+  "sem": 0.005063212180539874,
+  "n": 256
+ },
+ "copy_psnr_dec": {
+  "mean": 17.465798940509558,
+  "sem": 0.15048133897291346,
+  "n": 256
+ },
+ "latent_mse": {
+  "mean": 0.35048932730569504,
+  "sem": 0.004328393826568197,
+  "n": 256
+ },
+ "hud_psnr_dec": {
+  "mean": 24.149078458547592,
+  "sem": 0.09109524920680334,
+  "n": 256
+ },
+ "psnr_raw": {
+  "mean": 16.09835871681571,
+  "sem": 0.0926410923792071,
+  "n": 256
+ },
+ "lpips_raw": {
+  "mean": 0.4349837178597227,
+  "sem": 0.004836792492456406,
+  "n": 256
+ },
+ "copy_psnr_raw": {
+  "mean": 16.692134618759155,
+  "sem": 0.12597333150625492,
+  "n": 256
+ },
+ "vae_psnr": {
+  "mean": 23.485339492559433,
+  "sem": 0.053350553044956256,
+  "n": 256
+ },
+ "vae_lpips": {
+  "mean": 0.08023049667826854,
+  "sem": 0.000907646663846235,
+  "n": 256
+ },
+ "hud_psnr_raw": {
+  "mean": 17.834842644631863,
+  "sem": 0.016554291485344614,
+  "n": 256
+ },
+ "hud_vae_psnr": {
+  "mean": 18.03260051459074,
+  "sem": 0.009960664690701834,
+  "n": 256
+ },
+ "persist_psnr_raw": {
+  "mean": 16.95090366154909,
+  "sem": 0.14626811610859944,
+  "n": 256
+ },
+ "persist_lpips_raw": {
+  "mean": 0.34878069658589084,
+  "sem": 0.007724336757170379,
+  "n": 256
+ },
+ "persist_hud_psnr_raw": {
+  "mean": 72.00366550683975,
+  "sem": 2.1281476901036718,
+  "n": 256
+ },
+ "per_map": {
+  "7": {
+   "psnr_dec": 16.70741357654333,
+   "lpips_dec": 0.40990785002941266
+  }
+ },
+ "per_tics_since_decision": {
+  "0": {
+   "psnr_dec": {
+    "mean": 16.545100110949893,
+    "sem": 0.15598144509565304,
+    "n": 66
+   },
+   "lpips_dec": {
+    "mean": 0.4229256312052409,
+    "sem": 0.01043536622785356,
+    "n": 66
+   },
+   "psnr_raw": {
+    "mean": 15.981464154792555,
+    "sem": 0.1389942500837245,
+    "n": 66
+   },
+   "persist_psnr_raw": {
+    "mean": 16.739877830852162,
+    "sem": 0.2637454766077904,
+    "n": 66
+   },
+   "windows": 66
+  },
+  "1": {
+   "psnr_dec": {
+    "mean": 16.577129895870502,
+    "sem": 0.24729730072857076,
+    "n": 52
+   },
+   "lpips_dec": {
+    "mean": 0.40211380559664506,
+    "sem": 0.009853132772510258,
+    "n": 52
+   },
+   "psnr_raw": {
+    "mean": 15.963048201340895,
+    "sem": 0.2195880408874049,
+    "n": 52
+   },
+   "persist_psnr_raw": {
+    "mean": 16.37944406729478,
+    "sem": 0.29112574461836455,
+    "n": 52
+   },
+   "windows": 52
+  },
+  "2": {
+   "psnr_dec": {
+    "mean": 16.727029669774723,
+    "sem": 0.16908145315189757,
+    "n": 73
+   },
+   "lpips_dec": {
+    "mean": 0.40858674335153133,
+    "sem": 0.009227166172471097,
+    "n": 73
+   },
+   "psnr_raw": {
+    "mean": 16.124042706946803,
+    "sem": 0.14988523344133126,
+    "n": 73
+   },
+   "persist_psnr_raw": {
+    "mean": 17.261852982926044,
+    "sem": 0.22797516787424468,
+    "n": 73
+   },
+   "windows": 73
+  },
+  "3": {
+   "psnr_dec": {
+    "mean": 16.970831096172333,
+    "sem": 0.2679546697864765,
+    "n": 64
+   },
+   "lpips_dec": {
+    "mean": 0.40479981037788093,
+    "sem": 0.010959874684130583,
+    "n": 64
+   },
+   "psnr_raw": {
+    "mean": 16.307152822613716,
+    "sem": 0.23700997420923878,
+    "n": 64
+   },
+   "persist_psnr_raw": {
+    "mean": 17.216454073786736,
+    "sem": 0.37040191854787236,
+    "n": 64
+   },
+   "windows": 64
+  },
+  "4": {
+   "psnr_dec": {
+    "mean": 15.904157638549805,
+    "sem": NaN,
+    "n": 1
+   },
+   "lpips_dec": {
+    "mean": 0.37937992811203003,
+    "sem": NaN,
+    "n": 1
+   },
+   "psnr_raw": {
+    "mean": 15.61179256439209,
+    "sem": NaN,
+    "n": 1
+   },
+   "persist_psnr_raw": {
+    "mean": 20.899980545043945,
+    "sem": NaN,
+    "n": 1
+   },
+   "windows": 1
+  }
+ },
+ "sampling_frames_per_s": 1.9755342020387432,
+ "config": {
+  "ckpt": "/sata2/data/rnagabhi/doom/results_spiderman/040-unet-nexttic/snap_0200000.pt",
+  "backbone": "unet",
+  "latent_channels": 4,
+  "use_ema": true,
+  "objective": "auto",
+  "context_frames": 32,
+  "num_actions": 29,
+  "noise_buckets": 10,
+  "infer_noise": 0.0,
+  "train_noise_max": 0.7,
+  "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/arenas_678",
+  "parquet_dir": "/sata2/data/rnagabhi/doom/raw_arnold_dense/arenas_678",
+  "stride": 4,
+  "tic_stride": 1,
+  "action_history": null,
+  "horizon_tics": 4,
+  "split": "/sata2/data/rnagabhi/doom/repo_distance/results/distance_study/splits/split_arenas_678_map07.json",
+  "subset": "val",
+  "num_windows": 256,
+  "batch_size": 16,
+  "num_workers": 0,
+  "steps": 10,
+  "timestep_spacing": "linear",
+  "eta": 0.0,
+  "lpips_net": "alex",
+  "vae_path": "",
+  "vae_subfolder": "",
+  "latent_scale": 0.18215,
+  "latent_shift": null,
+  "sd_path": "CompVis/stable-diffusion-v1-4",
+  "pixart_path": "PixArt-alpha/PixArt-XL-2-512x512",
+  "unidiffuser_path": "thu-ml/unidiffuser-v1",
+  "sd35_path": "stabilityai/stable-diffusion-3.5-medium",
+  "hf_cache": "/sata2/data/rnagabhi/doom/hf/hub",
+  "save_images": 3,
+  "seed": 0,
+  "out_dir": "/sata2/data/rnagabhi/doom/results_spiderman/distance_study/040-unet-nexttic/snap_0200000_ema_ddim10/arenas_678_map07_h4",
+  "wandb_run": "",
+  "wandb_project": "doomdit-nexttic",
+  "wandb_entity": null,
+  "wandb_step": null,
+  "step": 200000,
+  "resolved_latent_channels": 4,
+  "resolved_objective": "v",
+  "checkpoint_interface": {
+   "tic_stride": 1,
+   "action_history": 32,
+   "phase_buckets": 0,
+   "control_bits": 19
+  },
+  "game_time_tics": 4,
+  "window_validity": {
+   "episodes": 20,
+   "context_frames": 32,
+   "horizon": 4,
+   "candidate_windows": 95961,
+   "windows": 88609,
+   "excluded_windows": 7352,
+   "excluded_fraction": 0.07661445795687831,
+   "control_bits": 19
+  }
+ },
+ "decoder": {
+  "name": "stabilityai/sd-vae-ft-mse",
+  "path": "stabilityai/sd-vae-ft-mse",
+  "identity": "hub:stabilityai/sd-vae-ft-mse",
+  "provenance": "public",
+  "corpus": "none: published weights, never tuned on Doom frames",
+  "provenance_source": "registry:stabilityai/sd-vae-ft-mse",
+  "unseen_map_claim": "ok",
+  "unseen_map_problems": []
+ }
+}

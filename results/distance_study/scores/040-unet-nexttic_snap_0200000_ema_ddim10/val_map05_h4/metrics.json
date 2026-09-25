@@ -1,0 +1,274 @@
+{
+ "psnr_dec": {
+  "mean": 21.98532499372959,
+  "sem": 0.2240380480718444,
+  "n": 256
+ },
+ "lpips_dec": {
+  "mean": 0.2148575514438562,
+  "sem": 0.0058347684532496875,
+  "n": 256
+ },
+ "copy_psnr_dec": {
+  "mean": 18.76691723614931,
+  "sem": 0.21214447527676938,
+  "n": 256
+ },
+ "latent_mse": {
+  "mean": 0.2937279102479806,
+  "sem": 0.005577482318836102,
+  "n": 256
+ },
+ "hud_psnr_dec": {
+  "mean": 24.970341950654984,
+  "sem": 0.10522980677054507,
+  "n": 256
+ },
+ "psnr_raw": {
+  "mean": 19.98969877138734,
+  "sem": 0.163421561960931,
+  "n": 256
+ },
+ "lpips_raw": {
+  "mean": 0.25838456142810173,
+  "sem": 0.005619413965607254,
+  "n": 256
+ },
+ "copy_psnr_raw": {
+  "mean": 17.653686553239822,
+  "sem": 0.16918102437649069,
+  "n": 256
+ },
+ "vae_psnr": {
+  "mean": 23.32770736515522,
+  "sem": 0.05692206742219476,
+  "n": 256
+ },
+ "vae_lpips": {
+  "mean": 0.10471937348484062,
+  "sem": 0.0013151260770634058,
+  "n": 256
+ },
+ "hud_psnr_raw": {
+  "mean": 17.751295797526836,
+  "sem": 0.01760325420238476,
+  "n": 256
+ },
+ "hud_vae_psnr": {
+  "mean": 17.83312129229307,
+  "sem": 0.011581890155292268,
+  "n": 256
+ },
+ "persist_psnr_raw": {
+  "mean": 18.088513176888227,
+  "sem": 0.20582198613924457,
+  "n": 256
+ },
+ "persist_lpips_raw": {
+  "mean": 0.3659437330788933,
+  "sem": 0.007291040767757395,
+  "n": 256
+ },
+ "persist_hud_psnr_raw": {
+  "mean": 77.07001484930515,
+  "sem": 2.0622296004613845,
+  "n": 256
+ },
+ "per_map": {
+  "5": {
+   "psnr_dec": 21.98532499372959,
+   "lpips_dec": 0.2148575514438562
+  }
+ },
+ "per_tics_since_decision": {
+  "0": {
+   "psnr_dec": {
+    "mean": 22.248759867540045,
+    "sem": 0.47059247000804444,
+    "n": 67
+   },
+   "lpips_dec": {
+    "mean": 0.21189212943635768,
+    "sem": 0.011701698402404015,
+    "n": 67
+   },
+   "psnr_raw": {
+    "mean": 20.12432541064362,
+    "sem": 0.3370471543061606,
+    "n": 67
+   },
+   "persist_psnr_raw": {
+    "mean": 18.334468499938055,
+    "sem": 0.44023800415626485,
+    "n": 67
+   },
+   "windows": 67
+  },
+  "1": {
+   "psnr_dec": {
+    "mean": 22.182439789843205,
+    "sem": 0.3993358196445971,
+    "n": 67
+   },
+   "lpips_dec": {
+    "mean": 0.2072462817626213,
+    "sem": 0.010094326842068648,
+    "n": 67
+   },
+   "psnr_raw": {
+    "mean": 20.17788692018879,
+    "sem": 0.276434746804447,
+    "n": 67
+   },
+   "persist_psnr_raw": {
+    "mean": 17.909195259435855,
+    "sem": 0.394064936847182,
+    "n": 67
+   },
+   "windows": 67
+  },
+  "2": {
+   "psnr_dec": {
+    "mean": 21.851611721900202,
+    "sem": 0.3932106081384904,
+    "n": 62
+   },
+   "lpips_dec": {
+    "mean": 0.20527996867895126,
+    "sem": 0.011546543224695692,
+    "n": 62
+   },
+   "psnr_raw": {
+    "mean": 19.930065831830426,
+    "sem": 0.2922269925339428,
+    "n": 62
+   },
+   "persist_psnr_raw": {
+    "mean": 18.045084661053075,
+    "sem": 0.34259026552165084,
+    "n": 62
+   },
+   "windows": 62
+  },
+  "3": {
+   "psnr_dec": {
+    "mean": 21.521214469004487,
+    "sem": 0.5305209494223291,
+    "n": 59
+   },
+   "lpips_dec": {
+    "mean": 0.23562051115904825,
+    "sem": 0.013466047377715515,
+    "n": 59
+   },
+   "psnr_raw": {
+    "mean": 19.62927344693976,
+    "sem": 0.40366396022613577,
+    "n": 59
+   },
+   "persist_psnr_raw": {
+    "mean": 17.89985100697663,
+    "sem": 0.44637339779505475,
+    "n": 59
+   },
+   "windows": 59
+  },
+  "4": {
+   "psnr_dec": {
+    "mean": 26.801240921020508,
+    "sem": NaN,
+    "n": 1
+   },
+   "lpips_dec": {
+    "mean": 0.29229140281677246,
+    "sem": NaN,
+    "n": 1
+   },
+   "psnr_raw": {
+    "mean": 23.323444366455078,
+    "sem": NaN,
+    "n": 1
+   },
+   "persist_psnr_raw": {
+    "mean": 27.44744300842285,
+    "sem": NaN,
+    "n": 1
+   },
+   "windows": 1
+  }
+ },
+ "sampling_frames_per_s": 2.006287764006848,
+ "config": {
+  "ckpt": "/sata2/data/rnagabhi/doom/results_spiderman/040-unet-nexttic/snap_0200000.pt",
+  "backbone": "unet",
+  "latent_channels": 4,
+  "use_ema": true,
+  "objective": "auto",
+  "context_frames": 32,
+  "num_actions": 29,
+  "noise_buckets": 10,
+  "infer_noise": 0.0,
+  "train_noise_max": 0.7,
+  "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/val",
+  "parquet_dir": "/sata2/data/rnagabhi/doom/raw_arnold_dense/arenas",
+  "stride": 4,
+  "tic_stride": 1,
+  "action_history": null,
+  "horizon_tics": 4,
+  "split": "/sata2/data/rnagabhi/doom/repo_distance/results/distance_study/splits/split_val_map05.json",
+  "subset": "val",
+  "num_windows": 256,
+  "batch_size": 16,
+  "num_workers": 0,
+  "steps": 10,
+  "timestep_spacing": "linear",
+  "eta": 0.0,
+  "lpips_net": "alex",
+  "vae_path": "",
+  "vae_subfolder": "",
+  "latent_scale": 0.18215,
+  "latent_shift": null,
+  "sd_path": "CompVis/stable-diffusion-v1-4",
+  "pixart_path": "PixArt-alpha/PixArt-XL-2-512x512",
+  "unidiffuser_path": "thu-ml/unidiffuser-v1",
+  "sd35_path": "stabilityai/stable-diffusion-3.5-medium",
+  "hf_cache": "/sata2/data/rnagabhi/doom/hf/hub",
+  "save_images": 3,
+  "seed": 0,
+  "out_dir": "/sata2/data/rnagabhi/doom/results_spiderman/distance_study/040-unet-nexttic/snap_0200000_ema_ddim10/val_map05_h4",
+  "wandb_run": "",
+  "wandb_project": "doomdit-nexttic",
+  "wandb_entity": null,
+  "wandb_step": null,
+  "step": 200000,
+  "resolved_latent_channels": 4,
+  "resolved_objective": "v",
+  "checkpoint_interface": {
+   "tic_stride": 1,
+   "action_history": 32,
+   "phase_buckets": 0,
+   "control_bits": 19
+  },
+  "game_time_tics": 4,
+  "window_validity": {
+   "episodes": 25,
+   "context_frames": 32,
+   "horizon": 4,
+   "candidate_windows": 123186,
+   "windows": 116879,
+   "excluded_windows": 6307,
+   "excluded_fraction": 0.051198999886350724,
+   "control_bits": 19
+  }
+ },
+ "decoder": {
+  "name": "stabilityai/sd-vae-ft-mse",
+  "path": "stabilityai/sd-vae-ft-mse",
+  "identity": "hub:stabilityai/sd-vae-ft-mse",
+  "provenance": "public",
+  "corpus": "none: published weights, never tuned on Doom frames",
+  "provenance_source": "registry:stabilityai/sd-vae-ft-mse",
+  "unseen_map_claim": "ok",
+  "unseen_map_problems": []
+ }
+}

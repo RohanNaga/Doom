@@ -1,0 +1,274 @@
+{
+ "psnr_dec": {
+  "mean": 19.445519972592592,
+  "sem": 0.15256172320137823,
+  "n": 256
+ },
+ "lpips_dec": {
+  "mean": 0.4007505248882808,
+  "sem": 0.0047432123183007505,
+  "n": 256
+ },
+ "copy_psnr_dec": {
+  "mean": 19.50519973039627,
+  "sem": 0.1913363101870092,
+  "n": 256
+ },
+ "latent_mse": {
+  "mean": 0.33357290748972446,
+  "sem": 0.004562457880138299,
+  "n": 256
+ },
+ "hud_psnr_dec": {
+  "mean": 24.51182097941637,
+  "sem": 0.08010481924963815,
+  "n": 256
+ },
+ "psnr_raw": {
+  "mean": 18.29654138535261,
+  "sem": 0.12879031759492757,
+  "n": 256
+ },
+ "lpips_raw": {
+  "mean": 0.43434640049235895,
+  "sem": 0.0045356391240901055,
+  "n": 256
+ },
+ "copy_psnr_raw": {
+  "mean": 18.26237143576145,
+  "sem": 0.1474590431639392,
+  "n": 256
+ },
+ "vae_psnr": {
+  "mean": 22.975207671523094,
+  "sem": 0.07014894418268076,
+  "n": 256
+ },
+ "vae_lpips": {
+  "mean": 0.10172489017713815,
+  "sem": 0.0010117907637035906,
+  "n": 256
+ },
+ "hud_psnr_raw": {
+  "mean": 17.891179852187634,
+  "sem": 0.014241209108188848,
+  "n": 256
+ },
+ "hud_vae_psnr": {
+  "mean": 18.09408613294363,
+  "sem": 0.01142326434140723,
+  "n": 256
+ },
+ "persist_psnr_raw": {
+  "mean": 18.71787579730153,
+  "sem": 0.1950017055198643,
+  "n": 256
+ },
+ "persist_lpips_raw": {
+  "mean": 0.32566084573045373,
+  "sem": 0.007234926501576992,
+  "n": 256
+ },
+ "persist_hud_psnr_raw": {
+  "mean": 79.64609853178263,
+  "sem": 1.9680114017262063,
+  "n": 256
+ },
+ "per_map": {
+  "6": {
+   "psnr_dec": 19.445519972592592,
+   "lpips_dec": 0.4007505248882808
+  }
+ },
+ "per_tics_since_decision": {
+  "0": {
+   "psnr_dec": {
+    "mean": 19.366738497200657,
+    "sem": 0.2826124102075356,
+    "n": 59
+   },
+   "lpips_dec": {
+    "mean": 0.4061810477810391,
+    "sem": 0.00947121631455399,
+    "n": 59
+   },
+   "psnr_raw": {
+    "mean": 18.20751830278817,
+    "sem": 0.23673496399023364,
+    "n": 59
+   },
+   "persist_psnr_raw": {
+    "mean": 18.522157911526953,
+    "sem": 0.33836097874070914,
+    "n": 59
+   },
+   "windows": 59
+  },
+  "1": {
+   "psnr_dec": {
+    "mean": 20.060832738876343,
+    "sem": 0.28946319128954484,
+    "n": 64
+   },
+   "lpips_dec": {
+    "mean": 0.40194292669184506,
+    "sem": 0.00843455044830361,
+    "n": 64
+   },
+   "psnr_raw": {
+    "mean": 18.854412317276,
+    "sem": 0.2428601152109761,
+    "n": 64
+   },
+   "persist_psnr_raw": {
+    "mean": 19.269120052456856,
+    "sem": 0.3747444892019918,
+    "n": 64
+   },
+   "windows": 64
+  },
+  "2": {
+   "psnr_dec": {
+    "mean": 19.137752017974854,
+    "sem": 0.3724406591070258,
+    "n": 50
+   },
+   "lpips_dec": {
+    "mean": 0.398937067091465,
+    "sem": 0.012391132437922522,
+    "n": 50
+   },
+   "psnr_raw": {
+    "mean": 18.02319444656372,
+    "sem": 0.31732475540252947,
+    "n": 50
+   },
+   "persist_psnr_raw": {
+    "mean": 18.1879944229126,
+    "sem": 0.4719547813473047,
+    "n": 50
+   },
+   "windows": 50
+  },
+  "3": {
+   "psnr_dec": {
+    "mean": 19.206269101398746,
+    "sem": 0.283623746471814,
+    "n": 82
+   },
+   "lpips_dec": {
+    "mean": 0.396551506911836,
+    "sem": 0.008622217844767186,
+    "n": 82
+   },
+   "psnr_raw": {
+    "mean": 18.086761067553265,
+    "sem": 0.23874734818634089,
+    "n": 82
+   },
+   "persist_psnr_raw": {
+    "mean": 18.74453029399965,
+    "sem": 0.37668751808589973,
+    "n": 82
+   },
+   "windows": 82
+  },
+  "4": {
+   "psnr_dec": {
+    "mean": 19.720579147338867,
+    "sem": NaN,
+    "n": 1
+   },
+   "lpips_dec": {
+    "mean": 0.4390283226966858,
+    "sem": NaN,
+    "n": 1
+   },
+   "psnr_raw": {
+    "mean": 18.714496612548828,
+    "sem": NaN,
+    "n": 1
+   },
+   "persist_psnr_raw": {
+    "mean": 19.29399871826172,
+    "sem": NaN,
+    "n": 1
+   },
+   "windows": 1
+  }
+ },
+ "sampling_frames_per_s": 1.9669385475467815,
+ "config": {
+  "ckpt": "/sata2/data/rnagabhi/doom/results_spiderman/040-unet-nexttic/snap_0200000.pt",
+  "backbone": "unet",
+  "latent_channels": 4,
+  "use_ema": true,
+  "objective": "auto",
+  "context_frames": 32,
+  "num_actions": 29,
+  "noise_buckets": 10,
+  "infer_noise": 0.0,
+  "train_noise_max": 0.7,
+  "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/arenas_678",
+  "parquet_dir": "/sata2/data/rnagabhi/doom/raw_arnold_dense/arenas_678",
+  "stride": 4,
+  "tic_stride": 1,
+  "action_history": null,
+  "horizon_tics": 4,
+  "split": "/sata2/data/rnagabhi/doom/repo_distance/results/distance_study/splits/split_arenas_678_map06.json",
+  "subset": "val",
+  "num_windows": 256,
+  "batch_size": 16,
+  "num_workers": 0,
+  "steps": 10,
+  "timestep_spacing": "linear",
+  "eta": 0.0,
+  "lpips_net": "alex",
+  "vae_path": "",
+  "vae_subfolder": "",
+  "latent_scale": 0.18215,
+  "latent_shift": null,
+  "sd_path": "CompVis/stable-diffusion-v1-4",
+  "pixart_path": "PixArt-alpha/PixArt-XL-2-512x512",
+  "unidiffuser_path": "thu-ml/unidiffuser-v1",
+  "sd35_path": "stabilityai/stable-diffusion-3.5-medium",
+  "hf_cache": "/sata2/data/rnagabhi/doom/hf/hub",
+  "save_images": 3,
+  "seed": 0,
+  "out_dir": "/sata2/data/rnagabhi/doom/results_spiderman/distance_study/040-unet-nexttic/snap_0200000_ema_ddim10/arenas_678_map06_h4",
+  "wandb_run": "",
+  "wandb_project": "doomdit-nexttic",
+  "wandb_entity": null,
+  "wandb_step": null,
+  "step": 200000,
+  "resolved_latent_channels": 4,
+  "resolved_objective": "v",
+  "checkpoint_interface": {
+   "tic_stride": 1,
+   "action_history": 32,
+   "phase_buckets": 0,
+   "control_bits": 19
+  },
+  "game_time_tics": 4,
+  "window_validity": {
+   "episodes": 20,
+   "context_frames": 32,
+   "horizon": 4,
+   "candidate_windows": 98480,
+   "windows": 93370,
+   "excluded_windows": 5110,
+   "excluded_fraction": 0.05188870836718115,
+   "control_bits": 19
+  }
+ },
+ "decoder": {
+  "name": "stabilityai/sd-vae-ft-mse",
+  "path": "stabilityai/sd-vae-ft-mse",
+  "identity": "hub:stabilityai/sd-vae-ft-mse",
+  "provenance": "public",
+  "corpus": "none: published weights, never tuned on Doom frames",
+  "provenance_source": "registry:stabilityai/sd-vae-ft-mse",
+  "unseen_map_claim": "ok",
+  "unseen_map_problems": []
+ }
+}
