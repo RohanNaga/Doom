@@ -1,0 +1,31 @@
+{
+ "val": [
+  0,
+  2,
+  4,
+  6,
+  8,
+  10,
+  12,
+  14,
+  16,
+  18
+ ],
+ "meta": {
+  "corpus": "unseen_map16",
+  "set": "unseen",
+  "map": 16,
+  "cluster": "arena",
+  "role": "primary",
+  "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_eval_pertic/unseen",
+  "published_split": null,
+  "num_episodes": 10,
+  "subset_key": "val",
+  "num_windows": 256,
+  "windows_h1": 49026,
+  "windows_h4": 48864,
+  "short": false,
+  "limit": null,
+  "note": "one map of one evaluation corpus for the distance study; eval_tf.py scores it with --subset val --num-windows 256"
+ }
+}

@@ -1,0 +1,41 @@
+{
+ "val": [
+  62,
+  65,
+  68,
+  71,
+  74,
+  77,
+  80,
+  83,
+  86,
+  89,
+  92,
+  95,
+  98,
+  101,
+  104,
+  107,
+  110,
+  113,
+  116,
+  119
+ ],
+ "meta": {
+  "corpus": "arenas_678_map08",
+  "set": "arenas_678",
+  "map": 8,
+  "cluster": "arena",
+  "role": "primary",
+  "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/arenas_678",
+  "published_split": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/split_arenas_678.json",
+  "num_episodes": 20,
+  "subset_key": "val",
+  "num_windows": 256,
+  "windows_h1": 95567,
+  "windows_h4": 95138,
+  "short": false,
+  "limit": null,
+  "note": "one map of one evaluation corpus for the distance study; eval_tf.py scores it with --subset val --num-windows 256"
+ }
+}
