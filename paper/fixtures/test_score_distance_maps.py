@@ -232,6 +232,19 @@ def test_it_scores_every_map_then_skips_what_is_complete(root, real):
     assert r.returncode == 0 and calls() == []                           # everything complete: nothing rerun
 
 
+def test_map_guard_runs_before_every_map_and_its_failure_fails_only_that_map(root, real):
+    go, calls, log = real
+    guard = root / "guard.sh"
+    guard.write_text("#!/bin/bash\necho \"GUARD $1 $2 $3\"\n[ \"$1_$2\" = val_03 ] && exit 7\nexit 0\n")
+    r = go(3, "unet", CKPT="/x/snap_0200000.pt", HORIZONS="1", MAP_GUARD=str(guard))
+    assert r.returncode != 0 and "SCORE_DISTANCE_MAP_FAILED val_map03_h1: MAP_GUARD" in r.stderr
+    scored = {os.path.basename(c["argv"][c["argv"].index("--out-dir") + 1]) for c in calls()}
+    assert "val_map03_h1" not in scored and len(scored) == len(MAPS) - 1
+    scorer_log = next((root / "logs").glob("distance_*.log")).read_text()
+    guard_lines = [ln for ln in scorer_log.splitlines() if ln.startswith("GUARD ")]
+    assert len(guard_lines) == len(MAPS) and "GUARD val 03 1" in guard_lines
+
+
 def test_a_score_made_under_another_key_is_refused_unless_rescored(root, real):
     go, calls, log = real
     assert go(3, "unet", CKPT="/x/snap_0200000.pt", MAPS="val:3", HORIZONS="1").returncode == 0

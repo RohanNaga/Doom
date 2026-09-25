@@ -3,8 +3,12 @@
 #
 #   usage: [CKPT=path] [RUN=name] [SPACE=sd1|sd35] [MAPS="val:2 unseen2"] [STEPS=10] [HORIZONS="1 4"] \
 #          [NUM_WINDOWS=256] [SEED=0] [SPLITS=dir] [OUT=dir] [RESCORE=1] [PY_UNET=..] [PY_SD35=..] [PY=..] \
-#          [RUN_REPO=$D/repo] [DRY=1] [DOOM_ROOT=..] \
+#          [RUN_REPO=$D/repo] [DRY=1] [DOOM_ROOT=..] [MAP_GUARD=script] \
 #          score_distance_maps.sh <gpu> <unet | sd35 | pixart>
+#
+# MAP_GUARD names a script run before every map (arguments: set, map, horizon) on a card shared with other
+# tenants: it returns when the map may start (for example when enough memory is free and no other read is
+# running); a non-zero exit fails that map, which the next invocation retries.
 #
 # Design: .claude/analyses/distance-study-design-2026-09-24.md, section 6 item 2. The map list is the
 # split files `distance_study.py splits` wrote (SPLITS, default $RUN_REPO/results/distance_study/splits,
@@ -50,6 +54,7 @@ NUM_WINDOWS=${NUM_WINDOWS:-256}
 SEED=${SEED:-0}
 RESCORE=${RESCORE:-0}
 MAPS=${MAPS:-}
+MAP_GUARD=${MAP_GUARD:-}
 CKPT=${CKPT:-}
 RUN_REPO=${RUN_REPO:-$D/repo}
 SPLITS=${SPLITS:-$RUN_REPO/results/distance_study/splits}
@@ -181,6 +186,9 @@ score() {   # score <set> <map NN> <split> <horizon>
   fi
   MISS=$(missing_episodes "$F" "$LAT") || { fail "${S}_map${M}_h$K: cannot read $F"; return 0; }
   if [ -n "$MISS" ]; then fail "${S}_map${M}_h$K: $LAT lacks episode(s) $MISS of $F"; return 0; fi
+  if [ -n "$MAP_GUARD" ]; then   # the shared card: wait here (free memory, other tenants' reads) before each map
+    bash "$MAP_GUARD" "$S" "$M" "$K" >> "$LOG" 2>&1 < /dev/null || { fail "${S}_map${M}_h$K: MAP_GUARD $MAP_GUARD exit $?"; return 0; }
+  fi
   mkdir -p "$DIR" && rm -f "$DIR/metrics.json" "$DIR/score_key.txt"
   echo "$(date -Iseconds) start ${S}_map${M}_h$K" >> "$LOG"
   "${CMD[@]}" > "$DIR/eval_tf.log" 2>&1 < /dev/null; E=$?
