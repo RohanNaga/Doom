@@ -134,6 +134,26 @@ def test_the_run_resumes_by_name_under_a_custom_step_axis(wb, tmp_path):
     assert ("define_metric", ("*",), {"step_metric": "step"}) in rest
 
 
+def test_every_wandb_subprocess_starts_on_the_callers_thread(wb, tmp_path, monkeypatch):
+    """The caller forks long-lived DataLoader workers while the logger thread opens the run, and a
+    subprocess the SDK starts on the logger thread inside that window waits forever for its pipes to
+    close (see `test_the_real_sdk_opens_the_run_while_the_caller_forks`). So `wandb.setup()` (W&B's
+    settings, which run `git`, and its service process) and `platform.platform()` (which runs
+    `uname -p` once per process) run on the caller's thread, and the run is opened with git off."""
+    import platform
+    import threading
+    here, probed = threading.current_thread().name, []
+    real = platform.platform
+    monkeypatch.setattr(platform, "platform", lambda *a, **k: probed.append(threading.current_thread().name)
+                        or real(*a, **k))
+    lg = wandb_log.RunLogger(enabled=True, name="r", results_dir=str(tmp_path))
+    assert wb.setups == [here], "wandb.setup() must run on the caller's thread"
+    assert probed and set(probed) == {here}, "the platform probe must run on the caller's thread"
+    assert lg.flush(5) and wb.setup_before_init == [True], "the service must exist before the run is opened"
+    (kw,) = inits(wb)
+    assert kw["settings"]["disable_git"] is True, "the SDK's own git calls would run on the logger thread"
+
+
 def test_rows_carry_their_step_and_never_pass_step_to_log(wb, tmp_path):
     """`run.log(step=...)` drops any row at a step below the last one; an evaluation read of an
     earlier checkpoint arrives after later training steps, so the step travels in the row."""
@@ -244,7 +264,7 @@ def test_any_other_evaluator_is_flattened_generically(wb, tmp_path):
 # a W&B failure never reaches the caller
 # ---------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("fail", ["init", "log", "finish"])
+@pytest.mark.parametrize("fail", ["setup", "init", "log", "finish"])
 def test_a_wandb_failure_disables_the_logger_and_is_reported_once(fail, tmp_path, monkeypatch, capsys):
     mod = stub_wandb(fail=fail)
     monkeypatch.setitem(sys.modules, "wandb", mod)
@@ -434,6 +454,139 @@ def test_an_init_that_completes_after_close_gave_up_never_holds_the_process(fail
     assert got["closed"] is False and got["thread_done"] is not hang, got
     if fail == "finish" or hang:
         assert got["released"] >= 1, "the late teardown must be detached"
+
+
+# ---------------------------------------------------------------------------------------
+# the real SDK, while the caller forks
+# ---------------------------------------------------------------------------------------
+
+REAL_SDK_PROBE = r'''
+import glob, json, os, sys, threading, time
+sys.path.insert(0, {repo!r})
+import wandb_log
+
+wandb_log.FINISH_TIMEOUT, wandb_log.CLOSE_MARGIN = 10.0, 5.0
+MAIN, PARENT = threading.get_ident(), os.getpid()
+spawns, fork_now, forked = [], threading.Event(), threading.Event()
+
+
+def audit(event, args):
+    # the race's worst case: whenever another thread starts a subprocess, this thread forks a worker
+    # inside that spawn window, before the spawn goes on
+    if event == "subprocess.Popen" and threading.get_ident() != MAIN:
+        spawns.append(" ".join(map(str, args[1]))[:120])
+        forked.clear()
+        fork_now.set()
+        forked.wait(10)
+
+
+def worker():
+    # a persistent DataLoader worker: a fork (no exec) that keeps every descriptor open at its fork
+    # and lives as long as the trainer
+    if os.fork() == 0:
+        while os.getppid() == PARENT:
+            time.sleep(0.2)
+        os._exit(0)
+
+
+def history(path):
+    # the rows in a W&B transaction log: 32 KiB blocks of records, each behind a 7-byte header
+    # (crc32, little-endian length, type: 1 full, 2 first, 3 middle, 4 last), after a 7-byte file header
+    from wandb.proto import wandb_internal_pb2 as pb
+    data, pos, buf, rows = open(path, "rb").read(), 7, b"", []
+    while pos + 7 <= len(data):
+        if 32768 - pos % 32768 < 7:
+            pos += 32768 - pos % 32768
+            continue
+        n, kind = int.from_bytes(data[pos + 4:pos + 6], "little"), data[pos + 6]
+        chunk, pos = data[pos + 7:pos + 7 + n], pos + 7 + n
+        buf = chunk if kind in (1, 2) else buf + chunk
+        if kind in (1, 4):
+            rec = pb.Record()
+            rec.ParseFromString(buf)
+            if rec.WhichOneof("record_type") == "history":
+                rows.append({{(i.key or "/".join(i.nested_key)): json.loads(i.value_json) for i in rec.history.item}})
+    return rows
+
+
+sys.addaudithook(audit)
+t0 = time.monotonic()
+lg = wandb_log.RunLogger(enabled=True, name="fork-race", project="doomdit-test", config={{"git": "abc"}},
+                         results_dir={out!r})
+opened = time.monotonic() - t0
+for _ in range(8):                  # the DataLoader starts its workers while the run is being opened
+    worker()
+lg.log_event({{"event": "train", "step": 100, "loss": 0.3125}})
+flushed = []
+waiter = threading.Thread(target=lambda: flushed.append(lg.flush(45)), daemon=True)
+waiter.start()
+while waiter.is_alive():
+    if fork_now.wait(0.01):
+        fork_now.clear()
+        worker()
+        forked.set()
+closed = lg.close()
+logs = glob.glob(os.path.join({out!r}, ".wandb", "wandb", "offline-run-*-fork-race", "run-fork-race.wandb"))
+print(json.dumps({{"constructor_s": opened, "flushed": bool(flushed and flushed[0]), "closed": closed,
+                  "failed": lg.failed, "spawns": spawns, "logs": logs,
+                  "rows": history(logs[0]) if logs else []}}), flush=True)
+# a normal exit from here: the SDK's exit-time teardown runs while the workers are still alive
+'''
+
+
+def real_wandb_installed():
+    """Whether this interpreter has the real SDK, found without importing it: its import patches
+    sys.stdout and sys.stderr for the whole test process."""
+    import importlib.machinery
+    return importlib.machinery.PathFinder.find_spec("wandb") is not None
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="the race needs os.fork")
+@pytest.mark.skipif(not real_wandb_installed(), reason="the real wandb SDK is not installed in this interpreter")
+def test_the_real_sdk_opens_the_run_while_the_caller_forks(tmp_path):
+    """Sep 24 2026, a live train_wm.py run: W&B's service started and accepted one connection, then
+    nothing; no run directory after 8 minutes, while training went on. The trainer forks persistent
+    DataLoader workers while the logger thread is still inside `wandb.init`, and every subprocess the
+    SDK starts there (`git` for its settings, `git` for the repo root and commit, `uname -p` for the
+    platform string, the service process itself) waits for EOF on a pipe to it. A worker forked inside
+    that window keeps the pipe's write end open for the whole run, so the EOF never comes.
+
+    Here the real SDK runs offline in a subprocess launched like the trainer (output appended to a
+    file), whose main thread forks eight persistent workers while the run opens and, as the worst
+    case of the race, one more inside every subprocess any other thread starts. The run directory
+    and the logged row must appear, the logger thread must start no subprocess at all, and the
+    process must exit, all within 60 s. Before the fix this hung in the first `git` call."""
+    import glob
+    import subprocess
+    import time
+    out = tmp_path / "run"
+    out.mkdir()
+    script = tmp_path / "probe.py"
+    script.write_text(REAL_SDK_PROBE.format(repo=REPO, out=str(out)))
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("WANDB_")}
+    env.update(WANDB_MODE="offline", HOME=str(home), XDG_CACHE_HOME=str(home / ".cache"),
+               WANDB_CONFIG_DIR=str(home / "config"), WANDB_CACHE_DIR=str(home / "cache"),
+               WANDB_DATA_DIR=str(home / "data"))
+    log = tmp_path / "probe.log"
+    t = time.monotonic()
+    with open(log, "ab") as f:          # the launcher's `>> log 2>&1`
+        try:
+            r = subprocess.run([sys.executable, str(script)], stdin=subprocess.DEVNULL, stdout=f,
+                               stderr=subprocess.STDOUT, env=env, cwd=str(tmp_path), timeout=150)
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"the probe was still running after 150 s:\n{log.read_text()[-3000:]}")
+    elapsed = time.monotonic() - t
+    text = log.read_text()
+    lines = [ln for ln in text.splitlines() if ln.startswith("{")]
+    assert r.returncode == 0 and lines, text[-3000:]
+    got = json.loads(lines[-1])
+    assert got["spawns"] == [], "the logger thread started a subprocess, which a fork can hang forever"
+    assert got["flushed"] and got["closed"] and not got["failed"], (got, text[-3000:])
+    assert got["logs"] and glob.glob(str(out / ".wandb" / "wandb" / "offline-run-*-fork-race")), "no run directory"
+    assert any(row.get("step") == 100 and row.get("train/loss") == 0.3125 for row in got["rows"]), got["rows"]
+    assert elapsed < 60, f"the run opened, logged and closed in {elapsed:.0f} s"
 
 
 def test_a_failed_log_is_still_finished_under_the_writer_lock(tmp_path, monkeypatch):

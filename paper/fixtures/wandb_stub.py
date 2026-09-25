@@ -6,13 +6,16 @@ imports it as it would import the real package.
 `fail` makes one call raise; `gate` makes calls wait on a `threading.Event` (a W&B that hangs until
 the test lets it go); `delay` makes every call of a method sleep. `mod.released` records whether the
 logger unregistered the SDK's exit-time teardown, which is reached as
-`wandb.sdk.wandb_setup._singleton._connection._cleanup` in SDK 0.30.
+`wandb.sdk.wandb_setup._singleton._connection._cleanup` in SDK 0.30. `mod.setups` holds the name of
+the thread each `wandb.setup()` ran on, and `mod.setup_before_init` whether setup had run when each
+`init` started.
 
-`exit_hook=True` also registers that teardown the way SDK 0.30 does, at the start of `init` and before
-anything can fail: at interpreter exit it waits (for `HANG` seconds) unless the run was finished or
-the teardown was unregistered. `exit_hook="late"` registers it, and only then creates the connection
-that unregisters it, once a gated `init` is let go: a teardown that appears after the logger has
-already given up. Use either only in a subprocess, never in the test process itself.
+`exit_hook=True` also registers that teardown the way SDK 0.30 does, when its service process starts:
+in `wandb.setup()`, and again at the start of `init` before anything can fail. At interpreter exit it
+waits (for `HANG` seconds) unless the run was finished or the teardown was unregistered.
+`exit_hook="late"` registers it, and only then creates the connection that unregisters it, once a
+gated `init` is let go: a teardown that appears after the logger has already given up. Use either
+only in a subprocess, never in the test process itself.
 """
 import atexit
 import threading
@@ -54,12 +57,14 @@ class FakeRun:
 
 
 def stub_wandb(fail=None, gate=None, delay=None, exit_hook=False):
-    """A `wandb` module that records calls. `fail` in {"init", "log", "finish"} makes that call raise;
+    """A `wandb` module that records calls. `fail` in {"setup", "init", "log", "finish"} makes that call raise;
     `gate` and `delay` map the same names to an Event to wait on and to seconds to sleep; `exit_hook`
     registers the SDK-shaped exit-time teardown (see the module docstring)."""
     mod = types.ModuleType("wandb")
     mod.calls = []
     mod.released = []
+    mod.setups = []
+    mod.setup_before_init = []
     mod.finished = False
     gate, delay = gate or {}, delay or {}
 
@@ -75,8 +80,16 @@ def stub_wandb(fail=None, gate=None, delay=None, exit_hook=False):
         atexit.register(teardown)
         mod.sdk.wandb_setup._singleton._connection = conn
 
+    def setup(settings=None):
+        mod.setups.append(threading.current_thread().name)
+        if fail == "setup":
+            raise RuntimeError("W&B's service did not start")
+        if exit_hook is True:
+            register()
+
     def init(**kw):
         mod.calls.append(("init", (), kw))
+        mod.setup_before_init.append(bool(mod.setups))
         if exit_hook is True:
             register()
         if "init" in gate:
@@ -93,6 +106,7 @@ def stub_wandb(fail=None, gate=None, delay=None, exit_hook=False):
         mod.released.append(threading.current_thread().name)
         atexit.unregister(teardown)
 
+    mod.setup = setup
     mod.init = init
     mod.Settings = lambda **kw: dict(kw)
     conn = types.SimpleNamespace(_cleanup=cleanup)
