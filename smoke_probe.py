@@ -164,8 +164,13 @@ def gradient_and_sensitivity(model, groups, batch, objective="v", t_value=500, s
             flipped = act.clone()
             flipped[:, -1] = 1 - flipped[:, -1]
             b = model(xt, t, flipped, ctx, bucket).float()
-        s = float((a - b).abs().max())
+        d = (a - b).abs()
+        s = float(d.max())
         rep["newest_control_sensitivity"] = s
+        # the max is a tail statistic (one element can carry it); the mean and the 99th percentile say
+        # whether the whole output moved or one element did
+        rep["newest_control_sensitivity_mean"] = float(d.mean())
+        rep["newest_control_sensitivity_p99"] = float(torch.quantile(d.flatten().float(), 0.99))
         if not math.isfinite(s):
             problems.append("the output under a flipped newest control is not finite")
         elif not s > 0:
