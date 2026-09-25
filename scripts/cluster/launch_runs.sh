@@ -2,8 +2,13 @@
 # Zero to a usable node, step 5 of 5: the two next-tic rows, each on its own card, in tmux.
 #
 #   usage: [DOOM_ROOT=..] [UNET_GPU=0] [SD35_GPU=1] [MB_UNET=32] [MB_SD35=32] [WORKERS=..] \
-#          [STEPS=400000] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [ONLY=unet|sd35] [DRY=1] \
-#          launch_runs.sh
+#          [STEPS=400000] [PY_UNET=..] [PY_SD35=..] [PY=..] [RUN_REPO=$D/repo] [ONLY=unet|sd35] \
+#          [RUN_NAME=<run> with ONLY] [DRY=1] launch_runs.sh
+#
+# The rows here are 040-unet-nexttic and 042-sd35-nexttic. The next three Spiderman rows,
+# 041-pixart-nexttic, 043-dit-nexttic and 044-unet-nexttic-reqaction, are not launched from here: each
+# gate run prints its own GATES_LAUNCH line, and that line is the launch (invocations in
+# scripts/cluster/gates.sh, the resulting launches in scripts/spiderman/launch_nexttic.sh).
 #
 # PY_UNET runs the U-Net row and PY_SD35 the SD 3.5 row, each falling back to PY and then to the
 # node's one env, $D/env/bin/python; they must be the interpreters gates.sh certified. RUN_REPO is

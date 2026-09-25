@@ -22,6 +22,27 @@
 # RUN_QUERY=1 prints `<run> <session>` and stops; gates.sh and launch_runs.sh name runs and sessions
 # from it.
 #
+# The next three rows on Spiderman (PixArt first) launch from the GATES_LAUNCH line their own gate
+# run prints (the invocations are in scripts/cluster/gates.sh), which resolve to:
+#
+#   cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#     RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 PY_UNET=$HOME/miniconda3/envs/doom/bin/python \
+#     MB=32 WORKERS=12 STEPS=200000 TRAIN_IDS=0:2000 VAL_IDS=6000:6100 ACTION_HISTORY=32 \
+#     EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 bash scripts/spiderman/launch_nexttic.sh 1 pixart
+#
+#   cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#     RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 PY_UNET=$HOME/miniconda3/envs/doom/bin/python \
+#     MB=32 WORKERS=12 STEPS=200000 TRAIN_IDS=0:2000 VAL_IDS=6000:6100 ACTION_HISTORY=32 \
+#     EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 bash scripts/spiderman/launch_nexttic.sh 1 dit
+#
+#   cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#     RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 RUN_NAME=044-unet-nexttic-reqaction \
+#     PY_UNET=$HOME/miniconda3/envs/doom/bin/python MB=32 WORKERS=12 STEPS=200000 TRAIN_IDS=0:2000 \
+#     VAL_IDS=6000:6100 ACTION_HISTORY=0 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+#     bash scripts/spiderman/launch_nexttic.sh 1 unet
+#
+# Paste the printed lines, not these: the printed ones are checked against the certificate.
+#
 # RUN_REPO is the checkout the run executes from (`cd $RUN_REPO`) and whose clean HEAD the certificate
 # must name; it defaults to $D/repo. A second checkout (e.g. $D/repo_launch, while an encoder still
 # runs from $D/repo) works only if gates.sh certified that same checkout, with the same RUN_REPO.
@@ -38,7 +59,8 @@
 # IS the global batch of 32 and there is no gradient accumulation. The launcher refuses MB * cards != 32
 # rather than quietly accumulating; ALLOW_ACCUM=1 overrides it and says so in the resume log. The SD 3.5
 # row measured 36.4 GB at micro-batch 32 with --grad-ckpt, so 32 is known to fit there; GRAD_CKPT=1 turns
-# checkpointing on for the U-Net, PixArt or DiT if a fit check says 32 does not fit without it.
+# checkpointing on for the U-Net, PixArt or DiT if a fit check says 32 does not fit without it. PixArt
+# measured 26.4 GB at micro-batch 32 without it on a Spiderman A6000 (Sep 14, the stride-4 row).
 #
 # FIT=<steps> runs `--fit-check <steps>` with these exact arguments instead of launching, and prints
 # updates/s and peak allocated and reserved memory. Run it before every multi-hour launch; that is the

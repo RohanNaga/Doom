@@ -24,10 +24,46 @@ Staggered this morning: prefix `VAES=sd15 SMOKE_BBS=unet` as soon as the 4-chann
 1. Sidecar audit vs raw: `python check_action_alignment.py --latents-dir <train dir> --audit-parquet-dir $D/raw_arnold_dense/arenas --audit-only --episodes 100 --audit-rows 100000 --canonical $D/latents_arnold_dense_pertic/canonical_controls.json --seed 0` (zero mismatches; exit 0).
 2. Latent alignment: `python check_latent_alignment.py --latents-dir <train dir> --parquet-dir $D/raw_arnold_dense/arenas --space <sd15|sd35> --contract-peer <val dir> --device cuda:<free gpu> ...` (added by review-fixes; per shard; unshifted must beat the -4/-1/+1/+4 controls; train and val must share the space's own contract: sd-vae-ft-mse, 0.18215, no shift, 4 channels, or SD 3.5's `vae`, 1.5305, 0.0609, 16 channels).
 3. Alignment gate on val: `python check_action_alignment.py --latents-dir <val dir> --episodes 100 --canonical ... --seed 0` (exit 0 = aligned at shift 0; nonzero blocks).
-4. Fit check: `FIT=20 bash scripts/spiderman/launch_nexttic.sh <gpu> <unet|sd35>` (peak memory, updates/s; MB=32, no accumulation; sd35 with `--grad-ckpt`).
+4. Fit check: `FIT=20 bash scripts/spiderman/launch_nexttic.sh <gpu> <unet|sd35|pixart|dit>` (peak memory, updates/s; MB=32, no accumulation; sd35 with `--grad-ckpt`; `RUN_NAME` and `ACTION_HISTORY` as the gate run sets them).
 5. Smoke: gates.sh gate 4, 300 steps through `launch_nexttic.sh` with GATE_RUN=1 into `$D/results_smoke/<backbone>` (must write a recovery checkpoint and a snapshot), then `eval_tf.py --tic-stride 1 --horizon-tics 1` readback on 64 val windows (live and EMA), then a 10-update `--resume` of the smoke run.
 6. Launch: paste the two `GATES_LAUNCH` lines gates.sh printed (each is `cd $RUN_REPO && DOOM_ROOT=.. RUN_REPO=.. PY_UNET|PY_SD35=.. MB=32 WORKERS=12 STEPS=400000 TRAIN_IDS=0:2000 VAL_IDS=6000:6100 [EXTRA=..] bash scripts/spiderman/launch_nexttic.sh <1|2> <unet|sd35>`). A bare `launch_nexttic.sh 1 unet` resolves a different command (default interpreter, `$D/repo`) and the certificate check refuses it. Record the commit hash, the commands and the gate outputs in `RESEARCH_CONTEXT.md`.
 7. Steward: opus-monitor with the review's first-day list (section 7.2 of `docs/REVIEW_2026-09-22.md`): val loss every 1k against the planning bands, grad norm and clip fraction, skips, control-MLP update ratios, updates/s, data wait, memory, disk; at 10k and 20k the 512-window val read (live and EMA from the same file, raw floor and reconstruction beside), the control-sensitivity probe and the directional check; stop rules as in the audit.
+
+### Sep 24: PixArt, the DiT and the requested-action U-Net
+
+Three more 4-channel rows with the 040 recipe, each behind its own gate run from a clean clone of main at `$D/repo_launch2` (the live rows keep `repo_launch` at `35258f3`). `LAUNCH_STEPS=200000`. PixArt launches next on GPU 1; run one gate, read its `GATES_GO`, launch, then the next:
+
+```
+cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+  RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 PIXART_GPU=1 MB_PIXART=32 \
+  PY_UNET=$HOME/miniconda3/envs/doom/bin/python PY_SD35=$HOME/wanenc/bin/python \
+  LAUNCH_STEPS=200000 WORKERS=12 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+  VAES=sd15 SMOKE_BBS=pixart bash scripts/cluster/gates.sh
+```
+
+```
+cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+  RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 DIT_GPU=1 MB_DIT=32 \
+  PY_UNET=$HOME/miniconda3/envs/doom/bin/python PY_SD35=$HOME/wanenc/bin/python \
+  LAUNCH_STEPS=200000 WORKERS=12 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+  VAES=sd15 SMOKE_BBS=dit bash scripts/cluster/gates.sh
+```
+
+```
+cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+  RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 UNET_GPU=1 MB_UNET=32 \
+  PY_UNET=$HOME/miniconda3/envs/doom/bin/python PY_SD35=$HOME/wanenc/bin/python \
+  LAUNCH_STEPS=200000 WORKERS=12 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+  VAES=sd15 SMOKE_BBS=unet RUN_NAME=044-unet-nexttic-reqaction ACTION_HISTORY=0 bash scripts/cluster/gates.sh
+```
+
+- `041-pixart-nexttic`: PixArt-alpha 512 from `PixArt-alpha/PixArt-XL-2-512x512`, `--action-inject token` (the injection every PixArt row trained with), 32 executed-control tokens, tmux `train-pixart-nexttic`. No gradient checkpointing needed at micro-batch 32: the stride-4 row measured 26.4 GB on a Spiderman A6000 (Sep 14) and trained at 32 without it; next-tic adds 31 cross-attention tokens. Gate 3 prints the new number.
+- `043-dit-nexttic`: DiT-XL/2 from `$D/weights/DiT-XL-2-256x256.pt` (the file the stride-4 DiT rows started from), 32 executed-control tokens, tmux `train-dit-nexttic`. `044-unet-nexttic-reqaction`: the 040 U-Net with one token for Arnold's requested action id (`ACTION_HISTORY=0`), tmux `train-unet-nexttic-reqaction`.
+- Each run revokes and writes only its own run's entry in `$D/GATES_CERT.json`. The live `040-unet-nexttic` and `042-sd35-nexttic` entries are keyed `unet` and `sd35` by the code that certified them; the new code never writes or revokes a key that is a backbone name, and never deletes the file while an entry is left.
+- All three name card 1 and each run fills its card: gate and launch one after the other. The card is not part of the certified command, so a later launch may name another free card as its first argument.
+- `GATES_LAUNCH pixart:`, `GATES_LAUNCH dit:` and `GATES_LAUNCH unet:` carry `ACTION_HISTORY` and, for 044, `RUN_NAME`; paste them as printed.
+- Before the DiT launch: its 32 control tokens are averaged into the adaLN vector (the DiT has no cross-attention), so it sees which controls occurred in the last 32 tics but not their order. `ACTION_HISTORY=0` in its gate run gives it the requested action id instead. A decision for Rohan.
+- `after_nexttic.sh` (the final evaluation) knows `unet`, `pixart` and `sd35` with their default run names, so it scores 041 but not 043 or 044; the in-training reads (`EVAL_EVERY`) cover all three.
 
 ## Mirrors
 - Latents to `RohanNaga/doom-dense-arnold-latents` (`sd15/arenas`, `sd35/...`) as each set completes (from Spiderman, `hf upload`).

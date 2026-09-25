@@ -520,3 +520,77 @@ def test_the_printed_certificate_and_launch_work_beside_the_live_entries(tmp_pat
     p = subprocess.run(["bash", GATES], capture_output=True, text=True, env=e, timeout=120)
     assert p.returncode != 0 and "GATE_FAILED 0 pin" in p.stderr, p.stderr
     assert json.loads(cert.read_text())["backbones"] == legacy
+
+
+# ---------------------------------------------------------------------------------------
+# 4. the invocations the headers and the runbook give are the ones that certify the three rows
+# ---------------------------------------------------------------------------------------
+
+RUNBOOK = os.path.join(REPO, ".claude", "analyses", "launch-runbook-2026-09-23.md")
+# the Spiderman knobs every one of the three gate runs sets
+SEP24 = {"DOOM_ROOT": "/sata2/data/rnagabhi/doom", "RUN_REPO": "/sata2/data/rnagabhi/doom/repo_launch2",
+         "PY_UNET": "$HOME/miniconda3/envs/doom/bin/python", "PY_SD35": "$HOME/wanenc/bin/python",
+         "LAUNCH_STEPS": "200000", "WORKERS": "12", "EVAL_EVERY": "5000", "EVAL_DEVICE": "cuda:3", "VAES": "sd15"}
+# run: (backbone, action history, its card knob, its micro-batch knob), PixArt first as the next launch
+ROWS = {"041-pixart-nexttic": ("pixart", "32", "PIXART_GPU", "MB_PIXART"),
+        "043-dit-nexttic": ("dit", "32", "DIT_GPU", "MB_DIT"),
+        "044-unet-nexttic-reqaction": ("unet", "0", "UNET_GPU", "MB_UNET")}
+
+
+def _flat(text):
+    """A text's lines joined, comment marks and line continuations removed."""
+    return " ".join(ln.strip().lstrip("#").strip().rstrip("\\").strip() for ln in text.splitlines())
+
+
+def _gate_invocations(path):
+    """{NAME: VALUE} of every documented `cd .../repo_launch2 && ... bash scripts/cluster/gates.sh`, in order."""
+    import shlex
+    found = re.findall(r"cd /sata2/data/rnagabhi/doom/repo_launch2 && (.*?) bash scripts/cluster/gates\.sh",
+                       _flat(open(path).read()))
+    return [dict(t.split("=", 1) for t in shlex.split(inv)) for inv in found]
+
+
+def _dry_as_documented(tmp_path, env):
+    """The documented gate run under DRY against a throwaway root, printed as if on the documented one,
+    with $HOME standing for a fixed path."""
+    from test_nexttic_defects3 import _gates_dry
+    run = {k: v.replace("$HOME", "/HOME") for k, v in env.items()}
+    run["DOOM_ROOT"] = str(tmp_path)
+    return [ln.replace(str(tmp_path), env["DOOM_ROOT"]) for ln in _gates_dry(tmp_path, **run)]
+
+
+@pytest.mark.parametrize("path", [GATES, RUNBOOK], ids=os.path.basename)
+def test_the_documented_gate_runs_certify_the_three_new_rows(tmp_path, path):
+    from test_nexttic_defects3 import _operator
+    found = _gate_invocations(path)
+    assert len(found) == 3, found
+    got = []
+    for env in found:
+        assert {k: env.get(k) for k in SEP24} == SEP24, env
+        lines = _dry_as_documented(tmp_path, env)
+        run = next(ln for ln in lines if ln.startswith("DRY gates ")).split("runs=")[1].split()[0]
+        bb, history, card, mb = ROWS[run]
+        assert env["SMOKE_BBS"] == bb and env[card] == "1" and env[mb] == "32", env
+        cd, op, args = _operator(lines, bb)
+        assert args == ["1", bb] and op["ACTION_HISTORY"] == history and (op["STEPS"], op["MB"]) == ("200000", "32")
+        assert f"DRY launch check {bb}: resolves to the certified command" in "\n".join(lines)
+        got.append(run)
+    assert got == list(ROWS), "PixArt, the next launch, comes first"
+
+
+def test_the_launch_header_shows_the_launches_the_documented_gate_runs_print(tmp_path):
+    head = _flat(open(LAUNCH).read().split("\nset -u", 1)[0])
+    shown = re.findall(r"(cd /sata2/data/rnagabhi/doom/repo_launch2 && .*? "
+                       r"bash scripts/spiderman/launch_nexttic\.sh \d+ \w+)", head)
+    assert len(shown) == 3, shown
+    printed = []
+    for env in _gate_invocations(GATES):
+        bb = env["SMOKE_BBS"]
+        ln = next(ln for ln in _dry_as_documented(tmp_path, env) if ln.startswith(f"DRY launch {bb} "))
+        printed.append(ln[len(f"DRY launch {bb} "):].replace("/HOME/", "$HOME/"))
+    assert [" ".join(s.split()) for s in shown] == printed
+
+
+def test_launch_runs_points_the_three_new_rows_to_their_gate_runs():
+    head = open(LAUNCH_RUNS).read().split("\nset -u", 1)[0]
+    assert all(run in head for run in ROWS) and "GATES_LAUNCH" in head

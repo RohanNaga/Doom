@@ -19,11 +19,38 @@
 # certified command, and the printed launch repeats it.
 #
 #   on Spiderman (the launch may come from a second checkout while an encoder runs from $D/repo;
-#   REPO, the checkout these gates run from, must then be that same checkout):
-#     cd /sata2/data/rnagabhi/doom/repo_launch && DOOM_ROOT=/sata2/data/rnagabhi/doom \
-#       RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch UNET_GPU=1 SD35_GPU=2 LAUNCH_STEPS=400000 \
-#       MB_UNET=32 MB_SD35=32 WORKERS=12 PY_UNET=$HOME/miniconda3/envs/doom/bin/python \
-#       PY_SD35=$HOME/wanenc/bin/python bash scripts/cluster/gates.sh
+#   REPO, the checkout these gates run from, must then be that same checkout). The next three rows,
+#   one gate run each, 4-channel only (VAES=sd15), from a clean clone of main at repo_launch2, all
+#   with the 040 recipe:
+#
+#   041-pixart-nexttic, PixArt-alpha 512 (the next launch):
+#     cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#       RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 PIXART_GPU=1 MB_PIXART=32 \
+#       PY_UNET=$HOME/miniconda3/envs/doom/bin/python PY_SD35=$HOME/wanenc/bin/python \
+#       LAUNCH_STEPS=200000 WORKERS=12 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+#       VAES=sd15 SMOKE_BBS=pixart bash scripts/cluster/gates.sh
+#
+#   043-dit-nexttic, DiT-XL/2:
+#     cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#       RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 DIT_GPU=1 MB_DIT=32 \
+#       PY_UNET=$HOME/miniconda3/envs/doom/bin/python PY_SD35=$HOME/wanenc/bin/python \
+#       LAUNCH_STEPS=200000 WORKERS=12 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+#       VAES=sd15 SMOKE_BBS=dit bash scripts/cluster/gates.sh
+#
+#   044-unet-nexttic-reqaction, the 040 U-Net conditioned on the requested action id:
+#     cd /sata2/data/rnagabhi/doom/repo_launch2 && DOOM_ROOT=/sata2/data/rnagabhi/doom \
+#       RUN_REPO=/sata2/data/rnagabhi/doom/repo_launch2 UNET_GPU=1 MB_UNET=32 \
+#       PY_UNET=$HOME/miniconda3/envs/doom/bin/python PY_SD35=$HOME/wanenc/bin/python \
+#       LAUNCH_STEPS=200000 WORKERS=12 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3 \
+#       VAES=sd15 SMOKE_BBS=unet RUN_NAME=044-unet-nexttic-reqaction ACTION_HISTORY=0 bash scripts/cluster/gates.sh
+#
+#   All three name card 1 and each run fills its card, so gate them one after the other; the card is
+#   not part of the certified command, so a later launch may name another free card as its first
+#   argument. Each run revokes and writes only its own entry (041-pixart-nexttic, 043-dit-nexttic,
+#   044-unet-nexttic-reqaction); the live 040 and 042 entries, keyed `unet` and `sd35` by the code
+#   that certified them, are never touched. The 040 and 042 rows were gated on Sep 23 from
+#   repo_launch with UNET_GPU=1 SD35_GPU=2 LAUNCH_STEPS=400000 MB_UNET=32 MB_SD35=32 WORKERS=12 and the
+#   same interpreters.
 #
 # At GATES_GO the gates print, per certified backbone, the exact launch to paste (GATES_LAUNCH): `cd
 # $RUN_REPO &&` DOOM_ROOT, RUN_REPO, RUN_NAME when set, that backbone's PY_UNET or PY_SD35, MB,
