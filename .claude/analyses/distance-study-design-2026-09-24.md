@@ -1,6 +1,6 @@
 # Distance study: does quality fall with distance from the training footage? (design, 2026-09-24)
 
-Status: proposal. Prototype `distance_study.py`, tests `paper/fixtures/test_distance_study.py`. GPU scoring waits for Rohan's yes. Target sentence: "across N maps, gain over persistence falls with distance from the nearest training map (partial Spearman ρ, 95% CI)".
+Status: the study is go (RC 2026-09-24 22:20); Astra reviews this design on Sep 26. Prototype `distance_study.py`, tests `paper/fixtures/test_distance_study.py`. Maps: 30 distinct (training arenas 2 to 5 as held-out episodes; arenas 1 and 6 to 17; 13 curated campaign maps), about 370 episodes. Target sentence: "across N maps, gain over persistence falls with distance from the nearest training map (partial Spearman ρ, 95% CI)".
 
 ## 1. What transfers from the NVIDIA method
 
@@ -17,11 +17,11 @@ That method treats a driving test as a cloud of per-frame ego latents. It adds t
 ## 2. The distance
 
 **Primary.** `D(m) = min_k SW₂(μ_m, ν_k)` over training maps k ∈ {2, 3, 4, 5}.
-- *Cloud:* each map is 10 episodes × 250 target-eligible frames (at least 32 tics into a life), the population the scored windows come from. Maps with more episodes average five random 10-episode subsets. Sizes are equal because the finite-sample floor depends on n.
+- *Cloud:* each map is 4 episodes × 250 target-eligible frames (at least 32 tics into a life), the population the scored windows come from; 4 is the smallest per-map count (maps 1 and 9 to 15). Maps with more episodes average ten random 4-episode subsets. Sizes are equal because the finite-sample floor depends on n.
 - *Features:* SD 1.x latents with the bottom padding rows removed (`encode_parquet.py:161`), 5×5-pooled to 192 dimensions (`pool_latents`).
 - *Weights:* motion ||z_t − z_(t−1)|| at tic rate within each life (`latent_motion`). Weights are motion plus a closed-form floor giving the quietest half exactly 25 percent, per cloud (`motion_weights`).
 - *p = 2:* W₂² is the least mean squared displacement between clouds, in the units of the latent MSE the model trains on.
-- *Directions:* 1,000 from seed 0, shared by every distance (common random numbers). Measured: 1.6 s per distance on a laptop CPU, 2 percent spread across seeds.
+- *Directions:* 1,000 from seed 0, shared by every distance (common random numbers). Measured: about 2 s per distance on a laptop CPU, under 2 percent spread across seeds.
 - *No time coordinate:* windows are drawn uniformly and every episode lasts 150 s, so within-episode time is uniform on both sides. It would add only noise and a free price. The temporal structure the model uses, its 32-tic context, enters through the weights and space (c).
 
 **Secondaries (pre-declared):** pooled distance, uniform weights (`quiet_share=0.5`), best mixture of training maps.
@@ -30,10 +30,10 @@ That method treats a driving test as a cloud of per-frame ego latents. It adds t
 
 **Validation before scoring.**
 - (i) The four validation maps sit inside the floor band.
-- (ii) Disjoint episode subsets of a map agree within 10 percent.
+- (ii) Disjoint episode subsets of a map agree within 10 percent, and the seeded corpus's copies of maps 2 to 8 land where the dense corpus's do.
 - (iii) The two reference draws rank the maps with Spearman ≥ 0.95.
 - (iv) Arenas 6 to 8 (same WAD) sit nearer than the campaign maps.
-- (v) |Spearman(D, Kish n_eff)| < 0.4. Motion weights shrink n_eff and raise the floor (synthetic: 0.040 uniform against 0.059 weighted at n_eff 976); if the check fails, the uniform arm becomes primary.
+- (v) |Spearman(D, Kish n_eff)| < 0.4. Motion weights shrink n_eff and raise the floor (synthetic 1,000-frame clouds: 0.060 uniform against 0.084 weighted at n_eff 440); if the check fails, the uniform arm becomes primary.
 
 Then commit the distances with their code hash.
 
@@ -54,22 +54,22 @@ Raw PSNR misleads. In the first run, the U-Net's campaign-map PSNR (21.15) sat n
 - *Deaths:* arenas 6 to 8 average 7.1 to 11.7 lives per episode, against 3.2 to 8.6 on training arenas. Report lives and valid-window fraction per map.
 - *Decoder:* stock decoders only, so no decoder has seen an evaluation map. Add a decoder-free outcome (latent MSE ratio to copy-last), since the VAE ceiling varies with texture.
 - *Control regime:* weapon selects execute only in a recorder's first episode (k = 0). Measure k with `transitions.button_width_report` and stratify.
-- *Two clusters:* 13 campaign maps versus 9 arenas. A gap between clusters alone can inflate ρ, so report ρ within each.
+- *Two clusters:* 13 campaign maps (another WAD) versus 17 arenas. A gap between clusters alone can inflate ρ, so report ρ within each.
 
-**Map level (n ≈ 22, primary).**
+**Map level (n = 30, primary).**
 - *Correlation:* Spearman ρ(D, Δ), CI from a case bootstrap over maps (10,000 draws, episodes resampled within maps), permutation p-value.
 - *Partial on motion:* rank residuals on persistence PSNR.
-- *Leave-one-map-out:* the sign must hold in all 22 refits.
+- *Leave-one-map-out:* the sign must hold in all 30 refits.
 - *Distance error:* 200 episode redraws. If D's SD is under 10 percent of its spread across maps, attenuation is below 1 percent.
-- *Power:* |ρ| ≥ 0.43 at n = 22, and 0.56 within 13 maps.
+- *Power:* |ρ| ≥ 0.36 at n = 30, 0.49 within the 17 arenas and 0.56 within the 13 campaign maps.
 
-**Episode level (n ≈ 310, secondary).** Episodes nest in maps, so report a within-map ρ (map-demeaned ranks, permutation within maps) and a mixed model Δ_e ~ D_e + persistence_e + lives_e + (1 | map).
+**Episode level (n ≈ 370, secondary).** Episodes nest in maps, so report a within-map ρ (map-demeaned ranks, permutation within maps) and a mixed model Δ_e ~ D_e + persistence_e + lives_e + (1 | map).
 
 **One primary test:** SD 1.x space, U-Net 200k EMA, one-tic PSNR gain, partial on motion. Everything else is secondary.
 
 ## 4. Alternatives
 
-- **Fréchet distance:** assumes one Gaussian, but map frames are multimodal and a 768-dimensional covariance from 2,500 frames is biased. Robustness check only.
+- **Fréchet distance:** assumes one Gaussian, but map frames are multimodal and a 768-dimensional covariance from 1,000 correlated frames is badly conditioned. Robustness check only.
 - **MMD:** unbiased at small n, but depends on the kernel bandwidth and handles weights awkwardly.
 - **Nearest-training-frame distance:** the most direct "seen this before" measure, and a good secondary if memorisation drives failure. It ignores density.
 - **Classifier two-sample test:** AUC saturates near 1 for every other-WAD map, which erases the dose-response.
@@ -102,14 +102,14 @@ Never claimed: causation, or maps beyond these arenas and curated campaign maps.
    - `splits`: per-map split files.
    - `distances`: writes `distances_<space>.json` and `per_episode_<space>.csv`.
 
-   Run on Spiderman beside the roughly 10 GB of training latents, in one tmux session. Timing: 3 minutes for map distances, 30 for episodes, about 2 hours for the bootstrap.
+   Run on Spiderman beside the roughly 10 GB of training latents, in one tmux session. Timing: about 30 minutes for map distances (ten subsets per map), 40 for episodes, about 2 hours for the bootstrap.
 2. **`scripts/spiderman/score_distance_maps.sh`** (`DRY`, `DOOM_ROOT`). It runs `eval_tf.py` unmodified per map with `--num-windows 256 --use-ema --num-workers 0`, horizons 1 and 4, the paper's step count and the stock decoder. It is resumable.
-   - *No `--wandb-run`:* 22 per-map reads at one step would overwrite the headline `eval/ema_h1` series (`wandb_log.py:507-510`).
-   - *GPU time:* the U-Net needs 28,160 frames at about 20 frames/s (4.0 measured at 50 steps, so about 20 at 10), roughly 1 hour. SD 3.5 needs about 2. That is 3 hours on GPU 3, between steward reads.
+   - *No `--wandb-run`:* 30 per-map reads at one step would overwrite the headline `eval/ema_h1` series (`wandb_log.py:507-510`).
+   - *GPU time:* the U-Net needs 30 × 256 × 5 = 38,400 frames at about 20 frames/s (4.0 measured at 50 steps, so about 20 at 10), about 1.3 hours with model loads. SD 3.5 is estimated at twice that. The 3-hour GPU 3 budget covers the U-Net at both horizons and SD 3.5 at one tic; SD 3.5's four-tic reads follow when the card allows. Measure frames/s on the first map.
 3. **`paper/make_distance_figure.py`**: the figure, the stats JSON, and the appendix table.
 
 **Order, with a first figure by Sep 25 evening.**
-- Tonight: per-tic encode of unseen2 and arenas 16 to 17 (SD 1.x first), then the k and button reports.
+- Tonight (running): `enc-eval-maps` encodes all 210 seeded-corpus episodes per tic on GPU 3, 4-channel first (about 3 hours), then SD 3.5 (about 5). Then run the k and button reports.
 - Sep 25 morning: clouds, distances, validation, freeze.
 - Sep 25 afternoon: score the U-Net 200k EMA (about 1 hour).
 - Sep 25 evening: figure v1.
@@ -117,6 +117,7 @@ Never claimed: causation, or maps beyond these arenas and curated campaign maps.
 - Sep 27 to 28: space (c) if time allows, then the final figure.
 
 **For Rohan.**
-1. The go-ahead for GPU 3.
-2. The primary test.
-3. Whether to also encode the seeded corpus's 60 seen-map episodes (maps 1 to 15, 40 percent more encode). For the new rows, maps 1 and 9 to 15 are unseen, which adds 8 points between the clusters (n = 30, threshold 0.36) and replicates maps 2 to 8.
+1. Agree the single pre-declared primary test before any per-map score is read.
+2. A GPU 3 slot for the scoring pass after the encode drains.
+
+The seeded corpus's 60 seen-map episodes (maps 1 to 15, 4 each) are in tonight's encode. For the new rows, maps 1 and 9 to 15 are unseen, which adds 8 points in the arena cluster (hence n = 30); maps 2 to 8 serve as a cross-corpus replication, not as extra points.
