@@ -16,7 +16,7 @@ Logged at `step`: every `train` event's loss, lr, grad_norm, grad_norm_max, clip
 peak_mem_gb, nonfinite_loss, skipped_updates; every `val` event's val_loss and its four t-quartiles;
 each `steward_<step>/eval_tf_val_<live|ema>_h<H>/metrics.json` the steward writes (raw PSNR and
 LPIPS with the persistence floor beside them, and PSNR minus persistence), and every other JSON under
-`steward_<step>/` (probe, rollouts, sweeps) flattened generically. `--once` processes what is there and exits;
+`steward_<step>/` or the trainer's own `eval_<step>/` (probe, rollouts, sweeps) flattened generically. `--once` processes what is there and exits;
 otherwise it polls every `--interval` seconds until the run's `end` event has been logged.
 """
 import argparse
@@ -122,10 +122,14 @@ def steward_rows(run_dir, seen):
     steward artifact is plotted without a code change.
     """
     out = []
-    for path in sorted(glob.glob(os.path.join(run_dir, "steward_*", "**", "*.json"), recursive=True)):
+    paths = glob.glob(os.path.join(run_dir, "steward_*", "**", "*.json"), recursive=True)
+    paths += glob.glob(os.path.join(run_dir, "eval_*", "**", "*.json"), recursive=True)   # the trainer's own periodic reads
+    for path in sorted(paths):
         if path in seen:
             continue
         rel = os.path.relpath(path, run_dir).split(os.sep)
+        if rel[-1] in ("status.json", "launch.json"):
+            continue
         try:
             step = int(rel[0].split("_")[1])
         except (IndexError, ValueError):
