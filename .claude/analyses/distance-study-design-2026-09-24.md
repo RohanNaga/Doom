@@ -30,7 +30,7 @@ That method treats a driving test as a cloud of per-frame ego latents. It adds t
 
 **Validation before scoring.**
 - (i) The four validation maps sit inside the floor band.
-- (ii) Disjoint episode subsets of a map agree within 10 percent, and the seeded corpus's copies of maps 2 to 8 land where the dense corpus's do.
+- (ii) Disjoint episode subsets of a map agree within 10 percent, and the seeded corpus's copies of maps 2 to 8 land where the dense corpus's do. Maps whose distance lies inside the floor band are exempt: there the distance is draw noise and no relative tolerance can hold.
 - (iii) The two reference draws rank the maps with Spearman ≥ 0.95.
 - (iv) Arenas 6 to 8 (same WAD) sit nearer than the campaign maps.
 - (v) |Spearman(D, Kish n_eff)| < 0.4. Motion weights shrink n_eff and raise the floor (synthetic 1,000-frame clouds: 0.060 uniform against 0.084 weighted at n_eff 440); if the check fails, the uniform arm becomes primary.
