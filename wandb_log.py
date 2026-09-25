@@ -50,6 +50,9 @@ Rules the logger keeps:
     (settings, which run `git`, and the service process) and `platform.platform()` (`uname -p`, and
     `file` on macOS, cached for the process), and the run is opened with `disable_git=True`, which
     removes the SDK's other `git` calls. The run's commit is in its config (`git`), from the trainer.
+    A code path this does not cover (a successful online login was never exercised here) is caught
+    by an audit hook: a subprocess started on the logger thread fails at once with an OSError,
+    which the SDK's `git` and platform probes treat as "unknown", instead of starting and hanging.
   * **One writer per run id.** W&B's resume docs: "Unexpected results will occur if multiple
     processes use the same `id` concurrently." The trainer owns `<run>`; evaluators write to their
     own run `<run>-eval` in group `<run>`, which W&B overlays with the trainer's run in one panel.
@@ -81,6 +84,10 @@ LOCK_WAIT = 180.0         # seconds a second evaluator waits for `<run>-eval` be
 QUEUE_ROWS = 10000        # rows waiting for W&B; a train row every 100 steps makes this days of backlog
 FINISH_TIMEOUT = 30.0     # seconds W&B may spend finishing a run (its own `finish_timeout`)
 CLOSE_MARGIN = 10.0       # close() waits FINISH_TIMEOUT plus this, then gives the run up
+SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.spawn", "os.system"})
+_no_spawn_threads = set()       # idents of the logger threads that are running
+_audit_lock = threading.Lock()
+_audit_installed = False
 
 
 def _num(v):
@@ -219,6 +226,32 @@ def open_run(wandb, project, entity, run_id, name, group, config, wandb_dir, fin
     run.define_metric("step")
     run.define_metric("*", step_metric="step")
     return run
+
+
+class SpawnRefused(OSError):
+    """A subprocess refused on a logger thread (see "Starts no subprocess on its own thread")."""
+
+
+def _refuse_spawn(event, args):
+    """Audit hook: a subprocess started on a logger thread fails at once instead of starting."""
+    if event in SPAWN_EVENTS and threading.get_ident() in _no_spawn_threads:
+        raise SpawnRefused(f"{event} refused on the W&B logger thread: a fork elsewhere could hang it for good")
+
+
+def _forbid_spawns_on_this_thread():
+    """Register the calling thread with `_refuse_spawn`, installing the hook once per process.
+
+    An audit hook cannot be removed, so it stays for the process; it costs one set lookup per
+    audited event. A forked child starts with no logger threads (a new thread there could reuse a
+    registered ident).
+    """
+    global _audit_installed
+    with _audit_lock:
+        if not _audit_installed:
+            sys.addaudithook(_refuse_spawn)
+            os.register_at_fork(after_in_child=_no_spawn_threads.clear)
+            _audit_installed = True
+    _no_spawn_threads.add(threading.get_ident())
 
 
 def _release_exit_hook(wandb):
@@ -427,7 +460,14 @@ class RunLogger:
                 self._rows -= 1
             return kind, payload
 
-    def _work(self, project, entity, group, config, results_dir):
+    def _work(self, *args):
+        _forbid_spawns_on_this_thread()
+        try:
+            self._serve(*args)
+        finally:
+            _no_spawn_threads.discard(threading.get_ident())
+
+    def _serve(self, project, entity, group, config, results_dir):
         run = None
         try:
             wandb_dir = os.path.join(results_dir or ".", ".wandb")

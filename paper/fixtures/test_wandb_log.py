@@ -154,6 +154,32 @@ def test_every_wandb_subprocess_starts_on_the_callers_thread(wb, tmp_path, monke
     assert kw["settings"]["disable_git"] is True, "the SDK's own git calls would run on the logger thread"
 
 
+def test_a_subprocess_on_the_logger_thread_is_refused_and_other_threads_are_untouched(tmp_path, monkeypatch):
+    """The backstop for an SDK code path that still starts a subprocess on the logger thread (one
+    the real-SDK test does not reach, like a successful online login): the spawn fails at once with
+    an OSError, which the SDK's `git` and platform probes treat as "unknown", instead of starting and
+    then waiting on a pipe a forked worker may hold. Every other thread spawns as before."""
+    import subprocess
+    mod = stub_wandb()
+    real_init, outcome = mod.init, []
+
+    def init(**kw):
+        try:
+            subprocess.run([sys.executable, "-c", "pass"], capture_output=True, check=True)
+            outcome.append("started")
+        except OSError as exc:
+            outcome.append(exc)
+        return real_init(**kw)
+
+    mod.init = init
+    monkeypatch.setitem(sys.modules, "wandb", mod)
+    lg = wandb_log.RunLogger(enabled=True, name="r", results_dir=str(tmp_path))
+    lg.log_event(train_events(1)[0])
+    assert lg.close() and len(logged(mod)) == 1, "the run still opens and logs"
+    assert len(outcome) == 1 and isinstance(outcome[0], wandb_log.SpawnRefused), outcome
+    assert subprocess.run([sys.executable, "-c", "pass"]).returncode == 0, "the caller's thread still spawns"
+
+
 def test_rows_carry_their_step_and_never_pass_step_to_log(wb, tmp_path):
     """`run.log(step=...)` drops any row at a step below the last one; an evaluation read of an
     earlier checkpoint arrives after later training steps, so the step travels in the row."""
