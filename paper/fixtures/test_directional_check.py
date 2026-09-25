@@ -281,8 +281,10 @@ def test_the_raw_reference_reads_the_last_context_tic_and_the_target_tic(tmp_pat
 
 
 def test_the_summary_line_is_greppable():
-    line = dc.summary_line("040-unet-nexttic", 10000, {"correct_frac": 0.8125, "ref_frac": 0.96875})
-    assert line == "DIRECTIONAL_CHECK 040-unet-nexttic 10000 correct_frac=0.8125 ref_frac=0.9688"
+    summary = {"correct_frac": 0.8125, "ref_frac": 0.96875}
+    line = dc.summary_line("040-unet-nexttic", 10000, summary)
+    assert line == "DIRECTIONAL_CHECK 040-unet-nexttic 10000 correct_frac=0.8125 ref_frac=0.9688 weights=live"
+    assert dc.summary_line("040-unet-nexttic", 10000, summary, "ema").endswith(" weights=ema")
 
 
 # ---------------------------------------------------------------------------------------
@@ -350,7 +352,7 @@ def test_the_cli_writes_every_window_and_one_summary_line(tmp_path, tiny_pixart,
     assert "decoder" in rep and "per_direction" in rep["summary"]
     lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("DIRECTIONAL_CHECK")]
     assert len(lines) == 1
-    assert re.fullmatch(r"DIRECTIONAL_CHECK 040-unet-nexttic 10000 correct_frac=\S+ ref_frac=\S+", lines[0])
+    assert re.fullmatch(r"DIRECTIONAL_CHECK 040-unet-nexttic 10000 correct_frac=\S+ ref_frac=\S+ weights=ema", lines[0])
 
 
 def test_dead_controls_give_identical_predictions_under_the_same_noise(tmp_path, tiny_pixart):

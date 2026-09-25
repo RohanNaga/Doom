@@ -55,10 +55,9 @@ The h = 1 entry is the teacher-forced one-step ratio. A model that learned persi
 
 No W&B logging. The summary line a steward greps is
 
-    DIRECTIONAL_CHECK <run> <step> correct_frac=<x> ref_frac=<y>
+    DIRECTIONAL_CHECK <run> <step> correct_frac=<x> ref_frac=<y> weights=<live|ema>
 
-where <run> is `--run`, else the checkpoint's directory name. The line does not say live or EMA;
-`config.use_ema` in the JSON does, so name `--out` per weights.
+where <run> is `--run`, else the checkpoint's directory name; name `--out` per weights too.
 
 Spiderman, one free card each (check `nvidia-smi` first), 10k snapshot, live weights; add
 `--use-ema` and change `--out` for the EMA read. The 4-channel U-Net row, stock decoder:
@@ -371,10 +370,10 @@ def fmt(x):
     return "nan" if x is None else f"{x:.4f}"
 
 
-def summary_line(run, step, summary):
-    """The one line a steward greps."""
+def summary_line(run, step, summary, weights="live"):
+    """The one line a steward greps; `weights` says which weights (live or ema) it measured."""
     return (f"DIRECTIONAL_CHECK {run} {step} correct_frac={fmt(summary['correct_frac'])} "
-            f"ref_frac={fmt(summary['ref_frac'])}")
+            f"ref_frac={fmt(summary['ref_frac'])} weights={weights}")
 
 
 def model_namespace(args):
@@ -432,7 +431,7 @@ def main(args):
     with open(args.out, "w") as f:
         json.dump(out, f, indent=1, default=float)
     print(json.dumps({k: v for k, v in summary.items() if k != "per_direction"}, indent=1, default=float))
-    print(summary_line(run, step, summary), flush=True)
+    print(summary_line(run, step, summary, "ema" if args.use_ema else "live"), flush=True)
     return 0
 
 
