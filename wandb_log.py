@@ -21,7 +21,7 @@ Rules the logger keeps:
   * **A custom x axis.** Every row carries `step`, and `define_metric("*", step_metric="step")`
     plots every series against it. `run.log` is never given `step=`: W&B drops a row whose `step=`
     is below the last one, and an evaluation of an earlier checkpoint arrives after later steps.
-  * **Never raises into the caller.** Any W&B failure (import, init, log, finish) is reported once
+  * **Never raises into the caller.** Any W&B failure (import, setup, init, log, finish) is reported once
     on stderr and the logger switches itself off, so a W&B outage cannot stop a run. `log.jsonl`
     stays the record; the W&B run is a live view of it.
   * **Never blocks the caller.** `wandb.init`, `run.log` and `run.finish` all run on the logger's
@@ -31,11 +31,28 @@ Rules the logger keeps:
     is set, and `close()` tries `run.finish()` whatever failed before (a run left open keeps the
     SDK's exit-time teardown waiting), waiting at most `FINISH_TIMEOUT + CLOSE_MARGIN`. A run it
     could not finish (init or finish raised, or the wait ran out) is abandoned: the SDK's exit-time
-    teardown is unregistered, so the process can exit and release its GPU. An init still pending
-    when the run was abandoned registers that teardown later, so the logger thread unregisters it
-    again the moment init returns, and once more after any finish that did not succeed.
-    Only `import wandb` runs on the caller's thread (local work, before the timed loop): importing
-    on a thread while DataLoader workers fork could leave a module import lock held in the child.
+    teardown is unregistered, so the process can exit and release its GPU. The teardown is
+    registered when the service starts, normally in the constructor; should init start it instead
+    and return only after the run was abandoned, the logger thread unregisters it the moment init
+    returns, and once more after any finish that did not succeed.
+    The caller's thread does only local work, once, before the timed loop: `import wandb` (on a
+    thread, an import racing a DataLoader fork could leave a module import lock held in the child),
+    and starting the SDK's subprocesses (see "Starts no subprocess on its own thread"). None of it
+    touches the network; it took 0.4 s and 0.25 s on a laptop, and the service start is bounded by
+    the SDK's `x_service_wait` (30 s).
+  * **Starts no subprocess on its own thread.** The trainer forks its persistent DataLoader workers
+    while the logger thread is still inside `wandb.init`. Every subprocess the SDK starts waits for
+    EOF on a pipe to it (`git` and `uname -p` through `subprocess.run(capture_output=True)`, the
+    service process through `Popen`'s exec-status pipe), and a worker forked inside that window
+    keeps the pipe's write end open for the whole run, so the EOF never comes and `wandb.init`
+    never returns (a live run, Sep 24 2026: the service accepted one connection, then nothing). So
+    the constructor runs, on the caller's thread and before the caller forks, `wandb.setup()`
+    (settings, which run `git`, and the service process) and `platform.platform()` (`uname -p`, and
+    `file` on macOS, cached for the process), and the run is opened with `disable_git=True`, which
+    removes the SDK's other `git` calls. The run's commit is in its config (`git`), from the trainer.
+    A code path this does not cover (a successful online login was never exercised here) is caught
+    by an audit hook: a subprocess started on the logger thread fails at once with an OSError,
+    which the SDK's `git` and platform probes treat as "unknown", instead of starting and hanging.
   * **One writer per run id.** W&B's resume docs: "Unexpected results will occur if multiple
     processes use the same `id` concurrently." The trainer owns `<run>`; evaluators write to their
     own run `<run>-eval` in group `<run>`, which W&B overlays with the trainer's run in one panel.
@@ -46,6 +63,7 @@ Rules the logger keeps:
 import collections
 import fcntl
 import os
+import platform
 import re
 import sys
 import threading
@@ -66,6 +84,10 @@ LOCK_WAIT = 180.0         # seconds a second evaluator waits for `<run>-eval` be
 QUEUE_ROWS = 10000        # rows waiting for W&B; a train row every 100 steps makes this days of backlog
 FINISH_TIMEOUT = 30.0     # seconds W&B may spend finishing a run (its own `finish_timeout`)
 CLOSE_MARGIN = 10.0       # close() waits FINISH_TIMEOUT plus this, then gives the run up
+SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.spawn", "os.system"})
+_no_spawn_threads = set()       # idents of the logger threads that are running
+_audit_lock = threading.Lock()
+_audit_installed = False
 
 
 def _num(v):
@@ -176,10 +198,12 @@ def eval_run_names(run):
 
 
 def _settings(wandb, finish_timeout):
-    """No console capture (W&B must not wrap the trainer's stdout), no system sampling, and a
-    bounded finish: `finish_timeout` also bounds the SDK's own exit-time teardown."""
-    for kw in ({"console": "off", "_disable_stats": True, "finish_timeout": finish_timeout},
-               {"console": "off", "_disable_stats": True}):     # an SDK older than `finish_timeout`
+    """No console capture (W&B must not wrap the trainer's stdout), no system sampling, no `git`
+    subprocesses on the logger thread (see "Starts no subprocess on its own thread"), and a bounded
+    finish: `finish_timeout` also bounds the SDK's own exit-time teardown."""
+    base = {"console": "off", "_disable_stats": True, "disable_git": True}
+    for kw in ({**base, "finish_timeout": finish_timeout},
+               base):                                           # an SDK older than `finish_timeout`
         try:
             return wandb.Settings(**kw)
         except Exception:
@@ -202,6 +226,32 @@ def open_run(wandb, project, entity, run_id, name, group, config, wandb_dir, fin
     run.define_metric("step")
     run.define_metric("*", step_metric="step")
     return run
+
+
+class SpawnRefused(OSError):
+    """A subprocess refused on a logger thread (see "Starts no subprocess on its own thread")."""
+
+
+def _refuse_spawn(event, args):
+    """Audit hook: a subprocess started on a logger thread fails at once instead of starting."""
+    if event in SPAWN_EVENTS and threading.get_ident() in _no_spawn_threads:
+        raise SpawnRefused(f"{event} refused on the W&B logger thread: a fork elsewhere could hang it for good")
+
+
+def _forbid_spawns_on_this_thread():
+    """Register the calling thread with `_refuse_spawn`, installing the hook once per process.
+
+    An audit hook cannot be removed, so it stays for the process; it costs one set lookup per
+    audited event. A forked child starts with no logger threads (a new thread there could reuse a
+    registered ident).
+    """
+    global _audit_installed
+    with _audit_lock:
+        if not _audit_installed:
+            sys.addaudithook(_refuse_spawn)
+            os.register_at_fork(after_in_child=_no_spawn_threads.clear)
+            _audit_installed = True
+    _no_spawn_threads.add(threading.get_ident())
 
 
 def _release_exit_hook(wandb):
@@ -251,6 +301,14 @@ class RunLogger:
             import wandb          # on this thread, on purpose: see "Never blocks the caller"
         except Exception as exc:
             self._fail("importing wandb", exc)
+            return
+        try:
+            # every subprocess the SDK would otherwise start on the logger thread, started here,
+            # before the caller forks: see "Starts no subprocess on its own thread"
+            wandb.setup()
+            platform.platform(aliased=True)
+        except Exception as exc:
+            self._fail("starting W&B's local service", exc)
             return
         self._wandb = wandb
         self._thread = threading.Thread(target=self._work, name=f"wandb-{self.name}", daemon=True,
@@ -402,7 +460,14 @@ class RunLogger:
                 self._rows -= 1
             return kind, payload
 
-    def _work(self, project, entity, group, config, results_dir):
+    def _work(self, *args):
+        _forbid_spawns_on_this_thread()
+        try:
+            self._serve(*args)
+        finally:
+            _no_spawn_threads.discard(threading.get_ident())
+
+    def _serve(self, project, entity, group, config, results_dir):
         run = None
         try:
             wandb_dir = os.path.join(results_dir or ".", ".wandb")

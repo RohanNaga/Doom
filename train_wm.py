@@ -728,7 +728,9 @@ def main(args):
                "wandb_run": wandb_run}
         with open(os.path.join(args.results_dir, "config.json"), "w") as f:
             json.dump(cfg, f, indent=1)
-        # opened here, before the start event and the timed loop, so wandb.init's cost never lands in steps_per_s
+        # opened here, before the start event and the timed loop, so wandb.init's cost never lands in steps_per_s,
+        # and before the loader forks its workers, since the constructor starts W&B's subprocesses on this thread
+        # (wandb_log.py, "Starts no subprocess on its own thread")
         wb = RunLogger(enabled=wandb_run is not None, name=wandb_run, project=args.wandb_project,
                        entity=args.wandb_entity, config=cfg, results_dir=args.results_dir)
         if args.eval_every and not args.fit_check:
