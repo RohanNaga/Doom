@@ -253,7 +253,7 @@ Each instrument answers one question. Reading a number needs its instrument, its
 
 ## 4.1 Teacher-forced reads (h1, h4)
 
-`eval_tf.py --tic-stride 1` scores 512 windows from validation ids 6000:6100, drawn with seed 0 and identical at every step for every row. Sampling is 10-step DDIM with linear spacing, eta 0 and clean context; each space uses its stock decoder; targets are raw frames. Horizons are one tic (h1) and four tics (h4) past the last real frame; for h4 the model predicts directly four tics ahead from real context. Persistence on these windows is 21.566 dB / 0.203 LPIPS at h1 and 19.213 / 0.354 at h4, the same for every row. [RC 09-23 11:30]
+`eval_tf.py --tic-stride 1` scores 512 windows from validation ids 6000:6100, drawn with seed 0 and identical at every step for every row. Sampling is 10-step DDIM with linear spacing, eta 0 and clean context; each space uses its stock decoder; targets are raw frames. Horizons are one tic (h1) and four tics (h4) past the last real frame; for h4 the model starts from real context and rolls forward tic by tic, feeding its own three intermediate predictions back, so h4 is a four-step closed loop with the recorded controls. [`eval_tf.py:281–284`] Persistence on these windows is 21.566 dB / 0.203 LPIPS at h1 and 19.213 / 0.354 at h4, the same for every row. [RC 09-23 11:30]
 
 LPIPS is a learned perceptual distance (lower is better) that penalises blur and texture loss that PSNR tolerates, so every PSNR is reported with it. The metrics files carry an independent-window standard error (0.095 dB for a live h1 PSNR), which understates the uncertainty because the 512 windows share 100 episodes. No read yet has an episode-bootstrap interval. [`steward_5000/tf_live_h1/metrics.json`]
 
@@ -311,7 +311,7 @@ probe_v2 means (three seeds) swing by 30 times between reads: 0.16 / 0.18 / 0.18
 | SD 3.5 100k EMA / live | 0.844 / 0.836 | | | 0.94 / 0.96 |
 | SD 3.5 130k EMA / live | 0.844 / 0.867 | | | |
 
-Other SD 3.5 reads: EMA 0.828 at 85k, 0.836 at 90k, 95k, 105k and 115k, 0.828 at 120k, 0.852 at 125k; live 0.828 at 90k, 95k and 115k, 0.820 at 105k, 0.852 at 120k. [RC 09-25 02:10 to 21:00; RC 09-26 03:50, 06:20, 09:00, 11:30]
+Other SD 3.5 reads: EMA 0.813 and live 0.859 at 75k; EMA 0.828 at 85k, 0.836 at 90k, 95k, 105k and 115k, 0.828 at 120k, 0.852 at 125k; live 0.828 at 90k, 95k and 115k, 0.820 at 105k, 0.852 at 120k. [RC 09-25 02:10 to 21:00; RC 09-26 03:50, 06:20, 09:00, 11:30]
 
 Both rows turn the right way with about the true magnitude, and the swap reverses the motion; neither learned persistence. The orderings between rows and reads are not resolved. With 128 windows, one window moves `correct_frac` by 0.008; a binomial standard error at 0.83 is about 0.033, and about 0.047 for a difference of two runs. The whole SD 3.5 EMA range, 0.805 to 0.852, is under 1.5 such standard errors (derived). The check covers turning on seen-map validation windows only.
 
