@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crossing the Map Shift</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono&display=swap">
+<style>
+:root{--bg:#f7f5f0;--surface:#fffdf9;--ink:#1f2225;--ink-2:#5a6068;--line:#dcd7cc;--accent:#c2801a;--blue:#1f6f8b;--good:#2f8f5b;--bad:#b23a3a;--tint:#f1ede4}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#16181b;--surface:#1e2226;--ink:#e6e3dc;--ink-2:#9aa1a8;--line:#31373d;--accent:#e0a03a;--blue:#5fb3d0;--good:#4fbf82;--bad:#e06666;--tint:#24292e}}
+:root[data-theme="dark"]{--bg:#16181b;--surface:#1e2226;--ink:#e6e3dc;--ink-2:#9aa1a8;--line:#31373d;--accent:#e0a03a;--blue:#5fb3d0;--good:#4fbf82;--bad:#e06666;--tint:#24292e}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+main{max-width:960px;margin:0 auto;padding:28px 16px 60px}
+h1{font-family:"Source Serif 4",Georgia,serif;font-size:30px;font-weight:600;margin:0 0 4px;text-wrap:balance}
+h2{font-family:"Source Serif 4",Georgia,serif;font-size:21px;font-weight:600;margin:32px 0 8px}
+h3{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);margin:20px 0 6px}
+p{max-width:72ch} .lead{color:var(--ink-2);margin:0 0 16px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;margin:6px 0 10px} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;font-size:13.5px;vertical-align:top} th{color:var(--ink-2);font-weight:500} td.n,th.n{text-align:right}
+.wrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:6px 10px}
+.dec{border-left:3px solid var(--accent);background:var(--tint);padding:10px 14px;margin:10px 0;border-radius:0 6px 6px 0}
+.dec b{display:block;margin-bottom:4px} .dec .rec{color:var(--good);font-weight:500} .dec .alt{color:var(--ink-2)}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:500;background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent);margin-left:6px}
+code{font-family:"IBM Plex Mono",monospace;font-size:13px} ul{max-width:74ch}
+</style></head><body><main>
+<h1>Crossing the map shift: the LoRA adaptation study</h1>
+<p class="lead">Every parameter and decision for the experiment, with a recommendation and the alternatives, for the two of you to go through. Decisions are marked <span class="tag">decide</span>; the rest are facts from the data on disk (Sep 26 2026, 20:30 EDT).</p>
+
+<h2>0. The claim and the curve</h2>
+<p><strong>Claim.</strong> A world model pretrained on four maps can be adapted to an unseen map with a small adapter on frozen backbone weights and a few episodes of that map, and the training-to-map distance predicts how much adaptation the map needs.</p>
+<p><strong>Headline figure.</strong> x = distance D of the map to the nearest training map; y = adaptation cost, the LoRA steps (at fixed data) or the episodes (at fixed steps) needed to bring the map's gain over persistence up to a target, for example half the training-map gain. One point per map, coloured by backbone. Supporting figures: the raw curves (gain against steps, gain against episodes) for maps near, middle and far.</p>
+<p><strong>Outcome per curve point</strong>, on held-out episodes of the same map, the same 256 windows every time: one-tic PSNR and LPIPS gain over persistence, the decoder-free latent ratio, and two guards: the directional score on that map (did control response survive adaptation) and the training-map validation gain (how much was forgotten). The distance definition can be refined later without touching any of this; the maps' order barely changes across the three spaces (rank agreement 0.86 to 0.90).</p>
+
+<h2>1. Datasets: what each unseen map has</h2>
+<div class="wrap"><table><thead><tr><th class="n">D</th><th>set</th><th class="n">map</th><th class="n">episodes</th><th class="n">one-tic windows</th><th>proposed split (adapt / held-out)</th><th>role</th></tr></thead><tbody>
+<tr><td class="n">0.115</td><td>arenas_678</td><td class="n">8</td><td class="n">20</td><td class="n">95,567</td><td>12 / 8</td><td>near, same WAD</td></tr>
+<tr><td class="n">0.130</td><td>unseen</td><td class="n">17</td><td class="n">10</td><td class="n">49,452</td><td>6 / 4</td><td>near, same WAD</td></tr>
+<tr><td class="n">0.140</td><td>unseen2</td><td class="n">20</td><td class="n">10</td><td class="n">51,937</td><td>6 / 4</td><td>near campaign</td></tr>
+<tr><td class="n">0.143</td><td>unseen2</td><td class="n">32</td><td class="n">10</td><td class="n">51,866</td><td>6 / 4</td><td>near campaign</td></tr>
+<tr><td class="n">0.164</td><td>unseen</td><td class="n">16</td><td class="n">10</td><td class="n">49,026</td><td>6 / 4</td><td>middle</td></tr>
+<tr><td class="n">0.165</td><td>unseen2</td><td class="n">28</td><td class="n">10</td><td class="n">51,937</td><td>6 / 4</td><td>middle</td></tr>
+<tr><td class="n">0.181</td><td>unseen2</td><td class="n">24</td><td class="n">10</td><td class="n">52,150</td><td>6 / 4</td><td>middle</td></tr>
+<tr><td class="n">0.182</td><td>unseen2</td><td class="n">18</td><td class="n">10</td><td class="n">52,150</td><td>6 / 4</td><td>middle</td></tr>
+<tr><td class="n">0.182</td><td>unseen2</td><td class="n">19</td><td class="n">10</td><td class="n">52,150</td><td>6 / 4</td><td>middle</td></tr>
+<tr><td class="n">0.187</td><td>unseen2</td><td class="n">25</td><td class="n">10</td><td class="n">51,085</td><td>6 / 4</td><td>middle</td></tr>
+<tr><td class="n">0.188</td><td>arenas_678</td><td class="n">6</td><td class="n">20</td><td class="n">93,868</td><td>12 / 8</td><td>middle, same WAD</td></tr>
+<tr><td class="n">0.210</td><td>unseen2</td><td class="n">31</td><td class="n">10</td><td class="n">52,150</td><td>6 / 4</td><td>middle</td></tr>
+<tr><td class="n">0.220</td><td>unseen2</td><td class="n">22</td><td class="n">10</td><td class="n">51,369</td><td>6 / 4</td><td>far</td></tr>
+<tr><td class="n">0.235</td><td>unseen2</td><td class="n">29</td><td class="n">10</td><td class="n">48,316</td><td>6 / 4</td><td>far</td></tr>
+<tr><td class="n">0.273</td><td>unseen2</td><td class="n">26</td><td class="n">10</td><td class="n">51,937</td><td>6 / 4</td><td>far</td></tr>
+<tr><td class="n">0.282</td><td>arenas_678</td><td class="n">7</td><td class="n">20</td><td class="n">89,299</td><td>12 / 8</td><td>far, same WAD</td></tr>
+<tr><td class="n">0.338</td><td>unseen2</td><td class="n">30</td><td class="n">10</td><td class="n">52,150</td><td>6 / 4</td><td>far</td></tr>
+<tr><td class="n">0.371</td><td>unseen2</td><td class="n">23</td><td class="n">10</td><td class="n">52,079</td><td>6 / 4</td><td>farthest</td></tr>
+<tr><td class="n">0.13–0.18</td><td>seen</td><td class="n">1, 9–15</td><td class="n">4 each</td><td class="n">15–20k</td><td>not split</td><td>zero-shot only (too few episodes)</td></tr>
+</tbody></table></div>
+<p>Every episode is about 5,000 tics at 35 Hz, so one adaptation episode is about 2.4 minutes of play and about 5,000 one-tic windows. The 18 maps with 10 or 20 episodes are the adaptation set; the eight seeded maps with 4 episodes stay zero-shot points on the existing figures. Training maps 2 to 5 are not adapted (they are the source).</p>
+<div class="dec"><b>Decision 1 · the per-map split <span class="tag">decide</span></b><span class="rec">Recommended: a fixed 6 / 4 split for 10-episode maps and 12 / 8 for 20-episode maps, chosen once by seed and written to split files; held-out windows are the existing 256-window draw restricted to held-out episodes, so zero-shot and adapted scores are on the same windows.</span><br><span class="alt">Alternative: 8 / 2 for more adaptation data at the cost of noisier held-out scores (2 episodes give about 10,000 windows, still enough for 256).</span></div>
+<div class="dec"><b>Decision 2 · which maps in the pilot for Wednesday <span class="tag">decide</span></b><span class="rec">Recommended: four maps spanning the range, one per role: 17 (near), 24 (middle), 26 (far), 23 (farthest), U-Net only, steps curve only.</span><br><span class="alt">Alternative: arenas 8, 6, 7 plus 23 (three same-WAD maps give a within-WAD curve, but they are the maps where the model already does best).</span></div>
+
+<h2>2. The adapter</h2>
+<div class="wrap"><table><thead><tr><th>parameter</th><th>proposal</th><th>why</th></tr></thead><tbody>
+<tr><td>method</td><td>LoRA on the backbone's attention projections (query, key, value, output) in self- and cross-attention; backbone weights frozen</td><td>the standard recipe for adapting diffusion backbones; keeps the pretrained function and the control path intact</td></tr>
+<tr><td>trained in full</td><td>the control MLP and position table, the inflated input projection (context channels), the noise-level embedding</td><td>together under 1 percent of the backbone; the paths most likely to need re-tuning to a new map's statistics</td></tr>
+<tr><td>rank</td><td>16, alpha 16, dropout 0</td><td>the common default for U-Net and DiT adaptation; about 0.5 to 1 percent of the backbone's parameters</td></tr>
+<tr><td>learning rate</td><td>1e-4 for the LoRA and the fully trained parts, 100-step warmup, constant, fused AdamW</td><td>twice the pretraining rate is the usual LoRA convention; the pretraining rate was 5e-5</td></tr>
+<tr><td>objective and augmentation</td><td>unchanged: v-prediction, the same noise augmentation and buckets, the same 32-tic context</td><td>the recipe rule: nothing changes but the adapter</td></tr>
+<tr><td>batch</td><td>fill the card: the largest micro-batch that fits, no accumulation, so on Superman's 16 GB cards about 8 with gradient checkpointing (fit check decides), on an A6000 32</td><td>the standing rule; steps are counted in updates and the batch size is reported</td></tr>
+<tr><td>EMA</td><td>fp32 EMA of the trained parameters at 0.999 (short runs), both live and EMA scored</td><td>the closed-loop reads showed EMA matters; a 2,000-step run needs a shorter horizon than 0.9999</td></tr>
+<tr><td>step grid</td><td>0, 250, 500, 1,000, 2,000 updates; a checkpoint at each</td><td>a log-spaced curve; 2,000 updates of batch 32 is about 13 passes over one episode's windows</td></tr>
+<tr><td>data grid (three maps)</td><td>1, 2, 4, 6 episodes at 1,000 updates</td><td>the "how much footage" curve</td></tr>
+<tr><td>seeds</td><td>1 per point; 2 on the pilot maps to size the noise</td><td>time; the pilot tells whether one seed is enough</td></tr>
+</tbody></table></div>
+<div class="dec"><b>Decision 3 · rank and the rank ablation <span class="tag">decide</span></b><span class="rec">Recommended: rank 16 everywhere, plus an ablation at ranks 4 and 64 on two maps (one middle, one far) to show the curve is not rank-bound. About 6 extra card-hours.</span><br><span class="alt">Alternative: skip the ablation for Wednesday, run it for October. Or rank 8 to make the parameter count smaller than the fully trained parts.</span></div>
+<div class="dec"><b>Decision 4 · what is trained in full beside the LoRA <span class="tag">decide</span></b><span class="rec">Recommended: control MLP, positions, input projection, noise embedding (as above). Report their parameter count.</span><br><span class="alt">Alternative: LoRA only, backbone entirely frozen including the control path; cleaner story, but if the control path needs re-tuning the curve would blame the adapter.</span></div>
+<div class="dec"><b>Decision 5 · a full-fine-tune reference <span class="tag">decide</span></b><span class="rec">Recommended for October, not Wednesday: full fine-tuning of the backbone on one map at 1,000 updates as the upper reference for what LoRA recovers.</span><br><span class="alt">Alternative: run it on one map on GPU 2 Monday if time allows (about 1 hour for the U-Net).</span></div>
+
+<h2>3. Backbones and compute</h2>
+<div class="wrap"><table><thead><tr><th>row</th><th>card</th><th>fits with LoRA</th><th class="n">est. minutes per 1,000 updates</th><th class="n">per map, steps curve to 2,000 + scoring</th><th>when</th></tr></thead><tbody>
+<tr><td>U-Net (SD 1.4, 4-ch)</td><td>Superman A4000 16 GB</td><td>yes, micro-batch ~8 with checkpointing</td><td class="n">30 to 40</td><td class="n">about 1.5 h</td><td>Sunday, 6 cards free</td></tr>
+<tr><td>PixArt-alpha (4-ch)</td><td>Superman A4000</td><td>yes</td><td class="n">20 to 30</td><td class="n">about 1.2 h</td><td>Sunday night or Monday, after its 200k final read</td></tr>
+<tr><td>SD 3.5 medium (16-ch)</td><td>Spiderman A6000 48 GB</td><td>only on a 48 GB card</td><td class="n">30 to 35 at batch 32</td><td class="n">about 1.5 h</td><td>Monday, GPU 2, after 200k</td></tr>
+</tbody></table></div>
+<p>Estimates derive from the pretraining rates (U-Net 1.6 updates/s at batch 32 on an A6000, SD 3.5 0.53, PixArt 1.4) and a factor of about 3 between A6000 and A4000; a fit check on Sunday morning replaces them with measured numbers before anything is scheduled. Scoring per checkpoint on an A4000: one-tic teacher-forced on 256 windows about 6 minutes, the directional check about 9, the latent ratio comes free with the teacher-forced read.</p>
+<div class="wrap"><table><thead><tr><th>plan</th><th>maps × points × rows</th><th class="n">card-hours</th><th>wall clock on Superman (6 cards)</th></tr></thead><tbody>
+<tr><td>Pilot for Wednesday</td><td>4 maps × 4 step points × U-Net, 2 seeds</td><td class="n">about 12</td><td>Sunday afternoon</td></tr>
+<tr><td>Steps curve, all adaptation maps</td><td>18 × 4 × U-Net</td><td class="n">about 27</td><td>one night</td></tr>
+<tr><td>Data curve</td><td>3 maps × 3 extra sizes × U-Net</td><td class="n">about 5</td><td>with the above</td></tr>
+<tr><td>Rank ablation</td><td>2 maps × 2 ranks × U-Net</td><td class="n">about 6</td><td>with the above</td></tr>
+<tr><td>PixArt, same steps curve</td><td>18 × 4</td><td class="n">about 22</td><td>Monday</td></tr>
+<tr><td>SD 3.5, 8 maps</td><td>8 × 4</td><td class="n">about 12 on GPU 2</td><td>Monday to Tuesday</td></tr>
+</tbody></table></div>
+<div class="dec"><b>Decision 6 · which backbones and how many maps for Wednesday <span class="tag">decide</span></b><span class="rec">Recommended: the U-Net pilot on four maps for the Sep 30 draft as a preliminary figure; the full U-Net and PixArt curves and the SD 3.5 subset for the October version.</span><br><span class="alt">Alternative: all 18 maps on the U-Net by Monday (one night on Superman) and put the full curve in the Sep 30 paper; riskier but doable if the pilot behaves on Sunday.</span></div>
+
+<h2>4. Evaluation of each curve point</h2>
+<ul>
+<li><strong>Primary:</strong> one-tic PSNR and LPIPS gain over persistence on the map's held-out windows (the same 256 windows as the zero-shot score); the decoder-free latent ratio beside it.</li>
+<li><strong>Adaptation cost:</strong> the first step count at which the gain reaches the target; the target is half the training-map gain (about +0.5 dB PSNR, +0.02 LPIPS gain) unless the pilot suggests a better one. Report the curve, not only the crossing.</li>
+<li><strong>Guards:</strong> the directional check on the map after adaptation (control response kept); the training-map validation gain after adaptation (forgetting); both at the 2,000-step point at least.</li>
+<li><strong>Secondary, subset:</strong> four-tic gain and a 16-rollout 256-tic read against copy-seed at the final point on the pilot maps.</li>
+<li><strong>Statistics:</strong> per-map bootstrap over held-out episodes for the gain; the cost-against-distance relation reported as Spearman with a bootstrap over maps, the same form as the zero-shot study; the family control stays.</li>
+</ul>
+<div class="dec"><b>Decision 7 · the adaptation-cost target <span class="tag">decide</span></b><span class="rec">Recommended: half the training-map gain, in both PSNR and LPIPS, plus the curve itself.</span><br><span class="alt">Alternative: "gain above zero" (beat persistence), which most near maps may reach at 250 steps and far maps never within 2,000.</span></div>
+
+<h2>5. Implementation and schedule</h2>
+<ul>
+<li><strong>Tonight:</strong> a worker adds a LoRA path to the trainer (adapter library on the backbone wrapper; the fully trained parts as a parameter group; EMA of the trained parameters; a per-map split file writer; checkpoints at the step grid; certificate lines for provenance), with tests; Astra reviews the design and the diff before anything trains.</li>
+<li><strong>Sunday morning:</strong> the fit check on Superman (micro-batch, updates/s) and the pilot launch on four maps; the evaluation latents and the U-Net checkpoint are already staged on Superman.</li>
+<li><strong>Sunday evening:</strong> pilot curves; a preliminary figure in the draft's section 5.</li>
+<li><strong>Monday to Tuesday:</strong> PixArt and SD 3.5 rows if the pilot behaves; otherwise October.</li>
+</ul>
+<div class="dec"><b>Decision 8 · go for the pilot <span class="tag">decide</span></b><span class="rec">Recommended: yes, with the settings above; it uses only Superman and does not touch the Spiderman schedule.</span></div>
+
+<h2>6. Risks to name in the paper</h2>
+<ul>
+<li>The seeded agent explores rather than plays, and campaign footage is near-static on several maps; adaptation on 6 episodes of such footage tests a narrow slice of the map.</li>
+<li>The 4-episode seeded maps cannot be split and stay zero-shot.</li>
+<li>A curve on 18 maps with one seed is noisy; the pilot's two seeds size that noise before the full run.</li>
+<li>Distance is the SD 1.x latent distance frozen on Sep 25; if the definition changes later the maps' order barely moves, but the x axis of the final figure must be the frozen one or a re-frozen one, stated.</li>
+</ul>
+</main></body></html>
