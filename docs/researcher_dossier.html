@@ -574,6 +574,80 @@ figcaption{font-family:var(--sans);font-size:13px;color:var(--muted);margin:12px
 <p><strong>Why the nearest training map.</strong> Against the pooled four-map corpus, a held-out episode of a training map is charged for not resembling the other three. In the memo's 1-D example, with training maps at 0, 2, 4 and 6, a held-out draw of map 0 has W₂² = 14 to the pool, while an unseen map at 3 has only 5. The minimum over training maps ranks them correctly. [memo §1; <code>test_the_nearest_training_map_does_not_rank_a_seen_map_beyond_an_unseen_one</code>]</p>
 <p><strong>Why no time coordinate.</strong> Windows are drawn uniformly and every episode lasts 150 s, so within-episode time is uniform on both sides; a time axis would add noise and a free price. The model's temporal structure enters through the motion weights.</p>
 <p><strong>The floor.</strong> Forty single-subset train-versus-train distances give the band a map cannot be distinguished from training footage within: 0.022 to 0.093 in the SD 1.x space (mean 0.044), 0.009 to 0.046 in pixels, 0.023 to 0.093 in the SD 3.5 space. [dist-sd1, dist-pix, dist-sd35 <code>floor.motion</code>]</p>
+<figure>
+<div class="svg-wrap" tabindex="0"><svg viewBox="0 0 760 404" role="img" aria-label="Distance-study pipeline. Reference lane: for each training map, 50 training episodes, 250 frames each stratified by motion decile, form a 12,500-point cloud of 192-dimensional pooled latents; a second disjoint draw gives 40 train-versus-train distances, the floor band 0.022 to 0.093. Distance lane: for each evaluation map, 4 episodes times 250 frames form a 1,000-point motion-weighted cloud; its sliced Wasserstein distance to each of the four reference clouds is taken, the minimum picks the nearest training map, and the mean over ten 4-episode subsets is D(m). Outcome lane: 256 windows of the same map give the gain over persistence; D and gain meet only at the map, over 30 maps, in a partial Spearman correlation of -0.73.">
+<defs><marker id="f6-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="currentColor"/></marker><marker id="f6-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#d0652f"/></marker></defs>
+<text x="20" y="20" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">reference: each training map k (arenas 2 to 5)</text>
+<text x="20" y="124" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">distance: each evaluation map m (30 maps)</text>
+<text x="20" y="326" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">outcome: the same map m</text>
+<rect x="20" y="32" width="132" height="52" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="86.0" y="55.0" font-size="11" text-anchor="middle" fill="currentColor">50 training episodes</text>
+<text x="86.0" y="69.0" font-size="11" text-anchor="middle" fill="currentColor">(ids 0:2000)</text>
+<rect x="172" y="32" width="132" height="52" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="238.0" y="55.0" font-size="11" text-anchor="middle" fill="currentColor">250 frames each,</text>
+<text x="238.0" y="69.0" font-size="11" text-anchor="middle" fill="currentColor">25 per motion decile</text>
+<rect x="324" y="32" width="132" height="52" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="390.0" y="55.0" font-size="11" text-anchor="middle" fill="currentColor">reference cloud k:</text>
+<text x="390.0" y="69.0" font-size="11" text-anchor="middle" fill="currentColor">12,500 × 192-d</text>
+<rect x="628" y="32" width="132" height="52" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04" stroke-dasharray="4 3"/>
+<text x="694.0" y="55.0" font-size="11" text-anchor="middle" fill="currentColor">floor: 40 train-vs-train</text>
+<text x="694.0" y="69.0" font-size="11" text-anchor="middle" fill="currentColor">SW₂ = 0.022 to 0.093</text>
+<line x1="152" y1="58.0" x2="170" y2="58.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<line x1="304" y1="58.0" x2="322" y2="58.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<line x1="456" y1="58.0" x2="626" y2="58.0" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#f6-a)"/>
+<text x="542.0" y="52.0" font-size="11" text-anchor="middle" fill="currentColor" opacity=".75">second disjoint draw</text>
+<rect x="20" y="136" width="132" height="60" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="86.0" y="163.0" font-size="11" text-anchor="middle" fill="currentColor">4 episodes of map m</text>
+<text x="86.0" y="177.0" font-size="11" text-anchor="middle" fill="currentColor">(one subset)</text>
+<rect x="172" y="136" width="132" height="60" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="238.0" y="156.0" font-size="11" text-anchor="middle" fill="currentColor">250 eligible frames</text>
+<text x="238.0" y="170.0" font-size="11" text-anchor="middle" fill="currentColor">each, 25 per</text>
+<text x="238.0" y="184.0" font-size="11" text-anchor="middle" fill="currentColor">motion decile</text>
+<rect x="324" y="136" width="132" height="60" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="390.0" y="156.0" font-size="11" text-anchor="middle" fill="currentColor">cloud m: 1,000 × 192-d</text>
+<text x="390.0" y="170.0" font-size="11" text-anchor="middle" fill="currentColor">pooled SD 1.x latents,</text>
+<text x="390.0" y="184.0" font-size="11" text-anchor="middle" fill="currentColor">motion weights</text>
+<rect x="476" y="136" width="132" height="60" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="542.0" y="156.0" font-size="11" text-anchor="middle" fill="currentColor">SW₂ to each of the</text>
+<text x="542.0" y="170.0" font-size="11" text-anchor="middle" fill="currentColor">4 reference clouds,</text>
+<text x="542.0" y="184.0" font-size="11" text-anchor="middle" fill="currentColor">1,000 directions</text>
+<rect x="628" y="136" width="132" height="60" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="694.0" y="163.0" font-size="11" text-anchor="middle" fill="currentColor">min over k:</text>
+<text x="694.0" y="177.0" font-size="11" text-anchor="middle" fill="currentColor">nearest training map</text>
+<line x1="152" y1="166.0" x2="170" y2="166.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<line x1="304" y1="166.0" x2="322" y2="166.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<line x1="456" y1="166.0" x2="474" y2="166.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<line x1="608" y1="166.0" x2="626" y2="166.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<path d="M390.0,84 V104 H542.0 V134" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<text x="548.0" y="118" font-size="11" text-anchor="start" fill="currentColor" opacity=".75">4 references</text>
+<path d="M694.0,196 V224" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<rect x="628" y="226" width="132" height="60" rx="4" fill="currentColor" stroke="#d0652f" stroke-width="2" fill-opacity=".04"/>
+<text x="694.0" y="246.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">D(m): mean over ten</text>
+<text x="694.0" y="260.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">4-episode subsets</text>
+<text x="694.0" y="274.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">(maps with more than 4)</text>
+<path d="M628,252.0 H86.0 V198" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#f6-a)" opacity=".6"/>
+<text x="364.0" y="246.0" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">redraw the 4 episodes, ten times</text>
+<rect x="20" y="338" width="132" height="52" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="86.0" y="361.0" font-size="11" text-anchor="middle" fill="currentColor">256 windows of map m</text>
+<text x="86.0" y="375.0" font-size="11" text-anchor="middle" fill="currentColor">(eval_tf draw)</text>
+<rect x="172" y="338" width="132" height="52" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="238.0" y="361.0" font-size="11" text-anchor="middle" fill="currentColor">U-Net 200k EMA,</text>
+<text x="238.0" y="375.0" font-size="11" text-anchor="middle" fill="currentColor">h1, 10-step DDIM</text>
+<rect x="324" y="338" width="132" height="52" rx="4" fill="currentColor" stroke="#d0652f" stroke-width="2" fill-opacity=".04"/>
+<text x="390.0" y="361.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">gain(m): mean PSNR</text>
+<text x="390.0" y="375.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">minus persistence</text>
+<rect x="628" y="338" width="132" height="60" rx="4" fill="currentColor" stroke="#d0652f" stroke-width="2" fill-opacity=".04"/>
+<text x="694.0" y="358.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">30 maps (D, gain):</text>
+<text x="694.0" y="372.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">partial Spearman</text>
+<text x="694.0" y="386.0" font-size="11" text-anchor="middle" fill="#d0652f" font-weight="600">ρ = −0.73</text>
+<line x1="152" y1="364.0" x2="170" y2="364.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<line x1="304" y1="364.0" x2="322" y2="364.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f6-a)"/>
+<line x1="456" y1="364.0" x2="626" y2="364.0" stroke="#d0652f" stroke-width="2" marker-end="url(#f6-acc)"/>
+<line x1="694.0" y1="286" x2="694.0" y2="336" stroke="#d0652f" stroke-width="2" marker-end="url(#f6-acc)"/>
+<text x="542.0" y="358.0" font-size="11" text-anchor="middle" fill="#d0652f">joined only by map</text>
+</svg></div>
+<figcaption>The distance never sees the model and the outcome never sees the distance: each map contributes one D from footage alone and one gain from 256 scored windows, and the two meet only in the 30-map correlation.</figcaption>
+</figure>
 <p><strong>Alternatives rejected as primary:</strong> Fréchet distance (assumes one Gaussian; a 768-dimensional covariance from 1,000 correlated frames is ill-conditioned); MMD (kernel bandwidth, awkward weights); nearest-training-frame distance (ignores density); a classifier two-sample test (its AUC saturates near 1 for every other-WAD map, erasing the dose-response). [memo §4] The arm choices barely matter: in the SD 1.x space the motion-weighted and uniform-weight distances rank the 30 maps with Spearman 0.994, and nearest-map against pooled with 0.897 (derived from [dist-sd1]).</p>
 <h2 id="7-3-outcome-confound-control-and-statistics">7.3 Outcome, confound control and statistics</h2>
 <p><strong>Outcome:</strong> per-map gain over persistence at one tic, the mean over 256 windows (from <code>eval_tf.draw_windows</code>) of <code>psnr_raw − persist_psnr_raw</code>. The scored model is the U-Net's 200k EMA, the final weights, so no checkpoint selection is possible. Scoring used 10-step DDIM, the stock decoder, seed 0 and horizons 1 and 4, from the clean checkout <code>$D/repo_distance</code>. Each map directory records the checkpoint SHA-256, split hash, sampler and decoder. [stats <code>primary</code>; <code>scripts/spiderman/score_distance_maps.sh</code>]</p>
