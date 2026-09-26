@@ -245,3 +245,73 @@ Nothing trains until `scripts/cluster/gates.sh` passes on the machine and checko
 
 Every run streams training loss, validation loss (overall and by quartile), gradient norm, throughput, memory and every evaluation read to W&B project `doomdit-nexttic`. The trainer does this by default through `wandb_log.RunLogger`; only the gates' throwaway runs pass `--no-wandb`. `periodic_eval.py` gives the trainer its own reads every N steps on another card. [RC 09-23 19:45; RC 09-24 21:55] The U-Net and SD 3.5 rows are pinned to `35258f3`, which predates native logging, so a sidecar, `tools/wandb_tail.py`, replays their `log.jsonl` and steward files. PixArt, launched before the init fix below, also streams through a sidecar (`041-pixart-nexttic-tail`). The fix: `wandb.init` starts subprocesses on the calling thread while the trainer forks DataLoader workers, and a worker forked in that window held a pipe open and hung the init; `11540db` moves setup before the fork. [RC 09-24 21:55]
 
+---
+
+# 4. The evaluation instruments
+
+Each instrument answers one question. Reading a number needs its instrument, its weights (live or EMA) and its windows.
+
+## 4.1 Teacher-forced reads (h1, h4)
+
+`eval_tf.py --tic-stride 1` scores 512 windows from validation ids 6000:6100, drawn with seed 0 and identical at every step for every row. Sampling is 10-step DDIM with linear spacing, eta 0 and clean context; each space uses its stock decoder; targets are raw frames. Horizons are one tic (h1) and four tics (h4) past the last real frame; for h4 the model predicts directly four tics ahead from real context. Persistence on these windows is 21.566 dB / 0.203 LPIPS at h1 and 19.213 / 0.354 at h4, the same for every row. [RC 09-23 11:30]
+
+LPIPS is a learned perceptual distance (lower is better) that penalises blur and texture loss that PSNR tolerates, so every PSNR is reported with it. The metrics files carry an independent-window standard error (0.095 dB for a live h1 PSNR), which understates the uncertainty because the 512 windows share 100 episodes. No read yet has an episode-bootstrap interval. [`steward_5000/tf_live_h1/metrics.json`]
+
+## 4.2 Why 10 sampling steps: the sampler sweep
+
+DDIM is a deterministic diffusion sampler that denoises along a subset of the trained timesteps, so the step count trades compute for fidelity. Fewer steps land a sample near the *conditional mean* of possible next frames, which is blurred. A blurred mean wins MSE, hence PSNR, and loses LPIPS. That is the perception-distortion trade, and the sweep shows it at every checkpoint. [RC 09-23 19:00; RC 09-24 10:30, 18:40]
+
+U-Net 200k, live weights, h1, the 512 validation windows (persistence 21.57 / 0.203):
+
+| Steps | Linear spacing PSNR / LPIPS | Trailing spacing PSNR / LPIPS |
+|---:|---|---|
+| 4 | 22.35 / 0.272 | 22.37 / 0.245 |
+| 8 | 22.34 / 0.199 | 22.32 / 0.193 |
+| 10 | 22.29 / 0.186 | not run |
+| 16 | 22.20 / 0.171 | not run |
+| 50 | 22.04 / 0.162 | not run |
+
+More steps lower PSNR and improve LPIPS. Spacing matters only at 4 steps. The step count at which the U-Net beats persistence in LPIPS fell from 16 at 50k to 8 at 200k. At 200k, 10 steps flatter PSNR by about 0.25 dB against 50 steps (0.36 dB at 10k). All reads and the distance study use 10 steps; the choice is a documented point on this curve, not the PSNR-best setting. The sweep is teacher-forced, U-Net only; the SD 3.5 sweeps planned at 50k and 100k were not recorded. [RC 09-24 18:40]
+
+GameNGen's step table moves differently: its PSNR rises 7 dB from 1 to 4 steps and then holds (25.47 at 1, 32.58 at 4, 32.19 at 64), and its LPIPS is flat after 4. Our 4 uniform-in-t steps on a linear schedule put two of four network calls at almost pure noise, and GameNGen samples with observation guidance 1.5 that our models cannot use (no observation dropout in training). So our 4-step point is not a reproduction of its 4-step setting. [G Table 1, §3.3; `docs/REVIEW_2026-09-22.md` M1]
+
+## 4.3 Rollouts, copy-seed and per-rollout events
+
+`rollout_eval.py` runs 16 rollouts of 256 tics from validation episodes with the recorded executed controls, clean context and 10-step DDIM, feeding each predicted latent back as context. It scores raw frames at 4, 32, 64, 128 and 256 tics. Seed 0 draws the standing windows; seed 1 draws a second set, run on the EMA at every read from 115k (and at 105k); seed 2 is the backfill on surviving snapshots. Every full read keeps the rollout arrays (`npz`), so events can be counted after the fact. [RC 09-26 03:30, 09:00]
+
+On the seed-0 windows copy-seed scores 18.93 / 17.47 / 17.60 / 17.80 / 17.52 dB at 4 / 32 / 64 / 128 / 256 tics, with LPIPS 0.317 / 0.487 / 0.505 / 0.502 / 0.520. The seed-1 windows' copy-seed is 19.11 / 18.07 / 17.94 / 17.50 / 17.46. [RC 09-25 01:40, 22:15] Copy-seed's LPIPS stays strong at long horizons because a frozen real frame is sharp; a model that drifts toward a smooth static frame can beat copy-seed in PSNR and lose in LPIPS.
+
+A mean over 16 rollouts hides whether one rollout collapsed or all degraded a little, so the stability claim is counted per rollout:
+
+- **(a)** any frame under 10 dB raw PSNR (a near-blank frame);
+- **(b)** PSNR under 12 dB at tic 256 (the rollout ends broken);
+- **(c)** latent channel 13's per-frame mean under −0.9 at tic 256 (the captured end state; the channel's data range is −0.44 to 0.80).
+
+Earlier reads also counted crossings of a line 3 dB under the EMA's mean curve. [rates; RC 09-25 01:40] A rollout needs its seed and its whole horizon inside one life; on 12 audited episodes that excluded 34 percent of 256-tic candidates against 3.7 percent at one tic, so rollouts describe surviving stretches of play. [review M4]
+
+## 4.4 The control probe, and why its maximum misleads
+
+`smoke_probe.py` flips all 19 bits of the newest control and reports the largest absolute change in the v-prediction, at fixed noise, context and t = 500, over one batch of four windows. It proves the output depends on the newest control. It does not measure control strength. An all-bits-flipped control is something the recorder can never produce, so the probe measures the response to an off-manifold token, and a one-element maximum is a tail statistic.
+
+The maximum rose 3.8 times from 60k to 65k, fell back at 70k and reached 71.0 at 75k, which looked like a learning event. Commit `caf58bb` added the mean and 99th percentile of the change field ("probe_v2"), which showed the whole field moving at 75k, with the mean 15 to 30 times its 70k value. Meanwhile real control swaps (section 4.5), teacher-forced reads and rollouts stayed normal. The reading: the jump is an extrapolation property of the control embedding off the data manifold. The rule since then flags a probe jump only if it pairs with a directional drop or a live collapse. [RC 09-24 23:30; RC 09-25 04:30, 05:00]
+
+probe_v2 means (three seeds) swing by 30 times between reads: 0.16 / 0.18 / 0.18 at 105k, 7.7 / 14.9 / 5.2 at 130k (the largest, seed-1 maximum 140), while the directional check held at 0.82 to 0.87 from 75k on. That contrast is the evidence for the extrapolation reading. An alternation (high at odd multiples of 5k, low at multiples of 10k) held from 60k to 125k with 80k and 105k as exceptions, and broke at 130k; it is recorded, not explained. [RC 09-26 03:30, 10:50, 11:30]
+
+## 4.5 The directional check and its estimator validation
+
+`directional_check.py` (`999f6b2`) asks whether the dependence on the control has the right *sign*. It takes validation windows whose newest control holds exactly one of TURN_LEFT and TURN_RIGHT and no strafe, predicts each window twice from the same noise with the two turn bits swapped in the newest control only, and measures each predicted frame's horizontal shift against the last context frame. The shift comes from normalised cross-correlation over ±32 px on rows 48 to 120 of a central crop, refined to sub-pixel by a parabola fit; a left turn slides the scene right (positive). `correct_frac` is the fraction of windows whose predicted shift reverses under the swap. A motion ratio compares predicted with true motion over four closed-loop tics; persistence scores 0 by construction. Each run uses 64 windows per direction. [RC 09-25 00:45, 02:10]
+
+**The estimator is validated first.** `ref_frac` is the fraction of windows in which the *ground-truth* next frame moves the way the control says. It reads 0.91 to 0.92 on decoded frames and 0.90 on raw frames, so the shift estimator and the sign convention work before any model is judged. [RC 09-25 02:10, 05:00]
+
+| Row, weights | correct_frac | Median shift, recorded control, left / right (px) | Median shift, swapped | Motion ratio |
+|---|---:|---|---|---:|
+| Ground truth | (ref_frac 0.91 to 0.92) | +18.2 / −19.1 | | 1 |
+| U-Net 200k EMA | 0.867 | +19.1 / −19.1 | −19.8 / +22.1 | 0.893 |
+| SD 3.5 70k EMA | 0.805 | +17.8 / −18.3 | −18.8 / +21.1 | 0.938 |
+| SD 3.5 100k EMA / live | 0.844 / 0.836 | | | 0.94 / 0.96 |
+| SD 3.5 130k EMA / live | 0.844 / 0.867 | | | |
+
+Other SD 3.5 reads: EMA 0.828 at 85k, 0.836 at 90k, 95k, 105k and 115k, 0.828 at 120k, 0.852 at 125k; live 0.828 at 90k, 95k and 115k, 0.820 at 105k, 0.852 at 120k. [RC 09-25 02:10 to 21:00; RC 09-26 03:50, 06:20, 09:00, 11:30]
+
+Both rows turn the right way with about the true magnitude, and the swap reverses the motion; neither learned persistence. The orderings between rows and reads are not resolved. With 128 windows, one window moves `correct_frac` by 0.008; a binomial standard error at 0.83 is about 0.033, and about 0.047 for a difference of two runs. The whole SD 3.5 EMA range, 0.805 to 0.852, is under 1.5 such standard errors (derived). The check covers turning on seen-map validation windows only.
+
