@@ -700,3 +700,59 @@ One line per decision: what was decided, and why. Dates are 2026, times EDT; the
 | 09-26 09:00 | Report rates per window; add EMA seed-2 on surviving snapshots; put release-checkpoint selection to Rohan | The pooled EMA rate rose late while teacher forcing improved |
 | 09-26 10:30 | PixArt gets a rollout read at 150k and the full final protocol at 200k | Its periodic reads never included rollouts |
 
+---
+
+# 9. Literature, and where we sit
+
+## 9.1 Recipes side by side
+
+| | GameNGen | DoomDiT next-tic | MultiGen | DIAMOND | PlayGen |
+|---|---|---|---|---|---|
+| Data | Doom, PPO agent recorded through its training; 70M frames; maps not named | Arnold on 4 arenas; 2,000 of 8,000 episodes (10.07M tics) used | ViZDoom, 100 generated maps, >10M frames | Atari 100k steps per game; CS:GO 5.5M frames (95 h) | Doom 200M frames balanced from 900M; random plus expert |
+| Frame spacing | not stated; actions repeat 4 frames | every tic, 35 Hz | not stated | Atari frameskip 4; CS:GO 16 Hz | not stated |
+| Representation | SD 1.4 latents, 320×256 | SD 1.x (4 ch) or SD 3.5 (16 ch) latents, 320×256 | not stated | pixels (64×64 Atari) | own VAE, 128×128 |
+| Backbone | SD 1.4 U-Net | SD 1.4 U-Net, SD 3.5 MMDiT, PixArt DiT | U-Net | EDM U-Net (4M params, Atari) | recurrent DiT, 131M |
+| Context | 64 frames, channel-stacked | 32 tics (0.91 s), channel-stacked | 32 plus geometry memory | 4 frames | recurrent state |
+| Actions | 64 past actions as cross-attention tokens | 32 executed 19-bit controls as tokens | cross-attention | adaptive group norm, 4 actions | cross-attention |
+| Context corruption | noise ≤ 0.7, 10 buckets | VP blend, q < 0.7, 10 buckets | context noise plus history guidance | none of this kind (EDM) | Diffusion Forcing |
+| Objective | v-prediction | v-prediction, VP linear betas | v-prediction | EDM denoising | clean-latent, Diffusion Forcing |
+| Optimisation | Adafactor 2e-5, batch 128, 700k updates, 128 TPU v5e | AdamW 5e-5, batch 32, 200k updates, one A6000 | not stated | AdamW 1e-4, batch 32, 400k updates, one RTX 4090 | lr 1e-4, batch 8 |
+| Sampler | DDIM, 4 steps; CFG 1.5 on observations | DDIM, 10 steps; no CFG | not stated | 3 Euler steps | 4/8/16-step sweep |
+| Evaluation | 2,048 TF samples, 5 levels; FVD; human | TF h1/h4 vs persistence; 256-tic rollouts vs copy-seed; directional; 30-map distance study | PSNR/SSIM/LPIPS, early and late halves | Atari return | 600 rollouts to 1,024 steps; action accuracy |
+| Release | no data, code or weights | code, data, weights | not stated | code and agents | Doom weights and data unfinished |
+
+[G §§3–5, A.5–A.6; M §§3–6; D §§4–6, App. E; P §§3–4, App. A; RC]
+
+## 9.2 GameNGen, read carefully
+
+- **Headline:** 29.43 dB / 0.249 LPIPS, teacher-forced, 2,048 held-out trajectory samples from five levels. Map-disjointness is not stated, so it is not an unseen-map result. Its step table (32.58 dB at 4 steps) is a different evaluation from the headline; neither converts into the other. [G §5.1, Table 1]
+- **Scale:** 700k updates at batch 128 is 89.6M presentations (derived), on 128 TPU v5e; the PPO agent trained for 50M environment steps, a separate counter from the 70M-frame diffusion set. [G §§4.1–4.2]
+- **Guidance:** observation dropout 0.1 in training enables observation CFG 1.5 at inference; action guidance did not help. Our rows have no observation dropout, so no guidance scale can be added afterwards with the same meaning. [G §§3.3, 4.2]
+- **Ablations:** context 1 to 64 frames moves PSNR from 20.94 to 22.36 with almost all of it by 4 frames (frozen decoder, 200k updates, 8,912 examples). Without noise augmentation, rollouts diverge within 10 to 20 frames. A random-policy data set loses to agent data at 3 s (16.84 against 19.02 dB). [G Table 2, Figure 7, §5.2.3]
+- **Human study:** 10 raters, 130 clips of 1.6 s and 3.2 s; raters picked the real clip 58 and 60 percent of the time. This is evidence about those clips, not mechanical equivalence. [G §5.1]
+- **Speed:** about 10 ms per U-Net call, 50 ms per frame with the autoencoder, 20 FPS on one TPU v5; a throughput figure, not the training stride. [G §3.3]
+
+Where we sit: we match the channel-stacked context, action tokens, v-prediction and bucketed augmentation; we differ in data, agent, stride, context length, optimiser, scale, sampler and guidance. We add what GameNGen does not report: a persistence reference, map-disjoint evaluation, per-rollout stability counts and a distance-quality relation.
+
+## 9.3 The other Doom and game world models
+
+- **MultiGen** adds explicit geometry and pose memory (ray-traced depth into the U-Net), which is extra information, not a longer context. It reports PSNR 19.32 overall (20.06 early, 18.59 late) against a memory-free GameNGen-style baseline at 18.77, and a context ablation from 27.6 dB at 2 frames to 30.0 at 32. The late-horizon gain is the relevant point for our memory limits. [M §§3–6, Tables 1, 3]
+- **DIAMOND** is pixel-space EDM diffusion. Its lesson for us: a single denoising step behaves like a conditional mean when futures are multimodal, which is our few-step blur. It uses three Euler steps. Its CS:GO model (381M parameters, one Dust II map, 87 h) is qualitative and names forgotten geometry as a failure. [D §§5–6]
+- **PlayGen** already applies a DiT to Doom, so "first Doom DiT" is not available to us. Recurrent state plus Diffusion Forcing; 600 test rollouts from one seed frame: 23.81 dB at step 1, 20.41 at 32, 17.25 at 1,024, with action accuracy 0.858 falling to 0.822. [P §4, Tables 1–2]
+- **Oasis** (open release): a 500M-parameter reduced Minecraft model with inference code; no training corpus or recipe, so no matched comparison is possible. Matrix-Game 2.0 attributes Oasis's high consistency scores to static frames after collapse, which a persistence reference would expose. [O README; lit Q4]
+- **Diffusion Forcing** noises each sequence token independently and trains a causal model across those noise patterns; our shared-level context corruption is not it. [DF §3]
+- **Self Forcing** trains on the model's own autoregressive rollouts with a distribution-matching loss, attacking exposure bias directly; post-training took about 1.5 h on 64 H100s for its video model. Arm 4 of section 6.6 is the bounded Doom version of this idea. [SF §§3–4]
+- **Open reproductions.** Stiegler's `gameNgen-repro` uses context 9, unpadded 320×240, additive context noise, and post-step frames with incoming actions (the opposite row convention to ours). Taketani's `GameNGen` fixes several of those (context 64, padding, no cross-episode windows, observation dropout) but reverted to AdamW after Adafactor at 2e-5 did worse, and reports quality far from the original. Neither publishes a matched PSNR/LPIPS benchmark. [Stiegler README; Taketani README]
+
+## 9.4 Distance against performance, and persistence baselines
+
+**The study's shape is standard in transfer learning.** One distance per domain against one normalised performance number per domain: Blitzer, Dredze and Pereira (ACL 2007: proxy A-distance against adaptation loss, 6 domain pairs, no statistic); OTDD (Alvarez-Melis and Fusi, NeurIPS 2020: optimal-transport dataset distance against relative error drop, ρ from −0.59 at n = 16 to −0.85 at n = 11); Cui et al. (CVPR 2018: a weighted EMD between feature clouds, structurally our construction); Deng and Zheng (CVPR 2021: Fréchet distance to training features against accuracy, Spearman about −0.91 on synthetic sample sets). Normalising by an in-domain reference (Blitzer's adaptation loss, OTDD's relative drop) is the same move as our gain over persistence. [lit Q1, Q6]
+
+**Distances have also lost.** Guillory et al. (ICCV 2021) find that Fréchet distance, MMD and proxy A-distance predict accuracy worse than average confidence; Mayilvahanan et al. (ICLR 2024) find that matching train-test similarity leaves CLIP's robustness intact. These are the precedents for reporting a weak coefficient. [lit Q1]
+
+**What is new here.** No paper found correlates a train-to-domain distance with a generative world model's quality across held-out scenes; world-model papers stop at tables over 1 to 8 domains (NWM 2, SCOPE 4, Vista 4, Matrix-Game 8). Also not found elsewhere: the minimum over training domains as the distance, motion weighting inside the distance, a partial rank correlation with bootstrap CI, leave-one-out and within-cluster coefficients, and a distance frozen before outcomes are read. Our n of 30 exceeds Blitzer's 6 and OTDD's 11 to 16. [lit Q2, Q6]
+
+**Copy-last-frame.** Rohan's doubt that recent work uses it is right for world models and wrong for video prediction. Ranzato et al. 2014, Mathieu, Couprie and LeCun 2016 (who also score moving areas only), Finn et al. 2016, PredNet 2017 (trained on KITTI, tested on unseen CalTech), ContextVP 2018, SDC-Net 2018 and Villegas et al. 2019 (where copy-last beats every model on Human3.6M) all report it. None of the 2024 to 2026 game and driving world models checked does, except the latent-space ThinkJEPA (2026). Villegas et al. give the rationale: per-frame evaluations are unreliable when much of a video does not move. [lit Q4]
+
+**Citations for the related-work paragraph, in priority order:** OTDD (arXiv 2002.02923, Figs. 6–7) as the nearest method; Deng and Zheng (arXiv 2007.02915, Fig. 2) as the nearest distance-predicts-drop claim; PredNet (arXiv 1605.08104, Table 2) for persistence on an unseen domain; Villegas et al. (arXiv 1911.01655, App. A.2.2) for the rationale; Blitzer et al. (P07-1056, Fig. 3); Mathieu et al. (arXiv 1511.05440, Table 2) for motion as the confound; Genie (arXiv 2402.15391) for the ΔtPSNR form; Guillory et al. (arXiv 2107.03315) and Mayilvahanan et al. (arXiv 2310.09562) for null framing. Every citation still needs checking on the paper's page. [lit Q6]
+
