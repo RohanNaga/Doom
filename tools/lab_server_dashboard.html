@@ -1,185 +1,287 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Lab Server Watch</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-:root{
-  --bg:#f6f5f1; --surface:#ffffff; --ink:#1e2226; --ink-2:#5b636b; --line:#dcd9d1; --line-2:#ebe8e1;
-  --accent:#1f6f8b; --ours:#1f6f8b; --others:#b8b1a3; --good:#2f8f5b; --warn:#c2801a; --crit:#b23a3a;
-  --track:#ece9e2;
+:root {
+  --bg:#F3F4F6; --surface:#FFFFFF; --ink:#1B1F24; --ink-2:#4B5563; --line:#D6D9DE; --line-2:#B9BEC6;
+  --accent:#8B1E1E; --accent-ink:#FFFFFF; --blue:#2B5C8A; --tint:#EEF0F3; --num:#9AA0A8;
+  --ours:#8B1E1E; --others:#8A8F98; --free:#DDE1E6; --ok:#2F6B3A; --warn:#B45309; --bad:#A32D2D;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif; --body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif; --mono:"IBM Plex Mono","SF Mono",Menlo,Consolas,monospace;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#15181b; --surface:#1d2125; --ink:#e7e5df; --ink-2:#9aa1a8; --line:#2f353b; --line-2:#272c31;
-    --accent:#5fb3d0; --ours:#5fb3d0; --others:#5c6168; --good:#4fbf82; --warn:#e0a03a; --crit:#e06666;
-    --track:#2a2f34;
-  }
-}
-:root[data-theme="dark"]{
-  --bg:#15181b; --surface:#1d2125; --ink:#e7e5df; --ink-2:#9aa1a8; --line:#2f353b; --line-2:#272c31;
-  --accent:#5fb3d0; --ours:#5fb3d0; --others:#5c6168; --good:#4fbf82; --warn:#e0a03a; --crit:#e06666;
-  --track:#2a2f34;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.45}
-main{max-width:1180px;margin:0 auto;padding:24px 16px 48px}
-header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 20px;margin-bottom:18px}
-h1{font-size:22px;font-weight:600;margin:0;letter-spacing:-0.01em}
-.stamp{color:var(--ink-2);font-family:"IBM Plex Mono",monospace;font-size:13px}
-.stamp.stale{color:var(--warn)}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
-section.server{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px 18px}
-section.server h2{margin:0 0 2px;font-size:17px;font-weight:600}
-.sub{color:var(--ink-2);font-size:13px;margin:0 0 12px}
-h3{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2);margin:16px 0 6px;font-weight:600}
-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
-th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line-2);vertical-align:top;font-size:13.5px}
-th{color:var(--ink-2);font-weight:500}
-td.num,th.num{text-align:right}
-.mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
-.bar{position:relative;height:9px;background:var(--track);border-radius:2px;overflow:hidden;min-width:90px}
-.bar span{position:absolute;top:0;bottom:0;left:0}
-.bar .ours{background:var(--ours)}
-.bar .others{background:var(--others)}
-.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:12px;font-weight:500;line-height:1.5}
-.pill.good{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
-.pill.warn{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
-.pill.crit{background:color-mix(in srgb,var(--crit) 18%,transparent);color:var(--crit)}
-.disk{display:grid;grid-template-columns:130px 1fr 110px;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line-2);font-size:13.5px}
-.disk .bar{height:11px}
-.tmux{display:flex;flex-wrap:wrap;gap:6px}
-.tmux span{font-family:"IBM Plex Mono",monospace;font-size:12px;padding:2px 7px;border:1px solid var(--line);border-radius:4px;color:var(--ink-2)}
-.tmux span.train{color:var(--accent);border-color:var(--accent)}
-.legend{display:flex;gap:16px;color:var(--ink-2);font-size:12.5px;margin:6px 0 0}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
-.empty{color:var(--ink-2);font-style:italic;padding:8px 0}
-.note{color:var(--ink-2);font-size:13px;margin-top:20px}
-svg.spark{width:100%;height:56px;display:block}
-.hist{margin-top:8px}
-.hist .lbl{font-size:12px;color:var(--ink-2);display:flex;justify-content:space-between}
-@media (max-width:480px){.disk{grid-template-columns:96px 1fr 90px}}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg:#15171A; --surface:#1E2126; --ink:#E8E6E1; --ink-2:#A8ADB5; --line:#33373D; --line-2:#4A4F57;
+  --accent:#D2524A; --accent-ink:#15171A; --blue:#7FB0DE; --tint:#23262B; --num:#5F656D;
+  --ours:#D2524A; --others:#6B7078; --free:#2C3036; --ok:#7CC48A; --warn:#E0A05A; --bad:#E66767; } }
+:root[data-theme="dark"] {
+  --bg:#15171A; --surface:#1E2126; --ink:#E8E6E1; --ink-2:#A8ADB5; --line:#33373D; --line-2:#4A4F57;
+  --accent:#D2524A; --accent-ink:#15171A; --blue:#7FB0DE; --tint:#23262B; --num:#5F656D;
+  --ours:#D2524A; --others:#6B7078; --free:#2C3036; --ok:#7CC48A; --warn:#E0A05A; --bad:#E66767; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--body); font-size:14px; line-height:1.5; }
+.wrap { max-width:1080px; margin:0 auto; padding:28px 24px 80px; }
+header { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px 20px; padding-bottom:14px; border-bottom:1px solid var(--line); margin-bottom:20px; }
+header h1 { font-family:var(--display); font-weight:600; font-size:30px; margin:0; letter-spacing:-0.01em; }
+.fresh { font-family:var(--mono); font-size:12.5px; color:var(--ink-2); display:flex; align-items:center; gap:8px; }
+.dot { width:9px; height:9px; border-radius:50%; background:var(--ok); display:inline-block; }
+.dot.stale { background:var(--warn); } .dot.dead { background:var(--bad); }
+.legend { display:flex; gap:16px; font-family:var(--mono); font-size:11.5px; color:var(--ink-2); flex-wrap:wrap; margin:0 0 18px; }
+.legend span { display:flex; align-items:center; gap:5px; }
+.sw { width:11px; height:11px; border-radius:2px; display:inline-block; }
+.summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin:0 0 22px; }
+.tile { background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:10px 12px; }
+.tile .l { font-family:var(--mono); font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-2); }
+.tile .v { font-family:var(--display); font-weight:600; font-size:24px; line-height:1.1; margin:3px 0 1px; font-variant-numeric:tabular-nums; }
+.tile .s { font-size:12px; color:var(--ink-2); }
+.tile.warn .v { color:var(--warn); } .tile.bad .v { color:var(--bad); }
+section.server, section.plan { background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:16px 18px; margin:0 0 18px; }
+section.server h2, section.plan h2 { font-family:var(--display); font-weight:600; font-size:22px; margin:0 0 2px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+section.server h2 small, section.plan h2 small { font-family:var(--mono); font-weight:400; font-size:12px; color:var(--ink-2); }
+.sysline { font-family:var(--mono); font-size:12px; color:var(--ink-2); margin:0 0 12px; }
+h3 { font-family:var(--mono); font-weight:500; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-2); margin:16px 0 8px; }
+.gpus { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
+.gpu { border:1px solid var(--line); border-radius:4px; padding:9px 11px; background:var(--bg); }
+.gpu.ours { border-color:var(--ours); }
+.gpu .t { display:flex; justify-content:space-between; font-family:var(--mono); font-size:12px; margin-bottom:6px; }
+.bar { height:12px; background:var(--free); border-radius:2px; overflow:hidden; display:flex; }
+.bar i { display:block; height:100%; }
+.bar i.o { background:var(--ours); } .bar i.x { background:var(--others); }
+.gpu .u { font-family:var(--mono); font-size:11px; color:var(--ink-2); margin-top:5px; display:flex; justify-content:space-between; }
+.util { height:4px; background:var(--free); border-radius:2px; margin-top:6px; overflow:hidden; }
+.util i { display:block; height:100%; background:var(--blue); }
+.procs { font-size:11.5px; color:var(--ink-2); margin-top:6px; line-height:1.4; }
+.procs b { color:var(--ink); font-weight:600; }
+.disks { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
+.disk { border:1px solid var(--line); border-radius:4px; padding:9px 11px; background:var(--bg); }
+.disk .t { display:flex; justify-content:space-between; font-family:var(--mono); font-size:12px; margin-bottom:6px; }
+.disk .bar { height:14px; }
+.disk .u { font-family:var(--mono); font-size:11px; color:var(--ink-2); margin-top:5px; display:flex; justify-content:space-between; }
+.runs { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:10px; }
+.run { border:1px solid var(--line); border-radius:4px; padding:10px 12px; background:var(--bg); }
+.run .t { font-family:var(--mono); font-size:12.5px; display:flex; justify-content:space-between; }
+.run .prog { height:8px; background:var(--free); border-radius:2px; margin:8px 0 6px; overflow:hidden; }
+.run .prog i { display:block; height:100%; background:var(--blue); }
+.run .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:12.5px; font-variant-numeric:tabular-nums; }
+.run .kv b { font-family:var(--mono); font-weight:500; font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-2); }
+.run svg { display:block; width:100%; height:auto; margin-top:8px; }
+.hbars { display:grid; grid-template-columns:130px 1fr 80px; gap:4px 10px; align-items:center; font-size:12.5px; font-variant-numeric:tabular-nums; }
+.hbars .n { font-family:var(--mono); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hbars .n.me { color:var(--ours); font-weight:500; }
+.hbars .b { height:10px; background:var(--free); border-radius:2px; overflow:hidden; }
+.hbars .b i { display:block; height:100%; background:var(--others); }
+.hbars .b i.me { background:var(--ours); }
+.hbars .v { font-family:var(--mono); font-size:12px; text-align:right; color:var(--ink-2); }
+.tmux { font-family:var(--mono); font-size:12px; color:var(--ink-2); }
+.tmux code { background:var(--tint); padding:1px 6px; border-radius:3px; margin-right:6px; }
+.empty { color:var(--ink-2); font-style:italic; }
+.err { background:var(--tint); border-left:3px solid var(--bad); padding:8px 12px; font-family:var(--mono); font-size:12px; }
+details { margin-top:10px; } summary { cursor:pointer; font-family:var(--mono); font-size:12px; color:var(--blue); }
+.flags { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 16px; }
+.flag { font-family:var(--mono); font-size:11.5px; padding:4px 8px; border-radius:3px; background:var(--tint); border:1px solid var(--line); }
+.flag.warn { border-color:var(--warn); color:var(--warn); } .flag.bad { border-color:var(--bad); color:var(--bad); } .flag.ok { color:var(--ok); }
+.lanes { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; }
+.lane { border:1px solid var(--line); border-radius:4px; background:var(--bg); padding:10px 12px; }
+.lane h4 { margin:0 0 8px; font-family:var(--mono); font-weight:500; font-size:12px; letter-spacing:0.04em; }
+.item { display:grid; grid-template-columns:118px 1fr; gap:2px 10px; padding:7px 0; border-top:1px solid var(--line); font-size:12.5px; }
+.item:first-of-type { border-top:0; }
+.item .w { font-family:var(--mono); font-size:11.5px; color:var(--ink-2); line-height:1.35; }
+.item .d b { font-weight:600; }
+.item .d small { display:block; color:var(--ink-2); font-size:11.5px; }
+.st { display:inline-block; font-family:var(--mono); font-size:10.5px; letter-spacing:0.05em; text-transform:uppercase; padding:1px 6px; border-radius:3px; border:1px solid var(--line); margin-left:6px; vertical-align:middle; }
+.st.running { color:var(--ok); border-color:var(--ok); } .st.done { color:var(--ink-2); }
+.st.conditional, .st.pending { color:var(--warn); border-color:var(--warn); } .st.planned { color:var(--blue); border-color:var(--blue); }
+.plannote { font-size:12.5px; color:var(--ink-2); margin:8px 0 0; max-width:90ch; }
+footer { font-size:12px; color:var(--ink-2); margin-top:24px; max-width:80ch; }
+@media (max-width:640px) { .hbars { grid-template-columns:100px 1fr 60px; } .item { grid-template-columns:1fr; } }
 </style>
-</head>
-<body>
-<main>
+<div class="wrap">
 <header>
   <h1>Lab server watch</h1>
-  <span id="stamp" class="stamp">loading the latest snapshot…</span>
+  <div class="fresh"><span class="dot" id="dot"></span><span id="fresh">connecting to the store</span></div>
 </header>
-<div id="servers" class="grid"><p class="empty">Waiting for the shared database.</p></div>
-<p class="note">Snapshots come from <span class="mono">tools/server_usage.py</span> in the Doom repo, written to this page's database about once an hour while the main session runs. Rules: Superman leaves 2 of 8 cards free and needs 250 GB free on disk; Spiderman jobs fill their card and keep the study jobs thread-capped. "Ours" is rohan on Superman and rnagabhi on Spiderman.</p>
-</main>
+<div class="legend"><span><i class="sw" style="background:var(--ours)"></i>ours (rohan, rnagabhi)</span><span><i class="sw" style="background:var(--others)"></i>other users</span><span><i class="sw" style="background:var(--free)"></i>free</span><span><i class="sw" style="background:var(--blue)"></i>utilisation / run progress</span></div>
+<div class="flags" id="flags"></div>
+<div class="summary" id="summary"></div>
+<section class="plan" id="plan" hidden>
+  <h2>What runs where next <small id="planwhen"></small></h2>
+  <div class="lanes" id="lanes"></div>
+  <p class="plannote" id="plannote"></p>
+</section>
+<div id="servers"><p class="empty">Waiting for the first snapshot.</p></div>
+<footer>Snapshots are taken every 30 minutes by the collector in <code>tools/server_usage.py</code> over ssh from Rohan's machine, with directory sizes refreshed hourly. The page listens to the store and redraws on every write. If the freshness dot turns amber, the collector has missed a cycle; red means over an hour. The plan panel is written by hand when the schedule changes.</footer>
+</div>
 <script>
-const GB = 1024 ** 3;
-const fmtGB = b => (b / GB).toFixed(0);
-const fmtAgo = s => s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${(s / 3600).toFixed(1)} h ago`;
-const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+(function () {
+  const GB = 2 ** 30;
+  const $ = (id) => document.getElementById(id);
+  const fmtGB = (b, d = 0) => (b / GB).toFixed(d) + ' GB';
+  const fmtTB = (b) => (b / 2 ** 40).toFixed(2) + ' TB';
+  const fmtMB = (mb) => mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB';
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const ago = (s) => s < 90 ? Math.round(s) + ' s' : s < 5400 ? Math.round(s / 60) + ' min' : s < 172800 ? (s / 3600).toFixed(1) + ' h' : (s / 86400).toFixed(1) + ' d';
+  const when = (t) => new Date(t * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  let latest = null, history = [], plan = null;
+  const totalFor = (name) => (plan && plan.totals && plan.totals[name]) || 90000;
 
-function gpuRows(gpus) {
-  return gpus.map(g => {
-    const total = g.mem_total_mb || 1, ours = g.ours_mb || 0, others = g.others_mb || 0;
-    const users = (g.users || []).join(", ") || "free";
-    const utilCls = g.util >= 90 ? "crit" : g.util >= 30 ? "warn" : "good";
-    return `<tr><td class="mono">${g.index}</td>
-      <td><div class="bar"><span class="ours" style="width:${(100*ours/total).toFixed(1)}%"></span><span class="others" style="left:${(100*ours/total).toFixed(1)}%;width:${(100*others/total).toFixed(1)}%"></span></div></td>
-      <td class="num mono">${(g.mem_used_mb/1024).toFixed(1)} / ${(total/1024).toFixed(0)} GB</td>
-      <td class="num"><span class="pill ${utilCls}">${g.util}%</span></td>
-      <td>${esc(users)}</td></tr>`;
-  }).join("");
-}
-
-function diskRows(disks, rule) {
-  return disks.map(d => {
-    const avail = d.avail_b, size = d.size_b || 1, pct = 100 * (1 - avail / size);
-    const floor = d.mount === "/" && rule && rule.includes("250") ? 250 : d.mount.startsWith("/sata2") ? 300 : d.mount === "/home" ? 50 : 5;
-    const cls = avail / GB < floor / 2 ? "crit" : avail / GB < floor ? "warn" : "good";
-    return `<div class="disk"><span class="mono">${esc(d.mount)}</span>
-      <div class="bar"><span class="others" style="width:${pct.toFixed(1)}%"></span></div>
-      <span class="num"><span class="pill ${cls}">${fmtGB(avail)} GB free</span></span></div>`;
-  }).join("");
-}
-
-function runRows(runs, now) {
-  const names = Object.keys(runs || {});
-  if (!names.length) return `<p class="empty">no DoomDiT run logs here</p>`;
-  return `<table><thead><tr><th>run</th><th class="num">step</th><th class="num">loss</th><th class="num">val</th><th class="num">upd/s</th><th>last log</th></tr></thead><tbody>` +
-    names.map(n => {
-      const r = runs[n], age = r.t ? Math.max(0, now - r.t) : null;
-      const live = age !== null && age < 900;
-      const flag = r.skipped ? ` <span class="pill warn">${r.skipped} skipped</span>` : "";
-      const exc = r.excursion ? ` <span class="pill crit">val excursion</span>` : "";
-      return `<tr><td class="mono">${esc(n)}${flag}${exc}</td><td class="num mono">${(r.step||0).toLocaleString()}</td>
-        <td class="num mono">${r.loss !== undefined ? r.loss.toFixed(4) : "–"}</td>
-        <td class="num mono">${r.val_loss !== undefined ? r.val_loss.toFixed(4) : "–"}<span class="stamp"> @${((r.val_step||0)/1000).toFixed(0)}k</span></td>
-        <td class="num mono">${r.steps_per_s ? r.steps_per_s.toFixed(2) : "–"}</td>
-        <td>${age === null ? "–" : `<span class="pill ${live ? "good" : "warn"}">${fmtAgo(age)}</span>`}</td></tr>`;
-    }).join("") + `</tbody></table>`;
-}
-
-function storageRows(detail) {
-  const items = Object.entries(detail || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  if (!items.length) return "";
-  return `<h3>Our largest directories</h3><table><tbody>` + items.map(([p, b]) =>
-    `<tr><td class="mono">${esc(p.replace(/^\/sata2\/data\/rnagabhi\/doom\//, "doom/").replace(/^\/home\/rohan\//, "~/"))}</td><td class="num mono">${fmtGB(b)} GB</td></tr>`).join("") + `</tbody></table>`;
-}
-
-function spark(points, key) {
-  if (points.length < 2) return "";
-  const xs = points.map(p => p.t), ys = points.map(p => p[key]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = 0, y1 = Math.max(...ys) * 1.05 || 1;
-  const W = 400, H = 56, X = t => 4 + (W - 8) * (t - x0) / Math.max(1, x1 - x0), Y = v => H - 4 - (H - 8) * (v - y0) / (y1 - y0);
-  const d = points.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join(" ");
-  const last = points[points.length - 1];
-  return `<div class="hist"><div class="lbl"><span>data disk free, GB, last ${points.length} snapshots</span><span class="mono">${fmtGB(last[key]*GB)} GB</span></div>
-    <svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="free disk space over the recent snapshots"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5"/><circle cx="${X(last.t).toFixed(1)}" cy="${Y(last[key]).toFixed(1)}" r="2.5" fill="var(--accent)"/></svg></div>`;
-}
-
-function render(snap, history) {
-  const now = Math.floor(Date.now() / 1000);
-  const age = now - (snap.collected_at || now);
-  const st = document.getElementById("stamp");
-  st.textContent = `snapshot ${new Date(snap.collected_at * 1000).toLocaleString()} (${fmtAgo(age)})`;
-  st.className = "stamp" + (age > 3 * 3600 ? " stale" : "");
-  const out = [];
-  for (const [name, s] of Object.entries(snap.servers || {})) {
-    const sys = s.system || {};
-    const loadCls = sys.cores && sys.load1 > sys.cores ? "crit" : sys.cores && sys.load1 > sys.cores * 0.6 ? "warn" : "good";
-    const oursGpus = (s.gpus || []).filter(g => g.ours_mb > 0).length, freeGpus = (s.gpus || []).filter(g => !g.procs || !g.procs.length).length;
-    const hist = (history || []).filter(h => h.server === name).sort((a, b) => a.t - b.t);
-    const mainDisk = (s.disks || [])[0];
-    out.push(`<section class="server">
-      <h2>${esc(s.name || name)}</h2>
-      <p class="sub">${esc(s.gpu_note || "")} · ${esc(s.rule || "")} · ${s.ok ? "" : '<span class="pill crit">unreachable</span>'}
-        load <span class="pill ${loadCls}">${sys.load1 ?? "–"} / ${sys.cores ?? "–"} cores</span> · ours on ${oursGpus} card${oursGpus === 1 ? "" : "s"}, ${freeGpus} free</p>
-      <h3>GPUs</h3>
-      <table><thead><tr><th>#</th><th>memory</th><th class="num">used</th><th class="num">util</th><th>users</th></tr></thead><tbody>${gpuRows(s.gpus || [])}</tbody></table>
-      <p class="legend"><span><i style="background:var(--ours)"></i>ours</span><span><i style="background:var(--others)"></i>others</span></p>
-      <h3>Disks</h3>${diskRows(s.disks || [], s.rule)}
-      ${mainDisk ? spark(hist, "avail_gb") : ""}
-      <h3>DoomDiT runs</h3>${runRows(s.runs, now)}
-      <h3>tmux sessions</h3><div class="tmux">${(s.tmux || []).map(t => `<span class="${/^train-/.test(t) ? "train" : ""}">${esc(t)}</span>`).join("") || '<span class="empty">none</span>'}</div>
-      ${storageRows(s.ours_detail_b)}
-    </section>`);
+  function bar(ours, others, total, cls) {
+    const o = Math.max(0, Math.min(100, 100 * ours / total)), x = Math.max(0, Math.min(100 - o, 100 * others / total));
+    return `<div class="bar ${cls || ''}"><i class="o" style="width:${o}%"></i><i class="x" style="width:${x}%"></i></div>`;
   }
-  document.getElementById("servers").innerHTML = out.join("") || `<p class="empty">The snapshot holds no servers.</p>`;
-}
+  function spark(points, w = 300, h = 46, color) {
+    if (!points || points.length < 2) return '';
+    const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const sx = (x) => x1 === x0 ? 0 : (x - x0) / (x1 - x0) * (w - 4) + 2, sy = (y) => y1 === y0 ? h / 2 : h - 4 - (y - y0) / (y1 - y0) * (h - 8);
+    const d = points.map((p, i) => (i ? 'L' : 'M') + sx(p[0]).toFixed(1) + ',' + sy(p[1]).toFixed(1)).join(' ');
+    const last = points[points.length - 1];
+    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="trend"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/><circle cx="${sx(last[0]).toFixed(1)}" cy="${sy(last[1]).toFixed(1)}" r="3" fill="${color}"/><text x="${w - 2}" y="10" font-size="9" fill="currentColor" opacity="0.7" text-anchor="end">${y1.toFixed(3)}</text><text x="${w - 2}" y="${h - 1}" font-size="9" fill="currentColor" opacity="0.7" text-anchor="end">${y0.toFixed(3)}</text></svg>`;
+  }
 
-(async () => {
-  const db = await claude.use("db");
-  if (!db) { document.getElementById("stamp").textContent = "shared database unavailable in this view"; return; }
-  let history = [];
-  try {
-    const rows = await db.collection("history").orderBy("t", "desc").limit(72).get();
-    history = rows.docs ? rows.docs.map(d => d.data()) : (rows || []).map(d => d.data ? d.data() : d);
-  } catch (e) { history = []; }
-  db.doc("usage/latest").onSnapshot(doc => {
-    const snap = doc && doc.data ? doc.data() : doc;
-    if (snap && snap.servers) render(snap, history);
-  });
+  function renderGpu(g, sv) {
+    const total = g.mem_total_mb, free = total - g.mem_used_mb;
+    const ours = g.ours_mb || 0, others = Math.max(0, g.mem_used_mb - ours);
+    const procs = (g.procs || []).slice().sort((a, b) => b.mem_mb - a.mem_mb).map((p) =>
+      `<div>${p.ours ? '<b>' + esc(p.user) + '</b>' : esc(p.user)} · ${fmtMB(p.mem_mb)}${p.etime_s != null ? ' · ' + ago(p.etime_s) : ''}</div>`).join('');
+    return `<div class="gpu ${ours ? 'ours' : ''}">
+      <div class="t"><span>GPU ${g.index}</span><span>${g.util}% busy</span></div>
+      ${bar(ours, others, total)}
+      <div class="u"><span>${ours ? 'ours ' + fmtMB(ours) + ' · ' : ''}${others ? 'others ' + fmtMB(others) : 'nobody else'}</span><span>${fmtMB(free)} free</span></div>
+      <div class="util"><i style="width:${g.util}%"></i></div>
+      ${procs ? `<div class="procs">${procs}</div>` : '<div class="procs empty">idle</div>'}
+    </div>`;
+  }
+  function renderDisk(d, sv) {
+    const oursB = Object.entries(sv.ours_b || {}).filter(([p]) => p.startsWith(d.mount === '/' ? '/home/' : d.mount) || (d.mount === '/' && sv.name === 'superman')).reduce((a, [, v]) => a + v, 0);
+    const ours = d.mount === '/' && sv.name === 'spiderman' ? 0 : Math.min(oursB, d.used_b);
+    const others = d.used_b - ours;
+    const pct = 100 * d.used_b / d.size_b;
+    const cls = d.avail_b < 20 * GB ? 'bad' : d.avail_b < 100 * GB ? 'warn' : '';
+    return `<div class="disk">
+      <div class="t"><span>${esc(d.mount)}</span><span class="${cls}" style="color:var(--${cls || 'ink-2'})">${pct.toFixed(0)}% full</span></div>
+      ${bar(ours, others, d.size_b)}
+      <div class="u"><span>${ours ? 'ours ' + fmtGB(ours) + ' · ' : ''}others ${fmtGB(others)} of ${fmtTB(d.size_b)}</span><span>${d.avail_b < GB ? '0 GB' : fmtGB(d.avail_b)} free</span></div>
+    </div>`;
+  }
+  function renderRun(name, r, sv, hist) {
+    if (!r || r.step == null) return `<div class="run"><div class="t"><span>${esc(name)}</span><span class="empty">no log yet</span></div></div>`;
+    const total = totalFor(name), pct = Math.min(100, 100 * r.step / total);
+    const rate = r.steps_per_s || 0, remain = rate ? (total - r.step) / rate : null;
+    const alive = latest && (latest.collected_at - (r.t || 0)) < 2400 && !r.ended;
+    const status = r.ended ? 'finished' : alive ? 'training' : 'no log line in ' + ago(latest.collected_at - (r.t || 0));
+    const eta = r.ended ? '' : remain != null ? when((r.t || latest.collected_at) + remain) : '';
+    const pts = hist.map((h) => [h.step, h.loss]).filter((p) => p[0] != null && p[1] != null);
+    const vpts = hist.map((h) => [h.val_step, h.val_loss]).filter((p) => p[0] != null && p[1] != null);
+    const seen = new Set(); const vdedup = vpts.filter((p) => !seen.has(p[0]) && seen.add(p[0]));
+    return `<div class="run">
+      <div class="t"><span>${esc(name)}</span><span style="color:var(--${r.ended ? 'ok' : alive ? 'ok' : 'warn'})">${status}</span></div>
+      <div class="prog"><i style="width:${pct}%"></i></div>
+      <div class="kv">
+        <b>step</b><span>${r.step.toLocaleString()} of ${total.toLocaleString()} (${pct.toFixed(1)}%)</span>
+        <b>rate</b><span>${rate.toFixed(2)} steps/s${eta ? ' · done about ' + eta : ''}</span>
+        <b>train loss</b><span>${r.loss != null ? r.loss.toFixed(4) : ''}${r.grad_norm != null ? ' · grad ' + r.grad_norm.toFixed(2) + ' · clipped ' + Math.round(100 * (r.clip_frac || 0)) + '%' : ''}${r.skipped ? ' · <span style="color:var(--warn)">skipped ' + r.skipped + '</span>' : ''}</span>
+        <b>held-out</b><span>${r.val_loss != null ? r.val_loss.toFixed(4) + ' at ' + r.val_step.toLocaleString() : 'none yet'}${r.excursion ? ' · <span style="color:var(--bad)">excursion flag</span>' : ''}</span>
+        <b>lr</b><span>${r.lr != null ? r.lr.toExponential(2) : ''}</span>
+      </div>
+      ${vdedup.length > 1 ? '<div style="font-family:var(--mono);font-size:10.5px;color:var(--ink-2);margin-top:8px">held-out v-loss by step</div>' + spark(vdedup, 300, 46, 'var(--accent)') : pts.length > 1 ? '<div style="font-family:var(--mono);font-size:10.5px;color:var(--ink-2);margin-top:8px">train loss by step</div>' + spark(pts, 300, 46, 'var(--blue)') : ''}
+    </div>`;
+  }
+  function renderHomes(sv) {
+    const rows = Object.entries(sv.homes_b || {}).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    if (!rows.length) return '';
+    const max = rows[0][1];
+    return `<h3>Who holds the root disk (top 12 home directories)</h3><div class="hbars">${rows.map(([p, v]) => {
+      const me = p.endsWith('/rohan'); return `<div class="n ${me ? 'me' : ''}">${esc(p.replace('/home/', ''))}</div><div class="b"><i class="${me ? 'me' : ''}" style="width:${100 * v / max}%"></i></div><div class="v">${fmtGB(v)}</div>`; }).join('')}</div>`;
+  }
+  function renderOurs(sv) {
+    const rows = Object.entries(sv.ours_detail_b || {}).sort((a, b) => b[1] - a[1]);
+    if (!rows.length) return '';
+    const max = rows[0][1];
+    return `<h3>Our footprint by directory</h3><div class="hbars">${rows.map(([p, v]) => `<div class="n" title="${esc(p)}">${esc(p.split('/').slice(-1)[0])}</div><div class="b"><i class="me" style="width:${100 * v / max}%"></i></div><div class="v">${fmtGB(v, 1)}</div>`).join('')}</div>`;
+  }
+  function renderServer(sv) {
+    if (!sv.ok) return `<section class="server"><h2>${esc(sv.name)} <small>${esc(sv.host)}</small></h2><div class="err">unreachable at ${when(sv.ts)}: ${esc(sv.error || 'no data')}</div></section>`;
+    const s = sv.system || {};
+    const sys = [s.load1 != null ? `load ${s.load1.toFixed(0)} on ${s.cores} cores` : '', s.mem_total_b ? `RAM ${fmtGB(s.mem_total_b - (s.mem_avail_b || 0))} of ${fmtGB(s.mem_total_b)} in use` : ''].filter(Boolean).join(' · ');
+    const hist = (name) => history.map((h) => (h.servers && h.servers[sv.name] && h.servers[sv.name].runs && h.servers[sv.name].runs[name]) || {});
+    const runs = Object.entries(sv.runs || {});
+    return `<section class="server">
+      <h2>${esc(sv.name)} <small>${esc(sv.host)} · ${esc(sv.gpu_note || '')} · rule: ${esc(sv.rule || '')}</small></h2>
+      <div class="sysline">${sys} · snapshot ${when(sv.ts)}</div>
+      <h3>GPUs</h3><div class="gpus">${sv.gpus.map((g) => renderGpu(g, sv)).join('')}</div>
+      <h3>Disks</h3><div class="disks">${sv.disks.map((d) => renderDisk(d, sv)).join('')}</div>
+      ${runs.length ? `<h3>Our training runs</h3><div class="runs">${runs.map(([n, r]) => renderRun(n, r, sv, hist(n))).join('')}</div>` : ''}
+      <h3>tmux sessions</h3><div class="tmux">${sv.tmux && sv.tmux.length ? sv.tmux.map((t) => `<code>${esc(t)}</code>`).join('') : '<span class="empty">none</span>'}</div>
+      ${renderOurs(sv)}${renderHomes(sv)}
+    </section>`;
+  }
+  function renderPlan() {
+    if (!plan || !plan.lanes) { $('plan').hidden = true; return; }
+    $('plan').hidden = false;
+    $('planwhen').textContent = plan.updated ? 'written ' + esc(plan.updated) : '';
+    $('lanes').innerHTML = plan.lanes.map((lane) => `<div class="lane"><h4>${esc(lane.name)}</h4>${(lane.items || []).map((it) =>
+      `<div class="item"><div class="w">${esc(it.when)}</div><div class="d"><b>${esc(it.what)}</b><span class="st ${esc(it.status)}">${esc(it.status)}</span>${it.note ? '<small>' + esc(it.note) + '</small>' : ''}</div></div>`).join('')}</div>`).join('');
+    $('plannote').textContent = plan.note || '';
+  }
+  function flagsFor(snap) {
+    const out = [];
+    for (const sv of Object.values(snap.servers)) {
+      if (!sv.ok) { out.push(['bad', sv.name + ' unreachable']); continue; }
+      for (const d of sv.disks) if (d.avail_b < 20 * GB) out.push([d.avail_b < 2 * GB ? 'bad' : 'warn', `${sv.name} ${d.mount}: ${d.avail_b < GB ? '0' : (d.avail_b / GB).toFixed(0)} GB free`]);
+      const oursOn = sv.gpus.filter((g) => g.ours_mb > 0).length, freeCards = sv.gpus.filter((g) => g.mem_used_mb < 600 && g.util < 5).length;
+      if (sv.name === 'superman' && freeCards < 2) out.push(['warn', `superman: only ${freeCards} GPUs free (rule says 2)`]);
+      out.push(['ok', `${sv.name}: ours on ${oursOn} of ${sv.gpus.length} GPUs, ${freeCards} fully free`]);
+      for (const [n, r] of Object.entries(sv.runs || {})) {
+        if (r.excursion) out.push(['bad', `${n}: held-out loss excursion`]);
+        if (r.skipped) out.push(['warn', `${n}: ${r.skipped} skipped updates`]);
+        if (r.step != null && !r.ended && snap.collected_at - (r.t || 0) > 2400) out.push(['bad', `${n}: no log line for ${ago(snap.collected_at - r.t)}`]);
+      }
+    }
+    return out;
+  }
+  function summaryFor(snap) {
+    let gpusOurs = 0, gpusAll = 0, gpusFree = 0, oursB = 0, minFree = Infinity, minFreeName = '';
+    for (const sv of Object.values(snap.servers)) {
+      if (!sv.ok) continue;
+      gpusAll += sv.gpus.length; gpusOurs += sv.gpus.filter((g) => g.ours_mb > 0).length; gpusFree += sv.gpus.filter((g) => g.mem_used_mb < 600 && g.util < 5).length;
+      oursB += Object.values(sv.ours_b || {}).reduce((a, b) => a + b, 0);
+      for (const d of sv.disks) if (d.avail_b < minFree) { minFree = d.avail_b; minFreeName = sv.name + ' ' + d.mount; }
+    }
+    const runs = Object.values(snap.servers).flatMap((sv) => Object.entries(sv.runs || {}).map(([n, r]) => ({ n, ...r })));
+    const active = runs.filter((r) => r.step != null && !r.ended && snap.collected_at - (r.t || 0) < 2400);
+    return `
+      <div class="tile"><div class="l">GPUs we hold</div><div class="v">${gpusOurs} of ${gpusAll}</div><div class="s">${gpusFree} fully free across both servers</div></div>
+      <div class="tile ${minFree < 20 * GB ? 'bad' : minFree < 100 * GB ? 'warn' : ''}"><div class="l">Tightest disk</div><div class="v">${minFree === Infinity ? '' : minFree < GB ? '0 GB' : fmtGB(minFree)}</div><div class="s">${esc(minFreeName)} free</div></div>
+      <div class="tile"><div class="l">Our storage</div><div class="v">${oursB ? fmtTB(oursB) : 'n/a'}</div><div class="s">home and data directories, both servers</div></div>
+      <div class="tile"><div class="l">Training runs</div><div class="v">${active.length}</div><div class="s">${active.map((r) => r.n.split('-')[1] + ' ' + (100 * r.step / totalFor(r.n)).toFixed(0) + '%').join(' · ') || 'none active'}</div></div>`;
+  }
+  function draw() {
+    renderPlan();
+    if (!latest) return;
+    $('summary').innerHTML = summaryFor(latest);
+    $('flags').innerHTML = flagsFor(latest).map(([c, t]) => `<span class="flag ${c}">${esc(t)}</span>`).join('');
+    $('servers').innerHTML = ['spiderman', 'superman'].filter((n) => latest.servers[n]).map((n) => renderServer(latest.servers[n])).join('');
+  }
+  function tickFresh() {
+    if (!latest) return;
+    const s = Date.now() / 1000 - latest.collected_at;
+    $('fresh').textContent = 'updated ' + ago(s) + ' ago · ' + when(latest.collected_at);
+    $('dot').className = 'dot' + (s > 3600 ? ' dead' : s > 2400 ? ' stale' : '');
+  }
+  setInterval(tickFresh, 15000);
+
+  (async () => {
+    const db = await (window.claude && window.claude.use ? window.claude.use('db') : Promise.resolve(null));
+    if (!db) { $('fresh').textContent = 'store unavailable in this view'; $('dot').className = 'dot dead'; return; }
+    db.collection('plan').orderBy('ts', 'desc').limit(1).onSnapshot((qs) => { plan = qs.docs.length ? qs.docs[0].data() : null; draw(); }, () => {});
+    db.doc('usage/latest').onSnapshot((snap) => {
+      if (!snap.exists) { $('fresh').textContent = 'no snapshot written yet'; return; }
+      latest = snap.data(); draw(); tickFresh();
+    }, (e) => { $('fresh').textContent = 'store error: ' + e.code; $('dot').className = 'dot dead'; });
+    db.collection('history').orderBy('ts', 'desc').limit(300).onSnapshot((qs) => {
+      history = qs.docs.map((d) => d.data()).sort((a, b) => a.ts - b.ts); draw();
+    }, () => {});
+  })();
 })();
 </script>
-</body>
-</html>
+
+</body></html>
