@@ -21,6 +21,10 @@ TINY_PIXART = dict(num_attention_heads=2, attention_head_dim=8, in_channels=4, o
                    num_layers=2, caption_channels=32, sample_size=64, patch_size=2,
                    cross_attention_dim=16, use_additional_conditions=False, norm_num_groups=2)
 PIXART_REPO = "PixArt-alpha/PixArt-XL-2-512x512"
+# the fixture map has 10 episodes, so its split states the budget: 6 adapt, 4 held out, a step curve on the
+# first 4 of the adapt list, and 3 windows from each held-out episode (12 scored windows)
+SPLIT_FLAGS = ["--adapt-episodes", "6", "--held-out-episodes", "4", "--ladder", "1,2,4,6", "--step-curve-k", "4",
+               "--windows-per-episode", "3"]
 
 
 def serve_tiny_pixart(monkeypatch):

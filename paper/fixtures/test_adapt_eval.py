@@ -47,7 +47,7 @@ def one_map(tmp_path):
     map_split = tmp_path / "split_unseen_map17.json"
     map_split.write_text(json.dumps({"val": list(F.EPISODES), "meta": {"set": "unseen", "map": F.MAP}}))
     out = tmp_path / "split_adapt.json"
-    adapt_split.main(["--map-split", str(map_split), "--latents-dir", d, "--seed", "0", "--windows", "12",
+    adapt_split.main(["--map-split", str(map_split), "--latents-dir", d, "--seed", "0", *F.SPLIT_FLAGS,
                       "--context-frames", str(F.CTX), "--legacy-windows", "40", "--out", str(out)])
     return d, str(map_split), str(out), tmp_path
 

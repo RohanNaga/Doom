@@ -52,7 +52,7 @@ def setup(tmp_path):
     src = F.write_source_snapshot(tmp_path / "040-unet-nexttic" / "snap_0200000.pt")
     split = tmp_path / "split_adapt_unseen_map17_seed0.json"
     adapt_split.main(["--episodes", ",".join(map(str, F.EPISODES)), "--set", "unseen", "--map", str(F.MAP),
-                      "--latents-dir", d, "--seed", "0", "--windows", "12", "--context-frames", str(F.CTX),
+                      "--latents-dir", d, "--seed", "0", *F.SPLIT_FLAGS, "--context-frames", str(F.CTX),
                       "--out", str(split)])
     return {"lat": d, "src": src, "split": str(split), "tmp": tmp_path}
 
@@ -239,9 +239,13 @@ def test_training_windows_come_only_from_the_adaptation_episodes(tiny, setup, mo
     monkeypatch.setattr(adapt_wm, "window_datasets", spy)
     split = json.load(open(setup["split"]))
     train(setup, "full")
-    assert seen["train"] == split["adapt"] == seen["episodes"] and seen["held"] == split["held_out"]
+    # by default the step-curve rung: the first step_curve_k (4 here) of the adapt list
+    assert seen["train"] == split["train"] == sorted(split["adapt"][:4]) == seen["episodes"]
+    assert seen["held"] == split["held_out"]
     train(setup, "k2", ["--adapt-episodes-k", "2"])
-    assert seen["episodes"] == sorted(split["adapt_pool"][:2])
+    assert seen["episodes"] == sorted(split["adapt"][:2])
+    train(setup, "k6", ["--adapt-episodes-k", "6"])
+    assert seen["episodes"] == sorted(split["adapt"])
     assert not set(seen["episodes"]) & set(split["held_out"])
 
 

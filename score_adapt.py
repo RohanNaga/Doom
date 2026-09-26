@@ -310,7 +310,7 @@ def cmd_score(a):
             base = {"run": run, "map": ck.get("map"), "set": split_meta.get("set"), "map_id": split_meta.get("map"),
                     "step": step, "seed": int(ck["adapt_args"]["seed"]), "weights": w, "backbone": recipe["backbone"],
                     "adapt_episodes": len(ck.get("episodes") or []),
-                    "adapt_episodes_k": ck["adapt_args"].get("adapt_episodes_k", 0),
+                    "adapt_episodes_k": ck["certificate"].get("adapt_episodes_k"),
                     "rank": ck["adapter_config"]["rank"], "alpha": ck["adapter_config"]["alpha"],
                     "lora_mlp": ck["adapter_config"]["include_mlp"], "parts": ck["adapter_config"]["parts"],
                     "grid": cert["step_grid"], "source_sha256": ck["source"]["sha256"],

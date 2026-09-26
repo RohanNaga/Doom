@@ -31,8 +31,9 @@ anything above `--parity-tol` (default 0, exact) stops the run before it trains.
 no weight decay); everything else is frozen. `--lora-rank 0 --full-parts all` is the full fine-tune reference
 (design decision 5): no adapter, every parameter trained, the same loop, checkpoints and evaluator. An fp32 EMA of exactly those tensors (decay `--ema-decay`,
 0.999 by default for runs of a few thousand updates) lives on the training device, updated every update.
-Windows come only from the split's adaptation episodes (or the first `--adapt-episodes-k` of its pool, the
-data grid); the live validation curve is the v-loss on the split's recorded held-out windows.
+Windows come only from the first k episodes of the split's adapt list: its step-curve rung (8 by default) or
+the data-ladder rung `--adapt-episodes-k` names; the live validation curve is the v-loss on the split's
+recorded held-out windows.
 
 **Checkpoints** at every step of `--step-grid` (default 0,250,500,1000,2000; 0 is written before the first
 update) as `adapter_<step>.pt`: the adapter and the trained parts, live and EMA, in fp32, how to rebuild them
@@ -293,7 +294,7 @@ def main(args):
 
     cert = {"git": git_state(), "seed": args.seed, "map": corpus, "set": set_name, "map_id": map_id,
             "source": source, "split": split_rec or {"path": None, "sha256": None},
-            "adapt_episodes": train_ids or [], "adapt_episodes_k": args.adapt_episodes_k, "held_out": held_ids or [],
+            "adapt_episodes": train_ids or [], "adapt_episodes_k": len(train_ids or []), "held_out": held_ids or [],
             "held_out_windows": len(val_ds), "micro_batch": args.per_gpu_batch, "world": world, "accum": accum,
             "effective_batch": args.per_gpu_batch * world * accum, "lr": args.lr, "warmup": args.warmup,
             "ema_decay": args.ema_decay, "rank": args.lora_rank, "alpha": args.lora_alpha,
@@ -433,7 +434,8 @@ def build_parser():
                         "what every zero-shot score used")
     p.add_argument("--adapt-split", default="", help="the map's adaptation split (adapt_split.py)")
     p.add_argument("--adapt-episodes-k", type=int, default=0,
-                   help="data grid: train on the first K episodes of the split's adapt pool (0 = its adaptation set)")
+                   help="data ladder: train on the first K episodes of the split's adapt list (0 = the split's "
+                        "step-curve rung, 8 by default)")
     p.add_argument("--latents-dir", default="", help="the map's per-tic latent directory, in the source's latent "
                    "space (default: the one the split was written from, which is the SD 1.x space)")
     p.add_argument("--results-dir", required=True)

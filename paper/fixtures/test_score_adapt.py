@@ -143,7 +143,7 @@ def test_every_checkpoint_is_scored_per_weights_and_step_zero_is_the_frozen_scor
     src = F.write_source_snapshot(tmp_path / "040-unet-nexttic" / "snap_0200000.pt")
     split = str(tmp_path / "split_adapt_unseen_map17_seed0.json")
     adapt_split.main(["--episodes", ",".join(map(str, F.EPISODES)), "--set", "unseen", "--map", str(F.MAP),
-                      "--latents-dir", d, "--windows", "12", "--context-frames", str(F.CTX), "--out", split])
+                      "--latents-dir", d, *F.SPLIT_FLAGS, "--context-frames", str(F.CTX), "--out", split])
     run = tmp_path / "unet_unseen_map17_s0"
     assert adapt_wm.main(adapt_wm.build_parser().parse_args(
         ["--source", src, "--adapt-split", split, "--latents-dir", d, "--results-dir", str(run),
