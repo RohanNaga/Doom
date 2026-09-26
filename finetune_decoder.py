@@ -22,7 +22,9 @@ must name its episodes with `--stream-ids`, inside the segment's train range.
 
 `--val-dir` / `--val-ids` take the validation frames from named held-out episodes instead of the
 split's `val` list of `--in-dir`; for a dense segment they must lie inside its validation range
-(`validation_episode_ids`).
+(`validation_episode_ids`). The decoder the run delivers is always the terminal one, `<out-dir>/vae`;
+the hourly checkpoint that scores best on the validation frames is recorded in metrics.json beside
+it (`checkpoint_selection`), never swapped in for it.
 
 Usage:
     python finetune_decoder.py --in-dir raw_arnold --split split_arnold.json \
@@ -303,6 +305,23 @@ def split_tag(args):
     return f"{os.path.basename(args.in_dir.rstrip('/'))}_{os.path.basename(args.split)}"
 
 
+def checkpoint_selection(history, step, after):
+    """Which saved decoder is the run's decoder: always the terminal one, `<out-dir>/vae`.
+
+    The hourly checkpoints are diagnostics of the ceiling-against-presentations curve. The one that
+    scores best on the validation frames is recorded beside the terminal one and never swapped in
+    for it: a checkpoint chosen on the validation curve carries that choice into every number later
+    scored on those episodes. A tie names the terminal checkpoint.
+    """
+    terminal = {"dir": "vae", "step": step, **after}
+    hourly = [{"dir": f"vae_h{e['hour_ckpt']}", "step": e["step"], "hour": e["hour_ckpt"],
+               **{k: v for k, v in e.items() if k not in ("step", "hour_ckpt")}}
+              for e in history if "hour_ckpt" in e]
+    cands = [terminal] + hourly
+    return {"rule": "terminal", "selected": "vae", "terminal": terminal,
+            "best_on_validation": max(cands, key=lambda c: c["psnr"]), "candidates": cands}
+
+
 def _maps_of(paths):
     """Sorted map ids of these recordings, from each file's first `map_id`."""
     import pyarrow.parquet as pq
@@ -530,7 +549,7 @@ def main(args):
     batches = stream_batches(stream, micro, args.workers, total * args.accum) if stream is not None else None
     hours_saved, stopped = 0, ""
 
-    def write_metrics(after):
+    def write_metrics(after, selection=None):
         """Record the run so far. Written next to every checkpoint, so a later crash keeps it."""
         with open(os.path.join(args.out_dir, "metrics.json"), "w") as f:
             json.dump({"before": before, "after": after, "history": history, "args": vars(args),
@@ -550,7 +569,7 @@ def main(args):
                        "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
                        "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
                        "presentations": step * eff, "stream": stream_info, "stopped": stopped,
-                       "train_seconds": time.time() - t_train,
+                       "train_seconds": time.time() - t_train, "checkpoint_selection": selection,
                        "peak_mem_gb": torch.cuda.max_memory_allocated() / 2**30 if device != "cpu" else None},
                       f, indent=1)
         write_provenance(args.out_dir, provenance)
@@ -622,7 +641,11 @@ def main(args):
     after = evaluate(vae, val_frames, device, lpips_fn)
     print("after:", json.dumps(after), flush=True)
     write_provenance(save_vae(vae, args.out_dir, args.channels_last), provenance)
-    write_metrics(after)
+    selection = checkpoint_selection(history, step, after)
+    best = selection["best_on_validation"]
+    print(f"selected the terminal decoder vae (step {step}, psnr {after['psnr']:.3f}); best on validation "
+          f"{best['dir']} (step {best['step']}, psnr {best['psnr']:.3f}), recorded only", flush=True)
+    write_metrics(after, selection)
     print("DONE", flush=True)
 
 

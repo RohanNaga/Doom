@@ -1,4 +1,4 @@
-"""Where the decoder tune's validation frames come from.
+"""Where the decoder tune's validation frames come from, and which saved decoder is the run's decoder.
 
 Astra's review of 2026-09-26 (section 5): the MSE tune validated on the cached 2,000 frames of the
 17-map corpus (finetune_decoder.py:373), whose maps 1 and 9 to 15 count as unseen for the next-tic
@@ -10,7 +10,9 @@ maps. These tests pin that
     segment without one (the unseen arenas_678) is refused, and every named episode must exist;
   * those frames are cached under a name of their own that hashes the exact id list, so neither the
     17-map cache nor another id list can be read back in their place;
-  * without `--val-dir` the old path, its frames and its cache name are unchanged.
+  * without `--val-dir` the old path, its frames and its cache name are unchanged;
+  * the terminal checkpoint is the selected decoder and the best-on-validation checkpoint is recorded
+    beside it, never swapped in for it.
 
 They run without pyarrow: the parquet readers are replaced by fakes that paint each frame's episode
 id into its pixels, so where a validation frame came from can be read off the frame itself.
@@ -32,7 +34,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, HERE)
 
 import finetune_decoder  # noqa: E402
-from finetune_decoder import val_cache_tag, validation_episode_ids  # noqa: E402
+from finetune_decoder import checkpoint_selection, val_cache_tag, validation_episode_ids  # noqa: E402
 from test_decoder_save import tiny_vae  # noqa: E402
 
 VAL_IDS = list(range(6000, 6004))
@@ -200,3 +202,34 @@ def test_without_val_dir_the_old_split_and_cache_name_are_used(tmp_path, monkeyp
     assert os.path.exists(os.path.join(cache, "train_split.json_val_4_s1.npy"))
     assert m["provenance"]["validation_frames"] == {"dir": str(tmp_path / "train"),
                                                     "split": str(tmp_path / "split.json"), "ids": [1]}
+
+
+# ---------------------------------------------------------------------------------------
+# the terminal checkpoint is the decoder; the best on validation is only recorded
+# ---------------------------------------------------------------------------------------
+
+def test_the_best_hourly_checkpoint_is_recorded_not_selected():
+    history = [{"step": 10, "psnr": 30.0},
+               {"step": 20, "hour_ckpt": 1, "psnr": 31.0, "lpips": 0.05},
+               {"step": 40, "hour_ckpt": 2, "psnr": 32.5, "lpips": 0.04}]
+    s = checkpoint_selection(history, 60, {"psnr": 32.0, "lpips": 0.045})
+    assert s["rule"] == "terminal" and s["selected"] == "vae"
+    assert s["terminal"] == {"dir": "vae", "step": 60, "psnr": 32.0, "lpips": 0.045}
+    assert s["best_on_validation"] == {"dir": "vae_h2", "step": 40, "hour": 2, "psnr": 32.5, "lpips": 0.04}
+    assert [c["dir"] for c in s["candidates"]] == ["vae", "vae_h1", "vae_h2"]
+
+
+def test_a_tie_with_the_terminal_checkpoint_names_the_terminal_one():
+    s = checkpoint_selection([{"step": 60, "hour_ckpt": 4, "psnr": 32.0}], 60, {"psnr": 32.0})
+    assert s["best_on_validation"]["dir"] == "vae"
+
+
+def test_a_tune_records_both_and_keeps_the_terminal_decoder_in_vae(tmp_path, monkeypatch):
+    m, _ = tune(tmp_path, monkeypatch, ckpt_every_hours=1e-9)
+    s = m["checkpoint_selection"]
+    assert s["selected"] == "vae" and s["rule"] == "terminal"
+    assert s["terminal"]["step"] == m["steps"] == 8
+    assert len(s["candidates"]) == 1 + len([e for e in m["history"] if "hour_ckpt" in e]) > 1
+    assert s["best_on_validation"]["psnr"] == max(c["psnr"] for c in s["candidates"])
+    for c in s["candidates"]:
+        assert os.path.isdir(tmp_path / "run" / c["dir"]), c["dir"]

@@ -16,8 +16,10 @@
 # They are drawn from every tic (--stride 1), because those rows predict every tic, and cached under
 # a name of their own that hashes the id list. They used to be the cached 2,000 frames of the 17-map
 # corpus, whose maps 1 and 9 to 15 are unseen for the next-tic rows, so reading the hourly
-# checkpoints on them was a checkpoint choice made on unseen maps. An hourly checkpoint still turns
-# the run into a curve of ceiling against presentations rather than one number.
+# checkpoints on them was a checkpoint choice made on unseen maps. No choice is made now: the decoder
+# is the TERMINAL checkpoint, $OUT/vae, and the hourly checkpoints ($OUT/vae_h<N>) turn the run into
+# a curve of ceiling against presentations rather than one number. metrics.json records which of them
+# scored best on validation (`checkpoint_selection`), beside the terminal one; nothing reads it to pick.
 #
 #   usage: [SPACE=sd1|sd35] [TRAIN_IDS=0:2000] [VAL_IDS=6000:6100] [OUT=dir] [PY=..] [REPO=..] \
 #          [DRY=1] [DOOM_ROOT=..] decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
