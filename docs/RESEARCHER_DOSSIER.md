@@ -182,3 +182,66 @@ Test data is sealed so that no choice is made after looking at it. The evaluator
 
 The historical decoders were fine-tuned on frames that included held-out maps, so all next-tic reads use the stock decoders, which have seen no Doom map. [RC 09-21 14:30]
 
+---
+
+# 3. The recipe
+
+All three rows share one recipe and differ only in backbone and latent space. [RC 09-21 01:30; RC 09-23 06:30; RC 09-24 20:35]
+
+| | SD 1.4 U-Net | SD 3.5 Medium | PixArt-alpha 512 |
+|---|---|---|---|
+| Run | `040-unet-nexttic` | `042-sd35-nexttic` | `041-pixart-nexttic` |
+| Architecture | convolutional U-Net | MMDiT (joint-attention transformer) | DiT with cross-attention |
+| Latent space | SD 1.x, 4 channels | SD 3.5, 16 channels | SD 1.x, 4 channels |
+| Parameters | 860.5M | 2,271.7M | 628M |
+| Control tokens enter via | cross-attention, width 768 | joint attention, width 4,096, plus a 2,048-d pooled slot from the newest control | cross-attention tokens (`--action-inject token`), width 4,096 |
+| Memory at batch 32 | 23.3 GB, no checkpointing | 36.8 GB, gradient checkpointing | 26.8 GB, no checkpointing |
+| Throughput alone | 1.78 to 1.83 updates/s | 0.50 to 0.55 updates/s | about 1.4 updates/s |
+| Launched | Sep 23 06:28 EDT | Sep 23 09:04 EDT | Sep 24 20:32 EDT |
+
+Shared settings: public pretrained weights (never our earlier Doom checkpoints, which would add in-domain exposure and the old stride); training ids 0:2000; fused AdamW at 5e-5 after 2,000 warmup updates, weight decay 0, clip norm 1.0; global batch 32 on one card with no gradient accumulation; bf16 autocast with fp32 parameters and EMA; seed 0; action dropout 0; validation loss every 1,000 updates on 1,024 fixed windows, overall and by timestep quartile; recovery checkpoints every 5k and snapshots every 10k. The U-Net fills only half of its 48 GB A6000, but a larger micro-batch would change the recipe's global batch, so the fill-the-card rule does not apply. SD 3.5 is compute-bound (GPU at 100 percent, CPU 93 percent idle), and gradient checkpointing costs it about a third of its speed. [RC 09-23 06:30; RC 09-24 21:05]
+
+## 3.1 Channel-stacked latents
+
+The 32 context latents are concatenated with the noisy target latent along the channel axis, so time is not a separate token axis; the backbone sees one tall image-like tensor. The pretrained input projection is inflated with zero-initialised weights for the new context channels, which preserves the pretrained function on the target at initialisation. The new control embeddings still change downstream activations, so the network does not start as exactly the pretrained model. [`backbones.py:241–259,344–388`] This is GameNGen's visual-context design, with 32 frames instead of 64; GameNGen's own ablation gains only 0.05 dB from 32 to 64 frames. [G Table 2] At 35 Hz, 32 tics span 0.914 s nominally (0.886 s between the oldest and newest frame), against 3.66 s for the stride-four rows, so long-range memory is weaker by design.
+
+## 3.2 The two latent spaces
+
+The SD 1.x autoencoder (`sd-vae-ft-mse`, 8× downsampling) maps a padded 320×256 frame to 4×32×40 with scale 0.18215. The SD 3.5 autoencoder gives 16×32×40 with shift 0.0609 and scale 1.5305. Padding rows are cropped before every decode so only the 240 real rows are scored. [`encode_parquet.py:155–189`; `backbones.py:34–74`] The 16-channel space reconstructs our validation frames at about 27.5 dB against 23.5 dB for the 4-channel space (stock decoders; section 3.7's alignment gate). That gap belongs to the SD 3.5 row as a system: its lead mixes a better representation with its backbone. A Flux autoencoder, also 16 channels, is not interchangeable, because its scale and shift differ.
+
+## 3.3 Controls as tokens
+
+Each of the 32 executed 19-bit controls passes through a shared MLP, gets a learned position embedding, and enters the backbone as a token. This adopts GameNGen's history-token idea without claiming its undisclosed vocabulary or encoding. [`backbones.py:153–217,771–790`] The ImageNet DiT was not used as a next-tic row partly because its conditioning path averages the control embeddings before adaLN (adaptive layer normalisation, where conditioning sets per-channel scale and shift); an average of embeddings with additive positions cannot see the order of the controls. [`backbones.py:153–181,290–307`]
+
+## 3.4 v-prediction and the schedule
+
+The network predicts the *velocity* v = √ᾱ_t·ε − √(1−ᾱ_t)·x₀, a mix of the noise ε and the clean latent x₀ whose weighting changes with the noise level ᾱ_t. Velocity targets keep the regression well-scaled at both ends of the noise range, which is why GameNGen switched to it. The loss is an unweighted MSE with t drawn uniformly. [`diffusion_v.py:38–102`; G §3.2]
+
+The schedule is 1,000 linear betas from 1e-4 to 0.02, kept from the earlier rows for continuity. It is not either backbone's native schedule. SD 1.4 uses a "scaled-linear" schedule with terminal ᾱ about 4.7e-3 against our 4.0e-5, so 273 of our timesteps are noisier than anything SD 1.4 saw in pretraining. SD 3.5 was pretrained with rectified flow, a different interpolation and target altogether. The paper discloses the mismatch; no schedule ablation was run, and the schedule is hard-coded at eight call sites, so changing it would be a new training experiment. [RC 09-21 14:30; `.claude/analyses/astra-prelaunch-audit-2026-09-21.md`]
+
+## 3.5 Noise augmentation and its bucket-zero subtlety
+
+Noise augmentation corrupts the *context* during training so that the model's own imperfect predictions look less foreign when they are fed back during a rollout. Our form is c̃ = √(1−q)·c + √q·ε, with one level q per example drawn uniformly below 0.7 and shared across its 32 context frames. The level is quantised into ten buckets of width 0.07, and the bucket id is embedded so the model knows how noisy its context is. At q = 0.7 the signal and noise coefficients are 0.548 and 0.837. GameNGen states the 0.7 maximum and ten buckets but not the formula; the Stiegler reproduction adds noise instead of blending. [`diffusion_v.py:135–151`; G §3.2.1]
+
+**The subtlety.** Inference uses clean context with bucket 0. But bucket 0 covers q in [0, 0.07), and a continuous uniform draw hits exactly q = 0 with probability zero, so clean context is a boundary case the model never trained on exactly. A proposal to give exactly-clean context 10 percent of training mass was withdrawn: it would change the training distribution and the bucket semantics relative to the earlier rows, and it is not a disclosed GameNGen detail. [RC 09-21 14:30]
+
+**Why augmentation stayed.** GameNGen's no-augmentation model diverges within 10 to 20 generated frames. [G §5.2.2, Figure 7] Our stride-four "noaug" cell instead improved teacher-forced fidelity and action accuracy at a cost in FVD (section 5.5). Both can be true; the recipe kept augmentation because the next-tic rows run much longer rollouts. Section 6 shows its limit: it does not prevent the absorbing states, whose errors are structured shifts of a channel's mean rather than the isotropic noise it trains on.
+
+## 3.6 fp32 EMA
+
+An EMA (exponential moving average) keeps a second copy of the weights, θ_EMA ← d·θ_EMA + (1−d)·θ, which averages the live weights over recent training. The trainer applies decay 0.9999 per update in steps of eight (d = 0.9999⁸ every eighth update), a time constant of about 10,000 updates. The arithmetic is fp32 because a bf16 update with weight 1e-4 underflows and freezes the average, which was the class project's bug. [`train_wm.py:419–422,819–820`]
+
+Early in training the EMA still contains the public start weights: a share of 0.9999^s, about 0.61 at 5k, 0.37 at 10k and 0.14 at 20k. So the EMA scores badly at first (U-Net EMA 11.76 dB at 5k against live 21.15) and passes the live weights once the start has washed out, by 40k for the U-Net. [RC 09-23 11:30] Every read scores live and EMA weights from the same saved file. Reported samples in the paper use the EMA.
+
+## 3.7 Launch gates and the certificate
+
+Nothing trains until `scripts/cluster/gates.sh` passes on the machine and checkout that will run it. The gates, in order: sidecar controls against the raw recordings; training inventory; latent alignment; emitted training windows; yaw alignment of controls against camera motion on validation; a 20-update memory fit; a 300-step smoke with checkpoints; conditioning probes; a 10-update resume that restores optimizer, scheduler, EMA and random state; and a readback of the smoke snapshot through the evaluator. Passing prints `GATES_GO` and a `GATES_LAUNCH` line; the certificate `$D/GATES_CERT.json` records the resolved command, commit, data fingerprints and encoder records per backbone. The launcher refuses any start or resume that differs from its certified entry. [RC 09-23 00:50 to 04:40; `.claude/analyses/launch-runbook-2026-09-23.md`]
+
+**Latent alignment** is the gate that catches an off-by-one between frames and controls. It re-encodes stored frames and compares them with the stored latents (MAE at most 5e-3, p99 at most 2e-2), then decodes the stored latents against raw frames unshifted and shifted by ±1 and ±4 rows; the unshifted score must win by at least 2 dB. The 2 dB floor was set after a correctly aligned, bit-identical 4-channel validation shard cleared only 2.91 dB: at one tic, a neighbouring frame is almost as good a match on slow footage, so the margin is bounded by per-tic motion. The MAE and p99 tolerances test misalignment independently. SD 3.5's latents were encoded on Superman's A4000s and re-encoded by the gate on Spiderman's A6000s; the cross-host differences were rounding-sized (largest MAE 19 percent of tolerance). All sampled shards passed, with margins 2.91 to 4.52 dB in the 4-channel space and 4.85 to 6.85 dB in the 16-channel space. These are sampled checks, not a proof for every row. [`check_latent_alignment.py:22–73`; `$D/GATES.txt`; RC 09-23 04:05, 04:40]
+
+**How the gates got here.** Four review rounds on Sep 22 to 23 closed 21 defects: the independent review's seven findings, then Astra's eight, three and three reproduced defects. Examples: the launcher accepted an SD 3.5-only certificate for a U-Net launch; a smoke at lr 5e-5 certified a launch at lr 0.1; two concurrent evaluators could both score the sealed test set. A separate launch blocker surfaced only because a 300-step pre-smoke ran on real data: one memory map per episode against Spiderman's soft limit of 1,024 open files, fixed by raising the limit before loading. [RC 09-23 00:20 to 04:40, 03:00; `doom_data.py:198`] The rows launched from a second checkout, `$D/repo_launch` at `35258f3`, because encoders were still running from `$D/repo`; PixArt later launched from `repo_launch2` at `f5386f1`. The gates certify the training contract, not model quality: the 300-step U-Net readback scored 18.38 dB against 21.92 persistence.
+
+## 3.8 Native W&B
+
+Every run streams training loss, validation loss (overall and by quartile), gradient norm, throughput, memory and every evaluation read to W&B project `doomdit-nexttic`. The trainer does this by default through `wandb_log.RunLogger`; only the gates' throwaway runs pass `--no-wandb`. `periodic_eval.py` gives the trainer its own reads every N steps on another card. [RC 09-23 19:45; RC 09-24 21:55] The U-Net and SD 3.5 rows are pinned to `35258f3`, which predates native logging, so a sidecar, `tools/wandb_tail.py`, replays their `log.jsonl` and steward files. PixArt, launched before the init fix below, also streams through a sidecar (`041-pixart-nexttic-tail`). The fix: `wandb.init` starts subprocesses on the calling thread while the trainer forks DataLoader workers, and a worker forked in that window held a pipe open and hung the init; `11540db` moves setup before the fork. [RC 09-24 21:55]
+
