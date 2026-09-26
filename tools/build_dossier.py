@@ -149,20 +149,20 @@ def figure(alt: str, src: str, md_dir: Path) -> str:
 
 
 RAW_FIGURE_START = re.compile(r"^\s*<figure[\s>]")
-# anything that could run code or load from outside the figure: a figure may reference only its own ids
-RAW_FIGURE_REFUSED = re.compile(
-    r"<\s*(script|style|foreignObject|image|iframe|object|embed)\b"
-    r"|\son[a-z]+\s*="
-    r"|(?:href|src)\s*=\s*[\"'](?!#)"
-    r"|url\(\s*(?!#)", re.IGNORECASE)
+# a figure may hold only drawing and caption elements, and may reference only its own ids
+RAW_FIGURE_TAGS = frozenset("""figure figcaption div span svg defs g marker symbol use path rect line polyline polygon
+    circle ellipse text tspan title desc linearGradient radialGradient stop pattern clipPath mask
+    sub sup code em strong b i br""".split())
+RAW_FIGURE_REFUSED = re.compile(r"\son[a-z]+\s*=|(?:href|src)\s*=\s*(?![\"']?#)|url\(\s*(?![\"']?#)",
+                                re.IGNORECASE)
 
 
 def raw_figure(lines: list[str], i: int) -> tuple[str, int]:
     """Pass a hand-authored ``<figure>`` block through verbatim; return (html, index after it).
 
     The block runs to the first line holding ``</figure>``. It is the one route by which raw HTML
-    enters the page, so scripts, event handlers, embedded documents and references to anything but
-    the figure's own ids are refused rather than escaped.
+    enters the page, so only drawing and caption elements are allowed, and event handlers and
+    references to anything but the figure's own ids are refused rather than escaped.
     """
     j = i
     while j < len(lines) and "</figure>" not in lines[j]:
@@ -170,9 +170,10 @@ def raw_figure(lines: list[str], i: int) -> tuple[str, int]:
     if j == len(lines):
         raise SystemExit(f"unterminated <figure> block at line {i + 1}")
     block = "\n".join(lines[i:j + 1])
-    bad = RAW_FIGURE_REFUSED.search(block)
+    tags = set(re.findall(r"<\s*/?\s*([A-Za-z][\w:.-]*)", block))
+    bad = sorted(tags - RAW_FIGURE_TAGS) or [m.group(0) for m in RAW_FIGURE_REFUSED.finditer(block)]
     if bad:
-        raise SystemExit(f"figure at line {i + 1} refused: active content or outside reference {bad.group(0)!r}")
+        raise SystemExit(f"figure at line {i + 1} refused: active content or outside reference {bad}")
     return block, j + 1
 
 

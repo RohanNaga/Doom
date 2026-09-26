@@ -3,7 +3,7 @@ The dossier builder passes hand-authored inline SVG figures through unchanged an
 
 A raw `<figure>` block in `docs/RESEARCHER_DOSSIER.md` must reach the page byte for byte: escaping it would print
 the SVG source as text. The pass-through is the one place raw HTML enters the page, so a block carrying a script,
-an event handler, a `foreignObject` or a link out of the figure is refused, as `data_uri` refuses a figure from
+an event handler, an element that is not drawing or caption markup, or a link out of the figure is refused, as `data_uri` refuses a figure from
 outside the repository.
 
     python -m pytest paper/fixtures/test_build_dossier.py -q
@@ -58,6 +58,11 @@ def test_html_outside_a_figure_block_is_still_escaped():
     '<a href="https://example.com"><text>x</text></a>',
     '<image href="data:image/png;base64,AAAA"/>',
     '<use xlink:href="javascript:alert(1)"/>',
+    '<a href=javascript:alert(1)><text>x</text></a>',
+    '<set attributeName="href" to="javascript:alert(1)"/>',
+    '<animate attributeName="href" values="javascript:alert(1)"/>',
+    '<meta http-equiv="refresh" content="0;url=https://example.com">',
+    '<rect style="fill:url(https://example.com/x.svg)"/>',
 ])
 def test_active_content_or_an_outside_reference_in_a_figure_is_refused(bad):
     block = FIGURE.replace("</svg>", bad + "</svg>")
