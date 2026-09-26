@@ -784,7 +784,7 @@ Where we sit: we match the channel-stacked context, action tokens, v-prediction 
 |---|---|---|
 | Does stability decline late in training? | Pooled EMA events rose after 105k, but the window set changed (6.4) | The same windows at early and late checkpoints |
 | Can the absorbing states be removed after training? | Proposal only (6.6) | The four-arm post-training experiment |
-| How much of SD 3.5's lead is its autoencoder? | Its reconstruction is about 4 dB better | Score a 4-channel DiT, or render identical predicted latents through both decoders' equivalents; at least report reconstruction beside every row |
+| How much of SD 3.5's lead is its autoencoder? | Its reconstruction is about 4 dB better | PixArt is a DiT in the 4-channel space, so PixArt against the U-Net compares architectures in one latent space, and SD 3.5 against PixArt adds the autoencoder; report reconstruction beside every row |
 | Does the distance relation hold for SD 3.5 and PixArt? | U-Net only | 200k per-map scoring |
 | Are the campaign-map losses the agent being stuck? | 1.0 to 1.4 lives per episode on ten maps; high persistence | Look at the frames |
 | Does the executed-control *history* help beyond the newest control? | Only the combined recipe was trained | A newest-control-only ablation at matched exposure |
@@ -793,7 +793,7 @@ Where we sit: we match the channel-stacked context, action tokens, v-prediction 
 | Does the 32-tic context limit revisits and map memory? | 0.91 s of context; MultiGen's memory helps late horizons | Out-and-back trajectories and revisit events |
 | What best spends extra compute, continuation or self-rollout post-training? | Untested | Arm 2 against arm 4 at equal cost |
 
-Stride-four questions that remain open but are not on the paper's path: the missing quarter-data and context-8 grid metrics; the provenance of the reproduction footage (a JPEG transcode of Stiegler's 500-episode set, or a fresh lossless 1,000-episode corpus); whether IDM scoring covers all eligible runs or only the longest; the Sep 21 server outage's cause; the deathmatch-simple corpus (its engine-keyword bug is fixed but no full corpus exists); and the dataset licence, which Rohan has to confirm. [Sep 22 dossier §6.2]
+Stride-four questions that remain open but are not on the paper's path: the missing quarter-data and context-8 grid metrics; the provenance of the reproduction footage (a JPEG transcode of Stiegler's 500-episode set, or a fresh lossless 1,000-episode corpus); whether IDM scoring covers all eligible runs or only the longest; the Sep 21 server outage's cause; the deathmatch-simple corpus (its engine-keyword bug is fixed but no full corpus exists); and the dataset licence, which Rohan has to confirm. [the Sep 22 to 25 dossier, §6.2, at `67dc386`]
 
 ## 10.3 Operations facts worth knowing
 
