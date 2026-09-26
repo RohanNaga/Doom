@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab Server Watch</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f6f5f1; --surface:#ffffff; --ink:#1e2226; --ink-2:#5b636b; --line:#dcd9d1; --line-2:#ebe8e1;
+  --accent:#1f6f8b; --ours:#1f6f8b; --others:#b8b1a3; --good:#2f8f5b; --warn:#c2801a; --crit:#b23a3a;
+  --track:#ece9e2;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15181b; --surface:#1d2125; --ink:#e7e5df; --ink-2:#9aa1a8; --line:#2f353b; --line-2:#272c31;
+    --accent:#5fb3d0; --ours:#5fb3d0; --others:#5c6168; --good:#4fbf82; --warn:#e0a03a; --crit:#e06666;
+    --track:#2a2f34;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15181b; --surface:#1d2125; --ink:#e7e5df; --ink-2:#9aa1a8; --line:#2f353b; --line-2:#272c31;
+  --accent:#5fb3d0; --ours:#5fb3d0; --others:#5c6168; --good:#4fbf82; --warn:#e0a03a; --crit:#e06666;
+  --track:#2a2f34;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.45}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 48px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 20px;margin-bottom:18px}
+h1{font-size:22px;font-weight:600;margin:0;letter-spacing:-0.01em}
+.stamp{color:var(--ink-2);font-family:"IBM Plex Mono",monospace;font-size:13px}
+.stamp.stale{color:var(--warn)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+section.server{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px 18px}
+section.server h2{margin:0 0 2px;font-size:17px;font-weight:600}
+.sub{color:var(--ink-2);font-size:13px;margin:0 0 12px}
+h3{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2);margin:16px 0 6px;font-weight:600}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line-2);vertical-align:top;font-size:13.5px}
+th{color:var(--ink-2);font-weight:500}
+td.num,th.num{text-align:right}
+.mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.bar{position:relative;height:9px;background:var(--track);border-radius:2px;overflow:hidden;min-width:90px}
+.bar span{position:absolute;top:0;bottom:0;left:0}
+.bar .ours{background:var(--ours)}
+.bar .others{background:var(--others)}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:12px;font-weight:500;line-height:1.5}
+.pill.good{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+.pill.crit{background:color-mix(in srgb,var(--crit) 18%,transparent);color:var(--crit)}
+.disk{display:grid;grid-template-columns:130px 1fr 110px;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line-2);font-size:13.5px}
+.disk .bar{height:11px}
+.tmux{display:flex;flex-wrap:wrap;gap:6px}
+.tmux span{font-family:"IBM Plex Mono",monospace;font-size:12px;padding:2px 7px;border:1px solid var(--line);border-radius:4px;color:var(--ink-2)}
+.tmux span.train{color:var(--accent);border-color:var(--accent)}
+.legend{display:flex;gap:16px;color:var(--ink-2);font-size:12.5px;margin:6px 0 0}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.empty{color:var(--ink-2);font-style:italic;padding:8px 0}
+.note{color:var(--ink-2);font-size:13px;margin-top:20px}
+svg.spark{width:100%;height:56px;display:block}
+.hist{margin-top:8px}
+.hist .lbl{font-size:12px;color:var(--ink-2);display:flex;justify-content:space-between}
+@media (max-width:480px){.disk{grid-template-columns:96px 1fr 90px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Lab server watch</h1>
+  <span id="stamp" class="stamp">loading the latest snapshot…</span>
+</header>
+<div id="servers" class="grid"><p class="empty">Waiting for the shared database.</p></div>
+<p class="note">Snapshots come from <span class="mono">tools/server_usage.py</span> in the Doom repo, written to this page's database about once an hour while the main session runs. Rules: Superman leaves 2 of 8 cards free and needs 250 GB free on disk; Spiderman jobs fill their card and keep the study jobs thread-capped. "Ours" is rohan on Superman and rnagabhi on Spiderman.</p>
+</main>
+<script>
+const GB = 1024 ** 3;
+const fmtGB = b => (b / GB).toFixed(0);
+const fmtAgo = s => s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${(s / 3600).toFixed(1)} h ago`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function gpuRows(gpus) {
+  return gpus.map(g => {
+    const total = g.mem_total_mb || 1, ours = g.ours_mb || 0, others = g.others_mb || 0;
+    const users = (g.users || []).join(", ") || "free";
+    const utilCls = g.util >= 90 ? "crit" : g.util >= 30 ? "warn" : "good";
+    return `<tr><td class="mono">${g.index}</td>
+      <td><div class="bar"><span class="ours" style="width:${(100*ours/total).toFixed(1)}%"></span><span class="others" style="left:${(100*ours/total).toFixed(1)}%;width:${(100*others/total).toFixed(1)}%"></span></div></td>
+      <td class="num mono">${(g.mem_used_mb/1024).toFixed(1)} / ${(total/1024).toFixed(0)} GB</td>
+      <td class="num"><span class="pill ${utilCls}">${g.util}%</span></td>
+      <td>${esc(users)}</td></tr>`;
+  }).join("");
+}
+
+function diskRows(disks, rule) {
+  return disks.map(d => {
+    const avail = d.avail_b, size = d.size_b || 1, pct = 100 * (1 - avail / size);
+    const floor = d.mount === "/" && rule && rule.includes("250") ? 250 : d.mount.startsWith("/sata2") ? 300 : d.mount === "/home" ? 50 : 5;
+    const cls = avail / GB < floor / 2 ? "crit" : avail / GB < floor ? "warn" : "good";
+    return `<div class="disk"><span class="mono">${esc(d.mount)}</span>
+      <div class="bar"><span class="others" style="width:${pct.toFixed(1)}%"></span></div>
+      <span class="num"><span class="pill ${cls}">${fmtGB(avail)} GB free</span></span></div>`;
+  }).join("");
+}
+
+function runRows(runs, now) {
+  const names = Object.keys(runs || {});
+  if (!names.length) return `<p class="empty">no DoomDiT run logs here</p>`;
+  return `<table><thead><tr><th>run</th><th class="num">step</th><th class="num">loss</th><th class="num">val</th><th class="num">upd/s</th><th>last log</th></tr></thead><tbody>` +
+    names.map(n => {
+      const r = runs[n], age = r.t ? Math.max(0, now - r.t) : null;
+      const live = age !== null && age < 900;
+      const flag = r.skipped ? ` <span class="pill warn">${r.skipped} skipped</span>` : "";
+      const exc = r.excursion ? ` <span class="pill crit">val excursion</span>` : "";
+      return `<tr><td class="mono">${esc(n)}${flag}${exc}</td><td class="num mono">${(r.step||0).toLocaleString()}</td>
+        <td class="num mono">${r.loss !== undefined ? r.loss.toFixed(4) : "–"}</td>
+        <td class="num mono">${r.val_loss !== undefined ? r.val_loss.toFixed(4) : "–"}<span class="stamp"> @${((r.val_step||0)/1000).toFixed(0)}k</span></td>
+        <td class="num mono">${r.steps_per_s ? r.steps_per_s.toFixed(2) : "–"}</td>
+        <td>${age === null ? "–" : `<span class="pill ${live ? "good" : "warn"}">${fmtAgo(age)}</span>`}</td></tr>`;
+    }).join("") + `</tbody></table>`;
+}
+
+function storageRows(detail) {
+  const items = Object.entries(detail || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (!items.length) return "";
+  return `<h3>Our largest directories</h3><table><tbody>` + items.map(([p, b]) =>
+    `<tr><td class="mono">${esc(p.replace(/^\/sata2\/data\/rnagabhi\/doom\//, "doom/").replace(/^\/home\/rohan\//, "~/"))}</td><td class="num mono">${fmtGB(b)} GB</td></tr>`).join("") + `</tbody></table>`;
+}
+
+function spark(points, key) {
+  if (points.length < 2) return "";
+  const xs = points.map(p => p.t), ys = points.map(p => p[key]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = 0, y1 = Math.max(...ys) * 1.05 || 1;
+  const W = 400, H = 56, X = t => 4 + (W - 8) * (t - x0) / Math.max(1, x1 - x0), Y = v => H - 4 - (H - 8) * (v - y0) / (y1 - y0);
+  const d = points.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join(" ");
+  const last = points[points.length - 1];
+  return `<div class="hist"><div class="lbl"><span>data disk free, GB, last ${points.length} snapshots</span><span class="mono">${fmtGB(last[key]*GB)} GB</span></div>
+    <svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="free disk space over the recent snapshots"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5"/><circle cx="${X(last.t).toFixed(1)}" cy="${Y(last[key]).toFixed(1)}" r="2.5" fill="var(--accent)"/></svg></div>`;
+}
+
+function render(snap, history) {
+  const now = Math.floor(Date.now() / 1000);
+  const age = now - (snap.collected_at || now);
+  const st = document.getElementById("stamp");
+  st.textContent = `snapshot ${new Date(snap.collected_at * 1000).toLocaleString()} (${fmtAgo(age)})`;
+  st.className = "stamp" + (age > 3 * 3600 ? " stale" : "");
+  const out = [];
+  for (const [name, s] of Object.entries(snap.servers || {})) {
+    const sys = s.system || {};
+    const loadCls = sys.cores && sys.load1 > sys.cores ? "crit" : sys.cores && sys.load1 > sys.cores * 0.6 ? "warn" : "good";
+    const oursGpus = (s.gpus || []).filter(g => g.ours_mb > 0).length, freeGpus = (s.gpus || []).filter(g => !g.procs || !g.procs.length).length;
+    const hist = (history || []).filter(h => h.server === name).sort((a, b) => a.t - b.t);
+    const mainDisk = (s.disks || [])[0];
+    out.push(`<section class="server">
+      <h2>${esc(s.name || name)}</h2>
+      <p class="sub">${esc(s.gpu_note || "")} · ${esc(s.rule || "")} · ${s.ok ? "" : '<span class="pill crit">unreachable</span>'}
+        load <span class="pill ${loadCls}">${sys.load1 ?? "–"} / ${sys.cores ?? "–"} cores</span> · ours on ${oursGpus} card${oursGpus === 1 ? "" : "s"}, ${freeGpus} free</p>
+      <h3>GPUs</h3>
+      <table><thead><tr><th>#</th><th>memory</th><th class="num">used</th><th class="num">util</th><th>users</th></tr></thead><tbody>${gpuRows(s.gpus || [])}</tbody></table>
+      <p class="legend"><span><i style="background:var(--ours)"></i>ours</span><span><i style="background:var(--others)"></i>others</span></p>
+      <h3>Disks</h3>${diskRows(s.disks || [], s.rule)}
+      ${mainDisk ? spark(hist, "avail_gb") : ""}
+      <h3>DoomDiT runs</h3>${runRows(s.runs, now)}
+      <h3>tmux sessions</h3><div class="tmux">${(s.tmux || []).map(t => `<span class="${/^train-/.test(t) ? "train" : ""}">${esc(t)}</span>`).join("") || '<span class="empty">none</span>'}</div>
+      ${storageRows(s.ours_detail_b)}
+    </section>`);
+  }
+  document.getElementById("servers").innerHTML = out.join("") || `<p class="empty">The snapshot holds no servers.</p>`;
+}
+
+(async () => {
+  const db = await claude.use("db");
+  if (!db) { document.getElementById("stamp").textContent = "shared database unavailable in this view"; return; }
+  let history = [];
+  try {
+    const rows = await db.collection("history").orderBy("t", "desc").limit(72).get();
+    history = rows.docs ? rows.docs.map(d => d.data()) : (rows || []).map(d => d.data ? d.data() : d);
+  } catch (e) { history = []; }
+  db.doc("usage/latest").onSnapshot(doc => {
+    const snap = doc && doc.data ? doc.data() : doc;
+    if (snap && snap.servers) render(snap, history);
+  });
+})();
+</script>
+</body>
+</html>
