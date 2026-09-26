@@ -14,6 +14,12 @@ decoder touches (Sep 26 2026).
 
 `--wandb-run <training run>` also appends the raw PSNR, LPIPS and persistence floor to the W&B run
 `<training run>-eval` as eval/<live|ema>_h<H>/..., at the step in the checkpoint's filename.
+
+An adaptation checkpoint (`adapt_wm.py`, a LoRA adapter on a frozen snapshot) is scored like any other:
+`--ckpt adapter_0000250.pt` rebuilds the frozen source it names and applies the adapter, and `--use-ema`
+selects the adapter's EMA. `--windows-file <adaptation split> --windows-key held_out_windows` scores exactly
+the windows that split recorded instead of a fresh `--num-windows` draw (`adapt_split.py`); without it the
+draw is unchanged.
 """
 import argparse
 import csv
@@ -116,6 +122,12 @@ def load_model(args, device, latent_channels, trained):
                         latent_channels=latent_channels, action_inject=inject,
                         phase_buckets=trained["phase_buckets"], action_history=trained["action_history"],
                         control_bits=trained["control_bits"])
+    from lora import is_adapter_checkpoint, load_adapter_checkpoint
+    if is_adapter_checkpoint(ck):
+        # a LoRA adaptation (adapt_wm.py): its frozen source snapshot, then the adapter and the parts it
+        # trained, live or EMA; `ck["args"]` is the source run's, so the graph above is the source's graph
+        load_adapter_checkpoint(model, ck, args.use_ema)
+        return model.to(device).eval(), ck.get("step", "?"), checkpoint_objective(ck, args.objective)
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
     load_world_model_state(model, ck, args.use_ema)
@@ -273,7 +285,13 @@ def main(args):
         base = LatentWindowDataset(args.latents_dir, split[args.subset], args.context_frames,
                                    latent_channels=latent_channels)
         ds, windows = base, HorizonOne(base)
-    idx = draw_windows(len(ds), args.num_windows, args.seed)
+    windows_file = getattr(args, "windows_file", "")
+    if windows_file:
+        # the windows an adaptation split recorded, as indices of this dataset (refused if any is not one)
+        from adapt_split import load_windows, windows_in_dataset
+        idx = windows_in_dataset(ds, load_windows(windows_file, args.windows_key))
+    else:
+        idx = draw_windows(len(ds), args.num_windows, args.seed)
     loader = DataLoader(Subset(windows, idx.tolist()), batch_size=args.batch_size, shuffle=False,
                         num_workers=args.num_workers)
     raw = RawFrames(args.parquet_dir) if args.parquet_dir else None
@@ -421,6 +439,14 @@ def build_parser():
     p.add_argument("--split", required=True)
     p.add_argument("--subset", default="val", choices=["val", "train", "unseen_map"])
     p.add_argument("--num-windows", type=int, default=2048)
+    p.add_argument("--windows-file", default="",
+                   help="an adaptation split (adapt_split.py): score exactly the [episode, start] windows it records "
+                        "under --windows-key instead of drawing --num-windows; empty (default) draws as always")
+    p.add_argument("--windows-key", default="held_out_windows",
+                   choices=["held_out_windows", "legacy_held_out_windows"],
+                   help="held_out_windows: the split's fixed draw from its held-out episodes (score with --split "
+                        "<the adaptation split>); legacy_held_out_windows: the distance study's draw restricted to "
+                        "them (score with --split <the map's distance-study split> to keep its noise keys)")
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--num-workers", type=int, default=2,
                    help="DataLoader worker processes; 0 loads in this process, which the trainer's periodic reads "
