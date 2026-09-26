@@ -29,16 +29,18 @@ anything above `--parity-tol` (default 0, exact) stops the run before it trains.
 
 **What is new.** The LoRA factors and the `--full-parts` train (lr 1e-4 constant after a 100-update warmup,
 no weight decay); everything else is frozen. `--lora-rank 0 --full-parts all` is the full fine-tune reference
-(design decision 5): no adapter, every parameter trained, the same loop, checkpoints and evaluator. An fp32 EMA of exactly those tensors (decay `--ema-decay`,
-0.999 by default for runs of a few thousand updates) lives on the training device, updated every update.
+(design decision 5): no adapter, every parameter trained, the same loop, checkpoints and evaluator. An fp32
+EMA of exactly the trained tensors (decay `--ema-decay`, 0.999 by default for runs of a few thousand updates)
+lives on the training device, updated every update.
 Windows come only from the first k episodes of the split's adapt list: its step-curve rung (8 by default) or
 the data-ladder rung `--adapt-episodes-k` names; the live validation curve is the v-loss on the split's
 recorded held-out windows.
 
-**Checkpoints** at every step of `--step-grid` (default 0,250,500,1000,2000; 0 is written before the first
-update) as `adapter_<step>.pt`: the adapter and the trained parts, live and EMA, in fp32, how to rebuild them
-(`adapter_config`), the source snapshot's path, SHA-256 and weights choice, the source run's args (so every
-evaluator rebuilds the source graph unchanged), and the certificate. No backbone weight is written.
+**Checkpoints** at every step of `--step-grid` (default 0,250,500,1000,2000,4000, log-spaced; 0 is written
+before the first update) as `adapter_<step>.pt`: the adapter and the trained parts, live and EMA, in fp32, how
+to rebuild them (`adapter_config`), the source snapshot's path, SHA-256 and weights choice, the source run's
+args (so every evaluator rebuilds the source graph unchanged), and the certificate. No backbone weight is
+written.
 
 **Batch.** `--global-batch` (default 32, the pretraining batch) and `--per-gpu-batch` (the micro-batch) are
 separate. Filling the card is the rule (CLAUDE.md): the run is refused unless micro-batch x processes equals
@@ -69,7 +71,7 @@ from diffusion_v import VDiffusion, noise_augment
 from train_wm import SeededCorruption, SyntheticWindows, save_checkpoint, unpack_batch
 from wandb_log import DEFAULT_PROJECT, RunLogger
 
-DEFAULT_GRID = "0,250,500,1000,2000"
+DEFAULT_GRID = "0,250,500,1000,2000,4000"       # log-spaced until the curve flattens
 CKPT_PREFIX = "adapter_"
 
 

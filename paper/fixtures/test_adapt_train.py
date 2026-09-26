@@ -87,7 +87,7 @@ def test_accumulation_needs_its_flag_and_the_batch_must_divide():
 
 
 def test_the_step_grid_parses_and_its_last_step_is_the_run_length():
-    assert adapt_wm.parse_grid(adapt_wm.DEFAULT_GRID) == [0, 250, 500, 1000, 2000]
+    assert adapt_wm.parse_grid(adapt_wm.DEFAULT_GRID) == [0, 250, 500, 1000, 2000, 4000]
     assert adapt_wm.parse_grid("1000,0,250,250") == [0, 250, 1000]
     for bad in ("0", "", "a,b", "-1,5"):
         with pytest.raises(SystemExit):
@@ -99,7 +99,7 @@ def test_the_defaults_are_the_designs():
     assert (a.lora_rank, a.lora_alpha, a.lora_dropout, a.lora_mlp) == (16, 16.0, 0.0, False)
     assert lora.parse_parts(a.full_parts) == ("control", "input_proj", "noise_emb")
     assert (a.lr, a.warmup, a.ema_decay, a.global_batch, a.source_weights) == (1e-4, 100, 0.999, 32, "ema")
-    assert adapt_wm.parse_grid(a.step_grid) == [0, 250, 500, 1000, 2000] and a.wandb is True
+    assert adapt_wm.parse_grid(a.step_grid) == [0, 250, 500, 1000, 2000, 4000] and a.wandb is True
 
 
 def test_the_recipe_is_the_sources_own():
