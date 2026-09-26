@@ -669,6 +669,7 @@ One line per decision: what was decided, and why. Dates are 2026, times EDT; the
 | 09-13 22:16 | One shared recipe: lr 5e-5, warmup 2,000, batch 32, context 32, action dropout 0 | A controlled comparison needs one recipe; no reason for per-backbone LRs |
 | 09-14 20:00 | Reframe as an adaptation study; add PixArt and a second DiT seed | The U-Net's lead was stable; warm starts differ in data, objective and size |
 | 09-16 14:30 | Audit motion before reading rollout PSNR | DiT's higher h64 PSNR came with less motion and worse FVD |
+| 09-17 00:20, 06:20 | Rescue UniDiffuser with logged rollback, lower LR (to 1e-5) and a gradient-norm skip guard; count the failed compute | Gradient excursions near 8.5k and 34.6k; hiding them would misstate the shared recipe |
 | 09-17 to 18 | Gate the 16-channel row on reconstruction first | A new autoencoder must earn its compute; SD 3.5's C16 gained 3 dB |
 | 09-19 | Dense recording on Arnold's published split (train 2 to 5, test 6 to 8) | Score-selected maps (3, 10, 12, 13) would make the data depend on outcomes |
 | 09-20 21:45 | Move to every tic | Persistence depends on the gap; stride-four PSNR is a different task |
@@ -683,6 +684,7 @@ One line per decision: what was decided, and why. Dates are 2026, times EDT; the
 | 09-23 06:30 | Encode 2000:6000 into a separate tree and Hub folders | New shard logs in the certified directories would block every resume |
 | 09-23 11:30 | Reads on GPU 3, checked idle each time; full reads every 5k | A read on the training card cost about 2,500 updates |
 | 09-23 11:30 | W&B native by default; sidecars for pinned rows | Rohan watches curves live; pinned runs cannot gain a flag |
+| 09-25 00:45 | Build the directional check and probe_v2 before trusting control conditioning | The probe showed dependence on the control but not its sign |
 | 09-24 16:20 | Stop the U-Net at 200k; 200k is the matched step for every row | The U-Net had saturated (EMA h1 22.42 to 22.46 from 150k to 180k) |
 | 09-24 18:40 | Drop the requested-action ablation | 89 percent identical to executed; 0.15 percent true overrides; likely null |
 | 09-24 18:40 | PixArt-alpha is the third row | A text-to-image DiT like the others; best transformer of the stride-four run |
