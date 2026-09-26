@@ -74,6 +74,14 @@ def trainable_decoder_params(vae):
     return params
 
 
+def decoder_optimizer(params, lr, device):
+    """AdamW without weight decay, fused into one kernel per step on a GPU, as train_wm.py builds its own.
+
+    The fused kernel is part of the fill-the-card recipe (CLAUDE.md); on CPU the plain one is kept.
+    """
+    return torch.optim.AdamW(params, lr=lr, weight_decay=0.0, fused=str(device).startswith("cuda"))
+
+
 def save_vae(vae, out_dir, channels_last=False, name="vae"):
     """Write the autoencoder to `<out_dir>/<name>`, proving it reloads before it replaces the old one.
 
@@ -533,7 +541,7 @@ def main(args):
         # NHWC is what the bf16 tensor cores want; the conv results differ only in the last bits,
         # so this is a throughput switch, not a recipe change. Off by default.
         vae.to(memory_format=torch.channels_last)
-    opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=0.0)
+    opt = decoder_optimizer(params, args.lr, device)
     micro, eff = args.batch_size, args.batch_size * args.accum
     if stream is not None:
         # A stream has no epoch, so the budget is the schedule: --max-steps sets the decay horizon
@@ -567,6 +575,7 @@ def main(args):
                                       "train_episodes": provenance["train_episodes"],
                                       "validation_frames": val_record},
                        "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
+                       "optimizer": {"name": "AdamW", "fused": bool(opt.defaults.get("fused"))},
                        "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
                        "presentations": step * eff, "stream": stream_info, "stopped": stopped,
                        "train_seconds": time.time() - t_train, "checkpoint_selection": selection,
