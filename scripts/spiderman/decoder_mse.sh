@@ -10,12 +10,17 @@
 # uniformly from the training ids of the dense four-arena corpus instead of a 50k cached sample, and a card-filling
 # batch for four GPU-hours instead of 2.5.
 #
-# The validation frames stay the cached 2,000 of the 17-map corpus, so the loss curve is comparable
-# to the earlier tunes, and an hourly checkpoint turns the run into a curve of ceiling against
-# presentations rather than one number.
+# HELD-OUT VALIDATION (Astra's review, 2026-09-26, section 5). The validation frames are 2,000 frames
+# of episodes 6000 to 6099 of raw_arnold_dense/arenas (VAL_IDS, half-open like every id range here):
+# the four training arenas' held-out validation episodes, the ones the next-tic rows are read on.
+# They are drawn from every tic (--stride 1), because those rows predict every tic, and cached under
+# a name of their own that hashes the id list. They used to be the cached 2,000 frames of the 17-map
+# corpus, whose maps 1 and 9 to 15 are unseen for the next-tic rows, so reading the hourly
+# checkpoints on them was a checkpoint choice made on unseen maps. An hourly checkpoint still turns
+# the run into a curve of ceiling against presentations rather than one number.
 #
-#   usage: [SPACE=sd1|sd35] [TRAIN_IDS=0:2000] [OUT=dir] [PY=..] [REPO=..] [DRY=1] [DOOM_ROOT=..] \
-#          decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
+#   usage: [SPACE=sd1|sd35] [TRAIN_IDS=0:2000] [VAL_IDS=6000:6100] [OUT=dir] [PY=..] [REPO=..] \
+#          [DRY=1] [DOOM_ROOT=..] decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
 #   fit:   FIT=1 [SPACE=..] decoder_mse.sh <gpu> <micro-batch> 60
 #
 # THE LATENT SPACE (Astra's review, 2026-09-26, section 5). SPACE names the autoencoder whose decoder
@@ -40,11 +45,13 @@
 # prefix, so the decoder sees no episode the dynamics models did not; 0:6000 is the whole train range) now
 # restricts it, `finetune_decoder.py` refuses ids that reach into val or test, and the exact episode
 # ids and row groups used are written to provenance.json beside the decoder. The validation frames
-# are still the cached 17-map sample: they only measure the decoder and never train it.
+# only measure the decoder and never train it, and finetune_decoder.py refuses validation ids outside
+# the arenas validation range (6000:7000).
 set -u
 GPU=${1:?gpu}; MB=${2:?micro batch}; STEPS=${3:?max steps}; HOURS=${4:-4.0}
 SPACE=${SPACE:-sd1}
 TRAIN_IDS=${TRAIN_IDS:-0:2000}
+VAL_IDS=${VAL_IDS:-6000:6100}
 DRY=${DRY:-0}
 D=${DOOM_ROOT:-/sata2/data/rnagabhi/doom}
 REPO=${REPO:-$D/tmp/levers/repo}
@@ -68,8 +75,8 @@ EPS=2000; VAL=2000; HRS=(--max-hours "$HOURS" --ckpt-every-hours 1)
 [ "${FIT:-0}" = 1 ] && { EPS=40; VAL=64; HRS=(); OUT=$D/tmp/levers/fit_${SPACE}_mb$MB; }
 
 TUNE=("$PY" finetune_decoder.py "${VAE[@]}"
-  --in-dir "$D/raw_arnold" --split "$D/split_arnold.json" --frame-cache "$D/frame_cache"
-  --val-frames "$VAL" --stride 4 --out-dir "$OUT"
+  --val-dir "$D/raw_arnold_dense/arenas" --val-ids "$VAL_IDS" --frame-cache "$D/frame_cache"
+  --val-frames "$VAL" --stride 1 --out-dir "$OUT"
   --stream-dir "$D/raw_arnold_dense/arenas" --stream-ids "$TRAIN_IDS" --stream-frames 400000 --stream-episodes "$EPS"
   --stream-buffer 8192 --workers 8 --seed 0
   --max-steps "$STEPS" ${HRS[@]+"${HRS[@]}"} --batch-size "$MB" --accum 1 --channels-last

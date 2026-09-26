@@ -13,9 +13,11 @@ argv, so the space switch is observed through the interpreter the launcher actua
 """
 import os
 import subprocess
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, REPO)
 DECODER_MSE = os.path.join(REPO, "scripts", "spiderman", "decoder_mse.sh")
 
 STUB = '''#!/usr/bin/env python3
@@ -155,3 +157,34 @@ def test_dry_prints_the_commands_and_touches_nothing(tmp_path):
                for ln in lines), p.stdout
     assert any("vae_gate_score.py" in ln for ln in lines), p.stdout
     assert calls == [] and list(root.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------------------
+# the validation frames are held-out episodes of the training arenas
+# ---------------------------------------------------------------------------------------
+
+def test_validation_is_on_the_held_out_dense_episodes(tmp_path):
+    for space in ("sd1", "sd35"):
+        p, calls, root = launch(tmp_path / space, SPACE=space)
+        assert p.returncode == 0, p.stdout + p.stderr
+        [tune] = calls_to(calls, "finetune_decoder.py")
+        assert has(tune, "--val-dir", f"{root}/raw_arnold_dense/arenas", "--val-ids", "6000:6100")
+        assert has(tune, "--val-frames", "2000") and has(tune, "--stride", "1")
+        # nothing of the 17-map corpus reaches the tune any more
+        assert "--in-dir" not in tune and "--split" not in tune
+        assert not any(a.startswith(f"{root}/raw_arnold/") or a == f"{root}/raw_arnold" or "split_arnold" in a
+                       for a in tune)
+
+
+def test_finetune_decoder_accepts_exactly_the_launchers_flags(tmp_path):
+    import finetune_decoder
+    for space in ("sd1", "sd35"):
+        _, calls, root = launch(tmp_path / space, SPACE=space)
+        [tune] = calls_to(calls, "finetune_decoder.py")
+        a = finetune_decoder.build_parser().parse_args(tune[2:])
+        assert a.val_dir == f"{root}/raw_arnold_dense/arenas" and a.val_ids == "6000:6100"
+        assert a.stream_dir == a.val_dir and a.stream_ids == "0:2000"
+        assert a.in_dir == "" and a.split == ""
+        # the ids the launcher names pass the checks the tune makes before it reads a frame
+        assert finetune_decoder.validation_episode_ids(a.val_dir, a.val_ids, a.stream_dir, list(range(2000))) \
+            == list(range(6000, 6100))

@@ -20,6 +20,10 @@ the exact episode ids (and maps) the decoder trained on. `decoder_provenance.py`
 whether a score made with this decoder may claim unseen maps. A streamed tune of the dense corpus
 must name its episodes with `--stream-ids`, inside the segment's train range.
 
+`--val-dir` / `--val-ids` take the validation frames from named held-out episodes instead of the
+split's `val` list of `--in-dir`; for a dense segment they must lie inside its validation range
+(`validation_episode_ids`).
+
 Usage:
     python finetune_decoder.py --in-dir raw_arnold --split split_arnold.json \
         --out-dir vae_decoder_arnold --train-frames 50000 --val-frames 2000 --epochs 2 --device cuda:3
@@ -27,8 +31,8 @@ Usage:
     python finetune_decoder.py --vae-id Alpha-VLLM/Lumina-Image-2.0 --vae-subfolder vae \
         --latent-channels 16 --scaling-factor 0.3611 --shift-factor 0.1159 ...
 
-    python finetune_decoder.py --in-dir raw_arnold --split split_arnold.json \
-        --stream-dir raw_arnold_dense/arenas --stream-ids 0:6000 --stream-frames 400000 --stream-episodes 2000 \
+    python finetune_decoder.py --stream-dir raw_arnold_dense/arenas --stream-ids 0:2000 \
+        --stream-frames 400000 --stream-episodes 2000 --val-dir raw_arnold_dense/arenas --val-ids 6000:6100 \
         --workers 8 --max-steps 12000 --max-hours 4 --ckpt-every-hours 1 --lpips-weight 0 ...
 """
 import argparse
@@ -206,6 +210,99 @@ def stream_episode_ids(stream_dir, spec):
     return ids
 
 
+def validation_episode_ids(val_dir, spec, train_dir="", train_ids=None):
+    """The episode ids `--val-dir` validation frames may come from, checked before anything is read.
+
+    The validation curve is what the hourly checkpoints are read on, so its episodes must be held
+    out from everything a row is later scored as unseen on. The 17-map sample this replaces holds
+    maps 1 and 9 to 15, which are unseen for the next-tic rows (Astra's review, 2026-09-26,
+    section 5). For a segment of `release/dense_split.json` the ids must lie inside its validation
+    range, which keeps out training episodes (the decoder would be read on frames it trained on)
+    and the sealed test range; a segment with no validation range (the unseen arenas_678) is
+    refused. When the training frames come from the same directory, the ids must also be disjoint
+    from the training ids, and `train_ids=None` there means every file, so it is refused.
+    """
+    from doom_data import assert_disjoint, dense_ids, load_dense_split, parse_episode_ids
+    try:
+        ids = parse_episode_ids(spec)
+    except ValueError as e:
+        raise SystemExit(f"--val-ids {spec}: {e}")
+    if not ids:
+        raise SystemExit(f"--val-dir {val_dir} needs --val-ids: the validation episodes are named, never implied")
+    split = load_dense_split()
+    seg = os.path.basename(os.path.normpath(val_dir))
+    if seg in split["segments"]:
+        ranges = split["segments"][seg]["ranges"]
+        if "val" not in ranges:
+            raise SystemExit(f"{val_dir} is the dense {seg} segment, which has no validation range "
+                             f"(only {', '.join(ranges)}): a checkpoint read there is read on held-out maps")
+        outside = sorted(set(ids) - set(dense_ids(split, seg, "val")))
+        if outside:
+            raise SystemExit(f"--val-ids {spec}: {len(outside)} id(s) outside the {seg} validation range "
+                             f"({ranges['val']}): {outside[:8]}")
+    if train_dir and os.path.normpath(train_dir) == os.path.normpath(val_dir):
+        if train_ids is None:
+            raise SystemExit(f"the training frames come from every file of {val_dir}, the validation "
+                             "episodes included: name the training ids")
+        try:
+            assert_disjoint(train_ids, ids, "training and validation episode ids")
+        except ValueError as e:
+            raise SystemExit(str(e))
+    return ids
+
+
+def val_cache_tag(val_dir, ids, n, stride):
+    """The frame-cache name of a `--val-dir` sample: segment, id bounds, count and a hash of the ids.
+
+    The split-file key (`<in-dir>_<split file>_val_<n>_s<stride>`) names the FILE, so an edited
+    split under the same name would read the old frames back; this name changes with every id.
+    """
+    import hashlib
+    ids = sorted(int(e) for e in ids)
+    digest = hashlib.sha1(",".join(map(str, ids)).encode()).hexdigest()[:8]
+    seg = os.path.basename(os.path.normpath(val_dir))
+    return f"{seg}_valids_{ids[0]}-{ids[-1]}_{len(ids)}ep_{digest}_{n}_s{stride}"
+
+
+def validation_frames(args, split):
+    """(frames, record) of the held-out frames every validation pass and hourly checkpoint is read on.
+
+    Without `--val-dir` this is the split's `val` episodes of `--in-dir` under the old cache name,
+    unchanged. With it, the ids of `--val-ids` after `validation_episode_ids`, every one of which
+    must exist, cached under `val_cache_tag`.
+    """
+    from doom_data import load_dense_split, parse_episode_ids
+    if not args.val_dir:
+        tag = f"{split_tag(args)}_val_{args.val_frames}_s{args.stride}"
+        frames = cached_frames(args.frame_cache, tag, lambda: load_frames(
+            sample_frames(args.in_dir, split["val"], args.val_frames, args.stride, 1)))
+        return frames, {"dir": args.in_dir, "split": args.split, "ids": sorted(split["val"])}
+    if args.stream_dir:
+        try:
+            train_ids = parse_episode_ids(args.stream_ids) if args.stream_ids else None
+        except ValueError as e:
+            raise SystemExit(f"--stream-ids {args.stream_ids}: {e}")
+        train_dir = args.stream_dir
+    else:
+        train_dir, train_ids = args.in_dir, list(split["train"])
+    ids = validation_episode_ids(args.val_dir, args.val_ids, train_dir, train_ids)
+    missing = [e for e in ids if not os.path.exists(os.path.join(args.val_dir, f"ep_{e:05d}.parquet"))]
+    if missing:
+        raise SystemExit(f"{len(missing)} validation episode(s) missing from {args.val_dir}: {missing[:8]}; "
+                         "the validation set is exactly the ids named")
+    tag = val_cache_tag(args.val_dir, ids, args.val_frames, args.stride)
+    frames = cached_frames(args.frame_cache, tag, lambda: load_frames(
+        sample_frames(args.val_dir, ids, args.val_frames, args.stride, 1)))
+    seg = os.path.basename(os.path.normpath(args.val_dir))
+    return frames, {"dir": args.val_dir, "segment": seg if seg in load_dense_split()["segments"] else None,
+                    "ids": ids, "frames": len(frames), "stride": args.stride, "frame_cache": tag}
+
+
+def split_tag(args):
+    """The cache prefix of a sample drawn with `--in-dir` and `--split`."""
+    return f"{os.path.basename(args.in_dir.rstrip('/'))}_{os.path.basename(args.split)}"
+
+
 def _maps_of(paths):
     """Sorted map ids of these recordings, from each file's first `map_id`."""
     import pyarrow.parquet as pq
@@ -360,17 +457,17 @@ def evaluate(vae, frames, device, lpips_fn, bs=32):
 def main(args):
     os.makedirs(args.out_dir, exist_ok=True)
     device = args.device if torch.cuda.is_available() else "cpu"
-    split = json.load(open(args.split))
-    tag = f"{os.path.basename(args.in_dir.rstrip('/'))}_{os.path.basename(args.split)}"
+    if not (args.in_dir and args.split) and not (args.stream_dir and args.val_dir):
+        raise SystemExit("--in-dir and --split are needed unless the training frames come from --stream-dir "
+                         "and the validation frames from --val-dir")
+    split = json.load(open(args.split)) if args.split else None
     t0 = time.time()
     # --stream-dir feeds training from a corpus too large to decode into memory; the validation
-    # frames stay the cached in-memory sample either way, so the loss curve of a streamed run is
-    # directly comparable to the tunes that came before it.
+    # frames are a cached in-memory sample either way, of --in-dir's val split or of --val-dir.
     train_frames = [] if args.stream_dir else cached_frames(
-        args.frame_cache, f"{tag}_train_{args.train_frames}_s{args.stride}", lambda:
+        args.frame_cache, f"{split_tag(args)}_train_{args.train_frames}_s{args.stride}", lambda:
         load_frames(sample_frames(args.in_dir, split["train"], args.train_frames, args.stride, 0)))
-    val_frames = cached_frames(args.frame_cache, f"{tag}_val_{args.val_frames}_s{args.stride}", lambda:
-                               load_frames(sample_frames(args.in_dir, split["val"], args.val_frames, args.stride, 1)))
+    val_frames, val_record = validation_frames(args, split)
     print(f"loaded {len(train_frames)} train and {len(val_frames)} val frames in {time.time() - t0:.0f}s", flush=True)
 
     stream, stream_info = None, None
@@ -396,7 +493,7 @@ def main(args):
     provenance = {"provenance": "recorded", "recorded_by": "finetune_decoder.py",
                   "corpus": "; ".join(f"{t['dir']} ({len(t['ids'])} episodes, maps {t['maps']})" for t in train_eps),
                   "train_episodes": train_eps,
-                  "validation_frames": {"dir": args.in_dir, "split": args.split, "ids": sorted(split["val"])},
+                  "validation_frames": val_record,
                   "loss": "mse" if args.lpips_weight <= 0 else f"mse + {args.lpips_weight} lpips",
                   "vae_source": args.vae_id or "sd-vae-ft-mse"}
 
@@ -444,11 +541,12 @@ def main(args):
                        # `split_subset` was always "train", including for a streamed tune whose
                        # frames never came from the split; `train_episodes` is the exact record
                        "provenance": {"train_corpus": args.stream_dir or args.in_dir, "split": args.split,
-                                      "split_subset": "val (validation frames only)" if args.stream_dir
-                                      else "train", "vae_source": args.vae_id or "sd-vae-ft-mse",
+                                      "split_subset": ("none" if args.val_dir else "val (validation frames only)")
+                                      if args.stream_dir else "train", "vae_source": args.vae_id or "sd-vae-ft-mse",
                                       "loss": provenance["loss"],
                                       "mse_rows": int(args.mse_rows), "lpips_rows": 240,
-                                      "train_episodes": provenance["train_episodes"]},
+                                      "train_episodes": provenance["train_episodes"],
+                                      "validation_frames": val_record},
                        "latent_contract": latent_contract(vae), "train_frames": len(train_frames),
                        "val_frames": len(val_frames), "steps": step, "effective_batch": eff,
                        "presentations": step * eff, "stream": stream_info, "stopped": stopped,
@@ -531,11 +629,18 @@ def main(args):
 def build_parser():
     """Every flag in one place, so a test can read the defaults without a subprocess."""
     p = argparse.ArgumentParser()
-    p.add_argument("--in-dir", required=True, help="parquet episodes")
-    p.add_argument("--split", required=True)
+    p.add_argument("--in-dir", default="", help="parquet episodes of the cached training sample and, without "
+                                                "--val-dir, of the validation frames")
+    p.add_argument("--split", default="", help="split file whose train and val ids --in-dir is read with")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--train-frames", type=int, default=50000)
     p.add_argument("--val-frames", type=int, default=2000)
+    p.add_argument("--val-dir", default="", help="parquet corpus the validation frames come from instead of "
+                                                 "--in-dir's val split (e.g. raw_arnold_dense/arenas)")
+    p.add_argument("--val-ids", dest="val_ids", default="",
+                   help="episode ids of --val-dir, as A:B or a comma list; required with it. For a dense segment "
+                        "they must lie inside its validation range (arenas: 6000:7000), and the unseen segment "
+                        "is refused")
     p.add_argument("--stride", type=int, default=4)
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--batch-size", type=int, default=16, help="micro-batch; effective batch is this times --accum")
