@@ -501,3 +501,157 @@ Proposed to Rohan on Sep 26, to run on GPU 1 after PixArt finishes, with Astra r
 
 The "what it tests" column is this dossier's reading of the design; the design itself is one line in the log.
 
+---
+
+# 7. The map-distance generalization study
+
+## 7.1 The question and the method's origin
+
+Changliu suggested measuring how far each evaluation map's footage is from the training footage and correlating that distance with the model's quality on the map. The study reuses Rohan's NVIDIA internship method, which treats a driving test as a weighted cloud of per-frame latents, weights frames by motion, and compares clouds by sliced Wasserstein distance. Target sentence: across N maps, gain over persistence falls with distance from the nearest training map (partial Spearman ρ with a 95% CI). Rohan approved it on Sep 24 at 22:20. [RC 09-24 22:20; memo §1]
+
+**What transferred and what did not.** The cloud of frames (no frame correspondence needed), motion weighting and sliced Wasserstein transferred. Motion weighting has a new reason here: persistence scores still frames almost perfectly, so a model's gain over persistence sits in the moving frames. Three things did not transfer. NVIDIA's two windows shared a trigger, so it priced time as a coordinate; a map and the corpus share no clock, so time is dropped. Its reference was one distribution; ours mixes four maps, which forces the nearest-map construction below. And its ego latent was a decision representation, while a VAE latent is a reconstruction code that keeps textures, so our distance measures how different footage *looks*, which is why a pixel space and a second latent space were run as checks. [memo §1]
+
+## 7.2 The distance as run
+
+**Sliced Wasserstein, in one paragraph.** The Wasserstein-2 distance W₂ between two weighted point clouds is the root of the least mean squared distance needed to move one cloud's mass onto the other's. In high dimensions it is expensive, but in one dimension it is exact and cheap: sort both clouds and compare quantiles. Sliced W₂ projects both clouds onto many random directions, computes the 1-D W₂ along each, and averages. It takes frame weights exactly, needs no Gaussian or kernel assumption, and its per-direction error does not grow with dimension. [memo §§2, 4]
+
+**Construction** (identical in every space; [dist-sd1] `config`):
+
+- *Cloud per map:* 4 episodes × 250 target-eligible frames (at least 32 tics into a life, the population scored windows come from). Four is the smallest per-map episode count, so maps with more episodes average ten random 4-episode subsets; every cloud has the same size because the finite-sample floor depends on it.
+- *Features:* SD 1.x latents with padding rows removed, 5×5-pooled to 192 dimensions (primary); RGB at 20×15×3 (pixels); SD 3.5 latents pooled to 768 dimensions. The pixel and SD 3.5 spaces read exactly the same episodes and tics.
+- *Weights:* each frame's latent motion ‖z_t − z_{t−1}‖ within a life, plus a closed-form floor so the quietest half of the frames carries exactly 25 percent of the weight.
+- *Reference:* 50 seeded training episodes per training map (ids 0:2000), 250 frames each, stratified 25 per motion decile: 12,500 frames per map. A disjoint second draw gives the train-versus-train floor.
+- *Distance:* D(m) = min over k ∈ {2, 3, 4, 5} of SW₂(cloud_m, reference_k), with 1,000 directions from seed 0 shared by every distance, p = 2, no time coordinate.
+
+**Why the nearest training map.** Against the pooled four-map corpus, a held-out episode of a training map is charged for not resembling the other three. In the memo's 1-D example, with training maps at 0, 2, 4 and 6, a held-out draw of map 0 has W₂² = 14 to the pool, while an unseen map at 3 has only 5. The minimum over training maps ranks them correctly. [memo §1; `test_the_nearest_training_map_does_not_rank_a_seen_map_beyond_an_unseen_one`]
+
+**Why no time coordinate.** Windows are drawn uniformly and every episode lasts 150 s, so within-episode time is uniform on both sides; a time axis would add noise and a free price. The model's temporal structure enters through the motion weights.
+
+**The floor.** Forty single-subset train-versus-train distances give the band a map cannot be distinguished from training footage within: 0.022 to 0.093 in the SD 1.x space (mean 0.044), 0.009 to 0.046 in pixels, 0.023 to 0.093 in the SD 3.5 space. [dist-sd1, dist-pix, dist-sd35 `floor.motion`]
+
+**Alternatives rejected as primary:** Fréchet distance (assumes one Gaussian; a 768-dimensional covariance from 1,000 correlated frames is ill-conditioned); MMD (kernel bandwidth, awkward weights); nearest-training-frame distance (ignores density); a classifier two-sample test (its AUC saturates near 1 for every other-WAD map, erasing the dose-response). [memo §4] The arm choices barely matter: in the SD 1.x space the motion-weighted and uniform-weight distances rank the 30 maps with Spearman 0.994, and nearest-map against pooled with 0.897 (derived from [dist-sd1]).
+
+## 7.3 Outcome, confound control and statistics
+
+**Outcome:** per-map gain over persistence at one tic, the mean over 256 windows (from `eval_tf.draw_windows`) of `psnr_raw − persist_psnr_raw`. The scored model is the U-Net's 200k EMA, the final weights, so no checkpoint selection is possible. Scoring used 10-step DDIM, the stock decoder, seed 0 and horizons 1 and 4, from the clean checkout `$D/repo_distance`. Each map directory records the checkpoint SHA-256, split hash, sampler and decoder. [stats `primary`; `scripts/spiderman/score_distance_maps.sh`]
+
+**Confound: motion.** Gain already cancels motion to first order (section 1.2). The test controls it further with a **partial Spearman** coefficient: rank both D and gain, regress each on the rank of the map's mean persistence PSNR (a motion proxy: static maps have high persistence), and correlate the residuals. The question it answers: among maps equally easy for persistence, does a farther map get less gain?
+
+**Uncertainty.** A **case bootstrap** resamples the 30 maps with replacement (and episodes within each map) 10,000 times and recomputes ρ; the middle 95 percent is the CI. A **permutation test** shuffles gains across maps 10,000 times; p is the share of shuffles with |ρ| at least the observed one, so 0.0001 is 1/10,001, the floor. **Leave-one-map-out** refits the primary 30 times with one map removed; the sign must hold in every refit, so no single map carries the result. Distance uncertainty comes from 200 episode redraws: if D's bootstrap SD is under a tenth of its spread across maps (the attenuation ratio), a correlation with D is attenuated by under 1 percent. Power at n = 30: |ρ| ≥ 0.36 is detectable; within the 17 arenas 0.49 and the 13 campaign maps 0.56. [memo §3]
+
+**One primary test, declared in advance:** SD 1.x space, motion arm, U-Net 200k EMA, one-tic PSNR gain, partial on persistence PSNR. Everything else is secondary.
+
+**The pre-declared verdict.** Supported if the primary ρ is negative with a CI excluding zero and the sign holds in every leave-one-out refit, within both clusters, for every row, and in pixel space with rankings agreeing at Kendall τ ≥ 0.6. Not supported if only the cluster gap exists, if the relation vanishes under motion control, if it appears only in raw PSNR, if the distance fails validation, or if the rows disagree. Never claimed: causation, or maps beyond these arenas and curated campaign maps. `paper/make_distance_figure.py` implements the rule; its `distance_validation` condition is the distances file's `checks.all_pass`. [memo §5]
+
+## 7.4 The validation checks and their outcomes
+
+The distance got outcome-free checks before any map was scored, because validating it on model quality would be circular. [memo §2]
+
+| Check | What it tests | SD 1.x | Pixels | SD 3.5 |
+|---|---|---|---|---|
+| (i) | The four validation maps sit inside the floor band | pass: 0.026 to 0.069 in [0.022, 0.093] | pass | pass |
+| (ii) | Disjoint 4-episode subsets of a map agree within 10% (median over 5 pairs); copies in another corpus land on the primary point; maps inside the floor band exempt | **fail**: 8 campaign maps, medians 0.108 to 0.288 (18, 20, 22, 24, 26, 28, 29, 31); copies of maps 6, 7, 8 agree within 0.5, 0.6 and 4.0% | **fail**: 10 maps incl. arena 6, up to 0.482 | **fail**: 10 maps incl. arena 6 |
+| (iii) | The two reference draws rank the maps alike (Spearman ≥ 0.95) | pass: 0.996 | pass: 0.980 | pass: 0.997 |
+| (iv) | Arenas 6 to 8 (the training WAD) sit nearer than every campaign map | **fail**: arena 7 at 0.282 against nearest campaign map 0.140; means 0.195 against 0.218 | **fail** | **fail** |
+| (v) | \|Spearman(D, Kish n_eff)\| < 0.4, so motion weighting does not just track sample size | pass: −0.022 | pass: 0.112 | pass: 0.001 |
+| Attenuation | Median bootstrap SD of D over its spread across maps | 0.089 (under 1% attenuation) | 0.139 (not under) | 0.076 |
+
+[dist-sd1, dist-pix, dist-sd35 `checks`, `bootstrap`] Kish n_eff is the effective number of frames after weighting, (Σw)²/Σw². The floor-band exemption in (ii) was committed at 01:19 on Sep 25 (`6a33311`), before any score existed: inside the band D is draw noise, and the validation maps' subsets disagree by 15 to 60 percent there, as the toy study had shown. An earlier count of nine failing campaign maps was corrected to eight. [RC 09-25 01:25, 23:15]
+
+**Main's reading of the two failures** (made after they failed, before the gate was ruled): (iv) fails because the same WAD is not a proxy for closeness in latent space; arena 7's distance exceeds that of eleven of the 13 campaign maps. That is a finding about the maps, not a fault of the measurement. (ii) fails because four-episode subsets of short, static campaign episodes are noisy; the ten-subset mean and the 200-redraw bootstrap already absorb that, as the 0.089 attenuation ratio shows. Checks (i), (iii) and (v) validate the measurement itself. [RC 09-25 09:40, 11:30]
+
+## 7.5 Results: U-Net 200k EMA, 30 maps
+
+| Read | n | ρ | 95% CI | Permutation p |
+|---|---:|---:|---|---:|
+| **Primary: partial on persistence PSNR, one-tic PSNR gain, SD 1.x** | 30 maps | −0.734 | [−0.840, −0.320] | 0.0001 |
+| Raw Spearman, one-tic gain (no motion control) | 30 | −0.440 | [−0.695, −0.025] | |
+| Raw Spearman, one-tic model PSNR instead of gain | 30 | −0.369 | [−0.654, +0.079] | |
+| Leave-one-map-out refits of the primary | 30 refits | −0.773 to −0.696 | 30 of 30 negative | |
+| Within the 17 arenas, partial | 17 | −0.574 | [−0.856, −0.025] | 0.017 |
+| Within the 13 campaign maps, partial | 13 | −0.378 | [−0.790, +0.354] | 0.200 |
+| LPIPS gain, partial | 30 | −0.589 | [−0.806, −0.193] | 0.001 |
+| Four-tic PSNR gain, partial | 30 | −0.795 | [−0.875, −0.458] | 0.0001 |
+| Episodes within maps (map-demeaned ranks) | 342 episodes | +0.088 | | 0.218 |
+| Pixel-space distance, partial | 30 | −0.657 | | |
+| SD 3.5-space distance, partial | 30 | −0.727 | | |
+
+[stats] A second bootstrap of the primary in the same file gives [−0.841, −0.323]; intervals quoted earlier during the run (25 maps, then 30) differ in the third decimal and are superseded.
+
+**Verdict conditions:** negative with CI excluding zero, pass; leave-one-out sign, pass; within both clusters, pass; every row, pass; pixel space, pass; distance validation, fail. So `make_distance_figure.py` prints the pre-declared "does not support". None of the four diagnostics fired: the relation does not vanish under motion control, is not only in raw PSNR, is not only the cluster gap, and no rows disagree. [stats `verdict`]
+
+**How to read it.** The gain falls with distance, more strongly once motion is controlled (−0.73 against −0.44) and more weakly for raw PSNR, whose CI crosses zero. So the relation lives in what the model adds over persistence, not in how hard the map is. It holds at four tics even more strongly. The episode-level null places it between maps: episodes of one map do not differ by distance in any way the model feels. Three passing conditions are weaker than their names: "within both clusters" is a sign test and the campaign CI spans zero; "every row" holds trivially with one row scored; the pixel coefficient has no interval and its attenuation ratio exceeds 0.1.
+
+![Gain over persistence at one tic against distance to the nearest training map, U-Net 200k EMA, 30 maps](../results/distance_study/figure_unet_h1/distance_gain.png)
+
+The frozen figure (`results/distance_study/figure_unet_h1/distance_gain.png`, dark variant beside it): x is D, y is one-tic gain in dB; circles are arenas, squares campaign maps; 95% bootstrap bars on both axes; the grey band is the train-versus-train floor, the dashed line persistence. The four validation maps sit inside the floor band at +0.5 to +1.8 dB; almost every other map sits near or below zero; the worst campaign map (26) sits at −4 dB. It does not yet label maps or print p, which the literature's conventions suggest. [lit Q6]
+
+**Per map** (condensed from `distance_table.md`; D in the SD 1.x space ± bootstrap SD; lives per episode; persistence is the map's mean one-tic `persist_psnr_raw`; LPIPS gain is persistence LPIPS minus model LPIPS, positive better):
+
+| Map | Cluster | D (± SD) | Nearest | Lives | Persistence (dB) | Gain h1 [95% CI] | LPIPS gain | Gain h4 |
+|---|---|---|---:|---:|---:|---|---:|---:|
+| val/5 | arena | 0.026 ± 0.005 | 5 | 8.3 | 19.76 | +1.79 [+1.58, +1.98] | +0.029 | +1.90 |
+| val/3 | arena | 0.034 ± 0.007 | 3 | 8.7 | 21.37 | +0.72 [+0.42, +1.01] | +0.006 | +2.21 |
+| val/2 | arena | 0.065 ± 0.019 | 2 | 5.5 | 21.92 | +0.51 [-0.05, +0.92] | +0.016 | +1.29 |
+| val/4 | arena | 0.069 ± 0.026 | 4 | 2.8 | 22.70 | +0.68 [+0.33, +1.07] | +0.056 | +2.27 |
+| arenas_678/8 | arena | 0.115 ± 0.005 | 4 | 7.2 | 23.20 | -0.92 [-1.28, -0.58] | -0.077 | -0.20 |
+| seen/15 | arena | 0.127 ± 0.004 | 3 | 5.0 | 19.85 | +1.30 [+1.03, +1.45] | -0.079 | +0.49 |
+| seen/12 | arena | 0.128 ± 0.008 | 3 | 5.0 | 21.69 | -0.31 [-0.56, +0.02] | -0.104 | +0.19 |
+| unseen/17 | arena | 0.130 ± 0.001 | 3 | 4.8 | 19.37 | +0.53 [+0.41, +0.65] | -0.155 | +0.49 |
+| unseen2/20 | campaign | 0.140 ± 0.016 | 3 | 1.3 | 22.12 | -0.13 [-0.65, +0.40] | -0.129 | +0.24 |
+| unseen2/32 | campaign | 0.143 ± 0.007 | 2 | 1.4 | 23.55 | -0.68 [-0.83, -0.52] | -0.144 | -0.49 |
+| seen/14 | arena | 0.146 ± 0.002 | 3 | 11.2 | 21.75 | -0.28 [-0.34, -0.18] | -0.109 | -0.27 |
+| seen/11 | arena | 0.150 ± 0.002 | 2 | 11.8 | 20.83 | +0.35 [+0.10, +0.63] | -0.080 | +0.38 |
+| seen/13 | arena | 0.156 ± 0.005 | 3 | 10.2 | 19.37 | +0.79 [+0.33, +1.26] | -0.125 | +0.51 |
+| seen/10 | arena | 0.162 ± 0.002 | 3 | 8.5 | 22.60 | -0.36 [-0.73, -0.06] | -0.069 | +0.88 |
+| unseen/16 | arena | 0.164 ± 0.005 | 3 | 5.4 | 20.03 | +0.77 [+0.65, +0.87] | -0.163 | +0.48 |
+| unseen2/28 | campaign | 0.165 ± 0.025 | 4 | 1.3 | 24.20 | -1.83 [-2.39, -1.06] | -0.161 | -1.96 |
+| seen/1 | arena | 0.179 ± 0.001 | 3 | 21.8 | 21.93 | -0.23 [-0.55, +0.09] | -0.138 | -0.11 |
+| seen/9 | arena | 0.180 ± 0.002 | 3 | 4.5 | 22.58 | -0.06 [-0.45, +0.39] | -0.063 | +0.53 |
+| unseen2/24 | campaign | 0.181 ± 0.023 | 3 | 1.0 | 23.98 | -2.44 [-4.84, -0.36] | -0.107 | -2.58 |
+| unseen2/18 | campaign | 0.182 ± 0.040 | 3 | 1.0 | 22.60 | -1.02 [-2.50, +0.25] | -0.155 | -1.78 |
+| unseen2/19 | campaign | 0.182 ± 0.039 | 4 | 1.0 | 24.64 | -2.35 [-4.75, -0.31] | -0.109 | -2.62 |
+| unseen2/25 | campaign | 0.187 ± 0.009 | 4 | 2.5 | 25.76 | -2.40 [-2.94, -1.65] | -0.130 | -1.84 |
+| arenas_678/6 | arena | 0.188 ± 0.010 | 3 | 8.3 | 20.72 | -0.31 [-1.23, +0.21] | -0.122 | -0.42 |
+| unseen2/31 | campaign | 0.210 ± 0.023 | 3 | 1.0 | 21.66 | -0.19 [-0.98, +0.57] | -0.099 | -0.06 |
+| unseen2/22 | campaign | 0.220 ± 0.035 | 3 | 2.1 | 19.63 | +0.03 [-0.85, +0.96] | -0.159 | -0.34 |
+| unseen2/29 | campaign | 0.235 ± 0.033 | 3 | 6.4 | 18.81 | +0.33 [-0.43, +1.04] | -0.173 | -0.41 |
+| unseen2/26 | campaign | 0.273 ± 0.073 | 4 | 1.3 | 27.23 | -3.98 [-5.40, -2.48] | -0.120 | -3.06 |
+| arenas_678/7 | arena | 0.282 ± 0.005 | 3 | 11.6 | 19.53 | +0.05 [-0.34, +0.38] | -0.084 | -0.85 |
+| unseen2/30 | campaign | 0.338 ± 0.006 | 4 | 1.0 | 20.51 | -0.75 [-1.90, +0.27] | -0.165 | -0.82 |
+| unseen2/23 | campaign | 0.371 ± 0.005 | 3 | 1.1 | 19.60 | +0.17 [+0.10, +0.27] | -0.212 | -0.69 |
+
+On the four validation maps the U-Net gains +0.51 to +1.79 dB at one tic and +1.29 to +2.27 at four. On the other 26 maps its one-tic gain is negative on 17, and its LPIPS gain is negative on all 26 (−0.063 to −0.212). It loses most on campaign maps whose seeded footage is nearly static: the five worst one-tic gains (maps 26, 24, 25, 19, 28; −3.98 to −1.83 dB) have persistence of 23.98 to 27.23 dB, and ten of the 13 campaign maps average 1.0 to 1.4 lives per episode. Whether the agent is stuck on those maps needs a look at the frames, which has not been done. Several intervals are wide (map 26 [−5.40, −2.48]), and 256 windows is a small sample of a map. [RC 09-25 11:30, 18:20]
+
+## 7.6 Three spaces agree
+
+| Pair of spaces | Spearman of D over 30 maps | Kendall τ |
+|---|---:|---:|
+| SD 1.x and SD 3.5 | 0.903 | 0.756 |
+| SD 1.x and pixels | 0.863 | 0.701 |
+| Pixels and SD 3.5 | 0.770 | |
+
+[stats `spaces`; Spearman values derived from the three distances files] Both replication spaces pass the same checks (i, iii, v) and fail the same two (ii, iv), and the U-Net's one-tic partial ρ is −0.73 in SD 1.x, −0.73 in SD 3.5 and −0.66 in pixels. Two encoders trained on different data, and raw pixels, rank the maps alike, so the distance is a property of the footage rather than of one encoder. [RC 09-25 14:00; RC 09-26 02:00]
+
+## 7.7 The superseded first look, and the `copy_psnr_raw` lesson
+
+At 09:50 on Sep 25 main read the first 16 scored maps against `copy_psnr_raw` and reported gains of +0.09 to +2.43 dB and a raw Spearman of −0.88. That column is the *decoded* copy, which carries the autoencoder's reconstruction error, and it is not the pre-registered outcome. Over the 30 maps `persist_psnr_raw` exceeds it by 1.36 dB on average, from −0.08 dB (map 23) to +4.04 dB (map 26). The gap is largest on the static campaign maps, so the wrong reference did not shift all maps by a constant: it reordered them, and it turned most unseen-map losses into apparent gains. The 11:30 entry marked the look superseded. The lesson is section 1.2's rule: the `_raw` suffix names the target, and only `persist_psnr_raw` is decoder-free. [RC 09-25 09:50, 11:30]
+
+## 7.8 The seen-sidecar incident
+
+At 10:10 the scorer failed on seeded maps 9 to 15: their buttons column was up to `<U36`, wider than the 19-button executed control. Episodes `seen/ep_00000` to `ep_00027` had been written on Sep 21 by an older encoder (`7f7d0b1`) with Arnold's raw request strings, and the Sep 24 encode had skipped them because the files existed. They were moved aside and re-encoded with the pinned encoder (`190c125`). The re-encoded latents equal the old ones (correlation 0.99999, 0.2 percent mean relative difference, bf16 nondeterminism), so only the sidecars were wrong and the frozen SD 1.x distances stand. Seeded map 1 was worse: its old sidecars were narrow enough to pass the width check with the wrong button semantics, so its first score (+0.84 dB) had fed the model wrong control tokens; it was rescored and reads −0.23 dB. Two lessons: a width check catches only wide strings, and skip-if-exists encoding can mix encoder versions in one directory. [RC 09-25 10:10, 10:40]
+
+## 7.9 Pre-registration, in order
+
+The weighted sliced-Wasserstein core and the memo landed on Sep 24 at 22:52 to 23:30 (`e3df659`). The floor-band exemption for check (ii) was committed at 01:19 (`6a33311`) and the SD 1.x distances frozen with the code's SHA-256 at 09:13 (`01de829`), both before any per-map score. The primary test was put to Rohan at 01:25 and kept as declared at 09:40 under his "continue with everything". One-tic scores and statistics froze at 11:42 (`7d186dd`), pixel distances at 13:34 (`02136c8`), four-tic scores at 18:14 (`d8e07b8`), and SD 3.5 distances at about 02:00 on Sep 26. [RC 09-25 01:25 to 18:20; RC 09-26 02:00] The pixel and SD 3.5 distances were computed after the one-tic scores existed, but with unchanged code: every distances file records the same `distance_study.py` SHA-256 (`f027fff…`) with `distance_study_modified` false. They are blind in code and parameters, not in time.
+
+## 7.10 The gate question
+
+The question as posed: should (iv), an assumption about the maps, and (ii), a subset-level tolerance stricter than the bootstrap precision the test uses, count against the measurement? The gate was not changed after seeing the data. [RC 09-25 11:30] The questions sent to Astra: should the gate be amended, and on what principled (not post-hoc) criterion; is the partial on persistence PSNR the right confound control, or should lives or the valid-window fraction enter; what threatens the claim "gain over persistence falls with distance from the nearest training map"; what would a reviewer attack first. [`.claude/analyses/astra-brief-2026-09-26.md` §1]
+
+Two defensible outcomes exist. Keeping the gate means reporting the relation as a strong pre-registered secondary result under a failed validation, with both failures explained. Amending it means stating, before the other rows are scored, that validation consists of checks that test the measurement (i, iii, v and the attenuation bound) and that (ii) and (iv) are reported as properties of the maps. Either way the paper should show the checks table.
+
+## 7.11 What remains
+
+SD 3.5 and PixArt are scored through the study at their final 200k EMA weights, so the "every row" condition will test three rows. Not implemented: the decoder-free outcome (latent MSE ratio to copy-last), the episode-level mixed model Δ ~ D + persistence + lives + (1 | map), stratification by control regime, and the model-feature distance space. [memo §§2, 3, 6]
+
