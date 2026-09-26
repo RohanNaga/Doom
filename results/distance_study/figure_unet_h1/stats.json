@@ -130,6 +130,12 @@
    "n_maps": 30,
    "partial_spearman": -0.656832238713006,
    "kendall_tau_with_primary": 0.7011494252873564
+  },
+  "sd35": {
+   "file": "/sata2/data/rnagabhi/doom/repo_distance/results/distance_study/distances_sd35.json",
+   "n_maps": 30,
+   "partial_spearman": -0.7271831395549352,
+   "kendall_tau_with_primary": 0.7563218390804598
   }
  },
  "verdict": {
