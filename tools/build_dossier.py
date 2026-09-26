@@ -86,7 +86,7 @@ def inline(text: str) -> str:
     text = re.sub(r"`([^`]+)`", stash, text)
     text = html.escape(text, quote=False)
     text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)",
-                  lambda m: f'<a href="{html.escape(m.group(2))}">{m.group(1)}</a>', text)
+                  lambda m: f'<a href="{html.escape(safe_href(m.group(2)))}">{m.group(1)}</a>', text)
     text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", text)
     return re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m.group(1))], text)
@@ -108,7 +108,22 @@ def split_row(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", s)]
 
 
+ROOT = Path(__file__).resolve().parent.parent
+SAFE_SCHEMES = ("http://", "https://", "mailto:", "#")
+
+
+def safe_href(url: str) -> str:
+    """Only web, mail, fragment and relative links are rendered; any other scheme becomes a fragment."""
+    u = url.strip()
+    if u.startswith(SAFE_SCHEMES) or ":" not in u.split("/", 1)[0]:
+        return u
+    return "#"
+
+
 def data_uri(path: Path) -> str:
+    """Inline a figure that lives inside the repository; anything outside it is refused."""
+    if ROOT not in path.resolve().parents:
+        raise SystemExit(f"figure outside the repository refused: {path}")
     mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode()}"
 
@@ -253,7 +268,7 @@ def build(src: Path, out: Path) -> None:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parent.parent
+    root = ROOT
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--src", type=Path, default=root / "docs/RESEARCHER_DOSSIER.md")
     ap.add_argument("--out", type=Path, default=root / "docs/researcher_dossier.html")
