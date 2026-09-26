@@ -427,3 +427,77 @@ The first corrected benchmark (Sep 13 to 22) trained five backbone families for 
 
 Stride-four records that never became numbers: the quarter-data and context-8 grid cells were named as complete but no metrics were found, and the context-16 cell stopped at 27.5k. A video-pretrained SkyReels pilot in its own autoencoder scored 20.11 / 0.305 on seen windows against its decoded copy of 18.85 but was never rolled out. The April checkpoint's 26.04 dB was on training data (section 1.3). [RC 09-17 09:45; RC 09-20 08:30]
 
+---
+
+# 6. Closed-loop stability
+
+## 6.1 Three terms
+
+- **Exposure bias.** The model trains on real context (plus noise augmentation) but runs on its own predictions. Its small errors produce contexts it never saw in training, and nothing in training teaches it to correct them.
+- **Absorbing state.** A state that a process enters and cannot leave. In a rollout, a context the model maps back to itself, a fixed point of the closed loop.
+- **Per-channel mean shift.** Each latent channel's spatial mean per frame has a range in real data. A shifted frame has one channel's mean outside that range while the latent's overall RMS (its scale) stays normal. Nothing explodes; the content is wrong in one direction of latent space.
+
+## 6.2 The mechanism
+
+**The live collapses.** At 50k, 8 of 16 live SD 3.5 rollouts on seed 1 ended at 2.3 to 3.9 dB, blank or saturated frames, with onsets from tic 4 to past tic 128 on maps 2 to 5. Once a rollout reached about 3 dB it never recovered. The collapse did not appear at 55k to 65k and returned at 70k: on seed 0, 11 of 16 live rollouts ended between 5.8 and 10.1 dB with onsets from tic 1 to 137, and seed 1 reproduced it (10 of 16 under 10 dB at 256 tics). The run logged no NaN, no skipped update, and a falling validation loss; the loss reached a new low of 0.0917 at 72k, straight after the 70k collapse. [RC 09-24 15:15, 15:55; RC 09-25 01:40, 02:30]
+
+**Where it lives.** Per-tic latent statistics of the collapsed rollouts (`stw6_latstats.py`) put it in one channel. The RMS of the predicted latents stayed inside the ground-truth range, 0.98 to 1.19. SD 3.5 latent channel 13, whose per-frame mean sits near +0.45 in real footage, dropped instead to one of two fixed values shared across windows and maps: −1.39 to −1.50 in 17 of the 22 collapsed rollouts over both seeds, and −2.60 to −2.73 in 4, the ones with RMS 1.35 to 1.48, which are the blank frames at 5.8 to 10 dB. [RC 09-25 02:30; `steward_70000/latstats_*.json`] The channel's data range is −0.44 to 0.80 in the event table's definition, which supersedes the −0.085 to 0.70 of the first 02:30 reading. [rates] On seed 0 the channel left its range at the PSNR drop; on seed 1 six rollouts dropped in PSNR at tic 1 while channel 13 left its range later. So the channel capture is the end state, not always the trigger.
+
+**A family, not one channel.** At 105k the EMA produced its first long-horizon failures. Seed-1 EMA rollout 8 (map 5) ended at 7.1 dB with RMS 1.00 to 1.17 (data 1.00 to 1.59) while channel 15's mean fell to 0.38 against a data range of 1.00 to 1.94; rollout 7 (map 4) shifted in channel 13, rollout 10 (map 4) in channel 8. The absorbing states are per-channel mean shifts with the scale intact, in channels 13, 15 and 8. [RC 09-25 22:40; `steward_105000/latstats_ema_seed1.json`]
+
+**Why not an all-channel count.** A first proposal counted rollouts whose last frame had *any* channel mean outside the real 0.5 to 99.5 percentile band. Calibrated on every read from 55k to 105k, it flagged 3 to 8 of 16 EMA rollouts at every read, and only the 70k live collapse (12 of 16) stood out. The band catches ordinary scene drift, so the count is too noisy to carry a claim; it is reported only as context. The claim rests on events (a), (b) and (c) of section 4.3 and on 256-tic PSNR against copy-seed. [RC 09-25 23:00; `$D/tmp/steward/stw7_endstate.py`]
+
+**The EMA's excursions.** The EMA's channel-13 minimum per read from 70k to 105k was −1.12 / −0.94 / −0.54 / −1.16 / −1.08 / −0.58 / −1.01 / −1.29, most often in one recurring map-4 window (rollout 5), with recovery each time until 105k. [RC 09-25 21:00] Later EMA excursions came mostly from one map-5 window (rollout 15, episode 6079): at 115k a 6.2 dB frame and a 9.9 dB end with ten channels out of range; at 125k 18 tics under 10 dB and a recovery to 16.9 dB; at 130k channel 13 to −1.43 for 7 tics, a 4.7 dB frame and recovery to 14.4 dB. The first EMA end-state capture outside maps 4 and 5 came at 130k on seed 1 (map 2, ending at 9.4 dB). [RC 09-26 03:30, 08:50, 10:50, 11:30] Over 50k to 130k, map 5 carries 18 of the 25 EMA frame-under-10-dB events, map 4 four and map 2 three (derived from [rates]).
+
+## 6.3 The rollout strip
+
+![SD 3.5 70k: ground truth, live and EMA rollouts on two validation windows, tics 1 to 256](figures/sd35_70k_live_vs_ema_rollout_strip.jpg)
+
+`paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg` (decoded by `tools/collapse_strip.py`, `42a4688`) shows two validation windows at 70k: rollout 6 on map 2 and rollout 2 on map 5. For each, three rows (ground truth, live, EMA) run across tics 1, 4, 8, 16, 32, 64, 96, 128, 192 and 256. The live rollout on map 2 floods to flat blue by tic 8; on map 5 it smears at tic 16, turns blue at 32 and flat grey from 64 on. Blue corresponds to a channel-13 mean near −2.6 and grey to about −1.4. Throughout, the HUD, the weapon sprite and the crosshair persist in the live rows, because those pixels are identical in every context frame and the model copies them. The EMA rows stay coherent Doom scenes to tic 256: they drift away from the true trajectory, as any open-loop rollout must, but remain plausible corridors and rooms. [RC 09-26 10:30] It is the paper's Figure 1 candidate.
+
+## 6.4 The rates, and what the late-training rise is
+
+**Totals, 50k to 130k** (per-read rows in [rates]; 16 rollouts per set):
+
+| Weights | Rollouts | (a) frame under 10 dB | (b) ends under 12 dB | (c) channel-13 end state |
+|---|---:|---:|---:|---:|
+| Live | 288 | 48 (16.7%) | 37 (12.8%) | 24 (8.3%) |
+| EMA | 352 | 25 (7.1%) | 9 (2.6%) | 6 (1.7%) |
+
+The live sets are seed 0 at every read from 55k plus seed 1 at 50k and 70k. The EMA sets are seed 0 at every read from 55k, seed 1 from 105k, and seed 2 at 90k. The 70k live collapse alone contributes 27 of the 48 live (a) events.
+
+**The pooled EMA rate rose after 105k.** Event (a) runs 7 of 176 (4.0 percent) at 55k to 100k and 18 of 176 (10.2 percent) at 105k to 130k, while teacher-forced quality improved at every read and the directional check held at 0.82 to 0.87. The Sep 26 09:00 entry read this as "the EMA rate roughly doubled since 105k", and the 11:30 entry states the split as 9 of 160 and 16 of 192. That split does not match the committed table's rows, whose totals it matches (25 of 352); the counts here are recomputed from the table. [rates; RC 09-26 09:00, 11:30]
+
+**The rise is mostly a change of windows.** Seed-1 windows, a second and harder draw, joined the EMA reads only from 105k. Split by window set (derived from [rates]):
+
+| Windows | EMA (a), 55k to 100k | EMA (a), 105k to 130k | Live (a), 55k to 100k | Live (a), 105k to 130k |
+|---|---|---|---|---|
+| Seed 0 (standing) | 5 / 160 (3.1%) | 4 / 96 (4.2%) | 19 / 160 (11.9%) | 4 / 96 (4.2%) |
+| Seed 1 | not run | 14 / 80 (17.5%) | 15 / 16 at 70k | not run |
+| Seed 2 | 2 / 16 at 90k | backfill running | | |
+
+On the standing windows the EMA rate is flat, and the live rate falls to meet it. On the same seed-0 windows over the same 16 reads from 55k to 130k, the live weights have 23 / 17 / 14 events (a) / (b) / (c) of 256 rollouts and the EMA 9 / 4 / 4; without the 70k read, 11 / 6 / 4 against 8 / 3 / 4 of 240. So the live-versus-EMA gap is concentrated at the 50k and 70k collapses, and the late rise in the pooled EMA rate comes from the harder seed-1 windows (maps 4 and 5). Whether stability truly declines late in training is not yet tested: that needs the same windows run at early and late checkpoints. The seed-2 backfill (90k already, then 100k, 110k, 120k and 125k) can answer it on its own windows. [RC 09-26 09:00]
+
+**What the paper can claim.** Per weight set and per training window, the three event rates with their window sets named. That the live weights of SD 3.5 fall into absorbing per-channel mean shifts at some checkpoints (50k, 70k) while the EMA at those checkpoints does not, which the strip shows. That teacher-forced quality does not predict closed-loop stability: it improved at every read while rollout PSNR wandered and events came and went. It cannot claim "the EMA never fails", a trend with training step, or a general stabiliser: one setting of EMA, one row with long series, and 16 rollouts per set without intervals. Rollouts on the same windows are not independent across reads, so any interval on a rate difference should resample windows (cluster bootstrap), not rollouts.
+
+## 6.5 Why the EMA helps, as far as we know
+
+Nothing measured establishes the mechanism. Two readings fit the evidence.
+
+**The exposure-bias reading.** Noise augmentation teaches the model to tolerate isotropic Gaussian corruption of its context. A per-channel mean shift is a structured error, one direction of latent space, which that augmentation does not cover. Once the context carries such a shift, a model with a strong persistence prior predicts a next frame consistent with its context, so the shift reinforces itself and becomes a fixed point. This explains why captured states never recover, why the HUD survives (it is copied from context), and why teacher-forced reads, which never feed predictions back, cannot see the failure.
+
+**The averaging reading.** The EMA averages the live weights over about 10,000 updates. The live collapses appear and vanish between checkpoints 5k apart while validation loss falls smoothly, so the property is sensitive to small, recent weight changes. Averaging suppresses exactly those, which would make the EMA less likely to sit at a point where the closed loop has a stable off-manifold fixed point. The EMA is not immune: it makes excursions and was captured 6 times in 352 rollouts.
+
+## 6.6 The proposed post-training experiment
+
+Proposed to Rohan on Sep 26, to run on GPU 1 after PixArt finishes, with Astra reviewing the design at 13:28. [RC 09-26 10:30] Each arm starts from an SD 3.5 checkpoint and is scored on the same windows with the event counts above.
+
+| Arm | What it is | What it tests |
+|---|---|---|
+| 1. Channel-mean clamp | inference only: hold each channel's per-frame mean inside its data range during the rollout | whether the failure is entirely a mean shift; if clamping removes it, the content is recoverable from the other statistics |
+| 2. Control | 3k more steps of ordinary training | separates any effect of the fixes from simply training longer |
+| 3. Per-channel-offset corruption | 3k steps with context corruption that adds per-channel mean offsets, extending noise augmentation to the observed failure direction | whether teaching the model to undo structured shifts removes the fixed point |
+| 4. Self-rollout fine-tune | 3k steps training on the model's own rolled-out context | whether attacking exposure bias directly, as Self Forcing does, removes it |
+
+The "what it tests" column is this dossier's reading of the design; the design itself is one line in the log.
+
