@@ -756,3 +756,51 @@ Where we sit: we match the channel-stacked context, action tokens, v-prediction 
 
 **Citations for the related-work paragraph, in priority order:** OTDD (arXiv 2002.02923, Figs. 6–7) as the nearest method; Deng and Zheng (arXiv 2007.02915, Fig. 2) as the nearest distance-predicts-drop claim; PredNet (arXiv 1605.08104, Table 2) for persistence on an unseen domain; Villegas et al. (arXiv 1911.01655, App. A.2.2) for the rationale; Blitzer et al. (P07-1056, Fig. 3); Mathieu et al. (arXiv 1511.05440, Table 2) for motion as the confound; Genie (arXiv 2402.15391) for the ΔtPSNR form; Guillory et al. (arXiv 2107.03315) and Mayilvahanan et al. (arXiv 2310.09562) for null framing. Every citation still needs checking on the paper's page. [lit Q6]
 
+---
+
+# 10. What remains, open questions and operations
+
+## 10.1 What remains for the paper
+
+| Item | Owner | State |
+|---|---|---|
+| PixArt 200k final read (512-window TF, two-seed rollouts, directional, probe_v2) and its rows in the event table | steward 7 | tonight, Sep 26 |
+| SD 3.5 200k final read | steward 7 | Sep 27 night |
+| Distance-study scoring of SD 3.5 and PixArt at 200k EMA, so "every row" tests three rows | Rohan, scorer on GPU 3 | after each 200k |
+| Verdict-gate ruling; sealed-corpora ruling | Rohan, Astra reviews 09-26 13:28 | open |
+| Released SD 3.5 checkpoint (200k or chosen by validation rollouts) | Rohan | open |
+| Trend test for late-training stability on matched windows | steward 7 (seed-2 backfill) | running |
+| Episode-bootstrap intervals on the main table and a cluster bootstrap on the rate difference | Rohan | not started |
+| Paper sections: related work, dataset, method, PhysWM template (4 pages: intro 0.5, related 0.5, dataset and method 1, results 1.5, discussion 0.5), Figure 1 candidates (the strip, W&B curves) | Keerthana | Sep 25 division of labour |
+| Results, tables, generalization figure (label maps, print p), statistics, server | Rohan | in progress |
+
+`paper/main.tex` is still the Sep 16 stride-four skeleton, and no CoRL template is checked in. [RC §0; `.claude/analyses/weekly-update-2026-09-25.md`; `paper/main.tex:1–8`]
+
+**Timeline.** Sep 26 night: PixArt 200k. Sep 27 evening: full draft to Changliu, SD 3.5 marked provisional; SD 3.5 200k lands about the same time. Sep 28 to 29: final tables and figures. Sep 30 AoE: submission. [RC 09-25 13:25; RC §0]
+
+## 10.2 Open research questions
+
+| Question | Known now | What would settle it |
+|---|---|---|
+| Does stability decline late in training? | Pooled EMA events rose after 105k, but the window set changed (6.4) | The same windows at early and late checkpoints |
+| Can the absorbing states be removed after training? | Proposal only (6.6) | The four-arm post-training experiment |
+| How much of SD 3.5's lead is its autoencoder? | Its reconstruction is about 4 dB better | Score a 4-channel DiT, or render identical predicted latents through both decoders' equivalents; at least report reconstruction beside every row |
+| Does the distance relation hold for SD 3.5 and PixArt? | U-Net only | 200k per-map scoring |
+| Are the campaign-map losses the agent being stuck? | 1.0 to 1.4 lives per episode on ten maps; high persistence | Look at the frames |
+| Does the executed-control *history* help beyond the newest control? | Only the combined recipe was trained | A newest-control-only ablation at matched exposure |
+| Would the native schedule (scaled-linear, rectified flow) do better? | No ablation | A bounded row per backbone with its native schedule |
+| Would observation CFG help? | Impossible without observation dropout in training | A row trained with observation dropout |
+| Does the 32-tic context limit revisits and map memory? | 0.91 s of context; MultiGen's memory helps late horizons | Out-and-back trajectories and revisit events |
+| What best spends extra compute, continuation or self-rollout post-training? | Untested | Arm 2 against arm 4 at equal cost |
+
+Stride-four questions that remain open but are not on the paper's path: the missing quarter-data and context-8 grid metrics; the provenance of the reproduction footage (a JPEG transcode of Stiegler's 500-episode set, or a fresh lossless 1,000-episode corpus); whether IDM scoring covers all eligible runs or only the longest; the Sep 21 server outage's cause; the deathmatch-simple corpus (its engine-keyword bug is fixed but no full corpus exists); and the dataset licence, which Rohan has to confirm. [Sep 22 dossier §6.2]
+
+## 10.3 Operations facts worth knowing
+
+- **Servers.** Spiderman (`rnagabhi@128.2.204.110`, A6000s, `/sata2` data disk) runs everything now; Superman (`rohan@128.2.204.116`, 8× A4000) encoded the 16-channel corpus. Use the `/run-server` skill; at most one server-touching agent at a time; no SSH retry loops, because CMU's edge blocks bursts. [CLAUDE.md]
+- **The "SSH hangs" of Sep 25 were this Mac sleeping.** Four stale-master incidents (18:22, 19:45, 20:48, 21:15) matched maintenance sleep in `pmset -g log`: timers freeze, the multiplexed master's TCP session goes stale, and the first call after wake hangs or returns 255. Spiderman and the edge were never at fault, and server-side tmux automation never stopped. `caffeinate -s` works only on AC power, and the desktop keep-awake covers idle sleep only, so on battery overnight reports arrive in bursts. Recommended: `ServerAliveInterval 15` and `ServerAliveCountMax 2` in the multiplexed Host block. [RC 09-25 23:15]
+- **Host contention.** Other users' jobs have twice slowed the trainers: `extract.py` on GPU 1 cut PixArt to about 57 percent (Sep 25 12:40 to 19:00), and CPU-heavy jobs pushed load to 70 on 64 cores, cutting SD 3.5 to 0.32 updates/s (Sep 25 evening). Our CPU jobs run capped and at nice 19. [RC 09-25 12:55, 22:15]
+- **Disk.** Another user's job filled `/sata2` at about 185 GB/h on Sep 25. `train_wm.py` raises on a failed checkpoint write, so a full disk kills a run at its next save; hence the deletion ladder. `_aborted_safe_to_delete` (39 GB) was deleted at the 300 GB step on Sep 25 22:15. `/home` is shared and nearly full; our runs write nothing under `~`. [RC 09-25 13:15, 22:15]
+- **Stopping jobs.** Use `tmux kill-session -t <name>`, never `pkill -f` on a command-line pattern: the tmux server carries the first session's command line and would be matched. [CLAUDE.md]
+- **Dashboard.** A lab-server dashboard artifact (`tools/lab_server_dashboard.html`, fed by `tools/server_usage.py` from a session cron at :23) shows GPUs, disks, load and run logs for both servers. [RC 09-26 10:30]
+
