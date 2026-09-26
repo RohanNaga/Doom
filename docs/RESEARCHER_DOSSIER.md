@@ -282,6 +282,71 @@ Shared settings: public pretrained weights (never our earlier Doom checkpoints, 
 
 The 32 context latents are concatenated with the noisy target latent along the channel axis, so time is not a separate token axis; the backbone sees one tall image-like tensor. The pretrained input projection is inflated with zero-initialised weights for the new context channels, which preserves the pretrained function on the target at initialisation. The new control embeddings still change downstream activations, so the network does not start as exactly the pretrained model. [`backbones.py:241–259,344–388`] This is GameNGen's visual-context design, with 32 frames instead of 64; GameNGen's own ablation gains only 0.05 dB from 32 to 64 frames. [G Table 2] At 35 Hz, 32 tics span 0.914 s nominally (0.886 s between the oldest and newest frame), against 3.66 s for the stride-four rows, so long-range memory is weaker by design.
 
+<figure>
+<div class="svg-wrap" tabindex="0"><svg viewBox="0 0 760 450" role="img" aria-label="Channel stacking: 32 context latents and the noisy target x_t, each C by 32 by 40, are stacked as slabs along the channel axis into one C times 33 channel tensor, 132 channels for C = 4 and 528 for C = 16, so one grid position carries all 33 frames. The input projection keeps its pretrained weights on the last C target channels and starts at zero on the context channels; 32 control tokens enter the backbone by attention; the output is the v-prediction, from which x0, the predicted z_r, is recovered.">
+<defs><marker id="f2-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="currentColor"/></marker><marker id="f2-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#d0652f"/></marker></defs>
+<rect x="150" y="122" width="120" height="96" rx="2" style="fill:var(--bg)" stroke="currentColor" stroke-width="1.5"/>
+<rect x="150" y="122" width="120" height="96" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".05"/>
+<line x1="273" y1="122" x2="284" y2="122" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="290" y="126" font-size="12" text-anchor="start" fill="currentColor">z<tspan dy="3" font-size="11">r−32</tspan><tspan dy="-3">: channels 0 … C−1</tspan></text>
+<rect x="132" y="140" width="120" height="96" rx="2" style="fill:var(--bg)" stroke="currentColor" stroke-width="1.5"/>
+<rect x="132" y="140" width="120" height="96" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".05"/>
+<line x1="255" y1="140" x2="284" y2="140" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="290" y="144" font-size="12" text-anchor="start" fill="currentColor">z<tspan dy="3" font-size="11">r−31</tspan><tspan dy="-3">: channels C … 2C−1</tspan></text>
+<rect x="114" y="158" width="120" height="96" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 4" opacity=".45"/>
+<line x1="237" y1="158" x2="284" y2="158" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="290" y="162" font-size="12" text-anchor="start" fill="currentColor" opacity=".7">⋯ 32 context latents in all</text>
+<rect x="96" y="176" width="120" height="96" rx="2" style="fill:var(--bg)" stroke="currentColor" stroke-width="1.5"/>
+<rect x="96" y="176" width="120" height="96" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".05"/>
+<line x1="219" y1="176" x2="284" y2="176" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="290" y="180" font-size="12" text-anchor="start" fill="currentColor">z<tspan dy="3" font-size="11">r−2</tspan></text>
+<rect x="78" y="194" width="120" height="96" rx="2" style="fill:var(--bg)" stroke="currentColor" stroke-width="1.5"/>
+<rect x="78" y="194" width="120" height="96" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".05"/>
+<line x1="201" y1="194" x2="284" y2="194" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="290" y="198" font-size="12" text-anchor="start" fill="currentColor">z<tspan dy="3" font-size="11">r−1</tspan><tspan dy="-3">: newest context</tspan></text>
+<rect x="60" y="212" width="120" height="96" rx="2" style="fill:var(--bg)" stroke="#d0652f" stroke-width="2"/>
+<rect x="60" y="212" width="120" height="96" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="2" fill-opacity=".12"/>
+<line x1="183" y1="212" x2="284" y2="212" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="290" y="216" font-size="12" text-anchor="start" fill="#d0652f" font-weight="600">x<tspan dy="3" font-size="11">t</tspan><tspan dy="-3">: channels 32C … 33C−1</tspan></text>
+<line x1="100" y1="266" x2="190" y2="176" stroke="currentColor" stroke-width="2" stroke-dasharray="1 3"/>
+<circle cx="100" cy="266" r="3.5" fill="currentColor"/>
+<text x="24" y="36" font-size="12" text-anchor="start" fill="currentColor">one grid position holds</text>
+<text x="24" y="52" font-size="12" text-anchor="start" fill="currentColor">all 33 frames in its channels:</text>
+<text x="24" y="68" font-size="12" text-anchor="start" fill="currentColor">time is depth, not tokens</text>
+<path d="M130,82 L186,182" fill="none" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="120.0" y="326" font-size="12" text-anchor="middle" fill="currentColor">40</text>
+<text x="50" y="264.0" font-size="12" text-anchor="end" fill="currentColor">32</text>
+<text x="24" y="356" font-size="12" text-anchor="start" fill="currentColor">stacked depth: 33·C channels</text>
+<text x="24" y="372" font-size="12" text-anchor="start" fill="currentColor">132 at C = 4, 528 at C = 16</text>
+<path d="M470,118 H478 V198 H470" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<line x1="478" y1="158" x2="516" y2="158" stroke="currentColor" stroke-width="1.5" marker-end="url(#f2-a)"/>
+<line x1="466" y1="212" x2="516" y2="212" stroke="#d0652f" stroke-width="2" marker-end="url(#f2-acc)"/>
+<text x="630.0" y="100" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">input projection (conv / patch embed)</text>
+<rect x="520" y="112" width="220" height="76" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="630.0" y="138" font-size="12" text-anchor="middle" fill="currentColor">32·C context channels:</text>
+<text x="630.0" y="154" font-size="12" text-anchor="middle" fill="currentColor">new weights, zero at init</text>
+<rect x="520" y="188" width="220" height="48" rx="4" fill="none" stroke="#d0652f" stroke-width="2"/>
+<text x="630.0" y="208" font-size="12" text-anchor="middle" fill="#d0652f">C target channels:</text>
+<text x="630.0" y="224" font-size="12" text-anchor="middle" fill="#d0652f">pretrained weights, kept</text>
+<line x1="630.0" y1="236" x2="630.0" y2="272" stroke="currentColor" stroke-width="1.5" marker-end="url(#f2-a)"/>
+<text x="622.0" y="258" font-size="11" text-anchor="end" fill="currentColor" opacity=".7">at init: the pretrained model on x<tspan dy="3" font-size="11">t</tspan></text>
+<rect x="520" y="276" width="220" height="48" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="630.0" y="296" font-size="12" text-anchor="middle" fill="currentColor">backbone: U-Net, MMDiT or DiT</text>
+<text x="630.0" y="312" font-size="12" text-anchor="middle" fill="currentColor">tokens = positions of the 32×40 grid</text>
+<rect x="230" y="344" width="210" height="48" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="335" y="364" font-size="12" text-anchor="middle" fill="currentColor">32 control tokens, u<tspan dy="3" font-size="11">r−32</tspan><tspan dy="-3"> … u</tspan><tspan dy="3" font-size="11">r−1</tspan></text>
+<text x="335" y="380" font-size="12" text-anchor="middle" fill="currentColor">19 bits → shared MLP + position</text>
+<path d="M440,368 H490 V304 H518" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#f2-a)"/>
+<text x="484" y="334" font-size="11" text-anchor="end" fill="currentColor" opacity=".7">cross or joint attention</text>
+<line x1="630.0" y1="324" x2="630.0" y2="352" stroke="currentColor" stroke-width="1.5" marker-end="url(#f2-a)"/>
+<rect x="520" y="356" width="220" height="32" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="630.0" y="377" font-size="12" text-anchor="middle" fill="currentColor">predicted v: C × 32 × 40</text>
+<line x1="630.0" y1="388" x2="630.0" y2="412" stroke="currentColor" stroke-width="1.5" marker-end="url(#f2-a)"/>
+<text x="630.0" y="430" font-size="12" text-anchor="middle" fill="#d0652f" font-weight="600">x<tspan dy="3" font-size="11">0</tspan><tspan dy="-3"> = √ᾱ</tspan><tspan dy="3" font-size="11">t</tspan><tspan dy="-3">·x</tspan><tspan dy="3" font-size="11">t</tspan><tspan dy="-3"> − √(1−ᾱ</tspan><tspan dy="3" font-size="11">t</tspan><tspan dy="-3">)·v  =  predicted z</tspan><tspan dy="3" font-size="11">r</tspan></text>
+</svg></div>
+<figcaption>What the backbone sees: 33 latents stacked along channels, so time is depth at every grid position rather than a token axis, and at initialisation only the target's channels reach the pretrained weights.</figcaption>
+</figure>
+
 ## 3.2 The two latent spaces
 
 The SD 1.x autoencoder (`sd-vae-ft-mse`, 8× downsampling) maps a padded 320×256 frame to 4×32×40 with scale 0.18215. The SD 3.5 autoencoder gives 16×32×40 with shift 0.0609 and scale 1.5305. Padding rows are cropped before every decode so only the 240 real rows are scored. [`encode_parquet.py:155–189`; `backbones.py:34–74`] The 16-channel space reconstructs our validation frames at about 27.5 dB against 23.5 dB for the 4-channel space (stock decoders; section 3.7's alignment gate). That gap belongs to the SD 3.5 row as a system: its lead mixes a better representation with its backbone. A Flux autoencoder, also 16 channels, is not interchangeable, because its scale and shift differ.
