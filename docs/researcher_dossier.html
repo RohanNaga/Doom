@@ -328,6 +328,91 @@ figcaption{font-family:var(--sans);font-size:13px;color:var(--muted);margin:12px
 <hr>
 <h1 id="4-the-evaluation-instruments">4. The evaluation instruments</h1>
 <p>Each instrument answers one question. Reading a number needs its instrument, its weights (live or EMA) and its windows.</p>
+<figure>
+<div class="svg-wrap" tabindex="0"><svg viewBox="0 0 760 444" role="img" aria-label="Three evaluation protocols on one window, sharing the last real frame. Teacher-forced h1 predicts one frame from 32 real frames; h4 feeds its own three predictions back and is scored at the fourth. The 256-tic rollout feeds every prediction back as the newest context frame and is scored at 4, 32, 64, 128 and 256 tics against copy-seed, which holds the last real frame. The directional check predicts the same window twice with TURN_LEFT and TURN_RIGHT swapped in the newest control and measures the horizontal shift of each prediction.">
+<defs><marker id="f4-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="currentColor"/></marker><marker id="f4-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#d0652f"/></marker></defs>
+<line x1="304" y1="20" x2="304" y2="436" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 3" opacity=".5"/>
+<text x="308" y="20" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">last real frame</text>
+<text x="20" y="69" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">teacher-forced h1</text>
+<rect x="150" y="52" width="118" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1" fill-opacity=".08"/>
+<text x="209.0" y="68" font-size="11" text-anchor="middle" fill="currentColor">32 real frames</text>
+<rect x="276" y="52" width="24" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".08"/>
+<text x="288.0" y="94" font-size="11" text-anchor="middle" fill="currentColor">z<tspan dy="3" font-size="11">r−1</tspan></text>
+<rect x="312" y="52" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<text x="324.0" y="94" font-size="11" text-anchor="middle" fill="#d0652f">ẑ<tspan dy="3" font-size="11">r</tspan></text>
+<text x="348" y="69" font-size="12" text-anchor="start" fill="currentColor">scored against real z<tspan dy="3" font-size="11">r</tspan><tspan dy="-3">; persistence copies z</tspan><tspan dy="3" font-size="11">r−1</tspan></text>
+<text x="20" y="141" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">teacher-forced h4</text>
+<rect x="150" y="124" width="118" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1" fill-opacity=".08"/>
+<text x="209.0" y="140" font-size="11" text-anchor="middle" fill="currentColor">32 real frames</text>
+<rect x="276" y="124" width="24" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".08"/>
+<text x="288.0" y="166" font-size="11" text-anchor="middle" fill="currentColor">z<tspan dy="3" font-size="11">r−1</tspan></text>
+<rect x="312" y="124" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<text x="324.0" y="166" font-size="11" text-anchor="middle" fill="#d0652f">ẑ<tspan dy="3" font-size="11">r</tspan></text>
+<rect x="344" y="124" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<text x="356.0" y="166" font-size="11" text-anchor="middle" fill="#d0652f">ẑ<tspan dy="3" font-size="11">r+1</tspan></text>
+<path d="M324.0,124 C324.0,108 354.0,108 354.0,122" fill="none" stroke="#d0652f" stroke-width="1.3" marker-end="url(#f4-acc)"/>
+<rect x="376" y="124" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<text x="388.0" y="166" font-size="11" text-anchor="middle" fill="#d0652f">ẑ<tspan dy="3" font-size="11">r+2</tspan></text>
+<path d="M356.0,124 C356.0,108 386.0,108 386.0,122" fill="none" stroke="#d0652f" stroke-width="1.3" marker-end="url(#f4-acc)"/>
+<rect x="408" y="124" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<text x="420.0" y="166" font-size="11" text-anchor="middle" fill="#d0652f">ẑ<tspan dy="3" font-size="11">r+3</tspan></text>
+<path d="M388.0,124 C388.0,108 418.0,108 418.0,122" fill="none" stroke="#d0652f" stroke-width="1.3" marker-end="url(#f4-acc)"/>
+<text x="444" y="141" font-size="12" text-anchor="start" fill="currentColor">3 predictions fed back; scored at z<tspan dy="3" font-size="11">r+3</tspan></text>
+<text x="20" y="231" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">256-tic rollout</text>
+<rect x="150" y="214" width="118" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1" fill-opacity=".08"/>
+<text x="209.0" y="230" font-size="11" text-anchor="middle" fill="currentColor">32 real seed frames</text>
+<rect x="276" y="214" width="24" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".08"/>
+<text x="288.0" y="256" font-size="11" text-anchor="middle" fill="currentColor">z<tspan dy="3" font-size="11">r−1</tspan></text>
+<rect x="312" y="214" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<rect x="344" y="214" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<path d="M324.0,214 C324.0,198 354.0,198 354.0,212" fill="none" stroke="#d0652f" stroke-width="1.3" marker-end="url(#f4-acc)"/>
+<rect x="376" y="214" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<path d="M356.0,214 C356.0,198 386.0,198 386.0,212" fill="none" stroke="#d0652f" stroke-width="1.3" marker-end="url(#f4-acc)"/>
+<rect x="408" y="214" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<path d="M388.0,214 C388.0,198 418.0,198 418.0,212" fill="none" stroke="#d0652f" stroke-width="1.3" marker-end="url(#f4-acc)"/>
+<text x="452.0" y="232" font-size="14" text-anchor="middle" fill="#d0652f">⋯</text>
+<rect x="472" y="214" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<text x="516.0" y="232" font-size="14" text-anchor="middle" fill="#d0652f">⋯</text>
+<rect x="536" y="214" width="24" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<text x="572" y="224" font-size="12" text-anchor="start" fill="currentColor">fed back as newest context;</text>
+<text x="572" y="239" font-size="12" text-anchor="start" fill="currentColor">oldest frame drops out</text>
+<text x="420.0" y="256" font-size="11" text-anchor="middle" fill="#d0652f">4</text>
+<text x="548.0" y="256" font-size="11" text-anchor="middle" fill="#d0652f">256</text>
+<text x="484.0" y="256" font-size="11" text-anchor="middle" fill="#d0652f">32, 64, 128</text>
+<text x="20" y="289" font-size="12" text-anchor="start" fill="currentColor">copy-seed</text>
+<text x="20" y="303" font-size="12" text-anchor="start" fill="currentColor">reference</text>
+<rect x="276" y="272" width="24" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".08"/>
+<rect x="312" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<rect x="344" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<rect x="376" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<rect x="408" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<rect x="440" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<rect x="472" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<rect x="504" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<rect x="536" y="272" width="24" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" opacity=".6"/>
+<line x1="288.0" y1="302" x2="548.0" y2="302" stroke="currentColor" stroke-width="1" marker-end="url(#f4-a)" opacity=".7"/>
+<text x="572" y="289" font-size="12" text-anchor="start" fill="currentColor">z<tspan dy="3" font-size="11">r−1</tspan><tspan dy="-3"> held throughout</tspan></text>
+<text x="20" y="369" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">directional check</text>
+<text x="20" y="385" font-size="11" text-anchor="start" fill="currentColor" opacity=".75">64 windows per turn;</text>
+<text x="20" y="399" font-size="11" text-anchor="start" fill="currentColor" opacity=".75">reversed in 87% (U-Net)</text>
+<text x="20" y="413" font-size="11" text-anchor="start" fill="currentColor" opacity=".75">and 84% (SD 3.5 EMA)</text>
+<rect x="150" y="364" width="118" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1" fill-opacity=".08"/>
+<text x="209.0" y="380" font-size="11" text-anchor="middle" fill="currentColor">32 real frames</text>
+<rect x="276" y="364" width="24" height="24" rx="2" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".08"/>
+<text x="288.0" y="406" font-size="11" text-anchor="middle" fill="currentColor">z<tspan dy="3" font-size="11">r−1</tspan></text>
+<path d="M302,376 L436,365" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#f4-a)" opacity=".8"/>
+<text x="316" y="349" font-size="11" text-anchor="start" fill="currentColor" opacity=".8">newest control TURN_LEFT</text>
+<rect x="442" y="352" width="40" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<line x1="450" y1="365" x2="474" y2="365" stroke="#d0652f" stroke-width="2" marker-end="url(#f4-acc)"/>
+<text x="494" y="369" font-size="12" text-anchor="start" fill="currentColor">should slide right: true median +18.2 px</text>
+<path d="M302,376 L436,409" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#f4-a)" opacity=".8"/>
+<text x="316" y="434" font-size="11" text-anchor="start" fill="currentColor" opacity=".8">newest control TURN_RIGHT, swapped</text>
+<rect x="442" y="396" width="40" height="24" rx="2" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".15"/>
+<line x1="474" y1="409" x2="450" y2="409" stroke="#d0652f" stroke-width="2" marker-end="url(#f4-acc)"/>
+<text x="494" y="413" font-size="12" text-anchor="start" fill="currentColor">should slide left: true median −19.1 px</text>
+</svg></div>
+<figcaption>The instruments differ only in what feeds the context after the last real frame: nothing (h1), three of the model's own predictions (h4), all 255 of them (rollout, against a frozen copy of the seed), or the same real context under a swapped newest control (directional check).</figcaption>
+</figure>
 <h2 id="4-1-teacher-forced-reads-h1-h4">4.1 Teacher-forced reads (h1, h4)</h2>
 <p><code>eval_tf.py --tic-stride 1</code> scores 512 windows from validation ids 6000:6100, drawn with seed 0 and identical at every step for every row. Sampling is 10-step DDIM with linear spacing, eta 0 and clean context; each space uses its stock decoder; targets are raw frames. Horizons are one tic (h1) and four tics (h4) past the last real frame; for h4 the model starts from real context and rolls forward tic by tic, feeding its own three intermediate predictions back, so h4 is a four-step closed loop with the recorded controls. [<code>eval_tf.py:281–284</code>] Persistence on these windows is 21.566 dB / 0.203 LPIPS at h1 and 19.213 / 0.354 at h4, the same for every row. [RC 09-23 11:30]</p>
 <p>LPIPS is a learned perceptual distance (lower is better) that penalises blur and texture loss that PSNR tolerates, so every PSNR is reported with it. The metrics files carry an independent-window standard error (0.095 dB for a live h1 PSNR), which understates the uncertainty because the 512 windows share 100 episodes. No read yet has an episode-bootstrap interval. [<code>steward_5000/tf_live_h1/metrics.json</code>]</p>
