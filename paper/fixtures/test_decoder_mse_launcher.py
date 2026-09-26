@@ -4,7 +4,8 @@ Astra's review of 2026-09-26 (section 5) found that the launcher never named the
 tuned, so an SD 3.5 tune would silently have run on sd-vae-ft-mse. These tests pin that `SPACE`
 picks the autoencoder, its asserted latent contract, its interpreter and its output directory, and
 that nothing else about the recipe moves with it; that the tune validates on held-out episodes of the
-training arenas; and that the gate scores each tune against its own space's stock decoder.
+training arenas; that the gate scores each tune against its own space's stock decoder; and that a
+failed stage fails the launcher instead of ending in E2_DECODER_DONE with exit 0.
 
 Every run here points `DOOM_ROOT`, `REPO` and `HOME` at the test's own directory, and both default
 interpreters (`~/miniconda3/envs/doom/bin/python`, `~/wanenc/bin/python`) are stubs that log their
@@ -24,14 +25,17 @@ DECODER_MSE = os.path.join(REPO, "scripts", "spiderman", "decoder_mse.sh")
 STUB = '''#!/usr/bin/env python3
 """Stands in for finetune_decoder.py and vae_gate_score.py: logs its argv, then exits as told.
 
-STUB_FAIL names the script that exits 3. A tune that succeeds leaves <out-dir>/vae and one hourly
-vae_h1 with a weight file each, as the real one does, unless STUB_NO_WEIGHTS=1.
+STUB_FAIL names the script that exits 3; STUB_FAIL_CURVE=1 fails only the gate's curve pass. A
+tune that succeeds leaves <out-dir>/vae and one hourly vae_h1 with a weight file each, as the real
+one does, unless STUB_NO_WEIGHTS=1.
 """
 import os, sys
 script = os.path.basename(sys.argv[1])
 with open(os.environ["STUB_LOG"], "a") as f:
     f.write(sys.argv[0] + " " + " ".join(sys.argv[1:]) + "\\n")
 if os.environ.get("STUB_FAIL") == script:
+    sys.exit(3)
+if os.environ.get("STUB_FAIL_CURVE") == "1" and "curve" in os.path.basename(sys.argv[sys.argv.index("--out-dir") + 1]):
     sys.exit(3)
 if script == "finetune_decoder.py" and os.environ.get("STUB_NO_WEIGHTS") != "1":
     out = sys.argv[sys.argv.index("--out-dir") + 1]
@@ -232,3 +236,42 @@ def test_the_hourly_curve_is_scored_only_when_asked_and_against_stock(tmp_path):
     assert has(curve, "--baseline", "stock_sd") and has(curve, "--decoder", "stock_sd=")
     assert has(curve, "--decoder", f"mse_h1={root}/vae_decoder_sd1x_mse/vae_h1")
     assert flag(curve, "--out-dir").endswith("e2-decoder-curve-sd1")
+
+
+# ---------------------------------------------------------------------------------------
+# a failed stage fails the launcher
+# ---------------------------------------------------------------------------------------
+
+def test_a_failed_tune_stops_before_the_gate_and_exits_non_zero(tmp_path):
+    p, calls, _ = launch(tmp_path, STUB_FAIL="finetune_decoder.py")
+    assert p.returncode == 3
+    assert calls_to(calls, "vae_gate_score.py") == []
+    assert "E2_DECODER_DONE" not in p.stdout and "E2_DECODER_FAILED" in p.stdout
+
+
+def test_a_tune_that_exits_zero_without_weights_is_a_failure(tmp_path):
+    p, calls, _ = launch(tmp_path, STUB_NO_WEIGHTS="1")
+    assert p.returncode != 0
+    assert calls_to(calls, "vae_gate_score.py") == []
+    assert "E2_DECODER_DONE" not in p.stdout
+
+
+def test_a_failed_gate_exits_non_zero(tmp_path):
+    p, calls, _ = launch(tmp_path, STUB_FAIL="vae_gate_score.py")
+    assert p.returncode == 3
+    assert "E2_DECODER_DONE" not in p.stdout and "E2_DECODER_FAILED" in p.stdout
+
+
+def test_a_failed_curve_exits_non_zero_after_the_headline(tmp_path):
+    """The curve fails after the headline is on disk: the answer is kept, the launcher still says it failed."""
+    p, calls, _ = launch(tmp_path, CURVE="1", STUB_FAIL_CURVE="1")
+    assert p.returncode == 3 and len(calls_to(calls, "vae_gate_score.py")) == 2
+    assert "E2_DECODER_DONE" not in p.stdout and "E2_DECODER_FAILED" in p.stdout
+
+
+def test_a_fit_reports_the_tunes_exit_code(tmp_path):
+    p, _, _ = launch(tmp_path / "bad", FIT="1", STUB_FAIL="finetune_decoder.py")
+    assert p.returncode == 3 and "FIT_DONE" not in p.stdout
+    p, calls, _ = launch(tmp_path / "good", FIT="1")
+    assert p.returncode == 0 and "FIT_DONE" in p.stdout
+    assert calls_to(calls, "vae_gate_score.py") == []

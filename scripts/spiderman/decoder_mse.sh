@@ -41,6 +41,12 @@
 # PY and OUT override the space's interpreter and output directory. DRY=1 prints the commands and
 # stops before every side effect; DOOM_ROOT repoints the data root.
 #
+# EXIT CODES. Each stage's exit code is checked, not only echoed: a failed tune, a tune that exits 0
+# without leaving weights in $OUT/vae, a failed headline score or a failed curve ends the launcher with
+# that stage's code and an E2_DECODER_FAILED line, and E2_DECODER_DONE (FIT_DONE for a fit) is printed
+# only when every stage asked for succeeded. It used to echo each code and carry on, so a crashed tune
+# still went on to the gate and ended in E2_DECODER_DONE with exit 0.
+#
 # TRAINING IDS ONLY (docs/REVIEW_2026-09-22.md H4). The stream used to sample row groups from every
 # file in raw_arnold_dense/arenas, validation 6000:7000 and test 7000:8000 included, while recording
 # `split_subset: "train"`. `--stream-ids $TRAIN_IDS` (default 0:2000, the next-tic runs' own training
@@ -50,6 +56,7 @@
 # only measure the decoder and never train it, and finetune_decoder.py refuses validation ids outside
 # the arenas validation range (6000:7000).
 set -u
+set -o pipefail
 GPU=${1:?gpu}; MB=${2:?micro batch}; STEPS=${3:?max steps}; HOURS=${4:-4.0}
 SPACE=${SPACE:-sd1}
 TRAIN_IDS=${TRAIN_IDS:-0:2000}
@@ -119,15 +126,24 @@ export CUDA_VISIBLE_DEVICES=$GPU HF_HUB_OFFLINE=1 TMPDIR=$D/tmp/tmpdir TORCH_HOM
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 mkdir -p "$TMPDIR" "$TORCH_HOME" "$OUT" "$D/logs"
 cd "$REPO" || exit 1
+die() {   # die <exit code> <what failed>
+  echo "=== $(date -u) E2_DECODER_FAILED ($SPACE): $2"
+  exit "$1"
+}
 
 echo "=== $(date -u) mse decoder tune, space $SPACE, micro $MB, $STEPS steps, ${HOURS}h, out $OUT"
 nice -n 15 "${TUNE[@]}"
-echo "=== tune exit $?"
+RC=$?
+echo "=== tune exit $RC"
+[ "$RC" -eq 0 ] || die "$RC" "the tune exited $RC"
+[ -f "$OUT/vae/diffusion_pytorch_model.safetensors" ] || die 1 "the tune exited 0 but left no weights in $OUT/vae"
 [ "${FIT:-0}" = 1 ] && { echo "=== FIT_DONE $SPACE mb$MB"; exit 0; }
 
 echo "=== $(date -u) score the headline ceilings"
 nice -n 15 "${HEADLINE[@]}"
-echo "=== headline score exit $?"
+RC=$?
+echo "=== headline score exit $RC"
+[ "$RC" -eq 0 ] || die "$RC" "the headline score exited $RC"
 
 HOURLY=()
 for H in "$OUT"/vae_h*; do
@@ -137,6 +153,8 @@ if [ "${CURVE:-0}" = 1 ] && [ ${#HOURLY[@]} -gt 0 ]; then
   echo "=== $(date -u) score the hourly curve"
   nice -n 15 "$PY" vae_gate_score.py --decoder "$STOCK=$STOCK_PATH" "${HOURLY[@]}" "${GATE[@]}" \
     --out-dir "$R/e2-decoder-curve-$SPACE"
-  echo "=== curve score exit $?"
+  RC=$?
+  echo "=== curve score exit $RC"
+  [ "$RC" -eq 0 ] || die "$RC" "the curve score exited $RC (the headline in $R/e2-decoder-$SPACE is complete)"
 fi
 echo "=== $(date -u) E2_DECODER_DONE"
