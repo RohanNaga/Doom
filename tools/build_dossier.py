@@ -4,7 +4,9 @@ A small, dependency-free Markdown-to-HTML converter for the subset the dossier
 uses: headings, paragraphs, bullet and numbered lists, pipe tables, fenced code,
 horizontal rules, block images and inline code, bold, italic and links. Images
 are embedded as data URIs so the page is a single file; a sibling named
-``<stem>_dark.<ext>`` is shown instead in dark mode. Every heading gets a unique
+``<stem>_dark.<ext>`` is shown instead in dark mode. A raw ``<figure>`` block
+(hand-authored inline SVG diagrams) passes through verbatim once it is checked
+for active content. Every heading gets a unique
 id, and parts (``#``) and sections (``##``) are listed in a table of contents.
 
 Usage: python tools/build_dossier.py [--src docs/RESEARCHER_DOSSIER.md] [--out docs/researcher_dossier.html]
@@ -46,12 +48,14 @@ th,td{padding:8px 11px;border-top:1px solid var(--line);vertical-align:top;text-
 th{font-weight:600;background:var(--surface)}td.num,th.num{text-align:right}
 figure{margin:30px 0 36px;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 figure img{display:block;max-width:100%;height:auto;margin:auto}.fig-has-dark img{max-width:min(100%,680px)}
+.svg-wrap{max-width:100%;overflow-x:auto}
+figure svg{display:block;width:100%;max-width:760px;height:auto;margin:auto;color:var(--ink);font-family:var(--sans)}
 figcaption{font-family:var(--sans);font-size:13px;color:var(--muted);margin:12px auto 0;max-width:95ch}
 .fig-dark{display:none}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .fig-has-dark .fig-light{display:none}:root:not([data-theme="light"]) .fig-has-dark .fig-dark{display:block}}
 :root[data-theme="dark"] .fig-has-dark .fig-light{display:none}:root[data-theme="dark"] .fig-has-dark .fig-dark{display:block}
 .theme{position:fixed;top:12px;right:12px;font:13px var(--sans);background:var(--surface);color:var(--ink);border:1px solid var(--line);padding:6px 10px;cursor:pointer}
-@media(max-width:600px){body{font-size:17px}main{padding:32px 16px 60px}h1{font-size:1.7rem}h2{font-size:1.25rem}th,td{padding:7px}}
+@media(max-width:600px){figure svg{min-width:680px}body{font-size:17px}main{padding:32px 16px 60px}h1{font-size:1.7rem}h2{font-size:1.25rem}th,td{padding:7px}}
 @media print{.theme,nav{display:none}.table-wrap{overflow:visible}main{padding:0}}
 """
 
@@ -144,6 +148,34 @@ def figure(alt: str, src: str, md_dir: Path) -> str:
     return f"<figure{cls}>{imgs}<figcaption>{alt_e}</figcaption></figure>"
 
 
+RAW_FIGURE_START = re.compile(r"^\s*<figure[\s>]")
+# anything that could run code or load from outside the figure: a figure may reference only its own ids
+RAW_FIGURE_REFUSED = re.compile(
+    r"<\s*(script|style|foreignObject|image|iframe|object|embed)\b"
+    r"|\son[a-z]+\s*="
+    r"|(?:href|src)\s*=\s*[\"'](?!#)"
+    r"|url\(\s*(?!#)", re.IGNORECASE)
+
+
+def raw_figure(lines: list[str], i: int) -> tuple[str, int]:
+    """Pass a hand-authored ``<figure>`` block through verbatim; return (html, index after it).
+
+    The block runs to the first line holding ``</figure>``. It is the one route by which raw HTML
+    enters the page, so scripts, event handlers, embedded documents and references to anything but
+    the figure's own ids are refused rather than escaped.
+    """
+    j = i
+    while j < len(lines) and "</figure>" not in lines[j]:
+        j += 1
+    if j == len(lines):
+        raise SystemExit(f"unterminated <figure> block at line {i + 1}")
+    block = "\n".join(lines[i:j + 1])
+    bad = RAW_FIGURE_REFUSED.search(block)
+    if bad:
+        raise SystemExit(f"figure at line {i + 1} refused: active content or outside reference {bad.group(0)!r}")
+    return block, j + 1
+
+
 def table(rows: list[str]) -> str:
     head = split_row(rows[0])
     aligns = [("num" if c.strip().endswith(":") else "") for c in split_row(rows[1])]
@@ -195,6 +227,10 @@ def convert(md: str, md_dir: Path) -> tuple[str, list[tuple[int, str, str]], str
             out.append("<hr>")
             i += 1
             continue
+        if RAW_FIGURE_START.match(line):
+            block, i = raw_figure(lines, i)
+            out.append(block)
+            continue
         m = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$", line)
         if m:
             out.append(figure(m.group(1), m.group(2), md_dir))
@@ -223,7 +259,7 @@ def convert(md: str, md_dir: Path) -> tuple[str, list[tuple[int, str, str]], str
             continue
         para = [line.strip()]
         i += 1
-        while i < len(lines) and lines[i].strip() and not re.match(r"^(#{1,3} |\||```|!\[|\s*([-*]|\d+\.) |-{3,}$)", lines[i]):
+        while i < len(lines) and lines[i].strip() and not re.match(r"^(#{1,3} |\||```|!\[|\s*<figure[\s>]|\s*([-*]|\d+\.) |-{3,}$)", lines[i]):
             para.append(lines[i].strip())
             i += 1
         out.append(f"<p>{inline(' '.join(para))}</p>")
