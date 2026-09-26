@@ -451,9 +451,9 @@ Stride-four records that never became numbers: the quarter-data and context-8 gr
 
 ## 6.3 The rollout strip
 
-![SD 3.5 70k: ground truth, live and EMA rollouts on two validation windows, tics 1 to 256](figures/sd35_70k_live_vs_ema_rollout_strip.jpg)
+![SD 3.5 70k: ground truth, live and EMA rollouts on two validation windows, tics 1 to 256](../paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg)
 
-`paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg` (decoded by `tools/collapse_strip.py`, `42a4688`) shows two validation windows at 70k: rollout 6 on map 2 and rollout 2 on map 5. For each, three rows (ground truth, live, EMA) run across tics 1, 4, 8, 16, 32, 64, 96, 128, 192 and 256. The live rollout on map 2 floods to flat blue by tic 8; on map 5 it smears at tic 16, turns blue at 32 and flat grey from 64 on. Blue corresponds to a channel-13 mean near −2.6 and grey to about −1.4. Throughout, the HUD, the weapon sprite and the crosshair persist in the live rows, because those pixels are identical in every context frame and the model copies them. The EMA rows stay coherent Doom scenes to tic 256: they drift away from the true trajectory, as any open-loop rollout must, but remain plausible corridors and rooms. [RC 09-26 10:30] It is the paper's Figure 1 candidate.
+`paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg` (decoded by `tools/collapse_strip.py`, `42a4688`) shows two validation windows at 70k: rollout 6 on map 2 and rollout 2 on map 5. For each, three rows (ground truth, live, EMA) run across tics 1, 4, 8, 16, 32, 64, 96, 128, 192 and 256. The live rollout on map 2 floods to flat blue by tic 8; on map 5 it smears at tic 16, turns blue at 32 and flat grey from 64 on. Blue corresponds to a channel-13 mean near −2.6 and grey to about −1.4. Throughout, the HUD, the weapon sprite and the crosshair persist in the live rows, plausibly because those regions barely change across context frames and the model copies them. The EMA rows stay coherent Doom scenes to tic 256: they drift away from the true trajectory, as any open-loop rollout must, but remain plausible corridors and rooms. [RC 09-26 10:30] It is the paper's Figure 1 candidate.
 
 ## 6.4 The rates, and what the late-training rise is
 
