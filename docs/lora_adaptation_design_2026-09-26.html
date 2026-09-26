@@ -56,13 +56,13 @@ code{font-family:"IBM Plex Mono",monospace;font-size:13px} ul{max-width:74ch}
 <h2>2. The adapter</h2>
 <div class="wrap"><table><thead><tr><th>parameter</th><th>proposal</th><th>why</th></tr></thead><tbody>
 <tr><td>method</td><td>LoRA on the backbone's attention projections (query, key, value, output) in self- and cross-attention; backbone weights frozen</td><td>the standard recipe for adapting diffusion backbones; keeps the pretrained function and the control path intact</td></tr>
-<tr><td>trained in full</td><td>the control MLP and position table, the inflated input projection (context channels), the noise-level embedding</td><td>together under 1 percent of the backbone; the paths most likely to need re-tuning to a new map's statistics</td></tr>
+<tr><td>trained in full</td><td>the control MLP and position table, the inflated input projection (context channels), the noise-level embedding</td><td>small on the U-Net but not on PixArt (its control MLP plus positions alone are about 17M parameters); counts reported per backbone; the paths most likely to need re-tuning to a new map's statistics</td></tr>
 <tr><td>rank</td><td>16, alpha 16, dropout 0</td><td>the common default for U-Net and DiT adaptation; about 0.5 to 1 percent of the backbone's parameters</td></tr>
 <tr><td>learning rate</td><td>1e-4 for the LoRA and the fully trained parts, 100-step warmup, constant, fused AdamW</td><td>1e-4 is the absolute default of the diffusers, cloneofsimo, GameFactory and DreamGen LoRA recipes (the cited world-model recipes use 5 to 10 times their pretraining rate; ours is 2 times 5e-5)</td></tr>
 <tr><td>objective and augmentation</td><td>unchanged: v-prediction, the same noise augmentation and buckets, the same 32-tic context</td><td>the recipe rule: nothing changes but the adapter</td></tr>
-<tr><td>batch</td><td>fill the card: the largest micro-batch that fits, no accumulation, so on Superman's 16 GB cards about 8 with gradient checkpointing (fit check decides), on an A6000 32</td><td>the standing rule; steps are counted in updates and the batch size is reported</td></tr>
+<tr><td>batch</td><td>the recipe's global batch of 32 stays fixed; the Sunday fit check decides whether one A4000 holds 32 (the latents are 4×16×20, so it may), and if not whether to accumulate or pair two cards; on an A6000 32 in one micro-batch</td><td>the standing rule; steps are counted in updates and the batch size is reported</td></tr>
 <tr><td>EMA</td><td>fp32 EMA of the trained parameters at 0.999 (short runs), both live and EMA scored</td><td>the closed-loop reads showed EMA matters; a 2,000-step run needs a shorter horizon than 0.9999</td></tr>
-<tr><td>step grid</td><td>0, 250, 500, 1,000, 2,000 updates; a checkpoint at each</td><td>a log-spaced curve; 2,000 updates of batch 32 is about 13 passes over one episode's windows</td></tr>
+<tr><td>step grid</td><td>0, 250, 500, 1,000, 2,000 updates; a checkpoint at each</td><td>a log-spaced curve; 2,000 updates of batch 32 is 64,000 samples, about two passes over the 6-episode adaptation set (about 30,000 windows)</td></tr>
 <tr><td>data grid (three maps)</td><td>1, 2, 4, 6 episodes at 1,000 updates</td><td>the "how much footage" curve</td></tr>
 <tr><td>seeds</td><td>1 per point; 2 on the pilot maps to size the noise</td><td>time; the pilot tells whether one seed is enough</td></tr>
 </tbody></table></div>
@@ -78,7 +78,7 @@ code{font-family:"IBM Plex Mono",monospace;font-size:13px} ul{max-width:74ch}
 </tbody></table></div>
 <p>Estimates derive from the pretraining rates (U-Net 1.6 updates/s at batch 32 on an A6000, SD 3.5 0.53, PixArt 1.4) and a factor of about 3 between A6000 and A4000; a fit check on Sunday morning replaces them with measured numbers before anything is scheduled. Scoring per checkpoint on an A4000: one-tic teacher-forced on 256 windows about 6 minutes, the directional check about 9, the latent ratio comes free with the teacher-forced read.</p>
 <div class="wrap"><table><thead><tr><th>plan</th><th>maps × points × rows</th><th class="n">card-hours</th><th>wall clock on Superman (6 cards)</th></tr></thead><tbody>
-<tr><td>Pilot for Wednesday</td><td>4 maps × 4 step points × U-Net, 2 seeds</td><td class="n">about 12</td><td>Sunday afternoon</td></tr>
+<tr><td>Pilot for Wednesday</td><td>4 maps × 4 step points × U-Net, 2 seeds</td><td class="n">16 to 19 (120 to 140 min per map and seed at the page's own rates)</td><td>Sunday afternoon, about 3 h wall on 6 cards</td></tr>
 <tr><td>Steps curve, all adaptation maps</td><td>18 × 4 × U-Net</td><td class="n">about 27</td><td>one night</td></tr>
 <tr><td>Data curve</td><td>3 maps × 3 extra sizes × U-Net</td><td class="n">about 5</td><td>with the above</td></tr>
 <tr><td>Rank ablation</td><td>2 maps × 2 ranks × U-Net</td><td class="n">about 6</td><td>with the above</td></tr>
@@ -90,7 +90,7 @@ code{font-family:"IBM Plex Mono",monospace;font-size:13px} ul{max-width:74ch}
 <h2>4. Evaluation of each curve point</h2>
 <ul>
 <li><strong>Primary:</strong> one-tic PSNR and LPIPS gain over persistence on the map's held-out windows (the same 256 windows as the zero-shot score); the decoder-free latent ratio beside it.</li>
-<li><strong>Adaptation cost:</strong> the first step count at which the gain reaches the target; the target is half the training-map gain (about +0.5 dB PSNR, +0.02 LPIPS gain) unless the pilot suggests a better one. Report the curve, not only the crossing.</li>
+<li><strong>Adaptation cost:</strong> the first step count at which the gain reaches the target; the target is half the training-map gain (about +0.5 dB PSNR, +0.013 LPIPS gain), reported at 25, 50 and 75 percent; Astra's alternative (decision 7) is the decoder-free latent skill ratio R = model latent error over copy-last latent error, cost = first budget with R ≤ 0.90, with R ≤ 1 and R ≤ 0.8 as sensitivities, frozen before the pilot. Maps that never cross are right-censored, never assigned the last step. Report the curve, not only the crossing.</li>
 <li><strong>Guards:</strong> the directional check on the map after adaptation (control response kept); the training-map validation gain after adaptation (forgetting); both at the 2,000-step point at least.</li>
 <li><strong>Secondary, subset:</strong> four-tic gain and a 16-rollout 256-tic read against copy-seed at the final point on the pilot maps.</li>
 <li><strong>Statistics:</strong> per-map bootstrap over held-out episodes for the gain; the cost-against-distance relation reported as Spearman with a bootstrap over maps, the same form as the zero-shot study; the family control stays.</li>
