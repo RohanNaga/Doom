@@ -191,14 +191,82 @@ def probe(ck, model, batch, latent_channels, context_frames, backbone):
             "probe": grad, "problems": problems, "ok": not problems}
 
 
-def real_batch(latents_dir, episode_ids, context_frames, latent_channels, action_history, batch=4, seed=0):
-    """A few windows of the real corpus, drawn with a fixed seed."""
+def real_batch(latents_dir, episode_ids, context_frames, latent_channels, action_history, batch=4, seed=0,
+               with_tokens=False):
+    """A few windows of the real corpus, drawn with a fixed seed; with `with_tokens`, also the table of
+    recorded control tokens (bit string -> count over every row of the corpus read)."""
     from doom_data import TicWindowDataset
     ds = TicWindowDataset(latents_dir, episode_ids, context_frames, latent_channels=latent_channels,
                           action_history=action_history)
     idx = np.random.RandomState(seed).choice(len(ds), size=min(batch, len(ds)), replace=False)
     items = [ds[int(i)] for i in idx]
-    return tuple(torch.stack([it[k] for it in items]) for k in range(3))
+    batch_t = tuple(torch.stack([it[k] for it in items]) for k in range(3))
+    if not with_tokens:
+        return batch_t
+    return batch_t, control_token_table(ds)
+
+
+def control_token_table(ds):
+    """Counts of every recorded newest-control token, as '0101…' strings over the executed bits."""
+    from collections import Counter
+    table = Counter()
+    for ep in ds.episodes:
+        controls = np.asarray(ep[7])
+        if controls.ndim != 2:
+            continue
+        rows = (controls > 0).astype(np.uint8)
+        for key, n in zip(*np.unique(rows, axis=0, return_counts=True)):
+            table["".join(str(int(b)) for b in key)] += int(n)
+    return dict(table)
+
+
+def rare_and_random_tokens(table, k=8, seed=0):
+    """The k least frequent recorded tokens and k tokens drawn in proportion to their frequency."""
+    if not table:
+        return [], []
+    keys = sorted(table, key=lambda t: (table[t], t))
+    rare = keys[:k]
+    rng = np.random.RandomState(seed)
+    probs = np.array([table[t] for t in keys], dtype=np.float64)
+    probs /= probs.sum()
+    random = [keys[i] for i in rng.choice(len(keys), size=min(k, len(keys)), replace=False, p=probs)]
+    return rare, random
+
+
+def token_sensitivity(model, batch, tokens, objective="v", t_value=500, seed=0):
+    """Max / mean / p99 |Δ output| when the newest control is replaced by each real token, at the probe's
+    fixed noise and timestep; the all-bits-flipped token of `gradient_and_sensitivity` is off the data
+    manifold, so this is the on-manifold counterpart. Returns the worst token and the per-token list."""
+    from diffusion_v import VDiffusion
+    ctx, tgt, act = batch
+    device = next(model.parameters()).device
+    ctx, tgt, act = ctx.to(device), tgt.to(device), act.to(device)
+    if act.ndim != 3 or not tokens:
+        return None
+    B = tgt.shape[0]
+    g = torch.Generator().manual_seed(seed)
+    noise = torch.randn(tgt.shape, generator=g).to(device)
+    t = torch.full((B,), int(t_value), dtype=torch.long, device=device)
+    bucket = torch.zeros(B, dtype=torch.long, device=device)
+    diff = VDiffusion(device=device, objective=objective)
+    model.eval()
+    out = []
+    with torch.no_grad():
+        xt = diff.q_sample(tgt, t, noise)
+        a = model(xt, t, act, ctx, bucket).float()
+        for tok in tokens:
+            bits = torch.tensor([float(c) for c in tok], dtype=act.dtype, device=device)
+            if bits.numel() != act.shape[-1]:
+                continue
+            sub = act.clone()
+            sub[:, -1] = bits
+            d = (model(xt, t, sub, ctx, bucket).float() - a).abs()
+            out.append({"token": tok, "max": float(d.max()), "mean": float(d.mean()),
+                        "p99": float(torch.quantile(d.flatten().float(), 0.99))})
+    if not out:
+        return None
+    worst = max(out, key=lambda r: r["mean"])
+    return {"worst": worst, "tokens": out}
 
 
 def main(args):
@@ -216,9 +284,22 @@ def main(args):
     latent_channels = resolve_latent_channels(args.backbone, args.latent_channels)
     model, _, _ = eval_tf.load_model(ns, device, latent_channels, trained)
     model = model.float()
-    batch = real_batch(args.latents_dir, parse_episode_ids(args.episodes), args.context_frames, latent_channels,
-                       trained["action_history"], args.batch, args.seed)
+    batch, table = real_batch(args.latents_dir, parse_episode_ids(args.episodes), args.context_frames,
+                              latent_channels, trained["action_history"], args.batch, args.seed, with_tokens=True)
     rep = probe(ck, model, batch, latent_channels, args.context_frames, args.backbone)
+    if args.token_probe > 0:
+        # the on-manifold counterpart of the all-bits-flipped sensitivity: real tokens, rare and typical
+        rare, random_ = rare_and_random_tokens(table, args.token_probe, args.seed)
+        objective = (ck.get("args") or {}).get("objective") or "v"
+        rep["probe"]["rare_token"] = token_sensitivity(model, batch, rare, objective, seed=args.seed)
+        rep["probe"]["random_token"] = token_sensitivity(model, batch, random_, objective, seed=args.seed)
+        rep["probe"]["token_table_size"] = len(table)
+        for name in ("rare_token", "random_token"):
+            r = rep["probe"][name]
+            if r:
+                w = r["worst"]
+                print(f"TOKEN_PROBE {name} worst={w['token']} max={w['max']:.4g} mean={w['mean']:.4g} "
+                      f"p99={w['p99']:.4g} tokens={len(r['tokens'])} table={len(table)}")
     text = json.dumps(rep, indent=1, default=float)
     if args.out:
         with open(args.out, "w") as f:
@@ -250,6 +331,9 @@ def build_parser():
     p.add_argument("--pixart-path", dest="pixart_path", default=PIXART_DEFAULT)
     p.add_argument("--unidiffuser-path", dest="unidiffuser_path", default=UNIDIFFUSER_DEFAULT)
     p.add_argument("--sd35-path", dest="sd35_path", default=SD35_DEFAULT)
+    p.add_argument("--token-probe", dest="token_probe", type=int, default=0,
+                   help="also measure the newest-control sensitivity to the K rarest and K typical REAL tokens "
+                        "of the corpus read (0 = off); prints TOKEN_PROBE lines")
     p.add_argument("--out", default="")
     return add_eval_args(p)
 

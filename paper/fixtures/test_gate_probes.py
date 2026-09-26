@@ -320,3 +320,19 @@ def test_the_readback_covers_live_and_ema_at_both_horizons(tmp_path):
 def test_the_certificate_requires_every_new_gate():
     for g in ("1c inventory val", "1e emitted windows", "4b smoke probes", "4c resume"):
         assert g in gc.REQUIRED_GATES
+
+
+def test_real_tokens_are_tabulated_and_probed(tmp_path):
+    """The on-manifold counterpart of the all-bits flip: the rarest and typical recorded tokens each
+    change the output, the worst is reported, and the table counts every recorded token."""
+    d = corpus(tmp_path / "lat4", (0,), channels=4)
+    (ctx, tgt, act), table = sp.real_batch(d, [0], CTX, 4, CTX, batch=2, with_tokens=True)
+    assert table and all(len(k) == act.shape[-1] for k in table) and sum(table.values()) > 0
+    rare, random_ = sp.rare_and_random_tokens(table, 3, seed=0)
+    assert 0 < len(rare) <= 3 and 0 < len(random_) <= 3 and rare[0] == min(table, key=lambda t: (table[t], t))
+    m = pixart_model()
+    trained(m, 4)
+    rep = sp.token_sensitivity(m, (ctx, tgt, act), rare, "v")
+    assert rep and len(rep["tokens"]) == len(rare) and rep["worst"]["mean"] >= 0
+    assert all(r["max"] >= r["p99"] >= r["mean"] >= 0 for r in rep["tokens"])
+    assert sp.token_sensitivity(m, (ctx, tgt, act), [], "v") is None
