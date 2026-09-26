@@ -684,11 +684,11 @@ One line per decision: what was decided, and why. Dates are 2026, times EDT; the
 | 09-23 06:30 | Encode 2000:6000 into a separate tree and Hub folders | New shard logs in the certified directories would block every resume |
 | 09-23 11:30 | Reads on GPU 3, checked idle each time; full reads every 5k | A read on the training card cost about 2,500 updates |
 | 09-23 11:30 | W&B native by default; sidecars for pinned rows | Rohan watches curves live; pinned runs cannot gain a flag |
-| 09-25 00:45 | Build the directional check and probe_v2 before trusting control conditioning | The probe showed dependence on the control but not its sign |
 | 09-24 16:20 | Stop the U-Net at 200k; 200k is the matched step for every row | The U-Net had saturated (EMA h1 22.42 to 22.46 from 150k to 180k) |
 | 09-24 18:40 | Drop the requested-action ablation | 89 percent identical to executed; 0.15 percent true overrides; likely null |
 | 09-24 18:40 | PixArt-alpha is the third row | A text-to-image DiT like the others; best transformer of the stride-four run |
 | 09-24 22:20 | Run the map-distance study with one pre-declared test | Changliu's suggestion; reuses a validated method |
+| 09-25 00:45 | Build the directional check and probe_v2 before trusting control conditioning | The probe showed dependence on the control but not its sign |
 | 09-25 01:25, 09:40 | Primary test fixed; SD 1.x distances frozen before scoring; floor-band maps exempt from (ii) | Choosing after scores would be selection; inside the floor D is noise |
 | 09-25 01:25 | Score sealed corpora once with a fixed checkpoint; book nothing in the seal | Leaves Rohan free to rule; no selection possible with final weights |
 | 09-25 10:20 | CPU-heavy study jobs at 16 BLAS threads and nice 19 | The pixel job's 64 threads halved both trainers for 50 minutes |
