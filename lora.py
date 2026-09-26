@@ -27,6 +27,10 @@ projection and base vector), `input_proj` (the inflated input projection, the wh
 target-channel kernel, context-channel kernel and bias) and `noise_emb` (the context-noise bucket table
 that noise augmentation conditions on; the diffusion timestep embedding stays frozen).
 
+**The full fine-tune reference** (design decision 5) is the same path with rank 0 and the part `all`: no
+adapter is injected and every backbone parameter trains, so the reference and the adapter runs share one
+trainer, one checkpoint format and one evaluator.
+
 The scale is `alpha / rank`, the LoRA paper's convention, so rank 16 and alpha 16 is a scale of 1.
 """
 import math
@@ -40,6 +44,7 @@ ATTENTION_TARGETS = ("to_q", "to_k", "to_v", "to_out.0", "add_q_proj", "add_k_pr
 MLP_TARGETS = ("ff.net.0.proj", "ff.net.2", "ff_context.net.0.proj", "ff_context.net.2")
 FULL_PARTS = ("control", "input_proj", "noise_emb")
 DEFAULT_PARTS = FULL_PARTS
+ALL_PART = "all"                   # every backbone parameter: the full fine-tune reference
 
 # The modules (or bare Parameters) each fully trained part consists of, per backbone. A name that the
 # built model does not carry is skipped (the single-action tables are deleted under --action-history,
@@ -156,10 +161,12 @@ def _under(name, prefix):
 
 
 def part_parameters(model, backbone, part):
-    """[(name, Parameter)] of one fully trained part (`FULL_PARTS`) of this backbone."""
+    """[(name, Parameter)] of one fully trained part (`FULL_PARTS`, or `all`) of this backbone."""
     check_backbone(backbone)
+    if part == ALL_PART:
+        return [(n, p) for n, p in model.named_parameters() if n.rsplit(".", 1)[-1] not in LORA_PARAM_NAMES]
     if part not in FULL_PARTS:
-        raise ValueError(f"unknown part {part!r}; the parts are {FULL_PARTS}")
+        raise ValueError(f"unknown part {part!r}; the parts are {FULL_PARTS} or {ALL_PART!r}")
     prefixes = PART_MODULES[backbone][part]
     out = [(n, p) for n, p in model.named_parameters()
            if any(_under(n, pre) for pre in prefixes) and n.rsplit(".", 1)[-1] not in LORA_PARAM_NAMES]
@@ -169,14 +176,18 @@ def part_parameters(model, backbone, part):
 
 
 def parse_parts(spec):
-    """"control,input_proj" -> ("control", "input_proj"); "" or "none" -> (), LoRA only."""
+    """"control,input_proj" -> ("control", "input_proj"); "" or "none" -> (), LoRA only; "all" -> ("all",)."""
     s = str(spec or "").strip()
     if s.lower() in ("", "none"):
         return ()
     parts = tuple(dict.fromkeys(x.strip() for x in s.split(",") if x.strip()))
+    if ALL_PART in parts:
+        if len(parts) > 1:
+            raise ValueError(f"'{ALL_PART}' already trains every parameter; name it alone")
+        return parts
     bad = [p for p in parts if p not in FULL_PARTS]
     if bad:
-        raise ValueError(f"unknown full part(s) {bad}; choose from {FULL_PARTS} or 'none'")
+        raise ValueError(f"unknown full part(s) {bad}; choose from {FULL_PARTS}, '{ALL_PART}' or 'none'")
     return parts
 
 
@@ -184,14 +195,15 @@ def parameter_counts(model, backbone, parts=DEFAULT_PARTS):
     """Tensor sizes the adapter path trains or leaves frozen, for the launch line and the log.
 
     Every part is counted whether it is selected or not (`part_<name>`), so a report can say what
-    switching one on would cost; `trainable` is LoRA plus the selected parts.
+    switching one on would cost; `trainable` is the size of the trained set (LoRA plus the selected parts).
     """
     check_backbone(backbone)
     lora = sum(p.numel() for _, p in lora_parameters(model))
     counts = {"lora": lora}
     for part in FULL_PARTS:
         counts[f"part_{part}"] = sum(p.numel() for _, p in part_parameters(model, backbone, part))
-    counts["trainable"] = lora + sum(counts[f"part_{p}"] for p in parts)
+    keep = set(trained_names(model, backbone, parts))
+    counts["trainable"] = sum(p.numel() for n, p in model.named_parameters() if n in keep)
     counts["total"] = sum(p.numel() for p in model.parameters())
     counts["backbone_frozen"] = counts["total"] - counts["trainable"]
     counts["trainable_fraction"] = counts["trainable"] / max(1, counts["total"] - lora)
@@ -205,12 +217,11 @@ def trained_names(model, backbone, parts=DEFAULT_PARTS):
     adapter without freezing anything (see `apply_adapter` for why that matters).
     """
     check_backbone(backbone)
-    found = lora_parameters(model)
-    if not found:
-        raise ValueError("the LoRA adapters have to be injected first")
-    names = {n for n, _ in found}
+    names = {n for n, _ in lora_parameters(model)}
     for part in parts:
         names |= {n for n, _ in part_parameters(model, backbone, part)}
+    if not names:
+        raise ValueError("nothing to train: inject LoRA (rank > 0) or select full parts")
     return [n for n, _ in model.named_parameters() if n in names]
 
 
@@ -293,7 +304,8 @@ def apply_adapter(model, cfg):
     way and leave `requires_grad` alone; only the trainer calls `configure_trainable`.
     """
     check_backbone(cfg["backbone"])
-    targets = inject_lora(model, cfg["rank"], cfg["alpha"], cfg["dropout"], cfg["include_mlp"], cfg["seed"])
+    targets = (inject_lora(model, cfg["rank"], cfg["alpha"], cfg["dropout"], cfg["include_mlp"], cfg["seed"])
+               if cfg["rank"] > 0 else [])
     if cfg.get("targets") is not None and list(cfg["targets"]) != targets:
         raise ValueError(f"the adapted layers differ from the run's: {len(targets)} here, {len(cfg['targets'])} "
                          "recorded; the backbone was built differently")

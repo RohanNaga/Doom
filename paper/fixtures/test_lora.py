@@ -238,7 +238,7 @@ def test_the_parameter_counts_are_the_arithmetic(backbone, tiny_unet_hub):
 
 
 @pytest.mark.parametrize("spec,want", [("", ()), ("none", ()), ("control", ("control",)),
-                                       ("noise_emb,control,control", ("noise_emb", "control"))])
+                                       ("noise_emb,control,control", ("noise_emb", "control")), ("all", ("all",))])
 def test_the_parts_flag_parses(spec, want):
     assert lora.parse_parts(spec) == want
 
@@ -246,8 +246,25 @@ def test_the_parts_flag_parses(spec, want):
 def test_an_unknown_part_or_backbone_is_refused():
     with pytest.raises(ValueError, match="unknown full part"):
         lora.parse_parts("control,timestep")
+    with pytest.raises(ValueError, match="alone"):
+        lora.parse_parts("all,control")
     with pytest.raises(NotImplementedError):
         lora.check_backbone("dit")
+
+
+@pytest.mark.parametrize("backbone", BACKBONES)
+def test_rank_zero_with_every_part_is_the_full_fine_tune_reference(backbone, tiny_unet_hub):
+    """Design decision 5 as a flag value: no adapter, every backbone parameter trained."""
+    m = build(backbone)
+    cfg = lora.adapter_config(backbone, 0, 0, 0.0, False, ("all",), seed=0)
+    assert lora.apply_adapter(m, cfg) == [n for n, _ in m.named_parameters()]
+    assert not any(isinstance(x, lora.LoRALinear) for x in m.modules())
+    names = lora.configure_trainable(m, backbone, ("all",))
+    assert all(p.requires_grad for p in m.parameters()) and len(names) == len(list(m.parameters()))
+    counts = lora.parameter_counts(m, backbone, ("all",))
+    assert counts["lora"] == 0 and counts["trainable"] == counts["total"] and counts["backbone_frozen"] == 0
+    with pytest.raises(ValueError, match="nothing to train"):
+        lora.trained_names(build(backbone), backbone, ())
 
 
 # ---------------------------------------------------------------------------------------
