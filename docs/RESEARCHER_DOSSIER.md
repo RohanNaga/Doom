@@ -1159,3 +1159,245 @@ The total of 21 defects closed over the four rounds comes from the main session'
 The margin floor was lowered after the pre-run failed it, so its justification has to rest on the measurement rather than on the outcome. The failing shard was bit-identical on re-encode, which rules out a row misalignment independently of the margin. A real misalignment also moves the MAE by orders of magnitude, and the MAE and p99 tolerances test that separately. On the certified corpora the lowest margin was the 4-channel validation shard's 2.91 dB. [RC 2026-09-23 04:05; `check_latent_alignment.py:36–38,47–53`; `$D/GATES.txt`.]
 
 Two of the launch night's gaps remain open at the cutoff, and both concern evaluation, not training. The directional check matters most. The probe in section 3.12 shows that the output depends on the newest control, but not that a left turn moves the image left. Without the motion ratio, a rollout that beats copy-seed in PSNR cannot be told apart from one that drifts toward a smoothed static frame. The main session's 08:50 EDT status offered to write both before the 20k read, and no decision on that offer was recorded before the cutoff. [RC 2026-09-23 09:10; main session status, 08:50 EDT.]
+
+## 3.13 Sep 24 to 25: the U-Net final, SD 3.5 to 105k, PixArt, and the closed-loop findings
+
+Sections 3.13, 3.14, 4.11 and 5.9 were appended after section 4.10 on 2026-09-25, so that no existing section changed. This section belongs to part 3 and follows the reading rules of section 3.1 and the protocols of section 3.12. Its source cutoff is main at `614a7a8`, which includes the 2026-09-25 23:00 EDT entry of `RESEARCH_CONTEXT.md` and its section 0 as rewritten at 19:30 EDT that day. It covers every entry from 2026-09-23 16:30 EDT to that one. The SD 3.5 110k read was running at the cutoff, so the series below ends at 105k. The run stewards (`run-steward-2`, then stewards 6 and 7 and their automations `stw6-arrive`, `stw6-queue` and `stw7-dirwait`) or the main session read each model number on Spiderman. This addendum copies the number from the RC entry named in brackets and contacted no server. Where two entries disagree, the later one is used and the disagreement is stated. “Not recorded” marks a read that ran but whose value no RC entry states. `$D` means `/sata2/data/rnagabhi/doom` on Spiderman, as in section 3.12.
+
+**Read protocol:** unless a table says otherwise, every teacher-forced read repeats the section 3.12 protocol. It uses 512 windows from validation ids 6000:6100, seed 0, identical at every step and for every row. Sampling is 10-step DDIM with linear spacing, eta 0 and clean context. Each latent space uses its stock decoder, `sd-vae-ft-mse` for the 4-channel rows and the SD 3.5 autoencoder's own decoder for SD 3.5. Targets are raw frames. Rollouts are 16 of 256 tics from the same validation ids, seed 0 unless stated, scored against raw frames at 4, 32, 64, 128 and 256 tics. A full read is the teacher-forced set at h1 and h4 for live and EMA weights, the rollouts and the probe. A light read is a one-tic teacher-forced read only, which takes about five minutes; the recorded light reads report the EMA. [RC 2026-09-23 19:00, 19:45, 21:30; 2026-09-24 11:30; `.claude/analyses/run-steward-brief-2026-09-23.md`, 5k/10k/20k section, step 1.]
+
+**Reference numbers:** the windows are identical for all three rows, and persistence scores the raw last frame against the raw target, so the same references serve every row. One-tic persistence is 21.566 dB and 0.203 LPIPS. Four-tic persistence is 19.213 dB and 0.354 LPIPS. The entries round these to 21.57 / 0.203 and 19.21 / 0.354. Copy-seed, which holds the last real seed frame, scores 18.93 / 17.47 / 17.60 / 17.80 / 17.52 dB at 4 / 32 / 64 / 128 / 256 tics, with LPIPS 0.317 / 0.487 / 0.505 / 0.502 / 0.520. Every gain below is a difference against these numbers. A gain the entry states is copied. A gain marked derived is computed here from the rounded PSNR and can differ by 0.01 dB from an unrounded computation. [Section 3.12, teacher-forced and rollout tables; RC 2026-09-24 10:30, 2026-09-25 01:40.]
+
+**The U-Net stopped at 200k.** Rohan set 200k as the matched step count for every row at 16:20 EDT on 2026-09-24, because the U-Net had saturated. Its EMA read 22.42 to 22.46 dB and 0.182 to 0.179 LPIPS at h1 from 150k to 180k, and its validation loss had stayed in a 0.153 to 0.155 band since 151k. A server-side waiter stopped `train-unet-nexttic` at 17:09 EDT after step 200150, once `snap_0200000.pt`, `0200000.pt` and step 200100 were on disk, and recorded the reason in `resumes.log`. The run logged no skipped update. Its last validation loss was 0.1509. [RC 2026-09-24 16:20, 17:45.]
+
+The U-Net validation loss fell from 0.1713 at 48k and 0.1707 at 50k to 0.1672 at 64k to 66k, 0.1648 at 79k and 0.1544 at 154k, where it flattened (0.1543 from 154k to 157k, 0.154 at 160k). The run held 1.80 updates/s at 154.9k with no skips, excursions or relaunches. The steward of the night of Sep 23 was killed by the harness watchdog at about 01:50 EDT and its replacement started at 09:33, so no read ran in that gap and the recovery checkpoints 105k to 135k were pruned before anyone read them. The snapshots 100k to 150k survived. The later backfill made the read series unbroken from 5k to 200k: full reads at every snapshot the stewards held, and light reads at the others. [RC 2026-09-23 16:30, 19:00, 21:30; 2026-09-24 09:45, 10:30, 11:30, 21:55.]
+
+| Update | Read | Live h1 PSNR / LPIPS | EMA h1 PSNR / LPIPS | EMA h1 gain (dB) | Live h4 PSNR / LPIPS | EMA h4 PSNR / LPIPS | EMA h4 gain (dB) | Source (RC) |
+|---:|---|---|---|---:|---|---|---:|---|
+| 30k | Full | 21.83 / 0.226 | Level with live; not recorded | Not recorded | 20.52 / 0.301 | Not recorded | Not recorded | 09-23 16:30 |
+| 40k | Full | 21.88 / 0.218 | 21.95 / 0.212 | +0.38 | 20.44 / 0.295 | 20.64 / 0.274 | +1.43 | 09-23 16:30 |
+| 45k | Full | 21.97 / 0.218 | 22.03 / 0.208 | +0.46 (derived) | 20.68 / 0.286 | 20.72 / 0.269 | +1.51 (derived) | 09-23 19:00 |
+| 50k | Full | 21.97 / 0.215 | 22.08 / 0.205 | +0.51 | 20.62 / 0.286 | 20.81 / 0.263 | +1.59 | 09-23 19:00 |
+| 55k | Light | Not run | 22.12 / 0.202 | +0.56 | Not run | Not run | Not run | 09-23 19:45, 21:30 |
+| 60k | Light | Not run | 22.17 / 0.200 | +0.60 (derived) | Not run | Not run | Not run | 09-23 21:30 |
+| 65k | Light | Not run | 22.20 / 0.198 | +0.63 (derived) | Not run | Not run | Not run | 09-23 21:30 |
+| 70k | Full | Not recorded | 22.22 / 0.197 | +0.65 (derived) | Not recorded | 20.99 / 0.251 | +1.78 (derived) | 09-23 21:30 |
+| 75k | Light | Not run | 22.25 / 0.195 | +0.68 (derived) | Not run | Not run | Not run | 09-23 21:30 |
+| 90k | Full | Not recorded | 22.30 / 0.191 | +0.73 (derived) | Not recorded | 21.14 / 0.242 | +1.93 (derived) | 09-24 09:45 |
+| 110k | Light | Not run | Not recorded | +0.79 | Not run | Not run | Not run | 09-24 21:55 |
+| 150k | Full | 22.27 / 0.197 | 22.42 / 0.182 | +0.86 | 20.96 / 0.257 | 21.24 / 0.232 | +2.03 | 09-24 10:30 |
+| 160k to 175k | Full and light | Not recorded | 22.45 / 0.180, flat | +0.88 (derived) | Not recorded | 21.27 / 0.228, flat | +2.06 (derived) | 09-24 15:15 |
+| 180k | Full | Not recorded | 22.46 / 0.179 | +0.89 (derived) | Not recorded | Not recorded | Not recorded | 09-24 15:55 |
+| 190k | Full | Not recorded | 22.47 / 0.178 | +0.90 (derived) | Not recorded | 21.31 / 0.225 | +2.10 | 09-24 17:45 |
+| 195k | Light | Not run | 22.48 / 0.177 | +0.91 (derived) | Not run | Not run | Not run | 09-24 17:45 |
+| 200k | Full | 22.29 / 0.186 | 22.49 / 0.177 | +0.92 | 20.97 / 0.244 | 21.33 / 0.224 | +2.11 | 09-24 18:40 |
+
+This table establishes that the U-Net's EMA passed the live weights by 40k and then led them at every full read, reversing the early order of section 3.12. The EMA crossed one-tic persistence in LPIPS between 50k (0.205) and 55k (0.202), after crossing it in PSNR by 40k. Its one-tic gain then rose slowly, by 0.41 dB from 50k to 200k, while its four-tic gain rose by 0.52 dB (derived). From 160k on the EMA moved by 0.04 dB at h1 and 0.06 dB at h4 (derived). The 200k EMA read, 22.49 dB and 0.177 at h1 and 21.33 dB and 0.224 at h4, is the row's final teacher-forced result at 10 steps on seen-map validation windows.
+
+The table does not establish the paper-protocol number, which needs a fixed step count and the chosen decoder (see the sweep below and section 3.12). All windows come from the four training maps. The row's behaviour on the 26 other maps is in section 3.14, and it differs sharply.
+
+Rollout PSNR in dB at 200k, 16 rollouts of 256 tics:
+
+| Tics | EMA 200k | Live 200k | Copy-seed | EMA minus copy-seed (derived) |
+|---:|---:|---:|---:|---:|
+| 4 | 21.28 | 20.75 | 18.93 | +2.35 |
+| 32 | 19.35 | 18.61 | 17.47 | +1.88 |
+| 64 | 18.24 | 17.84 | 17.60 | +0.64 |
+| 128 | 18.28 | 18.16 | 17.80 | +0.48 |
+| 256 | 17.81 | 15.87 | 17.52 | +0.29 |
+
+The EMA rollout history reached this point in steps. At 50k the EMA's LPIPS beat copy-seed at 32 and 64 tics for the first time (0.413 against 0.487 and 0.484 against 0.505). At 70k the EMA sat at or above copy-seed PSNR at every horizon to 256 tics (17.71 against 17.52) and beat it on LPIPS to 128 tics. At 150k it beat copy-seed in PSNR through 128 tics (18.92 against 17.80) and trailed by 0.16 dB at 256 (17.36 against 17.52), with the same shape in LPIPS. At 180k it led by 0.60 dB at 256 tics with LPIPS level. At 200k it led at every horizon. [RC 2026-09-23 19:00, 21:30; 2026-09-24 10:30, 15:55, 18:40.]
+
+The live rollouts behaved differently. The 256-tic live point read 17.8, 15.4 and 16.4 dB at 20k, 30k and 40k. It fell to 14.75 dB at 180k after 18.18 dB at 170k, where the live rollout had led copy-seed at every horizon. At 200k it read 15.87 dB. Scored per rollout at 200k, 4 of 16 live rollouts end below the line 3 dB under the EMA mean at 256 tics, two of them under 8 dB and none blank. The EMA has 2 of 16 below that line, the lowest at 13.6 dB. Across the full reads from 160k to 200k the live 256-tic point varies by 3.4 dB from checkpoint to checkpoint and the EMA's by 0.9 dB. [RC 2026-09-23 16:30; 2026-09-24 15:15, 15:55, 18:40; the line's definition in 2026-09-25 01:40.]
+
+These results establish that at 200k the released EMA weights of the U-Net hold a PSNR lead over copy-seed for 256 tics on these 16 validation rollouts. The lead shrinks from 2.35 dB at 4 tics to 0.29 dB at 256. They also establish that the live weights are the less stable closed-loop generator, by per-rollout count and by read-to-read variance. They do not establish a perceptual lead at 256 tics at 200k, because the 200k EMA rollout LPIPS is not recorded. With 16 rollouts and no interval, a 0.29 dB lead at 256 tics is not resolved, and the 160k-to-200k spread of the EMA point, 0.9 dB, is three times that lead (derived).
+
+**Sampler sweep:** live weights, h1, the same 512 windows, DDIM eta 0, linear spacing unless the cell names trailing; the 10k column is section 3.12's. The 100k sweep ran, and its entry records only that the pattern held and that 4-step PSNR had saturated by 100k. Cells with one value were recorded without a spacing split. Persistence is 21.566 dB / 0.203. Sources: RC 2026-09-23 19:00 (50k); 2026-09-24 10:30 (150k), 15:15 (100k), 18:40 (200k).
+
+| Steps | 10k PSNR / LPIPS | 50k PSNR / LPIPS | 150k linear / trailing | 200k linear / trailing |
+|---:|---|---|---|---|
+| 4 | 21.567 / 0.376 | 22.03 / 0.317 (trailing LPIPS 0.285) | 22.28 / 0.285; 22.31 / 0.258 | 22.35 / 0.272; 22.37 / 0.245 |
+| 8 | 21.552 / 0.282 | 22.01 / 0.231 | 22.30 / 0.210; 22.29 / 0.204 | 22.34 / 0.199; 22.32 / 0.193 |
+| 16 | 21.371 / 0.239 | 21.86 / 0.196 | 22.18 / 0.180 | 22.20 / 0.171 |
+| 50 | 21.134 / 0.221 | 21.65 / 0.184 | 22.02 / 0.168 | 22.04 / 0.162 |
+
+This table establishes that the perception-distortion trade of section 3.12 persisted through training. At every checkpoint more steps lowered PSNR and improved LPIPS. From 50k on, trailing spacing matched linear from 8 steps and helped only at 4 steps. The step count at which the model beats persistence in LPIPS fell as training went on: 16 steps at 50k (0.196), 16 steps at 150k, and 8 steps at 200k. The 150k entry adds 8 steps with trailing spacing, where the rounded values are 0.204 against 0.203, so that crossing rests on unrounded values. At 200k the 8-step linear point, 22.34 dB and 0.199, beats persistence on both metrics. Every cell at 150k is 0.15 to 0.3 dB and 0.016 to 0.03 LPIPS better than at 50k, and the perceptual gain from 10k to 50k was about 0.04 at every step count. At 200k the 10-step read flatters PSNR against 50 steps by about 0.25 dB (22.29 against 22.04, derived), less than the 0.36 dB of section 3.12 at 10k. [RC 2026-09-23 19:00; 2026-09-24 10:30, 18:40.]
+
+The sweep does not establish the best sampler for rollouts, because it is teacher-forced at one tic, and it covers the U-Net only. The SD 3.5 sweeps planned at 50k and 100k are not recorded in the log through the cutoff.
+
+**SD 3.5 from 5k to 105k.** SD 3.5's validation loss fell from 0.1115 at 10k to 0.1048 at 20k, 0.0973 at 42k, 0.0950 at 52k, 0.0926 at 65k to 67.5k, 0.0913 at 77.7k, 0.0897 at 86.5k and 0.0879 at 103.5k. It ran at 0.50 to 0.55 updates/s whenever its card and host were not contended. A throughput check on 2026-09-24 found GPU 2 at 100 percent utilisation, 0.53 updates/s median, the CPU 93 percent idle, no I/O wait and the data disk 13 percent busy. The run is therefore compute-bound, with gradient checkpointing costing about a third, and only a change to the certified run would speed it up. On the evening of 2026-09-25 other users' CPU-heavy jobs raised the host load to 70 on 64 cores and cut SD 3.5 to 0.32 updates/s; the load fell to 17 at about 22:45 EDT and the run returned to 0.50 to 0.54 updates/s. The reads at 20k, 25k, 30k, 35k, 45k and 60k ran, but their teacher-forced values are not recorded. [RC 2026-09-23 16:30, 19:00, 21:30; 2026-09-24 09:45, 15:15, 21:05, 22:50; 2026-09-25 04:30, 09:20, 19:00, 22:15, 23:00.]
+
+| Update | Live h1 PSNR / LPIPS | EMA h1 PSNR / LPIPS | EMA h1 gain (dB) | Live h4 PSNR / LPIPS | EMA h4 PSNR / LPIPS | EMA h4 gain (dB) | Source (RC) |
+|---:|---|---|---:|---|---|---:|---|
+| 5k | 21.30 / 0.259 | Not recorded | Not recorded | 19.73 / 0.381 | Not recorded | Not recorded | 09-23 19:00 |
+| 10k | 21.60 / 0.220 | 15.6 dB, warming | Not recorded | 19.88 / 0.335 | Not recorded | Not recorded | 09-23 19:00 |
+| 15k | 21.91 / 0.211 | 20.4 dB, warming | Not recorded | 20.32 / 0.317 | Not recorded | Not recorded | 09-23 21:30 |
+| 40k | 22.37 / 0.173 | 22.33 / 0.173 | +0.76 (derived) | 20.67 / 0.264 | Not recorded | Not recorded | 09-24 11:30 |
+| 50k | 22.51 / 0.170 | 22.56 / 0.163 | +0.99 | 20.77 / 0.265 | 20.88 / 0.245 | +1.67 (derived) | 09-24 15:15 |
+| 55k | 22.58 / 0.165 | 22.64 / 0.159 | +1.07 | 20.86 / 0.253 | 20.99 / 0.239 | +1.77 | 09-24 17:45 |
+| 65k | Not recorded | 22.77 / 0.154 | +1.21 | Not recorded | 21.07 / 0.231 | +1.86 (derived) | 09-24 23:30 |
+| 70k | 22.63 / 0.161 | 22.83 / 0.152 | +1.27 | 20.60 / 0.256 | 21.15 / 0.226 | +1.94 | 09-25 01:40 |
+| 75k | 22.73 / 0.154 | 22.88 / 0.150 | +1.31 | 20.96 / 0.238 | 21.19 / 0.223 | +1.98 | 09-25 04:30 |
+| 80k | 22.70 / 0.156 | 22.92 / 0.148 | +1.35 | 20.90 / 0.239 | 21.25 / 0.219 | +2.04 | 09-25 09:20 |
+| 85k | 22.83 / 0.157 | 22.96 / 0.146 | +1.39 | 21.16 / 0.233 | 21.30 / 0.216 | +2.09 | 09-25 10:05 |
+| 90k | 22.78 / 0.149 | 23.00 / 0.144 | +1.43 | 21.02 / 0.228 | 21.32 / 0.214 | +2.11 | 09-25 13:45 |
+| 95k | 22.83 / 0.150 | 23.04 / 0.142 | +1.47 | 21.10 / 0.230 | 21.35 / 0.212 | +2.14 | 09-25 18:40 |
+| 100k | Not recorded | 23.06 / 0.142 | +1.49 | Not recorded | 21.39 / 0.210 | +2.18 | 09-25 18:40, 19:00 |
+| 105k | Not recorded | 23.07 / 0.141 | +1.51 | Not recorded | 21.41 / 0.208 | +2.20 | 09-25 21:00 |
+
+The 40k entry states +0.80 dB, which is the live gain (22.37 against 21.566); the EMA gain in the table is derived. This table establishes that SD 3.5's EMA teacher-forced quality improved or held at every recorded read from 50k to 105k, at both horizons, while the live-weight rollouts below collapsed twice. The live weights did not improve monotonically: their one-tic PSNR dipped at 80k and 90k and their four-tic PSNR at 70k (derived). By 40k SD 3.5 matched the U-Net's 150k one-tic PSNR (22.33 to 22.37 against 22.42) with better LPIPS (0.173 against 0.182), at about a quarter of the updates. At 50k its one-tic EMA read, 22.56 dB / 0.163 and a gain of +0.99 dB, already beat the U-Net's final 22.49 dB / 0.177 and +0.92 dB on both metrics (derived). Section 0 of `RESEARCH_CONTEXT.md` dates that passing to 40k, which holds for LPIPS (0.173 against 0.177) but not for PSNR (22.33 EMA and 22.37 live against 22.49). Its four-tic EMA gain passed the U-Net's final +2.11 dB at 95k (+2.14). At 105k the EMA read 23.07 dB / 0.141 at h1 and 21.41 dB / 0.208 at h4, the best of the series, with gains of +1.51 and +2.20 dB. Its EMA led its live weights at every read from 50k on where both were recorded. [RC 2026-09-24 11:30, 17:45; 2026-09-25 21:00; RC section 0.]
+
+The table does not rank the rows under the paper's protocol. SD 3.5 decodes through a 16-channel autoencoder that reconstructs the validation frames better than the 4-channel one (about 27.5 against 23.5 dB unshifted in the gate of section 3.12), so part of its lead can be decoder quality rather than dynamics. The comparison at matched steps waits for SD 3.5 at 200k. All windows are seen-map validation windows.
+
+Rollout PSNR in dB, 16 rollouts of 256 tics, seed 0 unless stated. The 40k and 45k rows record the 256-tic live point only. Sources: the RC entry of each update in the table above; seed-1 reruns from RC 2026-09-24 15:55 and 2026-09-25 02:30; 105k from RC 2026-09-25 21:00 and 22:15. The 105k seed-1 EMA rerun drew different validation windows and is scored against its own copy-seed row.
+
+| Update | Weights | 4 | 32 | 64 | 128 | 256 |
+|---:|---|---:|---:|---:|---:|---:|
+| Reference | Copy-seed | 18.93 | 17.47 | 17.60 | 17.80 | 17.52 |
+| 40k | Live | Not recorded | Not recorded | Not recorded | Not recorded | 17.12 |
+| 45k | Live | Not recorded | Not recorded | Not recorded | Not recorded | 17.00 |
+| 50k | Live, seed 0 | 20.74 | 17.24 | 14.71 | 13.38 | 8.98 |
+| 50k | Live, seed 1 | 20.16 | 17.93 | 15.30 | 14.60 | 10.13 |
+| 50k | EMA | 20.45 | 18.51 | 18.15 | 17.66 | 17.82 |
+| 55k | Live | 20.45 | 18.89 | 18.47 | 18.09 | 17.21 |
+| 55k | EMA | 20.42 | 18.46 | 18.08 | 18.23 | 16.82 |
+| 65k | EMA | 20.64 | 18.77 | 18.39 | 17.97 | 17.54 |
+| 70k | Live, seed 0 | 20.72 | 15.20 | 15.29 | 13.69 | 11.11 |
+| 70k | Live, seed 1 | 20.57 | 15.62 | 14.68 | 12.96 | 10.95 |
+| 70k | EMA | 20.71 | 18.85 | 18.42 | 17.89 | 16.84 |
+| 75k | Live | 21.30 | 18.55 | 17.43 | 17.85 | 17.63 |
+| 75k | EMA | 20.92 | 18.77 | 18.02 | 18.31 | 18.54 |
+| 80k | Live | 20.75 | 18.67 | 17.77 | 18.13 | 18.26 |
+| 80k | EMA | 21.15 | 18.94 | 18.43 | 18.65 | 17.94 |
+| 85k | Live | 21.28 | 18.42 | 17.66 | 17.45 | 16.99 |
+| 85k | EMA | 21.02 | 19.05 | 18.44 | 18.10 | 17.44 |
+| 90k | Live | 21.38 | 18.78 | 18.35 | 18.51 | 17.71 |
+| 90k | EMA | 21.17 | 19.05 | 18.05 | 17.96 | 17.56 |
+| 95k | Live | 21.14 | 19.00 | 17.18 | 18.27 | 17.72 |
+| 95k | EMA | 21.26 | 18.77 | 18.18 | 18.54 | 17.55 |
+| 100k | Live | 21.06 | 18.46 | 18.36 | 17.90 | 17.36 |
+| 100k | EMA | 21.36 | 19.00 | 18.35 | 17.95 | 17.60 |
+| 105k | Live | 20.84 | 19.07 | 18.60 | 19.08 | 17.52 |
+| 105k | EMA, seed 0 | 21.43 | 18.85 | 18.06 | 18.36 | 16.86 |
+| 105k | Copy-seed, seed-1 windows | 19.11 | 18.07 | 17.94 | 17.50 | 17.46 |
+| 105k | EMA, seed 1 | 21.26 | 19.93 | 19.23 | 17.31 | 16.49 |
+
+The EMA's 256-tic point ran 18.54, 17.94, 17.44, 17.56, 17.55 and 17.60 dB from 75k to 100k and 16.86 dB at 105k. It sat 0.08 dB under copy-seed at 85k, 0.03 to 0.09 dB above it from 90k to 100k (the 100k entry states +0.09 from unrounded values) and 0.66 dB under it at 105k, while teacher-forced quality kept improving. The 105k point is 0.58 dB under the lowest earlier EMA point of the series, 17.44 at 85k (derived). At 256 tics the 75k LPIPS was 0.611 for live, 0.542 for the EMA and 0.520 for copy-seed, so the best EMA rollout by PSNR still trailed holding the seed frame perceptually at the last horizon. The 65k live rollout is not recorded; the 01:40 entry puts the live 256-tic point at 17.2 to 17.8 dB across 55k to 65k. [RC 2026-09-25 01:40, 04:30, 10:05, 13:45, 19:00, 21:00.]
+
+**The intermittent live collapse and channel 13.** At 50k the live weights produced an absorbing blank-frame failure under autoregression. On seed 1, 8 of 16 live rollouts ended at 2.3 to 3.9 dB at tic 256, a blank or saturated image. Their onsets were spread over tic 4 (one rollout), 36, 43, 95, 135, 225 and two past 128, on maps 2 to 5. Once a rollout reached about 3 dB it never recovered, and 7 of 16 crossed the line 3 dB under the EMA mean and never came back. The decoded latents collapsed the same way, so the latents themselves diverged from about 32 tics. The 50k EMA produced no collapse, and the 45k live rollout had read 17.00 dB at 256 tics. The run logged no NaN, no skipped update and a falling validation loss, so no hold rule applied. [RC 2026-09-24 15:15, 15:55.]
+
+The collapse did not recur at 55k, 60k or 65k, and it returned at 70k. On seed 0, 15 of 16 live rollouts crossed the EMA-minus-3-dB line, 11 were below it at 256 tics, and 11 ended between 5.8 and 10.1 dB with onsets from tic 1 to 137 across maps 2 to 5. The live LPIPS at 256 tics was 0.70 and the decoded PSNR 11.2 dB, so the latents left the data range. Seed 1 reproduced it: 15 of 16 crossed and 10 of 16 were under 10 dB at 256 tics. On the same windows 13 EMA rollouts crossed the line at some tic, none stayed down, and the EMA minimum was 9.7 dB. No live rollout was captured at a fixed point at 75k, 80k, 85k, 90k, 95k, 100k or 105k, although 95k and 100k came close (table below). [RC 2026-09-25 01:40, 02:30, 04:30.]
+
+The per-tic latent statistics of the collapsed rollouts (`stw6_latstats.py`, `steward_70000/latstats_*.json`) located the failure in one channel. The RMS of the predicted latents stayed inside the ground-truth range, 0.98 to 1.19, in almost every collapsed rollout, so the latent neither exploded nor vanished. SD 3.5 latent channel 13, whose per-frame mean sits at about +0.45 in the data (range −0.085 to 0.70), dropped instead to one of two fixed values shared across windows and maps. It sat at −1.39 to −1.50 in 17 of the 22 collapsed rollouts over both seeds, and at −2.60 to −2.73 in 4, the ones with RMS 1.35 to 1.48. Those are the blank frames at 5.8 to 10 dB. On seed 0 channel 13 left its range at the PSNR drop (tics 16/16, 88/90, 137/137, 30/31 and 80/85). On seed 1 six rollouts dropped at tic 1 while channel 13 left later, at tics 2 to 21 or 160 to 208. The channel capture is therefore the end state and not always the trigger. The two EMA reference windows kept channel 13 at or above −0.44 and ended near +0.4. The 21:00 entry corrects the 02:30 reading that this held for the EMA generally: EMA rollouts at 70k dipped under −1 (minimum −1.12) and recovered by tic 256. [RC 2026-09-25 02:30, 21:00.]
+
+| Update | Live channel-13 minimum | Live rollouts | EMA channel-13 minimum | EMA rollouts (number ending under −0.9) |
+|---:|---|---|---|---|
+| 70k | −1.39 to −1.50 and −2.60 to −2.73 (fixed points) | Collapsed, both seeds | −1.12 (the two reference windows at or above −0.44) | No collapse; dipped under −1 and recovered by tic 256 (0) |
+| 75k | Not recorded | No rollout under 10 dB | −0.94 | No rollout under 10 dB (0) |
+| 80k | −0.73 | None under 10 dB | −0.54 | None under 10 dB (0) |
+| 85k | −1.19; five rollouts under −0.9 for 4 to 30 tics, four recovered | No capture | −1.16; one rollout under −0.9 from tic 104, ending at −1.00 and 13.3 dB | First EMA excursion of that size (1) |
+| 90k | −0.96, recovered | No frame under 10 dB | −1.08 in the same map-4 window, under −0.9 for tics 92 to 157, recovered to −0.52 | No frame under 10 dB (0) |
+| 95k | −1.26; three rollouts under −1.0, one a 4.5 dB near-blank frame at tics 80 to 83 that recovered to 21.5 dB, one ending at −0.89 and 13.3 dB | Touched the absorbing state and recovered | −0.58 | Clear (0) |
+| 100k | Rollout 15 (map 5) under −0.9 from tic 183, at −1.04 with a 10.2 dB frame at 256 | Closest approach to the fixed point since 70k | −1.01 in the recurring map-4 window, recovered to 19.3 dB | Clear (0) |
+| 105k | −0.37 | Clean | −1.29; rollout 5 (map 4, the recurring window) under −0.9 from tic 108, ending at −1.12 and 13.4 dB; rollout 2 (map 5) under −0.9 from tic 175, ending at −0.97 and 12.2 dB | No blank frames; the first EMA rollouts to end in the zone (2) |
+
+Sources: RC 2026-09-25 02:30 (70k live), 09:20 (80k), 10:05 (85k), 13:45 (90k), 18:40 (95k), 19:00 (100k) and 21:00 (105k, and the EMA minimum and end-count series from 70k to 105k, which corrects the 02:30 entry's EMA value at 70k). The 75k live channel-13 minimum is not recorded.
+
+These reads establish that SD 3.5's live weights pass through periods in which closed-loop generation falls into an absorbing state in one latent channel, while teacher-forced quality and validation loss keep improving (validation loss reached a new low of 0.0917 at 72k, straight after the 70k collapse). They establish that the fp32 EMA at decay 0.9999 never reached the fixed values at any read from 50k to 105k. It made excursions under −0.9 at 70k, 75k, 85k, 90k, 100k and 105k, most often in one map-4 window, and recovered each time until 105k, where two EMA rollouts ended in that zone without blank frames (next paragraphs). The recorded reading is that noise augmentation at 0.7 over ten buckets does not cover the absorbing state and that the EMA keeps the released model out of it. The U-Net's live weights show a milder form of the same live-versus-EMA gap (earlier in this section). [RC 2026-09-24 15:55; 2026-09-25 01:40, 02:30.]
+
+They do not establish why the live weights enter the state, why it is intermittent, or that the EMA will stay clear to 200k. They do not show that the EMA is a general stabiliser, since only two rows and one EMA setting were observed. The candidate follow-up recorded on 2026-09-24 is a short rollout-consistency post-training that would test whether the fixed point can be removed from the live weights. The paper will report EMA rollouts and state the live-versus-EMA result with the per-rollout counts, and rollout arrays are now kept on every full read. [RC 2026-09-24 15:55.]
+
+**The 105k EMA long-horizon dip and the per-channel mean-shift family.** At 105k the EMA set its teacher-forced bests, 23.07 dB / 0.141 at h1 and 21.41 dB / 0.208 at h4, while its 256-tic rollout point fell to 16.86 dB, 0.66 dB under copy-seed. Two of 16 EMA rollouts ended in the channel-13 excursion zone, the first time for the EMA (table above), and neither produced blank frames. The live weights were clean at 105k, with a channel-13 minimum of −0.37, and held copy-seed at 256 tics (17.52 dB). The probe_v2 means were 0.16 / 0.18 / 0.18 and the directional check read 0.836 for the EMA and 0.820 for the live weights. The pairing rule therefore raised no flag, and the new item was the EMA's ending state. [RC 2026-09-25 21:00.]
+
+A seed-1 EMA rerun at 105k, on different validation windows, reproduced the weakness. It read 21.26 / 19.93 / 19.23 / 17.31 / 16.49 dB at 4 / 32 / 64 / 128 / 256 tics against its own copy-seed of 19.11 / 18.07 / 17.94 / 17.50 / 17.46. The EMA was therefore under copy-seed at 256 tics on both seeds, by 0.66 dB on seed 0 and 0.97 dB on seed 1. On seed 1, 12 of 16 rollouts crossed the steward's 3 dB line at some tic, 3 were below it at 256 tics (maps 4, 5 and 4), and three had frames under 10 dB. One rollout sat in the channel-13 zone for 77 tics and recovered, and none ended there. [RC 2026-09-25 22:15.]
+
+Seed-1 rollout 8 (map 5, episode 6011) ended at 7.1 dB without the channel-13 signature, so its latent statistics were read. Its RMS stayed at 1.00 to 1.17 against a data range of 1.00 to 1.59, so the latent kept its scale. Channel 15's per-frame mean stayed inside its data range through tic 192 and then fell to 0.38 by tic 256, against a range of 1.00 to 1.94, after an earlier 100-tic excursion that had recovered. Rollout 7 (map 4) shifted in channel 13 and rollout 10 (map 4) in channel 8. The recorded reading is that the EMA's long-horizon failures at 105k are per-channel mean shifts with the RMS in scale, in channels 13, 15 and 8. The absorbing state is a family of such shifts, not one channel. [RC 2026-09-25 22:40; `steward_105000/latstats_ema_seed1.json`.]
+
+The first proposal was to track the stability claim on every channel, counting the rollouts whose last frame has any channel mean outside the ground-truth 0.5 to 99.5 percentile band. The steward calibrated that count on the kept rollouts of every read from 55k to 105k before adopting it. The table gives, for each read, the rollouts out of 16 that end outside the band in any channel and in at least three channels.
+
+| Update | Live: any / at least three | EMA: any / at least three |
+|---:|---|---|
+| 55k | 8 / 8 | 6 / 5 |
+| 60k | 5 / 2 | 7 / 5 |
+| 65k | 4 / 2 | 5 / 3 |
+| 70k | 12 / 12 | 7 / 4 |
+| 75k | 5 / 3 | 7 / 5 |
+| 80k | 8 / 3 | 5 / 3 |
+| 85k | 8 / 4 | 8 / 3 |
+| 90k | 8 / 3 | 3 / 1 |
+| 95k | 8 / 3 | 4 / 3 |
+| 100k | 4 / 3 | 4 / 3 |
+| 105k | 6 / 4 | 8 / 5 |
+
+Source: RC 2026-09-25 23:00; `$D/tmp/steward/stw7_endstate.py`.
+
+The EMA sits at 3 to 8 rollouts in every read, and only the 70k live collapse (12 / 12) stands out. The band therefore catches ordinary scene drift, and the all-channel count is too noisy to carry a stability claim. From 110k each read reports, for both weight sets, the 256-tic PSNR against copy-seed, the channel-13 end count (under −0.9) and minimum, and the number of rollouts with any frame under 10 dB, with the all-channel count as context. [RC 2026-09-25 22:40, 23:00.]
+
+These reads establish that at 105k the SD 3.5 EMA is weaker past about 128 tics on two seeds and two window sets, while its teacher-forced quality and directional check are at or near their best. Maps 4 and 5 carry most of the failures. They establish that the EMA's long-horizon failures are per-channel mean shifts with the latent scale intact, unlike the live 70k collapse, which captured channel 13 at a fixed value and produced blank frames.
+
+They do not establish a trend. One read on two seeds cannot separate a checkpoint-level fluctuation from a drift, and the EMA's 256-tic point already moved by 1.1 dB between 75k and 100k (derived). The 110k and 115k reads decide it, and the 110k read was running at the cutoff. The log records the consequence if it is a trend: the paper's claim becomes “the EMA delays the closed-loop failure” instead of “the EMA stays clear”, and the released SD 3.5 checkpoint should be chosen by the rollout series, not by step count. [RC 2026-09-25 21:00, 22:15.]
+
+**Probe sensitivity episodes, and why the maximum misled.** `smoke_probe.py` reports newest-control sensitivity as the largest absolute element of the change in the v-prediction when all 19 bits of the newest executed control are flipped, at fixed noise, context and timestep t = 500, on one batch of four windows. An all-bits-flipped control is not a control the recorder can produce, so the probe measures the response to an off-manifold token, and a one-element maximum is a tail statistic. Commit `caf58bb` added the mean and 99th-percentile fields (called probe_v2 below) on 2026-09-25, and the steward reran the probe on 65k, 70k and 75k. From 80k probe_v2 joined every read. [RC 2026-09-25 04:30, 05:00.]
+
+| Update | Probe maximum, seeds 0 / 1 / 2 | probe_v2 mean, seeds 0 / 1 / 2 | Control-MLP update ratio | Source (RC) |
+|---:|---|---|---:|---|
+| 40k | 1.98 (one seed) | Not run | Not recorded | 09-24 11:30 |
+| 55k | 2.05 (one seed) | Not run | Not recorded | 09-24 23:30 |
+| 60k | 2.28 / 2.21 / 2.21 | 0.14, typical of three seeds (p99 0.86) | 0.081 | 09-24 23:30; 09-25 05:00 |
+| 65k | 9.13 / 8.30 / 8.48 | Not recorded | 0.155 | 09-24 23:30 |
+| 70k | 3.00 / 3.44 / 3.24 | 0.24 to 0.51 (typical 0.36, p99 1.5) | 0.095 | 09-25 01:40, 05:00, 13:45 |
+| 75k | 71.0 / 63.9 / 17.2 | 6.9 / 7.6 / 3.2 (p99 64.5 / 55.6 / 14.3) | Ordinary; not recorded | 09-25 04:30, 05:00 |
+| 80k | 17.5 / 8.6 / 16.9 | 2.2 / 1.0 / 1.5 | Not recorded | 09-25 09:20 |
+| 85k | Not recorded | 2.4 / 3.4 / 2.4 | Not recorded | 09-25 10:05 |
+| 90k | 4.3 / 4.5 / 4.2 | 0.63 / 0.78 / 0.63 | 0.082 | 09-25 13:45 |
+| 95k | 51 / 46 / 22 | 7.2 / 6.0 / 3.6 | 0.146 | 09-25 18:40 |
+| 100k | Not recorded | 0.19 / 0.57 / 0.20 | 0.088 | 09-25 18:40 |
+| 105k | Not recorded | 0.16 / 0.18 / 0.18, the lowest since 60k | Not recorded | 09-25 21:00 |
+
+The first episode looked like a learning event. Between 60k and 65k the maximum rose 3.8 times on three seeds, the control-MLP update ratio doubled from 0.081 to 0.155, the other ratios and the per-seed probe loss did not change, validation loss was flat at 0.0926 and no gradient spiked. At 70k the maximum fell back to about 3, so the 65k jump did not persist. At 75k it reached 71.0 on one seed. The probe_v2 fields showed that at 75k the whole difference field moved, with the mean 15 to 30 times its 70k value, rather than one element. The recorded interpretation is that the flipped token is off the data manifold, so the jump is an extrapolation property of the control embedding. It is watched, not acted on, while real control swaps, teacher-forced reads and rollouts stay normal, and the rule flags a future probe jump only if it pairs with a directional drop or a live collapse. [RC 2026-09-24 23:30; 2026-09-25 01:40, 04:30, 05:00.]
+
+At 95k the watched pairing occurred: the highest probe_v2 means of the series coincided with brief live channel-13 excursions. The directional check, the arbiter, showed no drop (EMA 0.836, live 0.828), so no flag was raised. The steward also recorded a pattern for analysis after the runs: probe_v2 was high at the reads at odd multiples of 5k (65k, 75k, 85k, 95k) and low at the reads at multiples of 10k (60k, 70k, 90k, 100k; 80k the exception), and both kinds were probed on recovery files. The maximum misled because it answered a narrower question than the one asked. It said that the response to an impossible control is heavy-tailed at some checkpoints. It did not say that real controls act 20 times more strongly. The directional check below, which swaps real controls, did not drop at any read where the probe rose. The alternation between odd and even multiples of 5k is recorded, not explained, and it did not hold at 105k, an odd multiple whose probe_v2 means were the lowest since 60k (derived from the 21:00 entry). [RC 2026-09-25 05:00, 18:40, 21:00.]
+
+**Directional check protocol:** `directional_check.py` at `999f6b2`, 22 tests, merged at 00:45 EDT on 2026-09-25. It draws turning windows from the validation split whose newest executed control holds exactly one of TURN_LEFT and TURN_RIGHT and no strafe, with the next four tics inside one life. It predicts each window twice from the same noise with the two turn bits swapped in the newest control only, decodes, and measures the horizontal shift of each frame against the decoded last context frame. The shift comes from normalised cross-correlation over ±32 px on rows 48 to 120 of a central crop, sub-pixel by a parabola fit. A left turn slides the scene right, which is a positive shift, and shifts under 1 px count as no motion. `ref_frac` is the fraction of windows in which the ground-truth next frame moves the way the control says; it checks the estimator and the sign convention and is read first. `correct_frac` is the fraction in which the predicted shift reverses under the swap. The motion ratio is the closed-loop four-tic ratio of predicted to true motion from review 7.2, on the same windows; persistence scores 0 by construction. Each run uses 64 windows per direction and takes about three minutes on GPU 3. The requested-action row is refused, since it has no control token to swap. [RC 2026-09-25 00:45, 02:10.]
+
+| Row, update | Weights | correct_frac (left / right) | Recorded-control median shift, left / right (px) | Swapped median shift, left / right (px) | Sign match | Motion ratio (per step) | Source (RC) |
+|---|---|---|---|---|---:|---|---|
+| U-Net 200k | EMA | 0.867 (0.859 / 0.875) | +19.1 / −19.1 | −19.8 / +22.1 | 0.92 | 0.893 (0.964 / 0.876 / 0.867 / 0.864) | 09-25 02:10 |
+| SD 3.5 70k | EMA | 0.805 (0.797 / 0.813) | +17.8 / −18.3; ground truth +18.2 | −18.8 / +21.1 | 0.90 | 0.938 (0.972 / 0.927 / 0.937 / 0.917) | 09-25 02:10 |
+| SD 3.5 75k | EMA | 0.8125 (0.797 / 0.828) | +17.8 / −18.8; ground truth +18.2 / −19.1 | −18.6 / +21.2 | Not recorded | 0.941 | 09-25 05:00 |
+| SD 3.5 75k | Live | 0.859 (0.844 / 0.875) | +19.4 / −19.0 | −19.6 / +22.0 | Not recorded | 0.920 | 09-25 05:00 |
+| SD 3.5 85k | EMA | 0.828 | Not recorded | Not recorded | Not recorded | Not recorded | 09-25 10:40 |
+| SD 3.5 90k | EMA / live | 0.836 / 0.828 | Not recorded | Not recorded | Not recorded | Not recorded | 09-25 18:20 |
+| SD 3.5 95k | EMA / live | 0.836 / 0.828 | Not recorded | Not recorded | Not recorded | EMA 0.94 | 09-25 18:20, 18:40 |
+| SD 3.5 100k | EMA / live | 0.844 / 0.836 | Not recorded | Not recorded | Not recorded | EMA 0.94, live 0.96 | 09-25 19:00 |
+| SD 3.5 105k | EMA / live | 0.836 / 0.820 | Not recorded | Not recorded | Not recorded | Not recorded | 09-25 21:00 |
+
+The estimator check passed before any model was read. The ground-truth next frame moved the way the control implies in 0.91 to 0.92 of windows on decoded frames and 0.90 on raw frames for both rows, and 0.914 decoded and 0.898 raw at 75k. The shift estimator and the left-turn-positive convention therefore hold. [RC 2026-09-25 02:10, 05:00, 18:20.]
+
+This table establishes that both rows turn the way the executed control says, with about the true magnitude, and that swapping the turn reverses the predicted motion. At the median the recorded-control shifts sit within 1.2 px of the ground-truth medians recorded at 75k (+18.2 px left, −19.1 px right), and the swapped shifts reverse sign. Neither row learned persistence. This answers the open gap of section 4.10: the probe showed that the output depends on the newest control, and the directional check shows that the dependence has the right sign. The U-Net reversed under the swap a little more often (0.867 against SD 3.5's 0.805 at 70k), and SD 3.5 kept more of the true motion over four tics (0.938 against 0.893). The SD 3.5 EMA value rose from 0.805 at 70k to 0.844 at 100k, the best of the series, and read 0.836 at 105k.
+
+The table does not resolve those orderings. With 128 windows per run, one window moves `correct_frac` by 0.008, and the whole SD 3.5 range from 0.805 to 0.844 is five windows. A binomial standard error at 0.83 over 128 windows is about 0.033, and that of a difference between two such runs about 0.047 (derived). The 0.039 rise from 70k to 100k and the 0.062 gap between the rows are therefore each under 1.5 standard errors of a difference; this ignores that the runs share windows. The check covers turning windows on seen-map validation episodes only, and the motion ratio covers four tics only.
+
+**PixArt-alpha from launch to 106.8k.** The third row, `041-pixart-nexttic`, launched on GPU 1 at 20:32 EDT on 2026-09-24 from `repo_launch2` at commit `f5386f1`. It is the first row on the new code, with native W&B logging and periodic reads on another card. Its gates ran from 20:13 to 20:31 EDT and all passed: audits with 0 mismatches, latent alignment, fit at 1.141 updates/s and 26.8 GB allocated (27.7 GB reserved, no checkpointing), the 300-step smoke (9.4 GB recovery checkpoint, 2.4 GB snapshot), probes, resume and four readbacks. The printed `GATES_LAUNCH pixart` line carries `MB=32 WORKERS=12 STEPS=200000 ACTION_HISTORY=32 EVAL_EVERY=5000 EVAL_DEVICE=cuda:3`. The model has 628 M parameters and receives controls through `--action-inject token`. It trains on the same 2,000 training and 100 validation episodes, and ran at 1.37 updates/s and 28.8 GB at step 100. Its config records `wandb: true` and periodic reads every 5k on `cuda:3` into `eval_<step>/`. [RC 2026-09-24 20:35.]
+
+| Update | Live h1 PSNR / LPIPS | EMA h1 | Live h4 PSNR / LPIPS | Status and notes | Source (RC) |
+|---:|---|---|---|---|---|
+| 5k | 20.91 / 0.305 | Warming | 19.10 / 0.410 | ok; 22 minutes | 09-24 22:20 |
+| 10k | 21.52 / 0.282 | Not recorded | Not recorded | ok; level with the U-Net at 10k | 09-24 23:30 |
+| 20k | 21.76 / 0.237 (+0.19) | Not recorded | 20.34 / 0.320 | ok; probe sensitivity 1.56 | 09-25 01:40 |
+| 25k | 21.79 / 0.229 | 21.48, nearly warmed | 20.50 / 0.311 | ok | 09-25 02:30 |
+| 30k | +0.33 dB gain | +0.14 dB gain | +1.30 dB gain | ok | 09-25 04:30 |
+| 65k | Not recorded | Not recorded | Not recorded | Both h4 labels lost to OOM | 09-25 11:45 |
+| 70k | Lost | Not recorded | Not recorded | `tf_live_h1`, `tf_ema_h4` and the probe lost to OOM; recovered by hand | 09-25 11:45, 18:40 |
+| 70k to 95k | Not recorded | Gain +0.62 to +0.71 | EMA gain +1.73 to +1.86 | 75k to 95k all ok | 09-25 18:40 |
+| 95k | Not recorded | Gain +0.71 | EMA gain +1.86 | ok | RC section 0 |
+| 105k | Not recorded | Not recorded | Not recorded | ok | 09-25 21:00 |
+
+PixArt's validation loss fell monotonically from 0.196 at 11.2k to 0.1836 at 24k, 0.1758 at 39k, 0.1685 at 61.9k and 0.1610 at 97k. From about 12:40 EDT on 2026-09-25 another user's `extract.py --gpu 1` shared its card, and it slowed from about 1.40 to 0.66 to 0.85 updates/s, about 57 percent of normal. It was back at 1.24 to 1.38 updates/s at 99.5k by 19:00, when that job eased. The CPU load from other users' jobs that evening cut it to 0.6 updates/s from 0.95 at 22:15, and it returned to 0.9 to 1.36 updates/s after the load fell at about 22:45. It stood at 106.8k at 21:00. Its probe_v2 series stopped when the steward's 70k and 75k holds were released for disk space (section 4.11); it had been flat from 45k to 55k. [RC 2026-09-24 22:50; 2026-09-25 01:40, 02:30, 04:30, 09:20, 12:55, 13:15, 13:25, 19:00, 21:00, 22:15, 23:00.]
+
+This table establishes that PixArt trains stably under the matched recipe and tracks the U-Net's curve. It was level with it at 10k and had an EMA one-tic gain of +0.62 to +0.71 dB from 70k to 95k against the U-Net's +0.65 to +0.73 dB at 70k to 90k (section above). Its periodic reads come from the trainer's own evaluator on another card, so they are not the steward's full reads. The log records only their teacher-forced values and the 20k probe; no PixArt rollout or directional check is recorded. Nothing here compares PixArt with SD 3.5 or ranks the three rows. That waits for 200k.
+
+**What the numbers license.** At 10 sampling steps on seen-map validation windows, all three rows beat one-tic and four-tic persistence in PSNR with their EMA weights. The U-Net and SD 3.5 EMA weights also beat it in LPIPS at one tic, The U-Net's EMA at 200k stays above copy-seed in PSNR for 256 tics on 16 rollouts. SD 3.5's EMA did so from 90k to 100k and fell under it at 105k on two seeds. SD 3.5's live weights have an intermittent absorbing state in which latent channel 13 is captured at a fixed value and the frames go blank; its EMA never reached that state, and its own long-horizon failures at 105k are per-channel mean shifts without blank frames. Both measured rows turn the right way under a control swap.
+
+They do not license a ranking of the rows before the matched 200k reads, a result under the paper's step count and decoder, any statement about unseen maps (section 3.14 shows the U-Net losing to persistence on most of them), a perceptual rollout lead at 256 tics, a claim that the SD 3.5 EMA stays stable to 200k, or a causal account of either failure. The 16-rollout reads carry no intervals, and the 5k-series teacher-forced reads carry only independent-window standard errors that understate episode-level uncertainty (section 3.12).
+
