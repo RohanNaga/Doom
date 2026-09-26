@@ -14,6 +14,28 @@ decoder touches (Sep 26 2026).
 
 `--wandb-run <training run>` also appends the raw PSNR, LPIPS and persistence floor to the W&B run
 `<training run>-eval` as eval/<live|ema>_h<H>/..., at the step in the checkpoint's filename.
+
+One pass leaves every per-window quantity a table needs in `per_window.csv` (the cohesion decision,
+`.claude/analyses/evaluation-cohesion-decision-2026-09-26.md`, item 3). Every column that existed before
+it keeps its name, value and position; the additions follow them:
+
+* `copy_lpips_dec`, the decoded copy-last frame's LPIPS against the decoded truth, beside `lpips_dec`;
+* a pixel MSE beside every PSNR (`psnr` replaced by `mse` in the name), so a mean of PSNRs and the PSNR
+  of a mean MSE can both be recomputed;
+* `scene_*`, every full-frame pixel metric again on rows 0 to 207, the frame without the 32-row HUD that
+  the `hud_*` columns score;
+* `dup_raw` (the raw target repeats the raw last context frame) and `dup_latent` (copy-last latent MSE is
+  exactly 0), counted under `duplicates` in metrics.json, which also carries `<mean>_nodup` beside every
+  mean, taken over the windows neither flag marks;
+* `start_tic`, `scored_tic` and `context_motion`, the mean absolute latent change between consecutive
+  context frames.
+
+`--decoder [name=]path` (repeatable) decodes the SAME predictions with a further decoder, a fine-tuned
+one from `finetune_decoder.py` for instance; its pixel columns carry the suffix `_<name>` (`_tuned` when no
+name is given). `--vae-path`, the stock decoder by default, is always scored and keeps the unsuffixed
+names. Latent and persistence columns are decoder-free and appear once. `--save-latents` writes the
+scored predictions in fp16, with the window identities, to `pred_latents.npz`, so a later decoder never
+forces a resample.
 """
 import argparse
 import csv
@@ -21,6 +43,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import time
 
 import numpy as np
@@ -38,11 +61,135 @@ from timestep_spacing import sample as sample_spaced
 from wandb_log import add_eval_args, log_evaluation
 
 HUD_ROWS = 32
+# The per-window columns the frozen results were read from, in their original order. per_window.csv
+# and metrics.json keep them first, so every earlier reader, positional or by name, reads the same file.
+LEGACY_COLUMNS = ("psnr_dec", "lpips_dec", "copy_psnr_dec", "latent_mse", "copy_latent_mse", "latent_mse_ratio",
+                  "hud_psnr_dec", "psnr_raw", "lpips_raw", "copy_psnr_raw", "vae_psnr", "vae_lpips",
+                  "hud_psnr_raw", "hud_vae_psnr", "persist_psnr_raw", "persist_lpips_raw", "persist_hud_psnr_raw")
+# columns that identify or flag a window rather than score it; they are never averaged
+WINDOW_COLUMNS = ("index", "episode", "map", "start", "action", "tics_since_decision",
+                  "start_tic", "scored_tic", "dup_raw", "dup_latent")
+DUPLICATE_FLAGS = ("dup_raw", "dup_latent")
+LATENTS_FILE = "pred_latents.npz"
+DEFAULT_DECODER_NAME = "tuned"
+RESERVED_DECODER_NAMES = ("nodup",)       # `_nodup` already suffixes the summary's duplicate-free means
 
 
 def psnr(a, b):
     mse = ((a - b) ** 2).flatten(1).mean(1).clamp_min(1e-10)
     return 10 * torch.log10(1.0 / mse)
+
+
+def pixel_mse(a, b):
+    """Per-sample mean squared error of images in [0, 1]: what `psnr` takes the log of, unclamped.
+
+    Kept beside every PSNR so both aggregations can be recomputed from the rows: the mean of per-window
+    PSNRs (a mean of logs, the reported one) and the PSNR of the mean MSE (a log of means). An exact
+    repeat reads 0 here where `psnr` clamps it to 100 dB.
+    """
+    return ((a - b) ** 2).flatten(1).mean(1)
+
+
+def hud_crop(x):
+    """The bottom `HUD_ROWS` rows of (B, 3, H, W) frames: the status bar, rows 208 to 239 of 240."""
+    return x[:, :, -HUD_ROWS:]
+
+
+def scene_crop(x):
+    """The rows above the HUD, 0 to 207 of 240. With `hud_crop` it tiles the frame exactly."""
+    return x[:, :, :-HUD_ROWS]
+
+
+def lpips_of(lp, a, b):
+    """LPIPS of two (1, 3, H, W) images in [0, 1], mapped to [-1, 1] the way every LPIPS column is."""
+    return float(lp(a * 2 - 1, b * 2 - 1).flatten())
+
+
+def pair_metrics(a, b, lp, psnr_key, lpips_key=None, hud_key=None):
+    """PSNR, pixel MSE and, with `lpips_key`, LPIPS of image `a` against reference `b`, keyed by column.
+
+    The full frame goes under `psnr_key` and `lpips_key`, the HUD crop's PSNR and MSE under `hud_key` when
+    one is given, and every full-frame metric again on the scene crop under a `scene_` prefix. An MSE key
+    is its PSNR key with `psnr` replaced by `mse`. `a` and `b` are (1, 3, 240, 320) images in [0, 1].
+    """
+    out = {psnr_key: float(psnr(a, b)), psnr_key.replace("psnr", "mse"): float(pixel_mse(a, b))}
+    if lpips_key:
+        out[lpips_key] = lpips_of(lp, a, b)
+    if hud_key:
+        ha, hb = hud_crop(a), hud_crop(b)
+        out[hud_key] = float(psnr(ha, hb))
+        out[hud_key.replace("psnr", "mse")] = float(pixel_mse(ha, hb))
+    sa, sb = scene_crop(a), scene_crop(b)
+    out["scene_" + psnr_key] = float(psnr(sa, sb))
+    out["scene_" + psnr_key.replace("psnr", "mse")] = float(pixel_mse(sa, sb))
+    if lpips_key:
+        out["scene_" + lpips_key] = lpips_of(lp, sa, sb)
+    return out
+
+
+def decoder_metrics(pred, gt, last, lp, raw=None):
+    """Every pixel column of one window that depends on the decoder, under its unsuffixed name.
+
+    `pred`, `gt` and `last` are one decoder's decodings of the predicted latent, the true latent and the
+    last real context latent; `raw` is the lossless target frame, or None. Each is (1, 3, 240, 320) in
+    [0, 1]. The decoded truth is the reference of the `*_dec` columns, so the decoder's floor cancels;
+    the raw frame is the reference of the `*_raw` columns; `vae_*` is the decoder's reconstruction of the
+    truth against the raw frame, the ceiling. `copy_*` is the decoded last context latent.
+    """
+    m = pair_metrics(pred, gt, lp, "psnr_dec", "lpips_dec", "hud_psnr_dec")
+    m.update(pair_metrics(last, gt, lp, "copy_psnr_dec", "copy_lpips_dec"))
+    if raw is not None:
+        m.update(pair_metrics(pred, raw, lp, "psnr_raw", "lpips_raw", "hud_psnr_raw"))
+        m.update(pair_metrics(last, raw, lp, "copy_psnr_raw"))
+        m.update(pair_metrics(gt, raw, lp, "vae_psnr", "vae_lpips", "hud_vae_psnr"))
+    return m
+
+
+def persistence_metrics(last_raw, raw, lp):
+    """The decoder-free floor of one window: the RAW last context frame against the RAW target."""
+    return pair_metrics(last_raw, raw, lp, "persist_psnr_raw", "persist_lpips_raw", "persist_hud_psnr_raw")
+
+
+def context_motion(ctx, latent_channels):
+    """Per window, the mean absolute latent change between consecutive frames of the real context."""
+    ctx = ctx.float()
+    return (ctx[:, latent_channels:] - ctx[:, :-latent_channels]).abs().flatten(1).mean(1)
+
+
+def parse_decoders(specs):
+    """[(name, path)] from repeated `--decoder [name=]path` values, in the order given.
+
+    The name becomes the column suffix `_<name>`, so it is a plain identifier (letters and digits,
+    starting with a letter); a value whose text before `=` is not one is a path, and takes the default
+    name `tuned`. Two decoders under one name would write one set of columns twice, so that is refused.
+    """
+    out, seen = [], set()
+    for spec in specs or []:
+        name, sep, path = spec.partition("=")
+        if not (sep and re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", name)):
+            name, path = DEFAULT_DECODER_NAME, spec
+        if not path:
+            raise SystemExit(f"--decoder {spec!r} names no path")
+        if name in RESERVED_DECODER_NAMES:
+            raise SystemExit(f"--decoder name {name!r} is reserved (the summary's `_{name}` means use it)")
+        if name in seen:
+            raise SystemExit(f"--decoder {name!r} given twice; name each decoder as name=path")
+        seen.add(name)
+        out.append((name, path))
+    return out
+
+
+def window_start_tic(ds, gi, tic_stride):
+    """The recorded tic of window `gi`'s first context frame (row times the spacing in old layouts)."""
+    slot, start = ds.locate(gi)
+    ep = ds.episodes[slot]
+    tics = ep[5] if len(ep) > 5 else None
+    return int(tics[start]) if tics is not None else start * tic_stride
+
+
+def duplicate_rule(flags):
+    """The one exclusion rule every `*_nodup` mean uses, in words, for the flags this run could set."""
+    return f"a window is left out of every *_nodup mean when {' or '.join(flags)} is 1"
 
 
 def copy_last_latent_mse(ctx, tgt, latent_channels):
@@ -140,6 +287,12 @@ def decoder_record(args):
     if args.vae_subfolder and os.path.isdir(os.path.join(path, args.vae_subfolder)):
         path = os.path.join(path, args.vae_subfolder)
     return describe(path)
+
+
+def extra_decoder_record(name, path):
+    """`decoder_record` for a `--decoder` decoder, with the suffix its columns carry."""
+    from decoder_provenance import describe
+    return {**describe(path), "path": path, "suffix": f"_{name}"}
 
 
 class HorizonOne(torch.utils.data.Dataset):
@@ -255,9 +408,14 @@ def main(args):
         raise SystemExit("--horizon-tics > 1 rolls the model forward tic by tic, which only means "
                          "something for a next-tic model (the checkpoint's tic_stride is "
                          f"{tic_stride})")
+    extra_specs = parse_decoders(args.decoders)
     model, step, objective = load_model(args, device, latent_channels, trained)
     vae = build_vae(args.vae_path, args.vae_subfolder, device, args.hf_cache, latent_channels=latent_channels,
                     scaling_factor=args.latent_scale, shift_factor=args.latent_shift)
+    # a tuned decoder reads the stock encoder's latents, so it must declare the corpus's own contract
+    extra_vaes = [(name, build_vae(path, "", device, args.hf_cache, latent_channels=latent_channels,
+                                   scaling_factor=args.latent_scale, shift_factor=args.latent_shift))
+                  for name, path in extra_specs]
     import lpips
     lp = lpips.LPIPS(net=args.lpips_net, verbose=False).to(device).eval()
     diffusion = VDiffusion(device=device, objective=objective)
@@ -282,10 +440,10 @@ def main(args):
     if hasattr(ds, "summary"):
         print(f"window validity: {json.dumps(ds.summary)}")
 
-    def dec(z):
-        return decode(vae, z, args.latent_scale, args.latent_shift)
+    def dec(z, with_vae=vae):
+        return decode(with_vae, z, args.latent_scale, args.latent_shift)
 
-    rows, t_sample, n = [], 0.0, 0
+    rows, saved, t_sample, n = [], [], 0.0, 0
     for b, (ctx, tgts, acts, phases) in enumerate(loader):
         ctx, tgts, acts, phases = ctx.to(device), tgts.to(device), acts.to(device), phases.to(device)
         B = ctx.shape[0]
@@ -322,41 +480,49 @@ def main(args):
         torch.cuda.synchronize() if device == "cuda" else None
         t_sample += time.time() - t0; n += B
         tgt = tgts[:, K - 1]
-        pred_img, gt_img, last_img = dec(pred), dec(tgt), dec(ctx[:, -latent_channels:])
+        last = ctx[:, -latent_channels:]
+        pred_img, gt_img, last_img = dec(pred), dec(tgt), dec(last)
+        # the same predictions through every further decoder: one sample, several renderings
+        extra_imgs = [(name, (dec(pred, v), dec(tgt, v), dec(last, v))) for name, v in extra_vaes]
         lat_mse = ((pred.float() - tgt.float()) ** 2).flatten(1).mean(1)
         # the decoder-free persistence reference: the last REAL context latent, K tics before the target
         copy_mse = copy_last_latent_mse(ctx, tgt, latent_channels)
         mse_ratio = latent_mse_ratio(lat_mse, copy_mse)
+        motion = context_motion(ctx, latent_channels)
+        if args.save_latents:
+            saved.append(pred.detach().to(torch.float16).cpu())
         for i in range(B):
             gi = gis[i]; slot, start = ds.locate(gi)
             ep_id, map_id = ds.episodes[slot][0], ds.episodes[slot][3]
             r = dict(index=gi, episode=ep_id, map=map_id, start=start,
                      action=int(acts[i, K - 1]) if acts.ndim == 2 else -1,
-                     tics_since_decision=int(phases[i, K - 1]),
-                     psnr_dec=float(psnr(pred_img[i:i+1], gt_img[i:i+1])), lpips_dec=float(lp(pred_img[i:i+1] * 2 - 1, gt_img[i:i+1] * 2 - 1).flatten()),
-                     copy_psnr_dec=float(psnr(last_img[i:i+1], gt_img[i:i+1])), latent_mse=float(lat_mse[i]),
-                     copy_latent_mse=float(copy_mse[i]), latent_mse_ratio=float(mse_ratio[i]),
-                     hud_psnr_dec=float(psnr(pred_img[i:i+1, :, -HUD_ROWS:], gt_img[i:i+1, :, -HUD_ROWS:])))
+                     tics_since_decision=int(phases[i, K - 1]))
+            tic = ds.target_tic(gi)
+            if tic is None:
+                tic = (start + args.context_frames) * tic_stride
+            scored_tic = tic + (K - 1) * tic_stride
+            rf = lf = None
             if raw is not None:
-                tic = ds.target_tic(gi)
-                if tic is None:
-                    tic = (start + args.context_frames) * tic_stride
-                scored_tic = tic + (K - 1) * tic_stride
                 rf = torch.from_numpy(raw.get(ep_id, scored_tic)).permute(2, 0, 1).float().div(255).unsqueeze(0).to(device)
-                r.update(psnr_raw=float(psnr(pred_img[i:i+1], rf)), lpips_raw=float(lp(pred_img[i:i+1] * 2 - 1, rf * 2 - 1).flatten()),
-                         copy_psnr_raw=float(psnr(last_img[i:i+1], rf)), vae_psnr=float(psnr(gt_img[i:i+1], rf)),
-                         vae_lpips=float(lp(gt_img[i:i+1] * 2 - 1, rf * 2 - 1).flatten()),
-                         hud_psnr_raw=float(psnr(pred_img[i:i+1, :, -HUD_ROWS:], rf[:, :, -HUD_ROWS:])),
-                         hud_vae_psnr=float(psnr(gt_img[i:i+1, :, -HUD_ROWS:], rf[:, :, -HUD_ROWS:])))
                 # The floor, decoder-independent: the RAW last context frame against the RAW target.
-                # `copy_psnr_raw` above decodes the last latent first, so it carries the decoder's own
+                # `copy_psnr_raw` decodes the last latent first, so it carries the decoder's own
                 # reconstruction error and is NOT a persistence reference; it is kept for continuity
                 # with the stride-4 rows, and `persist_*_raw` is the floor every next-tic number is
                 # read against.
                 lf = torch.from_numpy(raw.get(ep_id, scored_tic - K * tic_stride)).permute(2, 0, 1).float().div(255).unsqueeze(0).to(device)
-                r.update(persist_psnr_raw=float(psnr(lf, rf)),
-                         persist_lpips_raw=float(lp(lf * 2 - 1, rf * 2 - 1).flatten()),
-                         persist_hud_psnr_raw=float(psnr(lf[:, :, -HUD_ROWS:], rf[:, :, -HUD_ROWS:])))
+            m = {"latent_mse": float(lat_mse[i]), "copy_latent_mse": float(copy_mse[i]),
+                 "latent_mse_ratio": float(mse_ratio[i])}
+            m.update(decoder_metrics(pred_img[i:i+1], gt_img[i:i+1], last_img[i:i+1], lp, rf))
+            if raw is not None:
+                m.update(persistence_metrics(lf, rf, lp))
+            for name, imgs in extra_imgs:
+                m.update({f"{k}_{name}": v for k, v in decoder_metrics(*(im[i:i+1] for im in imgs), lp, rf).items()})
+            r.update({k: m.pop(k) for k in LEGACY_COLUMNS if k in m})
+            r.update(start_tic=window_start_tic(ds, gi, tic_stride), scored_tic=scored_tic,
+                     context_motion=float(motion[i]), dup_latent=int(float(copy_mse[i]) == 0.0))
+            if raw is not None:
+                r["dup_raw"] = int(m["persist_mse_raw"] == 0.0)
+            r.update(m)
             rows.append(r)
         if b < args.save_images:
             from torchvision.utils import save_image
@@ -364,33 +530,65 @@ def main(args):
         if (b + 1) % 10 == 0:
             print(f"  {len(rows)}/{len(idx)} psnr_dec={np.mean([r['psnr_dec'] for r in rows]):.2f}", flush=True)
 
-    keys = [k for k in rows[0] if k not in ("index", "episode", "map", "start", "action", "tics_since_decision")]
+    keys = [k for k in rows[0] if k not in WINDOW_COLUMNS]
 
     def agg(k, subset=None):
         src = rows if subset is None else subset
         v = np.array([r[k] for r in src], dtype=np.float64); v = v[~np.isnan(v)]
         return {"mean": float(v.mean()), "sem": float(v.std(ddof=1) / np.sqrt(len(v))), "n": int(len(v))} if len(v) else None
-    summary = {k: agg(k) for k in keys}
-    summary["per_map"] = {str(m): {k: float(np.mean([r[k] for r in rows if r["map"] == m])) for k in ("psnr_dec", "lpips_dec")}
-                          for m in sorted(set(r["map"] for r in rows))}
+
     # is the first tic after a decision harder than the three that follow it? `tics_since_decision`
     # of the SCORED target, so bucket 0 is a decision tic and the last bucket is off the grid
     phase_keys = [k for k in ("psnr_dec", "lpips_dec", "psnr_raw", "persist_psnr_raw") if k in rows[0]]
-    summary["per_tics_since_decision"] = {
-        str(p): {**{k: agg(k, [r for r in rows if r["tics_since_decision"] == p]) for k in phase_keys},
-                 "windows": sum(1 for r in rows if r["tics_since_decision"] == p)}
-        for p in sorted({r["tics_since_decision"] for r in rows})}
+
+    def breakdowns(src):
+        """(per-map means, per-`tics_since_decision` aggregates) over the windows in `src`."""
+        per_map = {str(m): {k: float(np.mean([r[k] for r in src if r["map"] == m])) for k in ("psnr_dec", "lpips_dec")}
+                   for m in sorted(set(r["map"] for r in src))}
+        per_phase = {str(p): {**{k: agg(k, [r for r in src if r["tics_since_decision"] == p]) for k in phase_keys},
+                              "windows": sum(1 for r in src if r["tics_since_decision"] == p)}
+                     for p in sorted({r["tics_since_decision"] for r in src})}
+        return per_map, per_phase
+
+    summary = {k: agg(k) for k in keys}
+    summary["per_map"], summary["per_tics_since_decision"] = breakdowns(rows)
+    # One exclusion rule for every column: a window whose target repeats its last context frame, in raw
+    # pixels or in latents, is counted here and left out of every `_nodup` mean. The means above it still
+    # average every window, as every frozen result did.
+    flags = [f for f in DUPLICATE_FLAGS if f in rows[0]]
+    kept = [r for r in rows if not any(r[f] for f in flags)]
+    summary["duplicates"] = {"rule": duplicate_rule(flags), "windows": len(rows),
+                             **{f: sum(r[f] for r in rows) for f in flags}, "excluded": len(rows) - len(kept)}
+    summary.update({f"{k}_nodup": agg(k, kept) for k in keys})
+    summary["per_map_nodup"], summary["per_tics_since_decision_nodup"] = breakdowns(kept)
     summary["sampling_frames_per_s"] = n / max(t_sample, 1e-9)
     summary["config"] = {**vars(args), "step": step, "resolved_latent_channels": latent_channels,
                          "resolved_objective": objective, "checkpoint_interface": trained,
                          "horizon_tics": K, "game_time_tics": K * tic_stride,
                          "window_validity": getattr(ds, "summary", None)}
     summary["decoder"] = decoder_record(args)
+    summary["extra_decoders"] = {name: extra_decoder_record(name, path) for name, path in extra_specs}
     json.dump(summary, open(os.path.join(args.out_dir, "metrics.json"), "w"), indent=1)
     with open(os.path.join(args.out_dir, "per_window.csv"), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
-    print(json.dumps({k: v for k, v in summary.items() if k not in ("config", "per_map")}, indent=1))
+    if args.save_latents:
+        save_latents(os.path.join(args.out_dir, LATENTS_FILE), torch.cat(saved), rows, K)
+    print(json.dumps({k: v for k, v in summary.items() if k not in ("config", "per_map", "per_map_nodup")}, indent=1))
     log_evaluation(args, wandb_tag(args), summary, ckpt=args.ckpt, recorded_step=step, out_dir=args.out_dir)
+
+
+def save_latents(path, preds, rows, horizon):
+    """The scored predictions, fp16, with the identities that find each window again, as one npz.
+
+    `pred` is (N, C, H, W) in per_window.csv's row order: at horizon K the Kth tic's prediction, the
+    latent every pixel column decoded. Beside it, per window, `index` (the dataset index), `episode`,
+    `start` (the context's first row in the episode's latents), `start_tic`, `scored_tic`, `map` and
+    `tics_since_decision`, and the scalar `horizon_tics`. The true and last-context latents are the
+    corpus rows `start + L + K - 1` and `start + L - 1`, so a later decoder can rescore every column.
+    """
+    ids = ("index", "episode", "start", "start_tic", "scored_tic", "map", "tics_since_decision")
+    np.savez(path, pred=preds.to(torch.float16).numpy(), horizon_tics=np.int64(horizon),
+             **{k: np.array([r[k] for r in rows], dtype=np.int64) for k in ids})
 
 
 def build_parser():
@@ -436,6 +634,14 @@ def build_parser():
     p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-path (e.g. vae for a full pipeline repo)")
     p.add_argument("--latent-scale", type=float, default=LATENT_SCALE, help="scaling_factor the corpus was encoded with")
     p.add_argument("--latent-shift", type=float, default=None, help="shift_factor the corpus was encoded with (SD 3.5: 0.0609)")
+    p.add_argument("--decoder", dest="decoders", action="append", default=None, metavar="[NAME=]PATH",
+                   help="a further decoder (a finetune_decoder.py output, <out> or <out>/vae) that decodes the same "
+                        "predictions; its pixel columns carry the suffix _NAME (_tuned by default). Repeatable. "
+                        "--vae-path is always scored and keeps the unsuffixed names; the latent contract "
+                        "(--latent-scale, --latent-shift) is checked against each decoder's config")
+    p.add_argument("--save-latents", action="store_true",
+                   help=f"write the scored predictions (fp16) and the window identities to {LATENTS_FILE} "
+                        "beside metrics.json, so a later decoder can rescore without resampling")
     p.add_argument("--sd-path", default="CompVis/stable-diffusion-v1-4")
     p.add_argument("--pixart-path", default=PIXART_DEFAULT)
     p.add_argument("--unidiffuser-path", default=UNIDIFFUSER_DEFAULT)
