@@ -404,6 +404,76 @@ The 32 context latents are concatenated with the noisy target latent along the c
 
 The SD 1.x autoencoder (`sd-vae-ft-mse`, 8× downsampling) maps a padded 320×256 frame to 4×32×40 with scale 0.18215. The SD 3.5 autoencoder gives 16×32×40 with shift 0.0609 and scale 1.5305. Padding rows are cropped before every decode so only the 240 real rows are scored. [`encode_parquet.py:155–189`; `backbones.py:34–74`] The 16-channel space reconstructs our validation frames at about 27.5 dB against 23.5 dB for the 4-channel space (stock decoders; section 3.7's alignment gate). That gap belongs to the SD 3.5 row as a system: its lead mixes a better representation with its backbone. A Flux autoencoder, also 16 channels, is not interchangeable, because its scale and shift differ.
 
+<figure>
+<div class="svg-wrap" tabindex="0"><svg viewBox="0 0 760 318" role="img" aria-label="Data flow. ViZDoom with Arnold records every tic into one raw parquet per episode: a 320 by 240 RGB frame, the requested buttons, tic, deaths and map. Frames are padded to 256 rows and encoded once per latent space by a frozen VAE encoder, taking the posterior mean: 4 by 32 by 40 in the SD 1.x space, 16 by 32 by 40 in the SD 3.5 space. Per-tic latents with a sidecar holding the executed buttons and the deaths counter are cut into windows of 32 context tics and one target within one life, which feed the trainer. Separately, for scoring only, a predicted latent is decoded by the stock decoder, cropped back to 240 rows, and compared with the raw target frame by PSNR and LPIPS.">
+<defs><marker id="f7-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="currentColor"/></marker><marker id="f7-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#d0652f"/></marker></defs>
+<rect x="16" y="30" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="96.0" y="49.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">ViZDoom</text>
+<text x="96.0" y="63.0" font-size="11" text-anchor="middle" fill="currentColor">Arnold vs bots, 35 Hz,</text>
+<text x="96.0" y="77.0" font-size="11" text-anchor="middle" fill="currentColor">stored every tic</text>
+<rect x="208" y="30" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="288.0" y="49.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">raw parquet</text>
+<text x="288.0" y="63.0" font-size="11" text-anchor="middle" fill="currentColor">320×240 RGB, requested</text>
+<text x="288.0" y="77.0" font-size="11" text-anchor="middle" fill="currentColor">buttons, tic, deaths, map</text>
+<rect x="400" y="30" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="480.0" y="49.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">pad height</text>
+<text x="480.0" y="63.0" font-size="11" text-anchor="middle" fill="currentColor">black rows 240 → 256</text>
+<text x="480.0" y="77.0" font-size="11" text-anchor="middle" fill="currentColor">(320×256 input)</text>
+<rect x="592" y="30" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="672.0" y="49.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">frozen VAE encoder</text>
+<text x="672.0" y="63.0" font-size="11" text-anchor="middle" fill="currentColor">posterior mean, no sample;</text>
+<text x="672.0" y="77.0" font-size="11" text-anchor="middle" fill="currentColor">run once per space</text>
+<line x1="176" y1="59.0" x2="206" y2="59.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<line x1="368" y1="59.0" x2="398" y2="59.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<line x1="560" y1="59.0" x2="590" y2="59.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<text x="96.0" y="104" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">one parquet per episode</text>
+<rect x="400" y="128" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="480.0" y="147.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">SD 1.x space</text>
+<text x="480.0" y="161.0" font-size="11" text-anchor="middle" fill="currentColor">4 × 32 × 40,</text>
+<text x="480.0" y="175.0" font-size="11" text-anchor="middle" fill="currentColor">scale 0.18215</text>
+<rect x="592" y="128" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="672.0" y="147.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">SD 3.5 space</text>
+<text x="672.0" y="161.0" font-size="11" text-anchor="middle" fill="currentColor">16 × 32 × 40,</text>
+<text x="672.0" y="175.0" font-size="11" text-anchor="middle" fill="currentColor">shift 0.0609, scale 1.5305</text>
+<line x1="672.0" y1="88" x2="672.0" y2="126" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<path d="M672.0,104 H480.0 V126" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<text x="576.0" y="119" font-size="11" text-anchor="middle" fill="currentColor" opacity=".75">same frames, encoded twice</text>
+<rect x="208" y="128" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="288.0" y="147.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">per-tic latents</text>
+<text x="288.0" y="161.0" font-size="11" text-anchor="middle" fill="currentColor">(T, C, 32, 40) fp16, and a</text>
+<text x="288.0" y="175.0" font-size="11" text-anchor="middle" fill="currentColor">sidecar: buttons[:19], deaths</text>
+<line x1="398" y1="157.0" x2="370" y2="157.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<path d="M672.0,186 V204 H288.0 V188" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<rect x="16" y="128" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04"/>
+<text x="96.0" y="147.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">windows</text>
+<text x="96.0" y="161.0" font-size="11" text-anchor="middle" fill="currentColor">32 context + 1 target,</text>
+<text x="96.0" y="175.0" font-size="11" text-anchor="middle" fill="currentColor">one life, one map</text>
+<line x1="206" y1="157.0" x2="178" y2="157.0" stroke="currentColor" stroke-width="1.5" marker-end="url(#f7-a)"/>
+<rect x="16" y="250" width="160" height="58" rx="4" fill="currentColor" stroke="#d0652f" stroke-width="2" fill-opacity=".04"/>
+<text x="96.0" y="269.0" font-size="12" text-anchor="middle" fill="#d0652f" font-weight="600">trainer</text>
+<text x="96.0" y="283.0" font-size="11" text-anchor="middle" fill="#d0652f">v-prediction MSE,</text>
+<text x="96.0" y="297.0" font-size="11" text-anchor="middle" fill="#d0652f">all in latent space</text>
+<line x1="96.0" y1="186" x2="96.0" y2="248" stroke="#d0652f" stroke-width="2" marker-end="url(#f7-acc)"/>
+<text x="208" y="242" font-size="11" text-anchor="start" fill="currentColor" opacity=".75">scoring only: the decoder never enters training</text>
+<rect x="208" y="250" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04" stroke-dasharray="4 3"/>
+<text x="288.0" y="269.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">predicted latent</text>
+<text x="288.0" y="283.0" font-size="11" text-anchor="middle" fill="currentColor">C × 32 × 40 from the</text>
+<text x="288.0" y="297.0" font-size="11" text-anchor="middle" fill="currentColor">trained model</text>
+<rect x="400" y="250" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04" stroke-dasharray="4 3"/>
+<text x="480.0" y="269.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">stock decoder</text>
+<text x="480.0" y="283.0" font-size="11" text-anchor="middle" fill="currentColor">same autoencoder, never</text>
+<text x="480.0" y="297.0" font-size="11" text-anchor="middle" fill="currentColor">tuned on Doom frames</text>
+<rect x="592" y="250" width="160" height="58" rx="4" fill="currentColor" stroke="currentColor" stroke-width="1.5" fill-opacity=".04" stroke-dasharray="4 3"/>
+<text x="672.0" y="269.0" font-size="12" text-anchor="middle" fill="currentColor" font-weight="600">PSNR, LPIPS</text>
+<text x="672.0" y="283.0" font-size="11" text-anchor="middle" fill="currentColor">crop to rows 0:240, score</text>
+<text x="672.0" y="297.0" font-size="11" text-anchor="middle" fill="currentColor">against the raw frame</text>
+<line x1="176" y1="279.0" x2="206" y2="279.0" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#f7-a)"/>
+<line x1="368" y1="279.0" x2="398" y2="279.0" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#f7-a)"/>
+<line x1="560" y1="279.0" x2="590" y2="279.0" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#f7-a)"/>
+</svg></div>
+<figcaption>From recording to trainer the frames pass through the encoder once and training never leaves latent space; the decoder appears only when a prediction is scored against the raw frame.</figcaption>
+</figure>
+
 ## 3.3 Controls as tokens
 
 Each of the 32 executed 19-bit controls passes through a shared MLP, gets a learned position embedding, and enters the backbone as a token. This adopts GameNGen's history-token idea without claiming its undisclosed vocabulary or encoding. [`backbones.py:153–217,771–790`] The ImageNet DiT's conditioning path instead averages the control embeddings before adaLN (adaptive layer normalisation, where the conditioning sets per-channel scale and shift), and an average of embeddings with additive positions cannot see the order of the controls. [`backbones.py:153–181,290–307`] PixArt took the third slot because it is a text-to-image DiT like the other two and was the best transformer of the stride-four run; a DiT-XL/2 row stays Rohan's call. [RC 09-24 18:40]
