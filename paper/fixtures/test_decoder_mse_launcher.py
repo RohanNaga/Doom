@@ -3,7 +3,8 @@
 Astra's review of 2026-09-26 (section 5) found that the launcher never named the autoencoder it
 tuned, so an SD 3.5 tune would silently have run on sd-vae-ft-mse. These tests pin that `SPACE`
 picks the autoencoder, its asserted latent contract, its interpreter and its output directory, and
-that nothing else about the recipe moves with it.
+that nothing else about the recipe moves with it; that the tune validates on held-out episodes of the
+training arenas; and that the gate scores each tune against its own space's stock decoder.
 
 Every run here points `DOOM_ROOT`, `REPO` and `HOME` at the test's own directory, and both default
 interpreters (`~/miniconda3/envs/doom/bin/python`, `~/wanenc/bin/python`) are stubs that log their
@@ -188,3 +189,46 @@ def test_finetune_decoder_accepts_exactly_the_launchers_flags(tmp_path):
         # the ids the launcher names pass the checks the tune makes before it reads a frame
         assert finetune_decoder.validation_episode_ids(a.val_dir, a.val_ids, a.stream_dir, list(range(2000))) \
             == list(range(6000, 6100))
+
+
+# ---------------------------------------------------------------------------------------
+# the gate scores the tune against its own stock decoder
+# ---------------------------------------------------------------------------------------
+
+def test_the_sd1_gate_is_stock_against_tuned(tmp_path):
+    p, calls, root = launch(tmp_path)
+    assert p.returncode == 0, p.stdout + p.stderr
+    [gate] = calls_to(calls, "vae_gate_score.py")
+    assert has(gate, "--baseline", "stock_sd")
+    # an empty path is sd-vae-ft-mse from the default cache (doomdit_utils.load_vae)
+    assert [flag(gate[i:], "--decoder") for i, a in enumerate(gate) if a == "--decoder"] == \
+        ["stock_sd=", f"mse_final={root}/vae_decoder_sd1x_mse/vae"]
+    assert flag(gate, "--out-dir").endswith("e2-decoder-sd1")
+
+
+def test_the_sd35_gate_is_stock_sd35_against_tuned(tmp_path):
+    p, calls, root = launch(tmp_path, SPACE="sd35")
+    assert p.returncode == 0, p.stdout + p.stderr
+    [gate] = calls_to(calls, "vae_gate_score.py")
+    assert has(gate, "--baseline", "stock_sd35")
+    assert [flag(gate[i:], "--decoder") for i, a in enumerate(gate) if a == "--decoder"] == \
+        ["stock_sd35=stabilityai/stable-diffusion-3.5-medium#vae", f"mse_final={root}/vae_decoder_sd35_mse/vae"]
+    assert flag(gate, "--out-dir").endswith("e2-decoder-sd35")
+
+
+def test_no_gate_scores_the_earlier_tuned_decoders(tmp_path):
+    for space in ("sd1", "sd35"):
+        _, calls, _ = launch(tmp_path / space, SPACE=space, CURVE="1")
+        text = "\n".join(calls)
+        assert "tuned_sd_lpips" not in text and "vae_decoder_arnold_lpips" not in text
+
+
+def test_the_hourly_curve_is_scored_only_when_asked_and_against_stock(tmp_path):
+    """Scoring every hourly checkpoint on the seen and unseen corpora invites choosing among them there."""
+    _, calls, _ = launch(tmp_path / "off")
+    assert len(calls_to(calls, "vae_gate_score.py")) == 1
+    _, calls, root = launch(tmp_path / "on", CURVE="1")
+    headline, curve = calls_to(calls, "vae_gate_score.py")
+    assert has(curve, "--baseline", "stock_sd") and has(curve, "--decoder", "stock_sd=")
+    assert has(curve, "--decoder", f"mse_h1={root}/vae_decoder_sd1x_mse/vae_h1")
+    assert flag(curve, "--out-dir").endswith("e2-decoder-curve-sd1")

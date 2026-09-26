@@ -22,7 +22,7 @@
 # scored best on validation (`checkpoint_selection`), beside the terminal one; nothing reads it to pick.
 #
 #   usage: [SPACE=sd1|sd35] [TRAIN_IDS=0:2000] [VAL_IDS=6000:6100] [OUT=dir] [PY=..] [REPO=..] \
-#          [DRY=1] [DOOM_ROOT=..] decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
+#          [CURVE=1] [DRY=1] [DOOM_ROOT=..] decoder_mse.sh <gpu> <micro-batch> <max-steps> [hours]
 #   fit:   FIT=1 [SPACE=..] decoder_mse.sh <gpu> <micro-batch> 60
 #
 # THE LATENT SPACE (Astra's review, 2026-09-26, section 5). SPACE names the autoencoder whose decoder
@@ -60,9 +60,11 @@ REPO=${REPO:-$D/tmp/levers/repo}
 case $SPACE in
   sd1)
     PY=${PY:-$HOME/miniconda3/envs/doom/bin/python}; OUT=${OUT:-$D/vae_decoder_sd1x_mse}
+    STOCK=stock_sd; STOCK_PATH=""        # vae_gate_score.py: an empty path is sd-vae-ft-mse (load_vae)
     VAE=(--vae-id stabilityai/sd-vae-ft-mse --latent-channels 4 --scaling-factor 0.18215) ;;
   sd35)
     PY=${PY:-$HOME/wanenc/bin/python}; OUT=${OUT:-$D/vae_decoder_sd35_mse}
+    STOCK=stock_sd35; STOCK_PATH="stabilityai/stable-diffusion-3.5-medium#vae"
     VAE=(--vae-id stabilityai/stable-diffusion-3.5-medium --vae-subfolder vae --cache-dir "$D/hf/hub"
          --latent-channels 16 --scaling-factor 1.5305 --shift-factor 0.0609) ;;
   *) echo "unknown SPACE '$SPACE' (sd1 | sd35)" >&2; exit 2 ;;
@@ -84,15 +86,17 @@ TUNE=("$PY" finetune_decoder.py "${VAE[@]}"
   --max-steps "$STEPS" ${HRS[@]+"${HRS[@]}"} --batch-size "$MB" --accum 1 --channels-last
   --lr 1e-5 --lpips-weight 0 --report-lpips --val-every 2000 --device cuda:0)
 
-# Ceilings, on exactly the frames the stored ceilings were measured on (vae_gate.sh's own
-# arguments), in TWO passes. `vae_gate_score.py` writes its metrics.json only when it has scored
-# every decoder it was given, so one pass over seven decoders that gets killed at the hand-back
-# deadline would leave nothing at all. The headline comparison -- stock, the incumbent, and the
-# finished tune -- therefore goes first and on its own, and the hourly curve follows as a second
-# pass that can be lost without costing the answer. Both passes carry the baseline so each has its
-# own paired bootstrap.
+# Ceilings, STOCK AGAINST TUNED in this space (Astra's review, 2026-09-26, section 5): the paired
+# bootstrap subtracts this space's stock decoder (stock_sd, sd-vae-ft-mse; stock_sd35, SD 3.5's own
+# autoencoder), where it used to subtract the earlier LPIPS-tuned SD 1.x decoder, on exactly the frames
+# the stored ceilings were measured on (vae_gate.sh's own arguments). `vae_gate_score.py` writes its
+# metrics.json only when it has scored every decoder it was given, so the headline pair goes first and
+# on its own. CURVE=1 adds a second pass over the hourly checkpoints against the same baseline, into its
+# own directory. It is off by default: scoring every hourly checkpoint on the seen and unseen corpora
+# invites choosing among them there, and the curve of ceiling against presentations is already in
+# metrics.json, read on the held-out validation episodes.
 R=$D/results_spiderman/levers_2026-09-20
-GATE=(--baseline tuned_sd_lpips --cache-dir "$D/hf/hub"
+GATE=(--baseline "$STOCK" --cache-dir "$D/hf/hub"
   --dev-in-dir "$D/raw_arnold" --dev-split "$D/split_arnold.json" --dev-frames 2000
   --frame-cache "$D/frame_cache" --stride 4
   --corpus "seen=$D/latents_arnold_eval/seen,$D/raw_arnold_eval/seen,$D/latents_arnold_eval/split_seen.json"
@@ -100,13 +104,14 @@ GATE=(--baseline tuned_sd_lpips --cache-dir "$D/hf/hub"
   --corpus "unseen2=$D/latents_arnold_eval/unseen2,$D/raw_arnold_eval/unseen2,$D/latents_arnold_eval/split_unseen2.json"
   --subset val --num-windows 2048 --context-frames 32 --resamples 1000 --seed 0
   --batch-size 32 --device cuda:0)
-INCUMBENT=(--decoder "tuned_sd_lpips=$D/vae_decoder_arnold_lpips/vae")
-HEADLINE=("$PY" vae_gate_score.py --decoder stock_sd= "${INCUMBENT[@]}" --decoder "mse_final=$OUT/vae"
+HEADLINE=("$PY" vae_gate_score.py --decoder "$STOCK=$STOCK_PATH" --decoder "mse_final=$OUT/vae"
   "${GATE[@]}" --out-dir "$R/e2-decoder-$SPACE")
 
 if [ "$DRY" = 1 ]; then
   echo "DRY tune cd $REPO && CUDA_VISIBLE_DEVICES=$GPU ${TUNE[*]}"
   [ "${FIT:-0}" = 1 ] || echo "DRY headline ${HEADLINE[*]}"
+  [ "${FIT:-0}" != 1 ] && [ "${CURVE:-0}" = 1 ] && echo "DRY curve (after the tune) $PY vae_gate_score.py" \
+    "--decoder $STOCK=$STOCK_PATH --decoder mse_h<N>=$OUT/vae_h<N> ... ${GATE[*]} --out-dir $R/e2-decoder-curve-$SPACE"
   exit 0
 fi
 
@@ -124,13 +129,14 @@ echo "=== $(date -u) score the headline ceilings"
 nice -n 15 "${HEADLINE[@]}"
 echo "=== headline score exit $?"
 
-CURVE=()
+HOURLY=()
 for H in "$OUT"/vae_h*; do
-  [ -d "$H" ] && CURVE+=(--decoder "mse_$(basename "$H" | sed s/vae_//)=$H")
+  [ -d "$H" ] && HOURLY+=(--decoder "mse_$(basename "$H" | sed s/vae_//)=$H")
 done
-if [ ${#CURVE[@]} -gt 0 ]; then
+if [ "${CURVE:-0}" = 1 ] && [ ${#HOURLY[@]} -gt 0 ]; then
   echo "=== $(date -u) score the hourly curve"
-  nice -n 15 "$PY" vae_gate_score.py "${INCUMBENT[@]}" "${CURVE[@]}" "${GATE[@]}" --out-dir "$R/e2-decoder-curve-$SPACE"
+  nice -n 15 "$PY" vae_gate_score.py --decoder "$STOCK=$STOCK_PATH" "${HOURLY[@]}" "${GATE[@]}" \
+    --out-dir "$R/e2-decoder-curve-$SPACE"
   echo "=== curve score exit $?"
 fi
 echo "=== $(date -u) E2_DECODER_DONE"
