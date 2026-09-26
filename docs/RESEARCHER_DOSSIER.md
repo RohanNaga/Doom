@@ -397,3 +397,33 @@ At 10 steps on seen-map validation windows, all three rows beat one-tic and four
 
 They do not license a final ranking before the matched 200k reads, a statement about unseen maps (section 7 shows the U-Net losing to persistence on most), a perceptual lead at 256 tics (where recorded, copy-seed's LPIPS beats the EMA's: 0.520 against 0.542 at SD 3.5 75k), or a separation of SD 3.5's dynamics from its better autoencoder. The 16-rollout reads carry no intervals.
 
+## 5.5 Before next-tic: what the stride-four rows taught
+
+The first corrected benchmark (Sep 13 to 22) trained five backbone families for 90k updates on 850 Arnold episodes across 17 arenas (675 training, 75 validation, 100 unseen-map), predicting verified decision frames four tics apart with the latest requested action only. It was scored with 50-step DDIM and tuned decoders on the `seen` / `unseen` / `unseen2` reporting corpora (2,048 windows each). These rows are a different task from next-tic and are not in the paper's main table, but each lesson below shaped the current design. [RC 09-13 22:16 to 09-22 09:15]
+
+| Row (90k, live) | Seen PSNR / LPIPS | Unseen | Unseen2 | Rollout h64 PSNR / LPIPS | FVD16 / FVD32 |
+|---|---|---|---|---|---|
+| DiT-XL/2 ImageNet, seed 0 | 21.06 / 0.311 | 19.52 / 0.450 | 21.43 / 0.413 | 18.30 / 0.553 | 232 / 481 |
+| DiT-XL/2 ImageNet, seed 1 | 21.21 / 0.307 | 19.59 / 0.442 | 21.59 / 0.404 | 17.68 / 0.550 | 198 / 407 |
+| SD 1.4 U-Net | 21.36 / 0.270 | 19.14 / 0.446 | 21.15 / 0.412 | 16.03 / 0.566 | 184 / 356 |
+| PixArt-alpha | 21.35 / 0.272 | 19.39 / 0.434 | 21.29 / 0.411 | 17.18 / 0.584 | 211 / 472 |
+| UniDiffuser U-ViT | 21.11 / 0.293 | 19.25 / 0.454 | 21.25 / 0.419 | 17.00 / 0.551 | 206 / 423 |
+| SD 3.5 (EMA, own tuned decoder) | 21.51 / 0.242 | 19.37 / 0.395 | 21.48 / 0.381 | 17.77 (live) | 202 / 458 (live) |
+| Decoded-copy reference (C4) | 19.41 | 18.50 | 20.92 | copy-seed 17.86 / 0.510 | |
+
+[RC 09-16 09:40, 14:30, 19:40; RC 09-18 14:50; RC 09-22 09:15] EMA weights beat live on the seen corpus for U-Net (21.67 / 0.250), PixArt (21.60 / 0.255), UniDiffuser (21.34 / 0.281) and SD 3.5, which is why every next-tic read scores both.
+
+**Lessons that carried forward.**
+
+- **Higher rollout PSNR can mean less motion.** DiT seed 0 had the best h64 PSNR but the least motion: optical-flow ratio to real motion 0.58 at h64 against the U-Net's 0.75, and 59 percent of its h64 frames closer to the seed than to the target, against 35 percent. Copy-seed's h64 LPIPS (0.510) beat every model. Blur controls did not reproduce the DiT's PSNR advantage, so reduced motion, not only smoothing, drove it. This is why rollouts are read against copy-seed, per rollout, and why the directional check exists. [RC 09-16 14:30]
+- **Warm start mattered more than architecture.** The ImageNet DiT lost to the text-image starts on seen LPIPS (0.311 against 0.270, episode-bootstrap CIs [0.301, 0.320] and [0.261, 0.280], which do not overlap), and a larger public transformer (UniDiffuser) did not help. At 2,500 updates the same order already held (DiT 19.20 / 0.471, U-Net 19.67 / 0.411, PixArt 19.89 / 0.412). [RC 09-16 10:00, 21:40] The next-tic rows therefore use text-image starts.
+- **Few denoising steps trade LPIPS for PSNR.** At 1 step the U-Net scored 22.26 / 0.580 on seen windows, at 50 steps 21.12 / 0.278. The next-tic sweep (section 4.2) confirms the trade. [`results_spiderman/levers_2026-09-20/e1-steps/*/metrics.json`, RC 09-22 09:15]
+- **The 16-channel autoencoder earned its row.** Tuned reconstruction on seen frames: 31.68 dB / 0.0247 LPIPS for SD 3.5's C16 against 28.61 / 0.0509 for SD's C4, with HUD PSNR 34.60 against 31.79. The gate was at least 1 dB with paired bootstrap intervals excluding no gain, and no perceptual or HUD regression. [RC 09-18 14:50]
+- **Decoder tuning changes the system, not the dynamics.** An MSE-only tune raised C4 reconstruction to 29.11 dB but worsened LPIPS to 0.276; MSE plus 0.1 LPIPS gave 28.34 / 0.051. Because predicted latents feed back directly, the decoder never affects the rollout itself. The tuned decoders saw held-out maps, which is why next-tic reads use stock decoders. [RC 09-09 12:30; RC 09-21 14:30]
+- **Augmentation is a trade, not a free win.** Removing context noise (30k-update PixArt grid) improved teacher-forced fidelity (seen 21.27 / 0.289 against 20.98 / 0.311) and action accuracy (IDM 0.546 against 0.478) and worsened FVD (219 / 469 against 186 / 379). Training from scratch lost clearly on LPIPS and FVD (0.349; 345 / 893). [RC 09-19 09:40; RC 09-20 08:30]
+- **Inference-time context noise did not rescue rollouts.** Sweeping q from 0 to 0.3 at inference moved h64 PSNR by under 0.6 dB with no consistent gain for either U-Net or PixArt. [`results/night_2026-09-19/q1-infer-noise/table.md`]
+- **Longer channel-stacked context did not close gaps.** DiT validation loss at 5k updates was 0.2631 / 0.2561 / 0.2532 / 0.2565 / 0.2535 for contexts 2 / 4 / 8 / 16 / 32, not monotonic past 8. [RC 09-14 20:30]
+- **Encoding is not bit-reproducible across batch sizes.** Re-encoding five episodes at batch 16 agreed on 99.6 percent of elements (mean difference 1.5e-5); at batch 64 on 60.3 percent (1.4e-3). Encoder dtype, batch and library versions are part of corpus provenance, and the alignment gate uses calibrated tolerances instead of bit identity. [Q3 `q3a_equivalence_b16.json`, `q3a_equivalence_b64.json`]
+
+Stride-four records that never became numbers: the quarter-data and context-8 grid cells were named as complete but no metrics were found, and the context-16 cell stopped at 27.5k. A video-pretrained SkyReels pilot in its own autoencoder scored 20.11 / 0.305 on seen windows against its decoded copy of 18.85 but was never rolled out. The April checkpoint's 26.04 dB was on training data (section 1.3). [RC 09-17 09:45; RC 09-20 08:30]
+
