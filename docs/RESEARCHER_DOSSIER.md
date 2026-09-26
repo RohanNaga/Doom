@@ -804,3 +804,85 @@ Stride-four questions that remain open but are not on the paper's path: the miss
 - **Stopping jobs.** Use `tmux kill-session -t <name>`, never `pkill -f` on a command-line pattern: the tmux server carries the first session's command line and would be matched. [CLAUDE.md]
 - **Dashboard.** A lab-server dashboard artifact (`tools/lab_server_dashboard.html`, fed by `tools/server_usage.py` from a session cron at :23) shows GPUs, disks, load and run logs for both servers. [RC 09-26 10:30]
 
+---
+
+# 11. Repository map and glossary
+
+## 11.1 Where each number lives
+
+| Number or fact | Where |
+|---|---|
+| Current state, decisions, every read as it happened | `RESEARCH_CONTEXT.md` §0 and the §7 log, newest first |
+| SD 3.5 closed-loop events per read (50k to 130k) | `results/sd35_stability/collapse_rates_50k_130k.md` (on Spiderman the live file is `$D/tmp/steward/collapse_rates.md`) |
+| The 70k rollout strip | `paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg`, built by `tools/collapse_strip.py` |
+| Distance-study statistics and verdict | `results/distance_study/figure_unet_h1/stats.json` |
+| Per-map distances, gains and the figure | `results/distance_study/figure_unet_h1/distance_table.md`, `distance_gain{,_dark}.{png,svg}` |
+| Distances, floors, checks per space | `results/distance_study/distances_{sd1,pixels,sd35}.json`; per-episode CSVs and `bootstrap_*.npz` beside them |
+| Per-map U-Net scores with provenance | `results/distance_study/scores/040-unet-nexttic_snap_0200000_ema_ddim10/<set>_map<NN>_h{1,4}/` (`metrics.json`, `score_key.txt`, `provenance.txt`) |
+| Every teacher-forced and rollout read on Spiderman | `$D/results_spiderman/<run>/steward_<step>/{tf_*,rollout_*}/` and, for PixArt, `eval_<step>/` |
+| Training curves | `$D/results_spiderman/<run>/log.jsonl`; W&B project `doomdit-nexttic` |
+| Gate outputs and the certificate | `$D/GATES.txt`, `$D/GATES_CERT.json`, `$D/logs/gates_*.log`, `$D/logs/resumes.log` |
+| The split | `release/dense_split.json` (with its `history`) |
+| Dataset schema and control semantics | `release/DATASET_CARD.md`, `release/DENSE_CORPUS.md` |
+| Stride-four persistence and footage audits | `results/night_2026-09-19/q2-verify-dense/`, `q4-repro-footage/TABLE.md`, `q1-*`, `q3a-pertic/` |
+| Launch review and its findings (H1 to H5, M1, M4) | `docs/REVIEW_2026-09-22.md` |
+| Distance design, literature, Astra's brief, the weekly update | `.claude/analyses/distance-study-design-2026-09-24.md`, `distance-study-literature-2026-09-25.md`, `astra-brief-2026-09-26.md`, `weekly-update-2026-09-25.md` |
+
+## 11.2 Where to answer an implementation question
+
+| Question | File |
+|---|---|
+| How are frames and controls recorded? | `record_arnold.py` (seeds, pre-step rows, engine buttons) |
+| What does the engine execute? | `transitions.py` (`normalize_buttons`, width and switch diagnostics) |
+| How are frames encoded? | `encode_parquet.py` (padding, scale and shift, per-tic mode, sidecar repair) |
+| What is a legal training window? | `doom_data.py` (next-tic dataset, life and map checks, history slicing, open-file budget) |
+| How does each backbone receive context and controls? | `backbones.py` |
+| The diffusion target, schedule, sampler and context noise | `diffusion_v.py` |
+| One training update, EMA, W&B, save and resume | `train_wm.py`, `wandb_log.py`, `periodic_eval.py` |
+| Teacher-forced reads | `eval_tf.py` |
+| Rollouts and their scoring | `rollout_eval.py` |
+| Probe, directional check, latent alignment | `smoke_probe.py`, `directional_check.py`, `check_latent_alignment.py` |
+| The distance study and its figure | `distance_study.py`, `paper/make_distance_figure.py`, `scripts/spiderman/score_distance_maps.sh` |
+| Gates and launch | `scripts/cluster/gates.sh`, `gate_certificate.py`, `scripts/spiderman/launch_nexttic.sh`, `after_nexttic.sh` |
+| Server watching | `tools/server_usage.py`, `tools/lab_server_dashboard.html`, `tools/wandb_tail.py` |
+| This document's HTML | `tools/build_dossier.py` builds `docs/researcher_dossier.html` |
+
+`train.py`, `extract_features.py`, `sample.py`, `sample_ddp.py`, `train_options/`, `run_DiT.ipynb` and `visuals/` are unmodified upstream fast-DiT, and `README.md` is still upstream's. [CLAUDE.md]
+
+## 11.3 Glossary
+
+Terms taught in the text are listed with the section that teaches them.
+
+| Term | Meaning |
+|---|---|
+| Tic | The engine's time step; 35 per game-second |
+| Teacher forcing; rollout | Scoring one prediction from real context; feeding predictions back (1.1) |
+| h1, h4 | One-tic prediction; four-tic short closed loop from real context (4.1) |
+| Persistence | Copy the last real frame; the reference for every gain (1.2) |
+| Copy-seed | Hold the last real context frame for a whole rollout (1.2, 4.3) |
+| Decoded copy (`copy_psnr_raw`) | Decode the last latent; includes autoencoder error (1.2, 7.7) |
+| Gain over persistence | Model PSNR minus persistence PSNR, a log MSE ratio (1.2) |
+| LPIPS | Learned perceptual distance, lower is better (4.1) |
+| Live / EMA weights | The optimiser's current weights; their fp32 moving average (3.6) |
+| v-prediction | Predicting the velocity √ᾱ·ε − √(1−ᾱ)·x₀ (3.4) |
+| Noise augmentation, bucket | Training-time context corruption; its quantised level (3.5) |
+| DDIM | Deterministic diffusion sampler over a subset of timesteps (4.2) |
+| Perception-distortion trade | Fewer steps give blurrier means: better PSNR, worse LPIPS (4.2) |
+| Executed control | The first 19 entries of the request, zero-padded (2.3) |
+| Worker-first episode (k = 0) | The only episode per recorder worker whose weapon requests execute (2.3) |
+| Exposure bias | Training on real context, running on generated context (6.1) |
+| Absorbing state | A rollout state the model maps back to itself (6.1) |
+| Per-channel mean shift | One latent channel's mean outside its data range, RMS normal (6.1) |
+| Events (a), (b), (c) | Frame under 10 dB; end under 12 dB; channel 13 under −0.9 at the end (4.3) |
+| probe_v2 | Mean and p99 of the all-bits-flipped control response (4.4) |
+| `correct_frac`, `ref_frac` | Share of windows whose predicted turn reverses under the swap; share whose true frame moves as the control says (4.5) |
+| Sliced Wasserstein (SW₂) | Average of exact 1-D W₂ distances over random projections (7.2) |
+| Floor band | Range of train-versus-train distances (7.2) |
+| Kish n_eff | (Σw)²/Σw², effective frame count after weighting (7.4) |
+| Partial Spearman | Rank correlation after removing a covariate's rank effect (7.3) |
+| Case bootstrap; permutation test; leave-one-out | Resample maps for a CI; shuffle outcomes for p; refit without each map (7.3) |
+| Attenuation ratio | Distance noise over distance spread; under 0.1 means under 1% attenuation (7.3) |
+| Seal | The rule that a reporting corpus is scored once, with choices fixed beforehand (2.5) |
+| Gates, certificate | Pre-launch checks and the record that pins a run's command and data (3.7) |
+| C4, C16 | The 4-channel SD 1.x and 16-channel SD 3.5 latent spaces (3.2) |
+| Stride-four rows | The Sep 13 to 22 benchmark on decision frames four tics apart (5.5) |
