@@ -39,7 +39,12 @@ seeded episodes per training map, and `--draw 2` is a disjoint second draw for t
 `--frames-from` carries one space's draw into another latent space or into raw pixels by tic.
 `splits` writes one `make_dense_eval_splits.py`-format split file per map for `eval_tf.py`.
 `distances` writes `distances_<space>.json`, `per_episode_<space>.csv` and, with `--bootstrap N`,
-`bootstrap_<space>.npz`. Everything reads latents through numpy memory maps, one episode and one
+`bootstrap_<space>.npz` and `bootstrap_full_<space>.npz`. The first resamples ONE 4-episode cloud per
+draw, while D is the mean of ten subsets, so it overstates D's uncertainty; it stays, unchanged, for
+continuity with the frozen Sep 25 files. The second (Sep 26 2026, Astra's review) bootstraps the
+estimator D actually is: each draw redraws the map's episodes with replacement and averages as many
+4-episode subsets of the redraw as D averages. It costs `subsets` times the clouds of the first;
+`--bootstrap-full 0` skips it. Everything reads latents through numpy memory maps, one episode and one
 chunk of rows at a time, so the roughly 10 GB of reference latents are never resident at once.
 """
 import argparse
@@ -1059,6 +1064,23 @@ def episode_subsets(episodes, size=EPISODES_PER_CLOUD, n=SUBSETS, rng=None):
     return subsets, pairs
 
 
+def full_bootstrap_subsets(episodes, size, n_subsets, draws, rng):
+    """The episode subsets of each draw of the full estimator's bootstrap, as a list of `draws` plans.
+
+    A draw redraws the map's episodes with replacement, as many as it has, and cuts `n_subsets` subsets
+    of `size` positions of that redraw (the whole redraw when it holds no more than `size`), which is
+    how D averages its clouds. A repeated episode can therefore sit in a subset twice, as in any
+    bootstrap. The distances of a plan's subsets, averaged, are one bootstrap draw of D.
+    """
+    eps = np.asarray(sorted(int(e) for e in episodes))
+    plans = []
+    for _ in range(draws):
+        redraw = rng.choice(eps, size=len(eps), replace=True)
+        k = min(size, len(redraw))
+        plans.append([sorted(int(e) for e in redraw[rng.permutation(len(redraw))[:k]]) for _ in range(n_subsets)])
+    return plans
+
+
 # ---------------------------------------------------------------------------------------------
 # distances
 # ---------------------------------------------------------------------------------------------
@@ -1325,6 +1347,41 @@ def cmd_distances(a):
                 "what": "median bootstrap SD of D over the SD of D across primary maps; under 0.1 the "
                         "attenuation of a correlation with D is below 1 percent"}
 
+    # the bootstrap of the full estimator: per draw, the map's episodes redrawn with replacement and as
+    # many 4-episode subsets of the redraw averaged as D averages (the single-cloud draws above resample
+    # one subset, a noisier quantity than D, and stay for the frozen files)
+    boot_full = None
+    n_full = a.bootstrap if a.bootstrap_full is None else a.bootstrap_full
+    if n_full > 0 and points:
+        fdraws = np.empty((len(points), n_full))
+        # one map at a time: its draws x subsets clouds are `subsets` times what the single-cloud bootstrap
+        # holds, and the references' per-call sort is negligible beside them
+        for pi, p in enumerate(points):
+            rng = np.random.default_rng([a.seed, 3, zlib.crc32(p["set"].encode()), p["map"]])
+            plans = full_bootstrap_subsets(p["episodes"], a.episodes_per_cloud, len(p["clouds"]), n_full, rng)
+            c = sets[p["set"]]["frames"]
+            fclouds, owner = [], []
+            for b, plan in enumerate(plans):
+                for sub in plan:
+                    idx = np.concatenate([index[p["set"]][e] for e in sub])
+                    w = motion_weights(c["motion"][idx]) if arm == "motion" else None
+                    fclouds.append((lambda f=c["feats"], i=idx: f[i], {arm: w}))
+                    owner.append(b)
+            ft = distance_table(fclouds, {k: refs1[k] for k in train_maps}, dirs, (arm,), a.block)[0]
+            per_draw = np.bincount(owner, minlength=n_full)
+            fdraws[pi] = np.bincount(owner, weights=ft.min(axis=1), minlength=n_full) / per_draw
+            p["bootstrap_full"] = {k: v for k, v in _summary(fdraws[pi]).items()
+                                   if k in ("n", "mean", "sd", "p2.5", "p97.5")}
+        sds = [p["bootstrap_full"]["sd"] for p in prim]
+        spread = float(np.std([p["D"] for p in prim], ddof=1)) if len(prim) > 1 else float("nan")
+        ratio = float(np.median(sds) / spread) if spread and np.isfinite(spread) else float("nan")
+        fpath = os.path.join(a.out, f"bootstrap_full_{a.space}.npz")
+        np.savez(fpath, keys=np.array([p["key"] for p in points]), draws=fdraws, arm=np.array(arm))
+        boot_full = {"draws": n_full, "arm": arm, "file": fpath, "attenuation_ratio": ratio,
+                     "what": "the bootstrap of D itself: episodes redrawn with replacement, then as many "
+                             "4-episode subsets averaged as D averages; median SD over the SD of D across "
+                             "primary maps"}
+
     # outputs
     ep_tab = {n: {int(e): i for i, e in enumerate(sets[n]["episodes"]["id"])} for n in names}
 
@@ -1360,6 +1417,8 @@ def cmd_distances(a):
             rec["mixture_weights"] = {str(k): float(w) for k, w in zip(train_maps, p["mixture"][1])}
         if "bootstrap" in p:
             rec["bootstrap"] = p["bootstrap"]
+        if "bootstrap_full" in p:
+            rec["bootstrap_full"] = p["bootstrap_full"]
         maps_out.append(rec)
     csv_path = os.path.join(a.out, f"per_episode_{a.space}.csv")
     cols = ["set", "map", "episode", "role", "cluster", "frames", "lives", "valid_fraction", "motion_mean", "n_eff",
@@ -1391,7 +1450,8 @@ def cmd_distances(a):
     out = {"space": a.space, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "code": code_identity(),
            "config": {"projections": a.projections, "direction_seed": a.direction_seed, "seed": a.seed,
                       "subsets": a.subsets, "episodes_per_cloud": a.episodes_per_cloud,
-                      "floor_subsets": a.floor_subsets, "bootstrap": a.bootstrap, "limit": a.limit or None,
+                      "floor_subsets": a.floor_subsets, "bootstrap": a.bootstrap, "bootstrap_full": n_full,
+                      "limit": a.limit or None,
                       "block": a.block, "mixture": not a.no_mixture, "mixture_projections": a.mixture_projections,
                       "quiet_share": QUIET_SHARE, "p": 2, "reference_draw": a.reference_draw,
                       "floor_draw": a.floor_draw, "sets": names, "validation_set": a.validation_set},
@@ -1401,7 +1461,8 @@ def cmd_distances(a):
                           "frames_per_map": {str(k): int(len(refs1[k][0])) for k in train_maps},
                           "episodes_per_map": {str(k): int(np.unique(ref1["frames"]["episode"][
                                                    ref1["frames"]["map"] == k]).size) for k in train_maps}},
-           "primary_arm": arm, "floor": floor, "checks": checks, "bootstrap": boot, "maps": maps_out,
+           "primary_arm": arm, "floor": floor, "checks": checks, "bootstrap": boot, "bootstrap_full": boot_full,
+           "maps": maps_out,
            "outputs": {"per_episode": os.path.abspath(csv_path)}}
     path = os.path.join(a.out, f"distances_{a.space}.json")
     with open(path + ".tmp", "w") as fh:
@@ -1461,6 +1522,9 @@ def build_parser():
     d.add_argument("--episodes-per-cloud", dest="episodes_per_cloud", type=int, default=EPISODES_PER_CLOUD)
     d.add_argument("--floor-subsets", dest="floor_subsets", type=int, default=SUBSETS)
     d.add_argument("--bootstrap", type=int, default=0, help="episode redraws per map for the distance error")
+    d.add_argument("--bootstrap-full", dest="bootstrap_full", type=int, default=None,
+                   help="draws of the full estimator's bootstrap (default: as many as --bootstrap; 0 skips it); "
+                        "each costs --subsets clouds per map")
     d.add_argument("--no-mixture", dest="no_mixture", action="store_true", help="skip the best-mixture secondary")
     d.add_argument("--mixture-projections", dest="mixture_projections", type=int, default=MIXTURE_PROJECTIONS)
     d.add_argument("--block", type=int, default=DIRECTION_BLOCK)

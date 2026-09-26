@@ -12,7 +12,8 @@ and what it writes, on synthetic per-tic corpora in the layout `encode_parquet.p
     averages ten 4-episode subsets as five disjoint pairs, finds the best mixture of training maps,
     computes the train-versus-train floor and validation checks (i) to (v), switches to the uniform
     arm when distance tracks the effective sample size, and writes the JSON, the per-episode CSV and
-    the bootstrap draws.
+    the bootstrap draws: the single-cloud bootstrap the frozen files carry, and (Sep 26) the bootstrap
+    of the full estimator, which redraws a map's episodes and averages as many 4-episode subsets as D.
 
 numpy, pyarrow and PIL only; nothing touches a GPU or real data.
 
@@ -521,6 +522,15 @@ def test_distances_end_to_end_on_clouds_with_a_known_geometry(tmp_path):
     assert boot["draws"].shape == (13, 20) and list(boot["keys"]) == [m["key"] for m in out["maps"]]
     assert maps["val/2"]["bootstrap"]["n"] == 20 and maps["val/2"]["bootstrap"]["sd"] > 0
     assert out["bootstrap"]["attenuation_ratio"] < 0.1
+    # the full estimator's bootstrap, beside it in the same layout: it averages ten subsets per draw, so
+    # on the maps with ten episodes it is tighter than one 4-episode cloud
+    full = np.load(tmp_path / "bootstrap_full_toy.npz")
+    assert full["draws"].shape == (13, 20) and list(full["keys"]) == list(boot["keys"])
+    assert str(full["arm"]) == "motion" and out["bootstrap_full"]["draws"] == 20
+    assert out["bootstrap_full"]["file"].endswith("bootstrap_full_toy.npz")
+    ten = [k for k in maps if k.startswith(("val/", "unseen2/"))]
+    assert all(maps[k]["bootstrap_full"]["n"] == 20 for k in ten)
+    assert np.median([maps[k]["bootstrap_full"]["sd"] / maps[k]["bootstrap"]["sd"] for k in ten]) < 0.8
     # the per-episode table: every episode with frames, its distance to every training map
     rows = list(csv.DictReader(open(tmp_path / "per_episode_toy.csv")))
     assert len(rows) == 4 * 10 + 3 * 8 + 3 * 4 + 3 * 10
@@ -548,3 +558,25 @@ def test_limit_scores_only_the_first_map_points(tmp_path):
     distances(tmp_path, "--limit", 3, "--no-mixture")
     out = json.load(open(tmp_path / "distances_toy.json"))
     assert len(out["maps"]) == 3 and out["config"]["limit"] == 3
+
+
+def test_the_full_bootstrap_redraws_episodes_and_averages_as_many_subsets_as_the_estimator():
+    """On a linear stand-in for the distance (a subset's value is the mean of its episodes' values) the
+    two bootstraps have known spreads. One 4-episode cloud per draw spreads like one subset mean, about
+    s / 2. The full estimator redraws the n episodes and averages k subsets of 4, so its variance is
+    about s^2 / n + (s^2 / 4) (1 - 4 / n) / k, here 0.07 s^2 for n = 20, k = 10."""
+    rng = np.random.default_rng(0)
+    value = dict(zip(range(100, 120), rng.normal(0.0, 1.0, size=20)))
+    s = np.std(list(value.values()))
+    plans = ds.full_bootstrap_subsets(list(value), 4, 10, 4000, np.random.default_rng(1))
+    assert len(plans) == 4000 and all(len(p) == 10 and all(len(sub) == 4 for sub in p) for p in plans)
+    assert all(e in value for p in plans for sub in p for e in sub)
+    full = np.array([np.mean([np.mean([value[e] for e in sub]) for sub in p]) for p in plans])
+    want = np.sqrt(s ** 2 / 20 + (s ** 2 / 4) * (1 - 4 / 20) / 10)
+    assert np.std(full) == pytest.approx(want, rel=0.1)
+    single = np.array([np.mean([value[e] for e in p[0]]) for p in plans])
+    assert np.std(single) == pytest.approx(s / 2, rel=0.1)
+    # a map with no more episodes than one cloud holds is one cloud of the whole redraw
+    small = ds.full_bootstrap_subsets([7, 8, 9], 4, 1, 50, np.random.default_rng(2))
+    assert all(len(p) == 1 and len(p[0]) == 3 and set(p[0]) <= {7, 8, 9} for p in small)
+    assert any(len(set(p[0])) < 3 for p in small)            # drawn with replacement
