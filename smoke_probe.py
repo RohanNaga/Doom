@@ -27,6 +27,11 @@ checks, per group:
 
 `--wandb-run <training run>` also appends the report to the W&B run `<training run>-eval` as
 eval/probe/..., at the step in the checkpoint's filename (the gates' own probe never passes it).
+
+`--seed` draws both the probe batch and the probe's fixed noise. Before Sep 26 2026 `probe()` did not
+forward it to `gradient_and_sensitivity`, so every probe run before that fix (the probe v2 "seeds 1/2"
+among them) varied the batch only and kept seed-0 noise for the loss, gradients and all-bits flip; the
+real-token probe always took the seed.
 """
 import argparse
 import json
@@ -178,14 +183,14 @@ def gradient_and_sensitivity(model, groups, batch, objective="v", t_value=500, s
     return rep, problems
 
 
-def probe(ck, model, batch, latent_channels, context_frames, backbone):
-    """The whole report for one smoke checkpoint; `ok` is False on any problem."""
+def probe(ck, model, batch, latent_channels, context_frames, backbone, seed=0):
+    """The whole report for one smoke checkpoint; `ok` is False on any problem. `seed` fixes the noise."""
     trained = (ck.get("args") or {})
     groups, problems = groups_in(ck["model"], latent_channels, context_frames,
                                  expect_pooled=backbone == "sd35",
                                  expect_controls=bool(int(trained.get("action_history") or 0)))
     upd, p1 = update_report(ck, groups, latent_channels, context_frames)
-    grad, p2 = gradient_and_sensitivity(model, groups, batch, (trained.get("objective") or "v"))
+    grad, p2 = gradient_and_sensitivity(model, groups, batch, (trained.get("objective") or "v"), seed=seed)
     problems += p1 + p2
     return {"step": ck.get("step"), "groups": {g: len(v) for g, v in groups.items()}, "updates": upd,
             "probe": grad, "problems": problems, "ok": not problems}
@@ -286,7 +291,7 @@ def main(args):
     model = model.float()
     batch, table = real_batch(args.latents_dir, parse_episode_ids(args.episodes), args.context_frames,
                               latent_channels, trained["action_history"], args.batch, args.seed, with_tokens=True)
-    rep = probe(ck, model, batch, latent_channels, args.context_frames, args.backbone)
+    rep = probe(ck, model, batch, latent_channels, args.context_frames, args.backbone, seed=args.seed)
     if args.token_probe > 0:
         # the on-manifold counterpart of the all-bits-flipped sensitivity: real tokens, rare and typical
         rare, random_ = rare_and_random_tokens(table, args.token_probe, args.seed)
@@ -324,7 +329,7 @@ def build_parser():
     p.add_argument("--num-actions", dest="num_actions", type=int, default=29)
     p.add_argument("--noise-buckets", dest="noise_buckets", type=int, default=10)
     p.add_argument("--batch", type=int, default=4)
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=0, help="draws the probe batch and the probe noise")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--hf-cache", dest="hf_cache", default=None)
     p.add_argument("--sd-path", dest="sd_path", default="CompVis/stable-diffusion-v1-4")

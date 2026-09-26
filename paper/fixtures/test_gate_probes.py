@@ -336,3 +336,35 @@ def test_real_tokens_are_tabulated_and_probed(tmp_path):
     assert rep and len(rep["tokens"]) == len(rare) and rep["worst"]["mean"] >= 0
     assert all(r["max"] >= r["p99"] >= r["mean"] >= 0 for r in rep["tokens"])
     assert sp.token_sensitivity(m, (ctx, tgt, act), [], "v") is None
+
+
+def test_the_probe_seed_reaches_the_noise(tmp_path, monkeypatch):
+    """Astra, Sep 26: `probe()` dropped `--seed`, so seed 1 and 2 changed the batch but kept seed-0 noise.
+    On one fixed batch, different seeds must now give different noise (so a different loss), the same seed
+    the same loss, and the CLI's `--seed` must reach the noise, not only the batch draw."""
+    m = pixart_model()
+    ck = trained(m, 4)
+    b = batch(tmp_path, 4)
+    loss = {s: sp.probe(ck, m, b, 4, CTX, "pixart", seed=s)["probe"]["loss"] for s in (0, 1, 2)}
+    assert len(set(loss.values())) == 3, loss
+    assert sp.probe(ck, m, b, 4, CTX, "pixart", seed=1)["probe"]["loss"] == loss[1]
+
+    from diffusers import PixArtTransformer2DModel as P
+    monkeypatch.setattr(P, "from_pretrained", classmethod(lambda cls, *a, **k: cls(**TINY_PIXART)))
+    monkeypatch.setattr(P, "load_config", classmethod(lambda cls, *a, **k: dict(TINY_PIXART)))
+    seen, real = [], sp.gradient_and_sensitivity
+
+    def spy(*a, **k):
+        seen.append(k.get("seed"))
+        return real(*a, **k)
+    monkeypatch.setattr(sp, "gradient_and_sensitivity", spy)
+    ck["args"].update({"action_dropout": 0.0, "tic_stride": 1, "resolved_control_bits": BITS})
+    path = tmp_path / "0000300.pt"
+    torch.save(ck, str(path))
+    d = corpus(tmp_path / "val", (6000,))
+    a = sp.build_parser().parse_args(["--ckpt", str(path), "--backbone", "pixart", "--pixart-path",
+                                      backbones.PIXART_DEFAULT, "--latents-dir", d, "--episodes", "6000:6001",
+                                      "--latent-channels", "4", "--context-frames", str(CTX), "--num-actions", "3",
+                                      "--noise-buckets", "4", "--batch", "2", "--device", "cpu", "--seed", "2"])
+    assert sp.main(a) == 0
+    assert seen == [2]

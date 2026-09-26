@@ -319,6 +319,53 @@ def test_a_control_history_checkpoint_is_scored_with_control_history(pertic_eval
     assert all(r["action"] == "-1" for r in rows)
 
 
+@pytest.mark.parametrize("horizon", [1, 4])
+def test_the_copy_last_latent_mse_is_a_decoder_free_persistence_reference(tmp_path, tiny_hub, horizon):
+    """Astra, Sep 26: per window, the copy-last latent MSE (the last REAL context latent against the scored
+    target) and the model's latent MSE over it, a persistence-normalised outcome no decoder touches. The
+    fixture fills row t's latent with t, so copying the last context row is off by exactly K per element
+    at horizon K, and its MSE is K squared. No raw recordings: it needs neither pyarrow nor a decoder."""
+    import csv
+    d = tmp_path / "corpus"
+    lat_dir = str(d / "latents")
+    for ep in (0, 1):
+        write_pertic_episode(lat_dir, ep, held_actions([0, 1, 2, 0, 1, 2]))
+    split = str(d / "split.json")
+    json.dump({"train": [0], "val": [1]}, open(split, "w"))
+    model = _tiny_model()
+    ck = str(tmp_path / "best.pt")
+    trained_with = {"action_dropout": 0.0, "objective": "v", "tic_stride": 1}
+    torch.save({"model": model.state_dict(), "step": 7, "args": trained_with}, ck)
+    out = str(tmp_path / "out")
+    eval_tf.main(eval_tf.build_parser().parse_args(
+        ["--ckpt", ck, "--backbone", "pixart", "--pixart-path", backbones.PIXART_DEFAULT, "--latent-channels", "4",
+         "--vae-path", _tiny_vae(tmp_path / "vae"), "--latents-dir", lat_dir, "--split", split, "--subset", "val",
+         "--context-frames", str(CTX), "--num-actions", "3", "--noise-buckets", "4", "--num-windows", "4",
+         "--batch-size", "2", "--steps", "2", "--save-images", "0", "--num-workers", "0",
+         "--horizon-tics", str(horizon), "--out-dir", out]))
+    m = json.load(open(os.path.join(out, "metrics.json")))
+    rows = list(csv.DictReader(open(os.path.join(out, "per_window.csv"))))
+    assert len(rows) == 4
+    for r in rows:
+        assert float(r["copy_latent_mse"]) == pytest.approx(horizon ** 2)
+        assert float(r["latent_mse_ratio"]) == pytest.approx(float(r["latent_mse"]) / float(r["copy_latent_mse"]))
+    assert m["copy_latent_mse"]["n"] == 4 and m["copy_latent_mse"]["mean"] == pytest.approx(horizon ** 2)
+    assert m["latent_mse_ratio"]["mean"] == pytest.approx(np.mean([float(r["latent_mse_ratio"]) for r in rows]))
+    assert m["latent_mse"]["n"] == 4                       # the existing fields stay beside it
+
+
+def test_a_target_equal_to_its_last_context_latent_has_no_ratio():
+    """A frame that did not change makes copy-last exact; the ratio is undefined there, so it is NaN and
+    the aggregate leaves it out rather than dividing by a clamp."""
+    ctx = torch.stack([torch.cat([torch.zeros(4, 2, 2), torch.ones(4, 2, 2)]),
+                       torch.cat([torch.zeros(4, 2, 2), torch.full((4, 2, 2), 2.0)])])
+    tgt = torch.stack([torch.ones(4, 2, 2), torch.zeros(4, 2, 2)])
+    copy = eval_tf.copy_last_latent_mse(ctx, tgt, 4)
+    assert copy.tolist() == [0.0, 4.0]
+    ratio = eval_tf.latent_mse_ratio(torch.tensor([0.5, 2.0]), copy)
+    assert np.isnan(float(ratio[0])) and float(ratio[1]) == pytest.approx(0.5)
+
+
 # ---------------------------------------------------------------------------------------
 # rollout window selection and the (frame, control) parity
 # ---------------------------------------------------------------------------------------
@@ -342,6 +389,62 @@ def test_a_per_tic_rollout_ignores_chain_ids(tmp_path):
     assert (meta["chain_id"] == -1).all()
     picks = rollout_eval.collect_rollout_windows(d, [0], L=4, H=4, n=20, seed=0, tic_stride=1)
     assert picks and all(len(set(deaths[s:s + 8].tolist())) == 1 for _, _, s, _, _ in picks)
+
+
+def _rollout_args(**kw):
+    return types.SimpleNamespace(**{"seed": 0, "window_seed": None, "noise_seed": None, **kw})
+
+
+def test_the_window_seed_and_the_noise_seed_are_separate(tmp_path):
+    """Astra, Sep 26: one --seed drew both the rollout windows and their noise, so a "seed 1" read changed
+    both at once. Each now defaults to --seed (every earlier read reproduces); set alone, the window seed
+    redraws the windows on the same noise keys and the noise seed redraws the noise on the same windows."""
+    assert rollout_eval.rollout_seeds(_rollout_args(seed=3)) == (3, 3)
+    assert rollout_eval.rollout_seeds(_rollout_args(seed=3, window_seed=5)) == (5, 3)
+    assert rollout_eval.rollout_seeds(_rollout_args(seed=3, noise_seed=7)) == (3, 7)
+    args = rollout_eval.build_parser().parse_args(["--rollout", "--seed", "2", "--noise-seed", "9"])
+    assert rollout_eval.rollout_seeds(args) == (2, 9)
+    d = str(tmp_path / "lat")
+    for ep in range(4):
+        write_pertic_episode(d, ep, held_actions([0, 1, 2] * 4), map_ids=np.full(48, 10 + ep))
+
+    def pick(seed):
+        return rollout_eval.collect_rollout_windows(d, range(4), L=4, H=4, n=40, seed=seed, tic_stride=1)
+    same, other = pick(0), pick(1)
+    assert [(ep, s) for ep, _, s, _, _ in same] == [(ep, s) for ep, _, s, _, _ in pick(0)]
+    assert [(ep, s) for ep, _, s, _, _ in same] != [(ep, s) for ep, _, s, _, _ in other]
+    # the noise of a window depends on the noise seed and the window, never on the window seed
+    k0 = rollout_eval.rollout_noise_keys(0, same, 2)
+    assert k0 == [(0, ep, s, 2) for ep, _, s, _, _ in same]
+    n0 = eval_tf.window_noise((len(same), 4, 8, 10), k0)
+    n9 = eval_tf.window_noise((len(same), 4, 8, 10), rollout_eval.rollout_noise_keys(9, same, 2))
+    assert not torch.equal(n0, n9)
+    shared = [(i, j) for i, a in enumerate(same) for j, b in enumerate(other) if (a[0], a[2]) == (b[0], b[2])]
+    n0_other = eval_tf.window_noise((len(other), 4, 8, 10), rollout_eval.rollout_noise_keys(0, other, 2))
+    assert shared and all(torch.equal(n0[i], n0_other[j]) for i, j in shared)
+
+
+def test_the_window_manifest_sits_beside_the_rollouts(tmp_path):
+    d = str(tmp_path / "lat")
+    for ep in range(3):
+        write_pertic_episode(d, ep, held_actions([0, 1, 2] * 4), map_ids=np.full(48, 20 + ep))
+    picks = rollout_eval.collect_rollout_windows(d, range(3), L=4, H=4, n=6, seed=4, tic_stride=1)
+    out = str(tmp_path / "rollouts_val.npz")
+    path = rollout_eval.write_window_manifest(out, picks, window_seed=4, noise_seed=0)
+    assert path == str(tmp_path / "rollouts_val.windows.json")
+    assert rollout_eval.window_manifest_path(str(tmp_path / "r")) == str(tmp_path / "r.windows.json")
+    man = json.load(open(path))
+    assert man["window_seed"] == 4 and man["noise_seed"] == 0
+    assert [w["index"] for w in man["windows"]] == list(range(6))
+    assert [(w["episode"], w["start"], w["map"]) for w in man["windows"]] == \
+        [(int(ep), int(s), int(mp)) for ep, mp, s, _, _ in picks]
+    assert all(w["map"] == 20 + w["episode"] for w in man["windows"])
+    # do_rollout resolves both seeds, draws its windows with one and keys its noise with the other, and
+    # writes the manifest beside the npz; it hardcodes CUDA, so its wiring is checked here by source
+    src = open(os.path.join(REPO, "rollout_eval.py")).read()
+    assert "window_seed, noise_seed = rollout_seeds(args)" in src
+    assert "args.num_rollouts, window_seed, latent_channels=C" in src
+    assert "write_window_manifest(args.out, picks" in src
 
 
 def test_a_per_tic_rollout_refuses_a_stride_four_corpus(tmp_path):

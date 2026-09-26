@@ -145,7 +145,7 @@ def test_no_evaluator_corrupts_context_from_the_global_generator():
 
 def test_the_rollout_uses_one_key_tuple_for_every_stream():
     roll = open(os.path.join(REPO, "rollout_eval.py")).read()
-    assert "noise_keys = [(args.seed, ep, s, h)" in roll
+    assert "noise_keys = rollout_noise_keys(noise_seed, chunk, h)" in roll
     assert "window_noise(shape, noise_keys)" in roll
     assert "eta_noise_fn(shape, noise_keys, device)" in roll
     assert "args.noise_buckets, noise_keys)" in roll

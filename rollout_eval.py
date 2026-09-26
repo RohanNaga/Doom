@@ -15,6 +15,10 @@ optional IDM action-following accuracy per horizon, and decoded clips for FVD.
 
 `--score --wandb-run <training run>` also appends drift.json's scalars (psnr@H, the raw floors, the
 IDM means) to the W&B run `<training run>-eval` as eval/rollout/..., at the rolled-out checkpoint's step.
+
+`--window-seed` draws the windows and `--noise-seed` keys every noise stream; each defaults to `--seed`,
+so every read made before Sep 26 2026 (when one seed set both) reproduces. `--rollout` also writes
+`<out>.windows.json` beside the npz: episode, start row and map of every rollout index.
 """
 import argparse
 import json
@@ -75,6 +79,38 @@ def collect_rollout_windows(latents_dir, episode_ids, L, H, n, seed, latent_chan
     return picks
 
 
+def rollout_seeds(args):
+    """(window seed, noise seed), each `--seed` unless set on its own.
+
+    One seed used to draw the windows AND key their noise, so a "seed 1" read changed both at once.
+    Split, a new window draw can keep the noise keys and a new noise draw can keep the windows.
+    """
+    seed = int(args.seed)
+    w, n = getattr(args, "window_seed", None), getattr(args, "noise_seed", None)
+    return (seed if w is None else int(w)), (seed if n is None else int(n))
+
+
+def rollout_noise_keys(noise_seed, chunk, h):
+    """One key per rollout of the batch at step h, shared by the initial noise, the context corruption
+    and the sampler's stochastic term: (noise seed, episode, start, step)."""
+    return [(noise_seed, ep, s, h) for ep, _, s, _, _ in chunk]
+
+
+def window_manifest_path(out):
+    """The manifest beside a rollout file: rollouts_val.npz -> rollouts_val.windows.json."""
+    return (out[:-4] if out.endswith(".npz") else out) + ".windows.json"
+
+
+def write_window_manifest(out, picks, **meta):
+    """Write which window every rollout index is (episode, start row, map) beside the rollout file."""
+    man = {**meta, "windows": [{"index": i, "episode": int(ep), "start": int(s), "map": int(mp)}
+                               for i, (ep, mp, s, _, _) in enumerate(picks)]}
+    path = window_manifest_path(out)
+    with open(path, "w") as f:
+        json.dump(man, f, indent=1)
+    return path
+
+
 def step_controls(meta_controls, s, L, h):
     """The L executed button vectors conditioning rollout step `h`, oldest first.
 
@@ -123,10 +159,11 @@ def do_rollout(args):
     print(f"rollout: step {ck.get('step', '?')}, objective {objective}, tic stride {tic_stride}, "
           f"horizon {args.horizon} frame(s) = {args.horizon * tic_stride} tic(s) of game time")
     split = load_split(args.split)
+    window_seed, noise_seed = rollout_seeds(args)
     picks = collect_rollout_windows(args.latents_dir, split[args.subset], args.context_frames, args.horizon,
-                                    args.num_rollouts, args.seed, latent_channels=C, tic_stride=tic_stride)
+                                    args.num_rollouts, window_seed, latent_channels=C, tic_stride=tic_stride)
     L, H, B = args.context_frames, args.horizon, args.batch_size
-    torch.manual_seed(args.seed)
+    torch.manual_seed(noise_seed)
     pred_all, gt_all, act_all, meta, dec_all = [], [], [], [], []
     hist = trained["action_history"]
     t0 = time.time()
@@ -151,7 +188,7 @@ def do_rollout(args):
                 act = torch.from_numpy(acts[:, h]).to(device)
             # one key tuple per rollout and step, shared by the initial noise, the context
             # corruption and the sampler's stochastic term, each on its own purpose tag
-            noise_keys = [(args.seed, ep, s, h) for ep, _, s, _, _ in chunk]
+            noise_keys = rollout_noise_keys(noise_seed, chunk, h)
             ctx_in, bucket = (ctx, torch.zeros(len(chunk), dtype=torch.long, device=device))
             if args.infer_noise > 0:
                 ctx_in, bucket = fixed_noise(ctx, args.infer_noise, args.train_noise_max,
@@ -208,9 +245,13 @@ def do_rollout(args):
              episode=np.array([m[0] for m in meta]), map=np.array([m[1] for m in meta]), start=np.array([m[2] for m in meta]),
              config=json.dumps({**vars(args), "step": ck.get("step", "?"), "resolved_latent_channels": C,
                                 "resolved_objective": objective, "checkpoint_interface": trained,
-                                "tic_stride": tic_stride}),
+                                "tic_stride": tic_stride, "window_seed": window_seed, "noise_seed": noise_seed}),
              **extra)
-    print("DONE", args.out)
+    manifest = write_window_manifest(args.out, picks, window_seed=window_seed, noise_seed=noise_seed,
+                                     subset=args.subset, split=os.path.abspath(args.split),
+                                     latents_dir=os.path.abspath(args.latents_dir), context_frames=L, horizon=H,
+                                     tic_stride=tic_stride, step=ck.get("step", "?"))
+    print("DONE", args.out, manifest)
 
 
 def fixed_noise(ctx, level, train_max, buckets, keys=None):
@@ -576,6 +617,10 @@ def build_parser():
     p.add_argument("--unidiffuser-path", default=UNIDIFFUSER_DEFAULT); p.add_argument("--sd35-path", default=SD35_DEFAULT)
     p.add_argument("--hf-cache", default=None)
     p.add_argument("--seed", type=int, default=0); p.add_argument("--out")
+    p.add_argument("--window-seed", dest="window_seed", type=int, default=None,
+                   help="draws the rollout windows; defaults to --seed")
+    p.add_argument("--noise-seed", dest="noise_seed", type=int, default=None,
+                   help="keys every noise stream of the rollout; defaults to --seed")
     p.add_argument("--rollouts"); p.add_argument("--idm", default=""); p.add_argument("--vae-path", default="")
     p.add_argument("--vae-subfolder", default="", help="subfolder inside --vae-path (e.g. vae for a full pipeline repo)")
     p.add_argument("--latent-scale", type=float, default=LATENT_SCALE, help="scaling_factor the corpus was encoded with")
