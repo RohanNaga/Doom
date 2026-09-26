@@ -655,3 +655,46 @@ Two defensible outcomes exist. Keeping the gate means reporting the relation as 
 
 SD 3.5 and PixArt are scored through the study at their final 200k EMA weights, so the "every row" condition will test three rows. Not implemented: the decoder-free outcome (latent MSE ratio to copy-last), the episode-level mixed model Δ ~ D + persistence + lives + (1 | map), stratification by control regime, and the model-feature distance space. [memo §§2, 3, 6]
 
+---
+
+# 8. Decisions ledger
+
+One line per decision: what was decided, and why. Dates are 2026, times EDT; the RC entry of that time records it.
+
+| When | Decision | Reason |
+|---|---|---|
+| 09-02 | Rebuild an honest held-out pipeline; drop the April headline as a result | 26.04 dB was on training segments; the U-Net code and weights were lost |
+| 09-08 to 09 | Record with Arnold, losslessly, every tic | Public agent and inspectable engine make the data reproducible |
+| 09-09 to 10 | Verify control intervals instead of a `tic % 4` grid | Deaths and anti-stuck behaviour shift Arnold's phase |
+| 09-13 22:16 | One shared recipe: lr 5e-5, warmup 2,000, batch 32, context 32, action dropout 0 | A controlled comparison needs one recipe; no reason for per-backbone LRs |
+| 09-14 20:00 | Reframe as an adaptation study; add PixArt and a second DiT seed | The U-Net's lead was stable; warm starts differ in data, objective and size |
+| 09-16 14:30 | Audit motion before reading rollout PSNR | DiT's higher h64 PSNR came with less motion and worse FVD |
+| 09-17 to 18 | Gate the 16-channel row on reconstruction first | A new autoencoder must earn its compute; SD 3.5's C16 gained 3 dB |
+| 09-19 | Dense recording on Arnold's published split (train 2 to 5, test 6 to 8) | Score-selected maps (3, 10, 12, 13) would make the data depend on outcomes |
+| 09-20 21:45 | Move to every tic | Persistence depends on the gap; stride-four PSNR is a different task |
+| 09-21 01:30 | Start from public weights; 32-tic context; executed-control history; fixed episode split | Clean exposure accounting; causal row contract; bounded memory |
+| 09-21 14:30 | Keep the VP linear schedule and context augmentation; withdraw the exactly-clean atom | Continuity with the finished rows; no schedule ablation; the atom would change bucket semantics |
+| 09-22 09:45, 11:30 | Normalise requests to the 19-wide executed control; repair sidecars, keep raw parquet | ViZDoom truncates and zero-fills; the original request stays auditable |
+| 09-22 | Move the unseen scoring subset to `arenas_678` 60:120 | 51 of 60 old ids were worker-first episodes with executed weapon switches |
+| 09-23 00:20 to 04:40 | Launch only behind gates and a per-backbone certificate; close 21 review defects | The first gates accepted changed recipes and double-scored test |
+| 09-23 03:00 | Raise the open-file soft limit before loading | One memory map per episode against a 1,024 limit killed the pre-smoke |
+| 09-23 04:05 | Alignment gate: MAE ≤ 5e-3, p99 ≤ 2e-2, shift margin ≥ 2 dB | A bit-identical shard cleared only 2.91 dB; per-tic motion bounds the margin |
+| 09-23 02:55 | Gate and launch from a second checkout, `repo_launch` | Encoders were still running from `$D/repo`; gates must certify the checkout that runs |
+| 09-23 06:30 | Encode 2000:6000 into a separate tree and Hub folders | New shard logs in the certified directories would block every resume |
+| 09-23 11:30 | Reads on GPU 3, checked idle each time; full reads every 5k | A read on the training card cost about 2,500 updates |
+| 09-23 11:30 | W&B native by default; sidecars for pinned rows | Rohan watches curves live; pinned runs cannot gain a flag |
+| 09-24 16:20 | Stop the U-Net at 200k; 200k is the matched step for every row | The U-Net had saturated (EMA h1 22.42 to 22.46 from 150k to 180k) |
+| 09-24 18:40 | Drop the requested-action ablation | 89 percent identical to executed; 0.15 percent true overrides; likely null |
+| 09-24 18:40 | PixArt-alpha is the third row | A text-to-image DiT like the others; best transformer of the stride-four run |
+| 09-24 22:20 | Run the map-distance study with one pre-declared test | Changliu's suggestion; reuses a validated method |
+| 09-25 01:25, 09:40 | Primary test fixed; SD 1.x distances frozen before scoring; floor-band maps exempt from (ii) | Choosing after scores would be selection; inside the floor D is noise |
+| 09-25 01:25 | Score sealed corpora once with a fixed checkpoint; book nothing in the seal | Leaves Rohan free to rule; no selection possible with final weights |
+| 09-25 10:20 | CPU-heavy study jobs at 16 BLAS threads and nice 19 | The pixel job's 64 threads halved both trainers for 50 minutes |
+| 09-25 11:45 | GPU 3 tenancy order: PixArt reads, steward reads, scorer, encoder | Unguarded periodic reads lost labels to OOM |
+| 09-25 13:15 | Disk deletion ladder at 300 GB and 150 GB free | A full disk kills a run at its next checkpoint save |
+| 09-24 15:55; 09-25 05:00 | Report EMA rollouts with per-rollout counts; flag a probe jump only with a directional drop or live collapse | The live collapses; the probe's maximum is an off-manifold tail statistic |
+| 09-25 23:00 | Track events (a), (b), (c) and 256-tic PSNR; all-channel count as context only | The all-channel band caught ordinary drift at every read |
+| 09-26 03:30 | The stability claim becomes a rate; EMA seed-1 rollouts join every read | 105k and 115k EMA reads each carried a long-horizon shifted rollout |
+| 09-26 09:00 | Report rates per window; add EMA seed-2 on surviving snapshots; put release-checkpoint selection to Rohan | The pooled EMA rate rose late while teacher forcing improved |
+| 09-26 10:30 | PixArt gets a rollout read at 150k and the full final protocol at 200k | Its periodic reads never included rollouts |
+
