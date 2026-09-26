@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where the Unseen-Map Gap Lives</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono&display=swap">
+<style>
+:root{--bg:#f7f5f0;--surface:#fffdf9;--ink:#1f2225;--ink-2:#5a6068;--line:#dcd7cc;--accent:#c2801a;--blue:#1f6f8b;--good:#2f8f5b;--bad:#b23a3a}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#16181b;--surface:#1e2226;--ink:#e6e3dc;--ink-2:#9aa1a8;--line:#31373d;--accent:#e0a03a;--blue:#5fb3d0;--good:#4fbf82;--bad:#e06666}}
+:root[data-theme="dark"]{--bg:#16181b;--surface:#1e2226;--ink:#e6e3dc;--ink-2:#9aa1a8;--line:#31373d;--accent:#e0a03a;--blue:#5fb3d0;--good:#4fbf82;--bad:#e06666}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15.5px;line-height:1.55}
+main{max-width:900px;margin:0 auto;padding:28px 16px 60px}
+h1{font-family:"Source Serif 4",Georgia,serif;font-size:30px;font-weight:600;margin:0 0 6px;text-wrap:balance}
+h2{font-family:"Source Serif 4",Georgia,serif;font-size:21px;font-weight:600;margin:34px 0 8px}
+p{max-width:68ch} .lead{color:var(--ink-2);font-size:15px;margin:0 0 20px}
+figure{margin:16px 0;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow-x:auto} figcaption{font-size:13px;color:var(--ink-2);margin-top:8px;max-width:78ch}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;margin:8px 0 4px} th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px;vertical-align:top} th{color:var(--ink-2);font-weight:500} td.n,th.n{text-align:right}
+.terms dt{font-weight:600;margin-top:12px} .terms dd{margin:2px 0 0 0;max-width:72ch}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12.5px;font-weight:500} .ok{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)} .no{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)} .qa{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+ol.steps li{margin:6px 0} code{font-family:"IBM Plex Mono",monospace;font-size:13px}
+</style></head><body><main>
+<h1>Where the unseen-map gap lives</h1>
+<p class="lead">What "rendering term of a decomposition" means, what the three reviews concluded, and what to think about next. Numbers: U-Net 200k EMA, one tic ahead, 30 evaluation maps, frozen in the repo (Sep 26 2026).</p>
+
+<h2>1. The pipeline, and the three places a prediction can go wrong</h2>
+<figure><svg viewBox="0 0 900 250" role="img" aria-label="the world model pipeline with the three measurement points" style="max-width:100%;height:auto">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<g font-family="inherit" font-size="12.5" fill="currentColor" stroke="currentColor">
+<rect x="20" y="70" width="150" height="56" rx="4" fill="none" stroke-width="1.4"/><text x="95" y="93" text-anchor="middle" stroke="none">32 real frames</text><text x="95" y="111" text-anchor="middle" stroke="none">+ 32 executed controls</text>
+<line x1="170" y1="98" x2="230" y2="98" stroke-width="1.4" marker-end="url(#ar)"/>
+<rect x="232" y="56" width="200" height="84" rx="4" fill="none" stroke-width="1.4"/><text x="332" y="82" text-anchor="middle" stroke="none" font-weight="600">backbone (frozen at test)</text><text x="332" y="101" text-anchor="middle" stroke="none">U-Net / PixArt / SD 3.5</text><text x="332" y="119" text-anchor="middle" stroke="none">predicts the next LATENT, C×32×40</text>
+<line x1="432" y1="98" x2="500" y2="98" stroke-width="1.4" marker-end="url(#ar)"/><text x="466" y="88" text-anchor="middle" stroke="none" font-size="11">latent ẑ</text>
+<rect x="502" y="70" width="140" height="56" rx="4" fill="none" stroke-width="1.4"/><text x="572" y="93" text-anchor="middle" stroke="none" font-weight="600">decoder</text><text x="572" y="111" text-anchor="middle" stroke="none">latent → pixels</text>
+<line x1="642" y1="98" x2="710" y2="98" stroke-width="1.4" marker-end="url(#ar)"/>
+<rect x="712" y="70" width="160" height="56" rx="4" fill="none" stroke-width="1.4"/><text x="792" y="93" text-anchor="middle" stroke="none">predicted frame</text><text x="792" y="111" text-anchor="middle" stroke="none">scored vs the real next frame</text>
+<path d="M332 140 L332 168" stroke-width="1.2" stroke-dasharray="3 3"/><path d="M572 126 L572 168" stroke-width="1.2" stroke-dasharray="3 3"/><path d="M95 126 L95 168" stroke-width="1.2" stroke-dasharray="3 3"/>
+<g stroke="none"><rect x="20" y="170" width="200" height="62" rx="4" fill="#c2801a" fill-opacity="0.12"/><text x="120" y="190" text-anchor="middle" font-weight="600">1 · control response</text><text x="120" y="207" text-anchor="middle" font-size="11.5">swap TURN_LEFT/RIGHT in the newest</text><text x="120" y="222" text-anchor="middle" font-size="11.5">control: does the camera reverse? (yaw only)</text>
+<rect x="232" y="170" width="200" height="62" rx="4" fill="#c2801a" fill-opacity="0.12"/><text x="332" y="190" text-anchor="middle" font-weight="600">2 · latent prediction error</text><text x="332" y="207" text-anchor="middle" font-size="11.5">‖ẑ − z‖² vs ‖z_last − z‖², in latent space,</text><text x="332" y="222" text-anchor="middle" font-size="11.5">before any decoder touches it</text>
+<rect x="502" y="170" width="200" height="62" rx="4" fill="#c2801a" fill-opacity="0.12"/><text x="602" y="190" text-anchor="middle" font-weight="600">3 · rendering</text><text x="602" y="207" text-anchor="middle" font-size="11.5">decode the TRUE latent: the ceiling any</text><text x="602" y="222" text-anchor="middle" font-size="11.5">prediction can reach through this decoder</text></g>
+</g></svg><figcaption>A prediction is made in latent space and only then rendered. So a bad predicted frame can come from three different places, and each has its own instrument. "Rendering" is the third box: how well the decoder turns a latent into pixels, measured by decoding the <em>true</em> latent of the next frame. That number is a ceiling: no prediction can score above it through this decoder, however good the backbone is.</figcaption></figure>
+<dl class="terms">
+<dt>1 · Control response</dt><dd>Does the backbone apply the control correctly in a room it never saw? The directional check swaps the two turn bits in the newest control and asks whether the predicted camera motion reverses by the right amount. It measures yaw under a turn, not all of the game's physics: not forward motion, doors, or enemies. On training maps both models score about 0.85; the 30-map run tonight gives the per-map curve.</dd>
+<dt>2 · Latent prediction error</dt><dd>How far the predicted latent is from the true one, compared with the trivial guess of repeating the last latent, all in latent space before any decoder is involved. This is the backbone's own error on unfamiliar footage: new textures, new geometry, new monsters, entangled. It is the decoder-free version of "gain over persistence" and is being rescored on all 30 maps tonight.</dd>
+<dt>3 · Rendering</dt><dd>Decode the true latent of the next frame and score it against the real pixels. That is the decoder's reconstruction ceiling. If the ceiling itself dropped on unseen maps, the decoder would be part of the problem and tuning it on the new map would help. Tuning the decoder on training maps (running tonight) raises the ceiling for every map at once; it cannot change the latent the backbone predicted.</dd>
+</dl>
+
+<h2>2. The finding: rendering is flat, prediction degrades</h2>
+<figure><svg viewBox="0 0 760 324" role="img" aria-label="per map: decoder ceiling, model PSNR and persistence PSNR against distance" style="max-width:100%;height:auto"><g transform="translate(0,24)"><line x1="52" y1="241.6" x2="744" y2="241.6" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="245.6" font-size="11" text-anchor="end" fill="currentColor">19</text>
+<line x1="52" y1="216.7" x2="744" y2="216.7" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="220.7" font-size="11" text-anchor="end" fill="currentColor">20</text>
+<line x1="52" y1="191.9" x2="744" y2="191.9" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="195.9" font-size="11" text-anchor="end" fill="currentColor">21</text>
+<line x1="52" y1="167.1" x2="744" y2="167.1" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="171.1" font-size="11" text-anchor="end" fill="currentColor">22</text>
+<line x1="52" y1="142.2" x2="744" y2="142.2" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="146.2" font-size="11" text-anchor="end" fill="currentColor">23</text>
+<line x1="52" y1="117.4" x2="744" y2="117.4" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="121.4" font-size="11" text-anchor="end" fill="currentColor">24</text>
+<line x1="52" y1="92.5" x2="744" y2="92.5" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="96.5" font-size="11" text-anchor="end" fill="currentColor">25</text>
+<line x1="52" y1="67.7" x2="744" y2="67.7" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="71.7" font-size="11" text-anchor="end" fill="currentColor">26</text>
+<line x1="52" y1="42.8" x2="744" y2="42.8" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="46.8" font-size="11" text-anchor="end" fill="currentColor">27</text>
+<line x1="52" y1="18.0" x2="744" y2="18.0" stroke="currentColor" stroke-opacity="0.12"/><text x="46" y="22.0" font-size="11" text-anchor="end" fill="currentColor">28</text>
+<text x="52.0" y="270" font-size="11" text-anchor="middle" fill="currentColor">0.0</text>
+<text x="225.0" y="270" font-size="11" text-anchor="middle" fill="currentColor">0.1</text>
+<text x="398.0" y="270" font-size="11" text-anchor="middle" fill="currentColor">0.2</text>
+<text x="571.0" y="270" font-size="11" text-anchor="middle" fill="currentColor">0.3</text>
+<text x="744.0" y="270" font-size="11" text-anchor="middle" fill="currentColor">0.4</text>
+<text x="398" y="292" font-size="12" text-anchor="middle" fill="currentColor">distance to the nearest training map (D)</text>
+<text transform="translate(14,136) rotate(-90)" font-size="12" text-anchor="middle" fill="currentColor">PSNR, dB</text>
+<line x1="97.0" y1="178.5" x2="97.0" y2="132.8" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="97.0" cy="132.8" r="4" fill="currentColor" stroke="currentColor" stroke-width="1.4"><title>map 5 (val): decoder ceiling 23.38</title></circle>
+<rect x="93.0" y="218.7" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 5: persistence 19.76</title></rect>
+<circle cx="97.0" cy="178.5" r="4" fill="#c2801a"><title>map 5: model 21.54</title></circle>
+<line x1="110.8" y1="164.8" x2="110.8" y2="124.6" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="110.8" cy="124.6" r="4" fill="currentColor" stroke="currentColor" stroke-width="1.4"><title>map 3 (val): decoder ceiling 23.71</title></circle>
+<rect x="106.8" y="178.7" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 3: persistence 21.37</title></rect>
+<circle cx="110.8" cy="164.8" r="4" fill="#c2801a"><title>map 3: model 22.09</title></circle>
+<line x1="164.4" y1="156.4" x2="164.4" y2="122.3" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="164.4" cy="122.3" r="4" fill="currentColor" stroke="currentColor" stroke-width="1.4"><title>map 2 (val): decoder ceiling 23.8</title></circle>
+<rect x="160.4" y="165.0" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 2: persistence 21.92</title></rect>
+<circle cx="164.4" cy="156.4" r="4" fill="#c2801a"><title>map 2: model 22.43</title></circle>
+<line x1="171.4" y1="132.8" x2="171.4" y2="99.0" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="171.4" cy="99.0" r="4" fill="currentColor" stroke="currentColor" stroke-width="1.4"><title>map 4 (val): decoder ceiling 24.74</title></circle>
+<rect x="167.4" y="145.7" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 4: persistence 22.7</title></rect>
+<circle cx="171.4" cy="132.8" r="4" fill="#c2801a"><title>map 4: model 23.38</title></circle>
+<line x1="250.9" y1="160.1" x2="250.9" y2="109.2" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="250.9" cy="109.2" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 8 (arenas_678): decoder ceiling 24.33</title></circle>
+<rect x="246.9" y="133.2" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 8: persistence 23.2</title></rect>
+<circle cx="250.9" cy="160.1" r="4" fill="#c2801a"><title>map 8: model 22.28</title></circle>
+<line x1="271.7" y1="188.4" x2="271.7" y2="123.6" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="271.7" cy="123.6" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 15 (seen): decoder ceiling 23.75</title></circle>
+<rect x="267.7" y="216.5" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 15: persistence 19.85</title></rect>
+<circle cx="271.7" cy="188.4" r="4" fill="#c2801a"><title>map 15: model 21.14</title></circle>
+<line x1="273.4" y1="182.5" x2="273.4" y2="132.5" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="273.4" cy="132.5" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 12 (seen): decoder ceiling 23.39</title></circle>
+<rect x="269.4" y="170.8" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 12: persistence 21.69</title></rect>
+<circle cx="273.4" cy="182.5" r="4" fill="#c2801a"><title>map 12: model 21.38</title></circle>
+<line x1="276.9" y1="219.2" x2="276.9" y2="146.2" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="276.9" cy="146.2" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 17 (unseen): decoder ceiling 22.84</title></circle>
+<rect x="272.9" y="228.4" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 17: persistence 19.37</title></rect>
+<circle cx="276.9" cy="219.2" r="4" fill="#c2801a"><title>map 17: model 19.9</title></circle>
+<line x1="294.2" y1="167.3" x2="294.2" y2="117.1" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="294.2" cy="117.1" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 20 (unseen2): decoder ceiling 24.01</title></circle>
+<rect x="290.2" y="160.1" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 20: persistence 22.12</title></rect>
+<circle cx="294.2" cy="167.3" r="4" fill="#c2801a"><title>map 20: model 21.99</title></circle>
+<line x1="299.4" y1="145.4" x2="299.4" y2="109.2" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="299.4" cy="109.2" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 32 (unseen2): decoder ceiling 24.33</title></circle>
+<rect x="295.4" y="124.5" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 32: persistence 23.55</title></rect>
+<circle cx="299.4" cy="145.4" r="4" fill="#c2801a"><title>map 32: model 22.87</title></circle>
+<line x1="304.6" y1="180.0" x2="304.6" y2="120.6" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="304.6" cy="120.6" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 14 (seen): decoder ceiling 23.87</title></circle>
+<rect x="300.6" y="169.3" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 14: persistence 21.75</title></rect>
+<circle cx="304.6" cy="180.0" r="4" fill="#c2801a"><title>map 14: model 21.48</title></circle>
+<line x1="311.5" y1="187.2" x2="311.5" y2="115.1" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="311.5" cy="115.1" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 11 (seen): decoder ceiling 24.09</title></circle>
+<rect x="307.5" y="192.1" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 11: persistence 20.83</title></rect>
+<circle cx="311.5" cy="187.2" r="4" fill="#c2801a"><title>map 11: model 21.19</title></circle>
+<line x1="321.9" y1="212.8" x2="321.9" y2="149.9" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="321.9" cy="149.9" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 13 (seen): decoder ceiling 22.69</title></circle>
+<rect x="317.9" y="228.4" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 13: persistence 19.37</title></rect>
+<circle cx="321.9" cy="212.8" r="4" fill="#c2801a"><title>map 13: model 20.16</title></circle>
+<line x1="332.3" y1="161.1" x2="332.3" y2="112.4" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="332.3" cy="112.4" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 10 (seen): decoder ceiling 24.2</title></circle>
+<rect x="328.3" y="148.1" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 10: persistence 22.6</title></rect>
+<circle cx="332.3" cy="161.1" r="4" fill="#c2801a"><title>map 10: model 22.24</title></circle>
+<line x1="335.7" y1="196.9" x2="335.7" y2="141.5" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="335.7" cy="141.5" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 16 (unseen): decoder ceiling 23.03</title></circle>
+<rect x="331.7" y="212.0" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 16: persistence 20.03</title></rect>
+<circle cx="335.7" cy="196.9" r="4" fill="#c2801a"><title>map 16: model 20.8</title></circle>
+<line x1="337.4" y1="158.1" x2="337.4" y2="99.7" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="337.4" cy="99.7" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 28 (unseen2): decoder ceiling 24.71</title></circle>
+<rect x="333.4" y="108.4" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 28: persistence 24.2</title></rect>
+<circle cx="337.4" cy="158.1" r="4" fill="#c2801a"><title>map 28: model 22.36</title></circle>
+<line x1="361.7" y1="174.5" x2="361.7" y2="123.8" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="361.7" cy="123.8" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 1 (seen): decoder ceiling 23.74</title></circle>
+<rect x="357.7" y="164.8" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 1: persistence 21.93</title></rect>
+<circle cx="361.7" cy="174.5" r="4" fill="#c2801a"><title>map 1: model 21.7</title></circle>
+<line x1="363.4" y1="154.1" x2="363.4" y2="101.7" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="363.4" cy="101.7" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 9 (seen): decoder ceiling 24.63</title></circle>
+<rect x="359.4" y="148.6" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 9: persistence 22.58</title></rect>
+<circle cx="363.4" cy="154.1" r="4" fill="#c2801a"><title>map 9: model 22.52</title></circle>
+<line x1="365.1" y1="178.7" x2="365.1" y2="114.4" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="365.1" cy="114.4" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 24 (unseen2): decoder ceiling 24.12</title></circle>
+<rect x="361.1" y="113.9" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 24: persistence 23.98</title></rect>
+<circle cx="365.1" cy="178.7" r="4" fill="#c2801a"><title>map 24: model 21.53</title></circle>
+<line x1="366.9" y1="177.2" x2="366.9" y2="118.6" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="366.9" cy="118.6" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 18 (unseen2): decoder ceiling 23.95</title></circle>
+<rect x="362.9" y="148.1" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 18: persistence 22.6</title></rect>
+<circle cx="366.9" cy="177.2" r="4" fill="#c2801a"><title>map 18: model 21.59</title></circle>
+<line x1="366.9" y1="159.8" x2="366.9" y2="123.3" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="366.9" cy="123.3" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 19 (unseen2): decoder ceiling 23.76</title></circle>
+<rect x="362.9" y="97.5" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 19: persistence 24.64</title></rect>
+<circle cx="366.9" cy="159.8" r="4" fill="#c2801a"><title>map 19: model 22.29</title></circle>
+<line x1="375.5" y1="133.3" x2="375.5" y2="85.8" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="375.5" cy="85.8" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 25 (unseen2): decoder ceiling 25.27</title></circle>
+<rect x="371.5" y="69.6" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 25: persistence 25.76</title></rect>
+<circle cx="375.5" cy="133.3" r="4" fill="#c2801a"><title>map 25: model 23.36</title></circle>
+<line x1="377.2" y1="206.6" x2="377.2" y2="145.9" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="377.2" cy="145.9" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 6 (arenas_678): decoder ceiling 22.85</title></circle>
+<rect x="373.2" y="194.9" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 6: persistence 20.72</title></rect>
+<circle cx="377.2" cy="206.6" r="4" fill="#c2801a"><title>map 6: model 20.41</title></circle>
+<line x1="415.3" y1="180.2" x2="415.3" y2="107.2" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="415.3" cy="107.2" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 31 (unseen2): decoder ceiling 24.41</title></circle>
+<rect x="411.3" y="171.5" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 31: persistence 21.66</title></rect>
+<circle cx="415.3" cy="180.2" r="4" fill="#c2801a"><title>map 31: model 21.47</title></circle>
+<line x1="432.6" y1="225.2" x2="432.6" y2="147.2" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="432.6" cy="147.2" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 22 (unseen2): decoder ceiling 22.8</title></circle>
+<rect x="428.6" y="221.9" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 22: persistence 19.63</title></rect>
+<circle cx="432.6" cy="225.2" r="4" fill="#c2801a"><title>map 22: model 19.66</title></circle>
+<line x1="458.6" y1="238.1" x2="458.6" y2="172.3" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="458.6" cy="172.3" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 29 (unseen2): decoder ceiling 21.79</title></circle>
+<rect x="454.6" y="242.3" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 29: persistence 18.81</title></rect>
+<circle cx="458.6" cy="238.1" r="4" fill="#c2801a"><title>map 29: model 19.14</title></circle>
+<line x1="524.3" y1="136.0" x2="524.3" y2="90.8" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="524.3" cy="90.8" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 26 (unseen2): decoder ceiling 25.07</title></circle>
+<rect x="520.3" y="33.1" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 26: persistence 27.23</title></rect>
+<circle cx="524.3" cy="136.0" r="4" fill="#c2801a"><title>map 26: model 23.25</title></circle>
+<line x1="539.9" y1="227.2" x2="539.9" y2="127.8" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="539.9" cy="127.8" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 7 (arenas_678): decoder ceiling 23.58</title></circle>
+<rect x="535.9" y="224.4" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 7: persistence 19.53</title></rect>
+<circle cx="539.9" cy="227.2" r="4" fill="#c2801a"><title>map 7: model 19.58</title></circle>
+<line x1="636.7" y1="222.5" x2="636.7" y2="129.8" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="636.7" cy="129.8" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 30 (unseen2): decoder ceiling 23.5</title></circle>
+<rect x="632.7" y="200.1" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 30: persistence 20.51</title></rect>
+<circle cx="636.7" cy="222.5" r="4" fill="#c2801a"><title>map 30: model 19.77</title></circle>
+<line x1="693.8" y1="222.5" x2="693.8" y2="170.8" stroke="#c2801a" stroke-width="2" stroke-opacity="0.75"/>
+<circle cx="693.8" cy="170.8" r="4" fill="none" stroke="currentColor" stroke-width="1.4"><title>map 23 (unseen2): decoder ceiling 21.85</title></circle>
+<rect x="689.8" y="222.7" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"><title>map 23: persistence 19.6</title></rect>
+<circle cx="693.8" cy="222.5" r="4" fill="#c2801a"><title>map 23: model 19.77</title></circle></g><g font-size="11.5" fill="currentColor"><circle cx="70" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.4"/><text x="80" y="16">decoder ceiling (reconstruction of the true frame; filled = training map)</text>
+<circle cx="470" cy="12" r="4" fill="#c2801a"/><text x="480" y="16">model prediction</text><rect x="580" y="8" width="8" height="8" fill="none" stroke="#1f6f8b" stroke-width="1.6"/><text x="594" y="16">copy-last-frame persistence</text></g></svg><figcaption>Every map at its distance to the nearest training map. Open and filled circles are the decoder ceiling; orange dots are the model; blue squares are copy-last-frame persistence. The orange bar between the model and its ceiling is the room the backbone left on the table. The ceiling does not move with distance (rank correlation −0.12); the bar grows with it (+0.47, +0.53 controlling for motion); and on the four training maps the model sits above persistence while on most unseen maps it sits below.</figcaption></figure>
+<table><thead><tr><th></th><th class="n">training maps (4)</th><th class="n">unseen maps (26)</th></tr></thead><tbody>
+<tr><td>decoder ceiling, PSNR / LPIPS</td><td class="n">23.91 / 0.094</td><td class="n">23.71 / 0.097</td></tr>
+<tr><td>model gain over persistence, PSNR</td><td class="n">+0.92 dB</td><td class="n">−0.54 dB</td></tr>
+<tr><td>model LPIPS (persistence LPIPS)</td><td class="n">0.180 (0.207)</td><td class="n">0.326 (0.201)</td></tr>
+<tr><td>ceiling minus model</td><td class="n">1.55 dB</td><td class="n">2.41 dB</td></tr>
+</tbody></table>
+<p>Read together: the decoder renders unseen maps about as well as training maps, so a decoder tuned on an unseen map has at most a few tenths of a dB of genuine rendering loss to recover. The loss is in the predicted latents. That is why the Sunday "adapt the decoder to the new map" experiment was cancelled: it could only have improved the painting of a wrong prediction. One caveat from Astra: the ceiling is measured on true latents, and a decoder can behave differently on off-distribution predicted latents, so the paired experiment (decode the same predictions with the stock and the tuned decoder) is what settles the rendering leg rather than this table alone.</p>
+<p>Three campaign maps (19, 25, 26) have a ceiling below persistence itself: their footage is so static that copy-last-frame beats even a perfect prediction through this autoencoder. So the headline against persistence leads with LPIPS, where all 26 unseen maps lose and the ceiling is fine, and every PSNR is shown with its ceiling.</p>
+
+<h2>3. What the three reviews concluded</h2>
+<table><thead><tr><th>claim</th><th>status</th><th>evidence</th></tr></thead><tbody>
+<tr><td>Trained on four maps, the models beat persistence on held-out episodes of those maps and lose on maps they never saw</td><td><span class="pill ok">headline</span></td><td>PSNR gain +0.51 to +1.79 dB on the 4 training maps; negative on 17 of 26 unseen maps; LPIPS gain negative on 26 of 26</td></tr>
+<tr><td>The loss sits in the predicted latents, not the decoder</td><td><span class="pill ok">supported</span></td><td>ceiling flat across maps; ceiling-minus-model grows with distance; latent ratio and paired decoding pending</td></tr>
+<tr><td>Distance to the training footage predicts the drop</td><td><span class="pill qa">qualified</span></td><td>pooled partial ρ −0.73 [−0.84, −0.32]; with the map-family control −0.43 with the interval crossing zero; the pre-declared gate failed on two checks</td></tr>
+<tr><td>The turn response survives on unseen maps</td><td><span class="pill qa">pending tonight</span></td><td>0.87 (U-Net) and 0.85 (SD 3.5) on training maps; 30-map run in progress</td></tr>
+<tr><td>EMA weights suffer the closed-loop collapse far less than live weights</td><td><span class="pill ok">supported, as a rate</span></td><td>frames under 10 dB on matched windows: live 23 of 256, EMA 9 of 256; outside the 70k collapse 11 vs 8</td></tr>
+<tr><td>"Shared physics transfers"</td><td><span class="pill no">not claimed</span></td><td>same engine rules do not give the same observable transitions once geometry and enemies change; the check measures yaw only</td></tr>
+<tr><td>Decoder-only adaptation learns a new map</td><td><span class="pill no">dropped</span></td><td>the decoder is downstream of the simulation</td></tr>
+<tr><td>Middle-layer post-training before Wednesday</td><td><span class="pill no">deferred</span></td><td>the LLM layer axis is the wrong axis here (one channel-stacked input; every block at every noise level; U-Net skips); noise level and control pathway are the informative axes</td></tr>
+</tbody></table>
+
+<h2>4. Where the distance metric fits</h2>
+<p>The distance is the x axis of everything above. It says how far a map's footage sits from the nearest training map, measured three ways (SD 1.x latents, pixels, SD 3.5 latents; the rankings agree at 0.86 to 0.90), and it is frozen before any score was read. What it is good for: ordering the 30 maps so that each leg of the decomposition can be read as a curve, and predicting which maps will need adaptation. What it cannot yet do: prove that distance <em>causes</em> the drop, because with 30 maps in three clusters (training arenas, other arenas, campaign) the pooled correlation cannot be separated from the cluster structure. It stays in the paper as qualified evidence with that stated, and becomes a validated predictor only when it predicts held-out maps out of sample, which needs more maps.</p>
+
+<h2>5. What to think about next</h2>
+<ol class="steps">
+<li><strong>Tonight, automatic:</strong> the directional check on all 30 maps (leg 1), the latent ratio on all 30 (leg 2), the training-map decoder tunes (leg 3's column).</li>
+<li><strong>Sunday:</strong> PixArt 200k through the 30 maps, the cross-backbone replication that the transfer claim most needs; the paired stock-versus-tuned decoding of the same predictions; the sign-flip figure; a look at the near-static campaign footage.</li>
+<li><strong>Monday:</strong> SD 3.5 200k through everything; final tables.</li>
+<li><strong>October, the stronger paper:</strong> controlled shifts (retexture the same geometry, then change geometry at matched appearance) to pull appearance and geometry apart; adaptation curves in a small part of the backbone across 8 to 10 maps with the control response as a guard; the denoising-step probe of where control acts; forward and strafe directional tests; more maps.</li>
+</ol>
+</main></body></html>
