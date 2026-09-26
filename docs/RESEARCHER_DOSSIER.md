@@ -25,6 +25,8 @@ A citation at the end of a table caption applies to every numerical cell in that
 
 The primary papers take precedence over the literature cards when they disagree. In particular, MultiGen's current paper reports PSNR and a context-length ablation. PlayGen explicitly uses Diffusion Forcing. GameNGen's inference frame rate does not specify its training stride. Our historical “copy-last” metric is not always raw-frame persistence. These distinctions affect the interpretation of the whole comparison. [M Tables 1, 3; P §3.3 and Figure 2; G §§3.3, 4.2 and Appendix A.6; `eval_tf.py:278–303`.]
 
+**Addenda and reading order (added 2026-09-25).** Sections 3.12 and 4.10 (Sep 23) and sections 3.13, 3.14, 4.11 and 5.9 (Sep 25) are appended after section 8, in that order, so that no earlier section changed; the rendered HTML places each in its part. The Sep 25 sections cut off at main `614a7a8`, which includes the 2026-09-25 23:00 EDT entry of `RESEARCH_CONTEXT.md`. A reader new to the project should start with section 0 of `RESEARCH_CONTEXT.md`, rewritten for Sep 25 at 19:30 EDT, which states the paper's spine, the runs, the dataset and what is open. Then read its section 7 log from Sep 23 onward, newest first; entries after 19:30 can revise section 0. Then read sections 3.12 to 3.14 of this dossier for the next-tic results and the distance study, sections 4.10 and 4.11 for the decisions behind them, and section 5.9 for the literature on distance and persistence baselines. Then read the two memos, `.claude/analyses/distance-study-design-2026-09-24.md` and `.claude/analyses/distance-study-literature-2026-09-25.md`. Sections 1 to 8 remain the background: the stride-four rows, the recipe comparison, the GameNGen reading and the repository map. Section 8.3 ends with pointers to the parts of the paper a co-author can take up now.
+
 # 1. The problem and the goal
 
 ## 1.1 What is being learned
@@ -966,6 +968,18 @@ Read GameNGen's task formulation and method first, keeping the recipe table open
 Read MultiGen for persistent state and additional conditioning information. Read DIAMOND for denoising formulation and the meaning of few-step samples. Read PlayGen for prior Doom transformers, data balancing and action-aware evaluation. Read Diffusion Forcing and Self Forcing only after the current next-tic contract is clear, so their training changes remain distinguishable from our existing augmentation. Use the reproductions to inspect practical engineering choices and public artifacts, while retaining their distance from the original experiment.
 
 For manuscript preparation, recover the missing grid and sampler artifacts before copying those tables into the paper. Freeze dense-test protocol before selecting test results. Preserve the distinctions between a dataset fact, a measured model result, a causal explanation, and a forecast throughout the write-up.
+
+**For a new co-author (added 2026-09-25).** Read in the order section 0 of `RESEARCH_CONTEXT.md` gives: that section, then its log from Sep 23; then this dossier's sections 3.12 to 3.14, 4.10 and 4.11, and 5.9; then the distance-study design and literature memos. Sections 3.1, 1.2 and 4.4 explain the reading rules, the persistence references and the causal contract that every number above depends on.
+
+**What Keerthana can pick up.** Section 0 of `RESEARCH_CONTEXT.md` records the Sep 25 division of labour. Keerthana takes the related work, the dataset and method sections, the PhysWM template with its page budget, and the Figure 1 candidates. Rohan holds the results, the tables, the generalization figure, the scoring and the server. Section 0 cites `.claude/analyses/weekly-update-2026-09-25.md` for the division, but that draft to Changliu states the plan to Sep 30 without assigning work. The rows below point to where each piece starts.
+
+| Piece | Where to start | State at the cutoff |
+|---|---|---|
+| Related work | Section 5.9 and its citation table; `.claude/analyses/distance-study-literature-2026-09-25.md`; the reading guides of sections 5.1 to 5.8 | Sources read and checked against the PDFs; paragraph not written |
+| Dataset section | `release/DATASET_CARD.md`, `release/DENSE_CORPUS.md` and `release/dense_split.json`; sections 4.2 to 4.4; the map list in section 3.14 | Dataset public on Hugging Face; 6,000 training episodes encoded in both latent spaces; 210 seeded evaluation episodes on 30 maps |
+| Method section | The recipe and gate paragraphs of section 3.12; section 4.4; the design as run in section 3.14 and the design memo | Recipe fixed and identical across the three rows; the paper's step count and decoder not yet fixed |
+| PhysWM template and page budget | `paper/main.tex:1–8`: 4 pages plus references; no CoRL template checked in; the CoRL text block is narrower, so the draft runs about 15 percent longer there | The skeleton carries the Sep 16 stride-four framing and needs the next-tic framing |
+| Figure 1 candidates: a rollout strip, W&B curves | Rollout arrays kept on every full read since Sep 24 (section 3.13); the W&B project `doomdit-nexttic` with the native and sidecar runs (section 4.11) | None chosen |
 
 ## 3.12 Sep 23: the next-tic launches and the first curves
 
