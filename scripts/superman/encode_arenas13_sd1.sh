@@ -20,7 +20,7 @@ REPO=$H/repo                                     # pinned 190c125
 PY=/home/rohan/miniconda3/envs/Doom/bin/python
 GPUS=${GPUS:-"1 2 3 4 5 6 7"}                    # GPU 0 belongs to another user tonight
 NSHARD=$(echo $GPUS | wc -w)
-FLAGS=${FLAGS:-"--every-tic --stride 4 --batch-size 64 --decode-threads 6 --dtype bf16 --decode-check 16"}
+FLAGS=${FLAGS:-"--every-tic --stride 4 --batch-size 64 --decode-threads 6 --decode-workers 0 --dtype bf16 --decode-check 16 --episode-ids 16:328"}
 EXPECT=${EXPECT:-312}
 
 ts() { date -Is; }
@@ -52,6 +52,18 @@ NMETA=$(ls "$LAT"/ep_*_meta.npz 2>/dev/null | wc -l)
 echo "$(ts) encoded: $NLAT latents, $NMETA sidecars (expect $EXPECT each)"
 [ "$NLAT" -eq "$EXPECT" ] && [ "$NMETA" -eq "$EXPECT" ] || { echo "encode incomplete"; exit 3; }
 grep -h "decode-check\|PSNR" "$H"/logs/encode_arenas13_sd1_shard*.log | head -20 || true
+
+# Cross-host check: Spiderman encodes ep_00016 on its own card into $D/tmp/enc_check; compare if present.
+if ssh -o BatchMode=yes "$SPIDER" "test -f $D/tmp/enc_check/ep_00016_latents.npy"; then
+  rsync -a "$SPIDER:$D/tmp/enc_check/ep_00016_latents.npy" "$H/logs/spiderman_ep_00016_latents.npy"
+  $PY - <<PYEOF
+import numpy as np
+a=np.load("$LAT/ep_00016_latents.npy").astype(np.float32); b=np.load("$H/logs/spiderman_ep_00016_latents.npy").astype(np.float32)
+print("cross-host check ep_00016: shapes", a.shape, b.shape, "max|diff|", float(np.abs(a-b).max()), "rms diff / rms", float(np.sqrt(((a-b)**2).mean())/np.sqrt((b**2).mean())))
+PYEOF
+else
+  echo "cross-host check: Spiderman reference not present yet (compare later)"
+fi
 
 echo "$(ts) pushing latents to Spiderman $LAT_REMOTE"
 ssh -o BatchMode=yes "$SPIDER" "mkdir -p $LAT_REMOTE"
