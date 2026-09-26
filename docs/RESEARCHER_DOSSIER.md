@@ -217,6 +217,59 @@ The split is by episode, in half-open id ranges, and frozen in `release/dense_sp
 
 Of the U-Net's 10,006,779 candidate training windows, 9,661,754 are valid; the 3.45 percent excluded cross a life boundary. [RC 09-23 06:30] At batch 32 one pass is about 300k updates, so 200k updates see about two thirds of one pass (derived). The 2000:6000 episodes were encoded later on Superman in both latent spaces, in a separate tree so the certified training directories stayed unchanged, and uploaded to their own Hub folders. The whole dataset is public on Hugging Face. [RC 09-24 22:50; RC §0]
 
+<figure>
+<div class="svg-wrap" tabindex="0"><svg viewBox="0 0 760 330" role="img" aria-label="An episode strip of 1,360 rows drawn to scale with one death at row 760, where the recorded tic jumps by about 39 and the deaths counter goes from 0 to 1. A one-tic window spans 33 rows, so 32 start positions before the death are rejected; a 256-tic rollout spans 288 rows, so 287 are rejected.">
+<defs><marker id="f3-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="currentColor"/></marker><marker id="f3-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#d0652f"/></marker></defs>
+<text x="230.0" y="52" font-size="12" text-anchor="middle" fill="currentColor">life 0: deaths = 0</text>
+<text x="570.0" y="52" font-size="12" text-anchor="middle" fill="currentColor">life 1: deaths = 1</text>
+<rect x="40.0" y="62" width="380.0" height="22" rx="0" fill="currentColor" stroke="currentColor" stroke-width="1" fill-opacity=".08"/>
+<rect x="420.0" y="62" width="300.0" height="22" rx="0" fill="currentColor" stroke="currentColor" stroke-width="1" fill-opacity=".08"/>
+<line x1="90.0" y1="84" x2="90.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="140.0" y1="84" x2="140.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="190.0" y1="84" x2="190.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="240.0" y1="84" x2="240.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="290.0" y1="84" x2="290.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="340.0" y1="84" x2="340.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="390.0" y1="84" x2="390.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="440.0" y1="84" x2="440.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="490.0" y1="84" x2="490.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="540.0" y1="84" x2="540.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="590.0" y1="84" x2="590.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="640.0" y1="84" x2="640.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<line x1="690.0" y1="84" x2="690.0" y2="89" stroke="currentColor" stroke-width="1" opacity=".45"/>
+<text x="40.0" y="102" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">row 0</text>
+<text x="720.0" y="102" font-size="11" text-anchor="end" fill="currentColor" opacity=".7">rows continue …</text>
+<line x1="420.0" y1="8" x2="420.0" y2="284" stroke="#d0652f" stroke-width="2"/>
+<text x="426.0" y="18" font-size="12" text-anchor="start" fill="#d0652f" font-weight="600">death and respawn</text>
+<text x="426.0" y="33" font-size="11" text-anchor="start" fill="#d0652f">tic jumps about 39 (R2 fails); deaths 0 → 1 (R3 fails)</text>
+<text x="40" y="134" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">one-tic read or training window</text>
+<text x="257.9" y="134" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">32 context + 1 target = 33 rows</text>
+<rect x="40.0" y="142" width="364.0" height="14" rx="0" fill="currentColor" stroke="currentColor" stroke-width="0" fill-opacity=".35"/>
+<rect x="404.0" y="142" width="16.0" height="14" rx="0" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".25" stroke-dasharray="3 2"/>
+<rect x="420.0" y="142" width="300.0" height="14" rx="0" fill="currentColor" stroke="currentColor" stroke-width="0" fill-opacity=".35"/>
+<text x="398.0" y="172" font-size="12" text-anchor="end" fill="#d0652f" font-weight="600">32 starts rejected</text>
+<path d="M404.0,160 v6 H420.0 v-6" fill="none" stroke="#d0652f" stroke-width="1"/>
+<text x="40" y="242" font-size="12" text-anchor="start" fill="currentColor" font-weight="600">256-tic rollout</text>
+<text x="147.5" y="242" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">32 seed + 256 predicted = 288 rows</text>
+<rect x="40.0" y="250" width="236.5" height="14" rx="0" fill="currentColor" stroke="currentColor" stroke-width="0" fill-opacity=".35"/>
+<rect x="276.5" y="250" width="143.5" height="14" rx="0" fill="#d0652f" stroke="#d0652f" stroke-width="1.5" fill-opacity=".25" stroke-dasharray="3 2"/>
+<rect x="420.0" y="250" width="300.0" height="14" rx="0" fill="currentColor" stroke="currentColor" stroke-width="0" fill-opacity=".35"/>
+<text x="270.5" y="280" font-size="12" text-anchor="end" fill="#d0652f" font-weight="600">287 starts rejected</text>
+<path d="M276.5,268 v6 H420.0 v-6" fill="none" stroke="#d0652f" stroke-width="1"/>
+<path d="M160.0,118 V112 H176.5 V118" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="168.25" y="107" font-size="11" text-anchor="middle" fill="currentColor">admitted</text>
+<path d="M413.0,118 V112 H429.5 V118" fill="none" stroke="#d0652f" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="435.5" y="116" font-size="11" text-anchor="start" fill="#d0652f">rejected: spans the death</text>
+<path d="M130.0,226 V220 H274.0 V226" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="202.0" y="215" font-size="11" text-anchor="middle" fill="currentColor">admitted</text>
+<path d="M360.0,226 V220 H504.0 V226" fill="none" stroke="#d0652f" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="510.0" y="224" font-size="11" text-anchor="start" fill="#d0652f">rejected: spans the death</text>
+<text x="40" y="304" font-size="11" text-anchor="start" fill="currentColor" opacity=".75">bars: rows where a window may start; every adjacent pair of rows in the span needs</text>
+<text x="40" y="320" font-size="11" text-anchor="start" fill="currentColor" opacity=".75">tic + 1 (R2), the same deaths count (R3) and the same map_id (R4)</text>
+</svg></div>
+<figcaption>A window is admitted only if it stays inside one life, so every death rejects the 32 starts before it for a one-tic read but 287 for a 256-tic rollout: 3.7 against 34 percent of candidates on 12 audited episodes (3.45 percent of the U-Net's training windows).</figcaption>
+</figure>
+
 **Why the unseen subset moved to ids 60:120.** Arnold's weapon-select requests execute only in each recorder worker's first episode (section 2.3). `arenas_678` was started three times, so its ids 0:60 held 51 worker-first episodes, against none in validation and test and 32 (1.6 percent) in the training prefix. Scoring 0:60 would have mixed map transfer with a control regime the models barely saw. Ids 60:120 hold none. The replacement was declared on Sep 22, before any model was scored on either set. [`docs/REVIEW_2026-09-22.md` H1]
 
 ## 2.3 Requested versus executed controls: the mechanism and the repair
