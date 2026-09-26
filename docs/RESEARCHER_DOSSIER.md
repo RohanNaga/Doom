@@ -32,11 +32,11 @@ Validation episodes of the four training maps (ids 6000:6100), 512 teacher-force
 | U-Net 200k EMA (final) | 22.49 / 0.177 | +0.92 | 21.33 / 0.224 | +2.11 | 17.81 | +0.29 |
 | U-Net 200k live | 22.29 / 0.186 | +0.72 | 20.97 / 0.244 | +1.76 | 15.87 | −1.65 |
 | SD 3.5 130k EMA | 23.21 / 0.135 | +1.64 | 21.52 / 0.199 | +2.31 | 17.70; seed-1 windows 17.25 | +0.18; −0.21 |
-| SD 3.5 130k live | not recorded (120k: 22.95 / 0.146) | | not recorded (120k: 21.24 / 0.222) | | 17.86 | +0.34 |
+| SD 3.5 130k live | 22.97 / 0.144 | +1.40 | 21.23 / 0.220 | +2.02 | 17.86 | +0.34 |
 | PixArt 155k EMA | 22.41 / 0.184 | +0.84 | 21.24 / 0.235 | +2.02 | no rollout read yet | |
 | PixArt 155k live | 22.30 / 0.189 | +0.73 | 20.94 / 0.250 | +1.73 | | |
 
-Sources: U-Net [RC 09-24 18:40]; SD 3.5 [RC 09-26 10:50, 11:30, 05:40]; PixArt [RC 09-26 12:00, read from `results_spiderman/041-pixart-nexttic/eval_0155000/*/metrics.json`]. The seed-1 rollouts draw different validation windows, whose own copy-seed is 17.46. SD 3.5 passed the U-Net's final LPIPS at 40k and both final U-Net numbers at 50k (22.56 / 0.163). [RC 09-25 23:15] The SD 3.5 130k gains and the U-Net live gains are derived.
+Sources: U-Net [RC 09-24 18:40]; SD 3.5 [RC 09-26 10:50, 11:30, 05:40; live teacher-forced reads from the same entries]; PixArt [RC 09-26 12:00, read from `results_spiderman/041-pixart-nexttic/eval_0155000/*/metrics.json`]. The seed-1 rollouts draw different validation windows, whose own copy-seed is 17.46. SD 3.5 passed the U-Net's final LPIPS at 40k and both final U-Net numbers at 50k (22.56 / 0.163). [RC 09-25 23:15] The SD 3.5 130k gains and the U-Net live gains are derived.
 
 Two caveats travel with every row. SD 3.5 decodes through a better autoencoder (about 27.5 against 23.5 dB reconstruction on validation frames), so part of its lead is rendering, not dynamics. And none of these windows come from maps the models did not train on; section 7 holds that evidence.
 
@@ -365,13 +365,13 @@ Read-by-read, 50k to 130k. PSNR / LPIPS for teacher-forced reads; rollouts are P
 | 85k | 22.83 / 0.157 | 22.96 / 0.146 | 21.30 / 0.216 | 17.44 | 16.99 | 0/0/1 | 1/0/1 |
 | 90k | 22.78 / 0.149 | 23.00 / 0.144 | 21.32 / 0.214 | 17.56 | 17.71 | 0/0/0; seed 2: 2/1/0 | 0/0/0 |
 | 95k | 22.83 / 0.150 | 23.04 / 0.142 | 21.35 / 0.212 | 17.55 | 17.72 | 1/0/0 | 1/0/0 |
-| 100k | n.r. | 23.06 / 0.142 | 21.39 / 0.210 | 17.60 | 17.36 | 0/0/0 | 1/1/1 |
-| 105k | n.r. | 23.07 / 0.141 | 21.41 / 0.208 | 16.86 [16.49] | 17.52 | 1/0/2; 3/1/0 | 0/0/0 |
+| 100k | 22.76 / 0.150 | 23.06 / 0.142 | 21.39 / 0.210 | 17.60 | 17.36 | 0/0/0 | 1/1/1 |
+| 105k | 22.87 / 0.151 | 23.07 / 0.141 | 21.41 / 0.208 | 16.86 [16.49] | 17.52 | 1/0/2; 3/1/0 | 0/0/0 |
 | 110k | 22.91 / 0.145 | 23.10 / 0.139 | 21.44 / 0.205 | 18.13 | 18.27 | 0/0/0 | 1/0/0 |
 | 115k | 22.95 / 0.144 | 23.14 / 0.138 | 21.46 / 0.203 | 17.55 [17.45] | 17.40 | 1/1/0; 3/1/0 | 0/0/0 |
 | 120k | 22.95 / 0.146 | 23.15 / 0.136 | 21.48 / 0.201 | 17.95 [18.01] | 17.38 | 0/0/0; 2/0/0 | 2/2/1 |
-| 125k | n.r. | 23.18 / 0.135 | 21.52 / 0.200 | 17.16 [17.36] | 17.38 | 1/0/0; 3/1/1 | 1/1/0 |
-| 130k | n.r. | 23.21 / 0.135 | 21.52 / 0.199 | 17.70 [17.25] | 17.86 | 1/1/0; 3/1/1 | 0/0/0 |
+| 125k | 22.97 / 0.143 | 23.18 / 0.135 | 21.52 / 0.200 | 17.16 [17.36] | 17.38 | 1/0/0; 3/1/1 | 1/1/0 |
+| 130k | 22.97 / 0.144 | 23.21 / 0.135 | 21.52 / 0.199 | 17.70 [17.25] | 17.86 | 1/1/0; 3/1/1 | 0/0/0 |
 
 Sources: the RC entry for each step, 09-24 15:15 to 09-26 11:30; event counts from [rates]. Copy-seed at 256 tics is 17.52 on seed-0 windows and 17.46 on seed-1 windows.
 
