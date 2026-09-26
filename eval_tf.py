@@ -4,7 +4,10 @@ Teacher-forced next-frame metrics for the new stack (velocity or epsilon backbon
 For each held-out window: L real context latents and the action, one DDIM sample, decode
 through the (optionally fine-tuned) VAE, score against the raw lossless frame from the
 parquet recording and against the VAE-decoded ground truth. Reports PSNR, LPIPS, latent
-MSE, HUD-crop PSNR, the copy-last-frame baseline, and the VAE ceiling.
+MSE, HUD-crop PSNR, the copy-last-frame baseline, and the VAE ceiling. Per window it also
+reports the copy-last LATENT MSE (the last real context latent against the scored target) and
+`latent_mse_ratio`, the model's latent MSE over it: a persistence-normalised outcome that no
+decoder touches (Sep 26 2026).
 
     python eval_tf.py --ckpt results/010-dit-l32/best.pt --backbone dit --latents-dir data/latents_arnold \
         --parquet-dir raw_arnold --split data/split_arnold.json --subset val --num-windows 2048 --out-dir eval/dit_val
@@ -40,6 +43,17 @@ HUD_ROWS = 32
 def psnr(a, b):
     mse = ((a - b) ** 2).flatten(1).mean(1).clamp_min(1e-10)
     return 10 * torch.log10(1.0 / mse)
+
+
+def copy_last_latent_mse(ctx, tgt, latent_channels):
+    """Per window, the MSE of copying the last real context latent forward onto the scored target."""
+    return ((ctx[:, -latent_channels:].float() - tgt.float()) ** 2).flatten(1).mean(1)
+
+
+def latent_mse_ratio(model_mse, copy_mse):
+    """Model latent MSE over copy-last latent MSE; NaN where copying was exact (the ratio is undefined
+    there, and a clamped denominator would let one static window dominate the mean)."""
+    return torch.where(copy_mse > 0, model_mse / copy_mse.clamp_min(1e-30), torch.full_like(model_mse, float("nan")))
 
 
 @torch.no_grad()
@@ -310,6 +324,9 @@ def main(args):
         tgt = tgts[:, K - 1]
         pred_img, gt_img, last_img = dec(pred), dec(tgt), dec(ctx[:, -latent_channels:])
         lat_mse = ((pred.float() - tgt.float()) ** 2).flatten(1).mean(1)
+        # the decoder-free persistence reference: the last REAL context latent, K tics before the target
+        copy_mse = copy_last_latent_mse(ctx, tgt, latent_channels)
+        mse_ratio = latent_mse_ratio(lat_mse, copy_mse)
         for i in range(B):
             gi = gis[i]; slot, start = ds.locate(gi)
             ep_id, map_id = ds.episodes[slot][0], ds.episodes[slot][3]
@@ -318,6 +335,7 @@ def main(args):
                      tics_since_decision=int(phases[i, K - 1]),
                      psnr_dec=float(psnr(pred_img[i:i+1], gt_img[i:i+1])), lpips_dec=float(lp(pred_img[i:i+1] * 2 - 1, gt_img[i:i+1] * 2 - 1).flatten()),
                      copy_psnr_dec=float(psnr(last_img[i:i+1], gt_img[i:i+1])), latent_mse=float(lat_mse[i]),
+                     copy_latent_mse=float(copy_mse[i]), latent_mse_ratio=float(mse_ratio[i]),
                      hud_psnr_dec=float(psnr(pred_img[i:i+1, :, -HUD_ROWS:], gt_img[i:i+1, :, -HUD_ROWS:])))
             if raw is not None:
                 tic = ds.target_tic(gi)

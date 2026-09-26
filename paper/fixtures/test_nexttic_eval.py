@@ -319,6 +319,53 @@ def test_a_control_history_checkpoint_is_scored_with_control_history(pertic_eval
     assert all(r["action"] == "-1" for r in rows)
 
 
+@pytest.mark.parametrize("horizon", [1, 4])
+def test_the_copy_last_latent_mse_is_a_decoder_free_persistence_reference(tmp_path, tiny_hub, horizon):
+    """Astra, Sep 26: per window, the copy-last latent MSE (the last REAL context latent against the scored
+    target) and the model's latent MSE over it, a persistence-normalised outcome no decoder touches. The
+    fixture fills row t's latent with t, so copying the last context row is off by exactly K per element
+    at horizon K, and its MSE is K squared. No raw recordings: it needs neither pyarrow nor a decoder."""
+    import csv
+    d = tmp_path / "corpus"
+    lat_dir = str(d / "latents")
+    for ep in (0, 1):
+        write_pertic_episode(lat_dir, ep, held_actions([0, 1, 2, 0, 1, 2]))
+    split = str(d / "split.json")
+    json.dump({"train": [0], "val": [1]}, open(split, "w"))
+    model = _tiny_model()
+    ck = str(tmp_path / "best.pt")
+    trained_with = {"action_dropout": 0.0, "objective": "v", "tic_stride": 1}
+    torch.save({"model": model.state_dict(), "step": 7, "args": trained_with}, ck)
+    out = str(tmp_path / "out")
+    eval_tf.main(eval_tf.build_parser().parse_args(
+        ["--ckpt", ck, "--backbone", "pixart", "--pixart-path", backbones.PIXART_DEFAULT, "--latent-channels", "4",
+         "--vae-path", _tiny_vae(tmp_path / "vae"), "--latents-dir", lat_dir, "--split", split, "--subset", "val",
+         "--context-frames", str(CTX), "--num-actions", "3", "--noise-buckets", "4", "--num-windows", "4",
+         "--batch-size", "2", "--steps", "2", "--save-images", "0", "--num-workers", "0",
+         "--horizon-tics", str(horizon), "--out-dir", out]))
+    m = json.load(open(os.path.join(out, "metrics.json")))
+    rows = list(csv.DictReader(open(os.path.join(out, "per_window.csv"))))
+    assert len(rows) == 4
+    for r in rows:
+        assert float(r["copy_latent_mse"]) == pytest.approx(horizon ** 2)
+        assert float(r["latent_mse_ratio"]) == pytest.approx(float(r["latent_mse"]) / float(r["copy_latent_mse"]))
+    assert m["copy_latent_mse"]["n"] == 4 and m["copy_latent_mse"]["mean"] == pytest.approx(horizon ** 2)
+    assert m["latent_mse_ratio"]["mean"] == pytest.approx(np.mean([float(r["latent_mse_ratio"]) for r in rows]))
+    assert m["latent_mse"]["n"] == 4                       # the existing fields stay beside it
+
+
+def test_a_target_equal_to_its_last_context_latent_has_no_ratio():
+    """A frame that did not change makes copy-last exact; the ratio is undefined there, so it is NaN and
+    the aggregate leaves it out rather than dividing by a clamp."""
+    ctx = torch.stack([torch.cat([torch.zeros(4, 2, 2), torch.ones(4, 2, 2)]),
+                       torch.cat([torch.zeros(4, 2, 2), torch.full((4, 2, 2), 2.0)])])
+    tgt = torch.stack([torch.ones(4, 2, 2), torch.zeros(4, 2, 2)])
+    copy = eval_tf.copy_last_latent_mse(ctx, tgt, 4)
+    assert copy.tolist() == [0.0, 4.0]
+    ratio = eval_tf.latent_mse_ratio(torch.tensor([0.5, 2.0]), copy)
+    assert np.isnan(float(ratio[0])) and float(ratio[1]) == pytest.approx(0.5)
+
+
 # ---------------------------------------------------------------------------------------
 # rollout window selection and the (frame, control) parity
 # ---------------------------------------------------------------------------------------
