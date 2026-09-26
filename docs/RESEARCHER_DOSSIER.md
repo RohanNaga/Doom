@@ -315,3 +315,85 @@ Other SD 3.5 reads: EMA 0.813 and live 0.859 at 75k; EMA 0.828 at 85k, 0.836 at 
 
 Both rows turn the right way with about the true magnitude, and the swap reverses the motion; neither learned persistence. The orderings between rows and reads are not resolved. With 128 windows, one window moves `correct_frac` by 0.008; a binomial standard error at 0.83 is about 0.033, and about 0.047 for a difference of two runs. The whole SD 3.5 EMA range, 0.805 to 0.852, is under 1.5 such standard errors (derived). The check covers turning on seen-map validation windows only.
 
+---
+
+# 5. Results, row by row
+
+All numbers in this section use the section 4 protocols on validation windows of the four training maps. Validation losses cannot rank rows: a 16-channel velocity loss and a 4-channel one measure different targets. They only show that each run descended without excursions.
+
+## 5.1 SD 1.4 U-Net (final at 200k)
+
+Validation loss fell from 0.2517 at 1k to 0.1837 at 20k, 0.1707 at 50k and 0.1544 at 154k, where it flattened; the last value was 0.1509. The run logged no skipped update, non-finite loss or excursion. Rohan stopped it at 200k on Sep 24 because it had saturated, and made 200k the matched step for every row. [RC 09-23 11:30; RC 09-24 16:20, 17:45]
+
+| Update | Live h1 | EMA h1 | EMA h1 gain | EMA h4 | EMA h4 gain |
+|---:|---|---|---:|---|---:|
+| 10k | 21.49 / 0.264 | 14.65 / 0.557 | −6.92 | 12.90 / 0.788 | −6.31 |
+| 20k | 21.84 / 0.237 | 20.07 / 0.270 | −1.50 | 18.11 / 0.365 | −1.10 |
+| 40k | 21.88 / 0.218 | 21.95 / 0.212 | +0.38 | 20.64 / 0.274 | +1.43 |
+| 50k | 21.97 / 0.215 | 22.08 / 0.205 | +0.51 | 20.81 / 0.263 | +1.59 |
+| 90k | | 22.30 / 0.191 | +0.73 | 21.14 / 0.242 | +1.93 |
+| 150k | 22.27 / 0.197 | 22.42 / 0.182 | +0.86 | 21.24 / 0.232 | +2.03 |
+| 200k | 22.29 / 0.186 | 22.49 / 0.177 | +0.92 | 21.33 / 0.224 | +2.11 |
+
+PSNR / LPIPS. [RC 09-23 11:30, 16:30, 19:00; RC 09-24 09:45, 10:30, 18:40] The live weights crossed one-tic persistence in PSNR between 10k and 20k. The EMA passed the live weights by 40k and led at every later read. It crossed persistence in LPIPS between 50k (0.205) and 55k (0.202). From 160k to 200k it moved only 0.04 dB at h1 and 0.06 dB at h4.
+
+Rollout PSNR at 200k, 16 rollouts:
+
+| Tics | 4 | 32 | 64 | 128 | 256 |
+|---|---:|---:|---:|---:|---:|
+| EMA | 21.28 | 19.35 | 18.24 | 18.28 | 17.81 |
+| Live | 20.75 | 18.61 | 17.84 | 18.16 | 15.87 |
+| Copy-seed | 18.93 | 17.47 | 17.60 | 17.80 | 17.52 |
+
+The EMA leads copy-seed at every horizon, by 2.35 dB at 4 tics shrinking to 0.29 at 256. That last lead is not resolved: across the 160k to 200k reads the EMA's 256-tic point moved by 0.9 dB, three times the lead, and the 200k rollout LPIPS was not recorded. The live weights are the less stable closed-loop generator: 4 of 16 live rollouts end more than 3 dB under the EMA mean at 256 tics (two under 8 dB, none blank) against 2 of 16 EMA rollouts, and the live 256-tic point varied by 3.4 dB between reads from 160k to 200k (it read 14.75 at 180k after 18.18 at 170k). [RC 09-24 15:15, 15:55, 18:40; RC 09-25 01:40]
+
+## 5.2 SD 3.5 Medium (running; 133.4k at cutoff)
+
+Validation loss fell from 0.1115 at 10k to 0.0973 at 42k, 0.0917 at 72k and 0.0879 at 103.5k. [RC 09-24 09:45 to RC 09-25 21:00] The live weights reached 21.60 / 0.220 at 10k and 22.37 / 0.173 at 40k; by 40k SD 3.5 matched the U-Net's 150k PSNR with better LPIPS at about a quarter of the updates. [RC 09-23 19:00; RC 09-24 11:30]
+
+Read-by-read, 50k to 130k. PSNR / LPIPS for teacher-forced reads; rollouts are PSNR at 256 tics (seed 0, with the seed-1 set in brackets); events are (a) / (b) / (c) of section 4.3, counted per 16 rollouts, seed 0 first and seed 1 after the semicolon. "n.r." means the read ran but its value was not recorded.
+
+| Step | Live h1 | EMA h1 | EMA h4 | EMA 256 | Live 256 | EMA events | Live events |
+|---:|---|---|---|---|---|---|---|
+| 50k | 22.51 / 0.170 | 22.56 / 0.163 | 20.88 / 0.245 | 17.82 | 8.98 [10.13] | n.r. | n.r.; seed 1: 10/9/1 |
+| 55k | 22.58 / 0.165 | 22.64 / 0.159 | 20.99 / 0.239 | 16.82 | 17.21 | 1/0/0 | 2/1/1 |
+| 60k | n.r. | n.r. | n.r. | n.r. | n.r. | 1/1/1 | 0/0/0 |
+| 65k | n.r. | 22.77 / 0.154 | 21.07 / 0.231 | 17.54 | n.r. | 0/0/0 | 1/1/0 |
+| 70k | 22.63 / 0.161 | 22.83 / 0.152 | 21.15 / 0.226 | 16.84 | 11.11 [10.95] | 1/1/0 | 12/11/10; 15/11/9 |
+| 75k | 22.73 / 0.154 | 22.88 / 0.150 | 21.19 / 0.223 | 18.54 | 17.63 | 1/0/0 | 0/0/0 |
+| 80k | 22.70 / 0.156 | 22.92 / 0.148 | 21.25 / 0.219 | 17.94 | 18.26 | 0/0/0 | 1/0/0 |
+| 85k | 22.83 / 0.157 | 22.96 / 0.146 | 21.30 / 0.216 | 17.44 | 16.99 | 0/0/1 | 1/0/1 |
+| 90k | 22.78 / 0.149 | 23.00 / 0.144 | 21.32 / 0.214 | 17.56 | 17.71 | 0/0/0; seed 2: 2/1/0 | 0/0/0 |
+| 95k | 22.83 / 0.150 | 23.04 / 0.142 | 21.35 / 0.212 | 17.55 | 17.72 | 1/0/0 | 1/0/0 |
+| 100k | n.r. | 23.06 / 0.142 | 21.39 / 0.210 | 17.60 | 17.36 | 0/0/0 | 1/1/1 |
+| 105k | n.r. | 23.07 / 0.141 | 21.41 / 0.208 | 16.86 [16.49] | 17.52 | 1/0/2; 3/1/0 | 0/0/0 |
+| 110k | 22.91 / 0.145 | 23.10 / 0.139 | 21.44 / 0.205 | 18.13 | 18.27 | 0/0/0 | 1/0/0 |
+| 115k | 22.95 / 0.144 | 23.14 / 0.138 | 21.46 / 0.203 | 17.55 [17.45] | 17.40 | 1/1/0; 3/1/0 | 0/0/0 |
+| 120k | 22.95 / 0.146 | 23.15 / 0.136 | 21.48 / 0.201 | 17.95 [18.01] | 17.38 | 0/0/0; 2/0/0 | 2/2/1 |
+| 125k | n.r. | 23.18 / 0.135 | 21.52 / 0.200 | 17.16 [17.36] | 17.38 | 1/0/0; 3/1/1 | 1/1/0 |
+| 130k | n.r. | 23.21 / 0.135 | 21.52 / 0.199 | 17.70 [17.25] | 17.86 | 1/1/0; 3/1/1 | 0/0/0 |
+
+Sources: the RC entry for each step, 09-24 15:15 to 09-26 11:30; event counts from [rates]. Copy-seed at 256 tics is 17.52 on seed-0 windows and 17.46 on seed-1 windows.
+
+**What the table shows.** Teacher-forced EMA quality improved or held at every read, at both horizons: one-tic gain from +0.99 dB at 50k to +1.64 at 130k, four-tic gain from +1.67 to +2.31 (derived). The EMA led the live weights at every read where both were recorded; the live teacher-forced numbers dipped at 80k and 90k. The four-tic EMA gain passed the U-Net's final +2.11 at 95k. Rollouts tell a different story from teacher forcing: the EMA's 256-tic point wanders between 16.49 and 18.54 dB with no trend, sitting within about 1 dB of copy-seed, while teacher-forced quality climbs steadily. The live weights collapsed at 50k and 70k and not since (section 6). The widening gap between teacher-forced quality and closed-loop stability is the late-training finding of section 6.4.
+
+## 5.3 PixArt-alpha (running; 160k at cutoff)
+
+PixArt launched on Sep 24 at 20:32 EDT, the first row on the new code, with periodic reads by its own trainer every 5k on GPU 3. Its gates passed at 1.141 updates/s and 26.8 GB. Validation loss fell monotonically from 0.196 at 11.2k to 0.1610 at 97k. [RC 09-24 20:35; RC 09-25 19:00]
+
+| Update | Live h1 | EMA h1 (gain) | Live h4 | EMA h4 (gain) |
+|---:|---|---|---|---|
+| 5k | 20.91 / 0.305 | warming | 19.10 / 0.410 | warming |
+| 20k | 21.76 / 0.237 | n.r. | 20.34 / 0.320 | n.r. |
+| 70k to 95k | n.r. | gain +0.62 to +0.71 | n.r. | gain +1.73 to +1.86 |
+| 150k | 22.18 / 0.196 | 22.40 / 0.185 (+0.83) | 20.97 / 0.260 | 21.21 / 0.236 (+2.00) |
+| 155k | 22.30 / 0.189 | 22.41 / 0.184 (+0.84) | 20.94 / 0.250 | 21.24 / 0.235 (+2.02) |
+
+[RC 09-24 22:20; RC 09-25 01:40, 18:40; RC 09-26 12:00] PixArt tracks the U-Net's curve: level at 10k, and at 155k within 0.08 dB of the U-Net's final one-tic EMA gain (+0.84 against +0.92) and ahead at four tics (+2.02 against +2.11 is behind; derived: PixArt trails by 0.09 dB). Its periodic reads lost some labels to out-of-memory errors at 65k and 70k before GPU 3's tenancy rule (section 8); no labels were lost after it. It has no rollout or directional read yet: the 150k rollout read is running, and the final read at 200k tonight runs the full U-Net protocol (512-window teacher forcing, two-seed rollouts, directional, probe_v2) and adds PixArt to the event table. [RC 09-25 11:45; RC 09-26 10:30]
+
+## 5.4 What the numbers license
+
+At 10 steps on seen-map validation windows, all three rows beat one-tic and four-tic persistence with their EMA weights, and SD 3.5 leads at both horizons. The U-Net's EMA stays above copy-seed in PSNR to 256 tics on these 16 rollouts; SD 3.5's EMA sits near copy-seed. Both measured rows turn the right way under a control swap.
+
+They do not license a final ranking before the matched 200k reads, a statement about unseen maps (section 7 shows the U-Net losing to persistence on most), a perceptual lead at 256 tics (copy-seed's LPIPS is better than the EMA's at 256 tics at every recorded read, 0.520 against 0.542 at SD 3.5 75k), or a separation of SD 3.5's dynamics from its better autoencoder. The 16-rollout reads carry no intervals.
+
