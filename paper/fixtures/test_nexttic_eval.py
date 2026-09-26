@@ -344,6 +344,62 @@ def test_a_per_tic_rollout_ignores_chain_ids(tmp_path):
     assert picks and all(len(set(deaths[s:s + 8].tolist())) == 1 for _, _, s, _, _ in picks)
 
 
+def _rollout_args(**kw):
+    return types.SimpleNamespace(**{"seed": 0, "window_seed": None, "noise_seed": None, **kw})
+
+
+def test_the_window_seed_and_the_noise_seed_are_separate(tmp_path):
+    """Astra, Sep 26: one --seed drew both the rollout windows and their noise, so a "seed 1" read changed
+    both at once. Each now defaults to --seed (every earlier read reproduces); set alone, the window seed
+    redraws the windows on the same noise keys and the noise seed redraws the noise on the same windows."""
+    assert rollout_eval.rollout_seeds(_rollout_args(seed=3)) == (3, 3)
+    assert rollout_eval.rollout_seeds(_rollout_args(seed=3, window_seed=5)) == (5, 3)
+    assert rollout_eval.rollout_seeds(_rollout_args(seed=3, noise_seed=7)) == (3, 7)
+    args = rollout_eval.build_parser().parse_args(["--rollout", "--seed", "2", "--noise-seed", "9"])
+    assert rollout_eval.rollout_seeds(args) == (2, 9)
+    d = str(tmp_path / "lat")
+    for ep in range(4):
+        write_pertic_episode(d, ep, held_actions([0, 1, 2] * 4), map_ids=np.full(48, 10 + ep))
+
+    def pick(seed):
+        return rollout_eval.collect_rollout_windows(d, range(4), L=4, H=4, n=40, seed=seed, tic_stride=1)
+    same, other = pick(0), pick(1)
+    assert [(ep, s) for ep, _, s, _, _ in same] == [(ep, s) for ep, _, s, _, _ in pick(0)]
+    assert [(ep, s) for ep, _, s, _, _ in same] != [(ep, s) for ep, _, s, _, _ in other]
+    # the noise of a window depends on the noise seed and the window, never on the window seed
+    k0 = rollout_eval.rollout_noise_keys(0, same, 2)
+    assert k0 == [(0, ep, s, 2) for ep, _, s, _, _ in same]
+    n0 = eval_tf.window_noise((len(same), 4, 8, 10), k0)
+    n9 = eval_tf.window_noise((len(same), 4, 8, 10), rollout_eval.rollout_noise_keys(9, same, 2))
+    assert not torch.equal(n0, n9)
+    shared = [(i, j) for i, a in enumerate(same) for j, b in enumerate(other) if (a[0], a[2]) == (b[0], b[2])]
+    n0_other = eval_tf.window_noise((len(other), 4, 8, 10), rollout_eval.rollout_noise_keys(0, other, 2))
+    assert shared and all(torch.equal(n0[i], n0_other[j]) for i, j in shared)
+
+
+def test_the_window_manifest_sits_beside_the_rollouts(tmp_path):
+    d = str(tmp_path / "lat")
+    for ep in range(3):
+        write_pertic_episode(d, ep, held_actions([0, 1, 2] * 4), map_ids=np.full(48, 20 + ep))
+    picks = rollout_eval.collect_rollout_windows(d, range(3), L=4, H=4, n=6, seed=4, tic_stride=1)
+    out = str(tmp_path / "rollouts_val.npz")
+    path = rollout_eval.write_window_manifest(out, picks, window_seed=4, noise_seed=0)
+    assert path == str(tmp_path / "rollouts_val.windows.json")
+    assert rollout_eval.window_manifest_path(str(tmp_path / "r")) == str(tmp_path / "r.windows.json")
+    man = json.load(open(path))
+    assert man["window_seed"] == 4 and man["noise_seed"] == 0
+    assert [w["index"] for w in man["windows"]] == list(range(6))
+    assert [(w["episode"], w["start"], w["map"]) for w in man["windows"]] == \
+        [(int(ep), int(s), int(mp)) for ep, mp, s, _, _ in picks]
+    assert all(w["map"] == 20 + w["episode"] for w in man["windows"])
+    # do_rollout resolves both seeds, draws its windows with one and keys its noise with the other, and
+    # writes the manifest beside the npz; it hardcodes CUDA, so its wiring is checked here by source
+    src = open(os.path.join(REPO, "rollout_eval.py")).read()
+    assert "window_seed, noise_seed = rollout_seeds(args)" in src
+    assert "args.num_rollouts, window_seed, latent_channels=C" in src
+    assert "write_window_manifest(args.out, picks" in src
+
+
 def test_a_per_tic_rollout_refuses_a_stride_four_corpus(tmp_path):
     from pertic_fixtures import write_stride4_episode
     d = str(tmp_path / "s4")
