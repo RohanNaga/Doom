@@ -12,11 +12,11 @@ Status as of 2026-09-27 (after the joint review; `REVIEW_LOG.md`). The submissio
 Status words: **exists** (the file or every number is in the repo today), **provisional** (numbers exist but will be replaced: fresh-set rescore, tuned SD 1 decoder, scene rows, final 200k checkpoints), **pending** (nothing exists yet).
 Figures are drawn by `\figslot{file}{width}{height}{label}` in `main.tex`: when `paper/<file>` exists it is included, otherwise a labelled box stands in. Dropping the file into `paper/figures/` under the name below is all a figure needs.
 
-## Body captions as set in `main.tex` (paper owner, 2026-09-27; synced to main e766322)
+## Body captions as set in `main.tex` (paper owner, 2026-09-27; synced to main af1de44)
 
-These are the captions of the four-page body; the draft captions below are the longer reading notes they were cut from, and where the two differ these win. Figure 1 drops the owner's training-map clause because the column is gone (cce87b9). Figure 3's caption no longer describes the band in (a), so the figure labels it itself ("train vs train $d$").
+These are the captions of the four-page body; the draft captions below are the longer reading notes they were cut from, and where the two differ these win. Figure 1 is the two-row teaser (forward and attack, 16-step holds; the section below has its numbers and provenance). Figure 3's caption no longer describes the band in (a), so the figure labels it itself ("train vs train $d$").
 
-**Figure 1** (`fig:teaser`, `figures/fig_teaser_B.pdf`, 5.5 x 1.5 in). Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a ground-truth context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and ground truth.
+**Figure 1** (`fig:teaser`, `figures/fig_teaser_B.pdf`, 5.5 x 1.5 in). Off its training maps the U-Net keeps moving and firing but renders the arena in training-map masonry; eight episodes restore it. Selected windows, 16 tics after the context frame, the row's button held throughout; arena 7 zero-shot and after 4k adapter updates on 8 episodes; fine-tuned decoder, raw ground truth, scene PSNR, persistence under each context frame.
 
 **Figure 2** (`fig:method`, `figures/fig1_method.pdf`, 5.5 x 1.8 in). What we built: (a) the benchmark, (b) three backbones under one recipe, (c) post-training, (d) evaluation. Prediction, ground truth and persistence are all rendered by the one fine-tuned decoder $D$.
 
