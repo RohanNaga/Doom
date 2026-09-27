@@ -45,8 +45,10 @@ import eval_tf  # noqa: E402
 CTX, _tiny_model, _tiny_vae = nexttic.CTX, nexttic._tiny_model, nexttic._tiny_vae
 lpips_available, tiny_hub = nexttic.lpips_available, nexttic.tiny_hub
 
-# the last commit whose eval_tf.py produced the frozen *_h1 / *_h4 results
-PINNED_SCORER = "60d99c4a39d7647288ecaa9fd3318fa56663cc13"
+# The eval_tf.py that produced the frozen distance-study scores: their provenance.txt files name 6a33311 (h1)
+# and ca03bad (h4), whose eval_tf.py are identical. 60d99c4, the later commit that added copy_latent_mse and
+# latent_mse_ratio, produced none of them, so it is not the header the frozen files have (Astra, Sep 26).
+PINNED_SCORER = "6a33311ffb7a37b977eb5b0318618b79064c0a63"
 T = 24                                  # tics per synthetic episode
 VAL_EP = 1
 
@@ -203,6 +205,8 @@ def test_copy_lpips_dec_is_the_lpips_of_the_decoded_copy_against_the_decoded_tru
     m = eval_tf.decoder_metrics(pred, gt, last, lp, raw)
     assert m["copy_lpips_dec"] == float(lp(last * 2 - 1, gt * 2 - 1).flatten())
     assert m["copy_psnr_dec"] == float(eval_tf.psnr(last, gt))           # the same two images
+    assert m["copy_lpips_raw"] == float(lp(last * 2 - 1, raw * 2 - 1).flatten())
+    assert m["scene_copy_lpips_raw"] == float(lp(last[:, :, :208] * 2 - 1, raw[:, :, :208] * 2 - 1).flatten())
     assert m["lpips_dec"] == float(lp(pred * 2 - 1, gt * 2 - 1).flatten())
     assert m["scene_copy_lpips_dec"] == float(lp(last[:, :, :208] * 2 - 1, gt[:, :, :208] * 2 - 1).flatten())
     assert m["scene_vae_psnr"] == float(eval_tf.psnr(gt[:, :, :208], raw[:, :, :208]))
@@ -220,7 +224,8 @@ DECODER_COLUMNS = {
     "scene_copy_psnr_dec", "scene_copy_mse_dec", "scene_copy_lpips_dec",
     "psnr_raw", "mse_raw", "lpips_raw", "hud_psnr_raw", "hud_mse_raw",
     "scene_psnr_raw", "scene_mse_raw", "scene_lpips_raw",
-    "copy_psnr_raw", "copy_mse_raw", "scene_copy_psnr_raw", "scene_copy_mse_raw",
+    "copy_psnr_raw", "copy_mse_raw", "copy_lpips_raw",
+    "scene_copy_psnr_raw", "scene_copy_mse_raw", "scene_copy_lpips_raw",
     "vae_psnr", "vae_mse", "vae_lpips", "hud_vae_psnr", "hud_vae_mse",
     "scene_vae_psnr", "scene_vae_mse", "scene_vae_lpips"}
 DECODER_FREE_COLUMNS = {
