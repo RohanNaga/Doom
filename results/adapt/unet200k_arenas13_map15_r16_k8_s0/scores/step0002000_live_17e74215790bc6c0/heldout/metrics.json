@@ -1,0 +1,387 @@
+{
+ "psnr_dec": {
+  "mean": 23.64559680223465,
+  "sem": 0.1366717134307651,
+  "n": 256
+ },
+ "lpips_dec": {
+  "mean": 0.17539617023430765,
+  "sem": 0.0036137931583716397,
+  "n": 256
+ },
+ "copy_psnr_dec": {
+  "mean": 20.174297764897346,
+  "sem": 0.14257142743942108,
+  "n": 256
+ },
+ "latent_mse": {
+  "mean": 0.19672545418143272,
+  "sem": 0.003120244672683772,
+  "n": 256
+ },
+ "hud_psnr_dec": {
+  "mean": 25.054468668997288,
+  "sem": 0.07686051348596018,
+  "n": 256
+ },
+ "copy_latent_mse": {
+  "mean": 0.3838453496573493,
+  "sem": 0.004527748457582046,
+  "n": 256
+ },
+ "latent_mse_ratio": {
+  "mean": 0.524732623831369,
+  "sem": 0.008837901517546556,
+  "n": 256
+ },
+ "context_motion": {
+  "mean": 0.423641694476828,
+  "sem": 0.0017130688735183476,
+  "n": 256
+ },
+ "mse_dec": {
+  "mean": 0.005008090146475297,
+  "sem": 0.00021381271609062188,
+  "n": 256
+ },
+ "hud_mse_dec": {
+  "mean": 0.003256570735175046,
+  "sem": 6.403418740983374e-05,
+  "n": 256
+ },
+ "scene_psnr_dec": {
+  "mean": 23.526384230703115,
+  "sem": 0.1483728507119994,
+  "n": 256
+ },
+ "scene_mse_dec": {
+  "mean": 0.005277554722397326,
+  "sem": 0.00024363277824153762,
+  "n": 256
+ },
+ "scene_lpips_dec": {
+  "mean": 0.2032462072384078,
+  "sem": 0.0041770411474824085,
+  "n": 256
+ },
+ "copy_mse_dec": {
+  "mean": 0.011096868287495454,
+  "sem": 0.0004328044890770094,
+  "n": 256
+ },
+ "copy_lpips_dec": {
+  "mean": 0.22780559648526832,
+  "sem": 0.004214778657095417,
+  "n": 256
+ },
+ "scene_copy_psnr_dec": {
+  "mean": 19.721504539251328,
+  "sem": 0.14652539309288137,
+  "n": 256
+ },
+ "scene_copy_mse_dec": {
+  "mean": 0.01241344994832616,
+  "sem": 0.0004980880279803968,
+  "n": 256
+ },
+ "scene_copy_lpips_dec": {
+  "mean": 0.263120321003953,
+  "sem": 0.004925175180131759,
+  "n": 256
+ },
+ "per_map": {
+  "15": {
+   "psnr_dec": 23.64559680223465,
+   "lpips_dec": 0.17539617023430765
+  }
+ },
+ "per_tics_since_decision": {
+  "0": {
+   "psnr_dec": {
+    "mean": 23.251398409329926,
+    "sem": 0.29590188657575767,
+    "n": 65
+   },
+   "lpips_dec": {
+    "mean": 0.1821059089440566,
+    "sem": 0.007758719806719788,
+    "n": 65
+   },
+   "windows": 65
+  },
+  "1": {
+   "psnr_dec": {
+    "mean": 23.39331895796979,
+    "sem": 0.28787403419410534,
+    "n": 61
+   },
+   "lpips_dec": {
+    "mean": 0.18650085576733605,
+    "sem": 0.008290164410832319,
+    "n": 61
+   },
+   "windows": 61
+  },
+  "2": {
+   "psnr_dec": {
+    "mean": 24.090877078828356,
+    "sem": 0.22571636314261692,
+    "n": 63
+   },
+   "lpips_dec": {
+    "mean": 0.16135676429858284,
+    "sem": 0.005460273343488672,
+    "n": 63
+   },
+   "windows": 63
+  },
+  "3": {
+   "psnr_dec": {
+    "mean": 23.83901749795942,
+    "sem": 0.27061825054816896,
+    "n": 67
+   },
+   "lpips_dec": {
+    "mean": 0.1719777185970278,
+    "sem": 0.006898774610717892,
+    "n": 67
+   },
+   "windows": 67
+  }
+ },
+ "duplicates": {
+  "rule": "a window is left out of every *_nodup mean when dup_latent is 1",
+  "windows": 256,
+  "dup_latent": 0,
+  "excluded": 0
+ },
+ "psnr_dec_nodup": {
+  "mean": 23.64559680223465,
+  "sem": 0.1366717134307651,
+  "n": 256
+ },
+ "lpips_dec_nodup": {
+  "mean": 0.17539617023430765,
+  "sem": 0.0036137931583716397,
+  "n": 256
+ },
+ "copy_psnr_dec_nodup": {
+  "mean": 20.174297764897346,
+  "sem": 0.14257142743942108,
+  "n": 256
+ },
+ "latent_mse_nodup": {
+  "mean": 0.19672545418143272,
+  "sem": 0.003120244672683772,
+  "n": 256
+ },
+ "hud_psnr_dec_nodup": {
+  "mean": 25.054468668997288,
+  "sem": 0.07686051348596018,
+  "n": 256
+ },
+ "copy_latent_mse_nodup": {
+  "mean": 0.3838453496573493,
+  "sem": 0.004527748457582046,
+  "n": 256
+ },
+ "latent_mse_ratio_nodup": {
+  "mean": 0.524732623831369,
+  "sem": 0.008837901517546556,
+  "n": 256
+ },
+ "context_motion_nodup": {
+  "mean": 0.423641694476828,
+  "sem": 0.0017130688735183476,
+  "n": 256
+ },
+ "mse_dec_nodup": {
+  "mean": 0.005008090146475297,
+  "sem": 0.00021381271609062188,
+  "n": 256
+ },
+ "hud_mse_dec_nodup": {
+  "mean": 0.003256570735175046,
+  "sem": 6.403418740983374e-05,
+  "n": 256
+ },
+ "scene_psnr_dec_nodup": {
+  "mean": 23.526384230703115,
+  "sem": 0.1483728507119994,
+  "n": 256
+ },
+ "scene_mse_dec_nodup": {
+  "mean": 0.005277554722397326,
+  "sem": 0.00024363277824153762,
+  "n": 256
+ },
+ "scene_lpips_dec_nodup": {
+  "mean": 0.2032462072384078,
+  "sem": 0.0041770411474824085,
+  "n": 256
+ },
+ "copy_mse_dec_nodup": {
+  "mean": 0.011096868287495454,
+  "sem": 0.0004328044890770094,
+  "n": 256
+ },
+ "copy_lpips_dec_nodup": {
+  "mean": 0.22780559648526832,
+  "sem": 0.004214778657095417,
+  "n": 256
+ },
+ "scene_copy_psnr_dec_nodup": {
+  "mean": 19.721504539251328,
+  "sem": 0.14652539309288137,
+  "n": 256
+ },
+ "scene_copy_mse_dec_nodup": {
+  "mean": 0.01241344994832616,
+  "sem": 0.0004980880279803968,
+  "n": 256
+ },
+ "scene_copy_lpips_dec_nodup": {
+  "mean": 0.263120321003953,
+  "sem": 0.004925175180131759,
+  "n": 256
+ },
+ "per_map_nodup": {
+  "15": {
+   "psnr_dec": 23.64559680223465,
+   "lpips_dec": 0.17539617023430765
+  }
+ },
+ "per_tics_since_decision_nodup": {
+  "0": {
+   "psnr_dec": {
+    "mean": 23.251398409329926,
+    "sem": 0.29590188657575767,
+    "n": 65
+   },
+   "lpips_dec": {
+    "mean": 0.1821059089440566,
+    "sem": 0.007758719806719788,
+    "n": 65
+   },
+   "windows": 65
+  },
+  "1": {
+   "psnr_dec": {
+    "mean": 23.39331895796979,
+    "sem": 0.28787403419410534,
+    "n": 61
+   },
+   "lpips_dec": {
+    "mean": 0.18650085576733605,
+    "sem": 0.008290164410832319,
+    "n": 61
+   },
+   "windows": 61
+  },
+  "2": {
+   "psnr_dec": {
+    "mean": 24.090877078828356,
+    "sem": 0.22571636314261692,
+    "n": 63
+   },
+   "lpips_dec": {
+    "mean": 0.16135676429858284,
+    "sem": 0.005460273343488672,
+    "n": 63
+   },
+   "windows": 63
+  },
+  "3": {
+   "psnr_dec": {
+    "mean": 23.83901749795942,
+    "sem": 0.27061825054816896,
+    "n": 67
+   },
+   "lpips_dec": {
+    "mean": 0.1719777185970278,
+    "sem": 0.006898774610717892,
+    "n": 67
+   },
+   "windows": 67
+  }
+ },
+ "sampling_frames_per_s": 9.734853870911092,
+ "config": {
+  "ckpt": "/home/rohan/Doom/results/adapt/unet200k_arenas13_map15_r16_k8_s0/adapter_0002000.pt",
+  "backbone": "unet",
+  "latent_channels": 4,
+  "use_ema": false,
+  "objective": "auto",
+  "context_frames": 32,
+  "num_actions": 29,
+  "noise_buckets": 10,
+  "infer_noise": 0.0,
+  "train_noise_max": 0.7,
+  "latents_dir": "/home/rohan/Doom/data/latents_arnold_eval_v2_pertic/arenas13",
+  "parquet_dir": "",
+  "stride": 4,
+  "tic_stride": 1,
+  "action_history": null,
+  "horizon_tics": 1,
+  "split": "/home/rohan/Doom/results/adapt_splits/split_adapt_arenas13_map15_seed0.json",
+  "subset": "val",
+  "num_windows": 2048,
+  "windows_file": "/home/rohan/Doom/results/adapt_splits/split_adapt_arenas13_map15_seed0.json",
+  "windows_key": "held_out_windows",
+  "batch_size": 16,
+  "num_workers": 0,
+  "steps": 10,
+  "timestep_spacing": "linear",
+  "eta": 0.0,
+  "lpips_net": "alex",
+  "vae_path": "",
+  "vae_subfolder": "",
+  "latent_scale": 0.18215,
+  "latent_shift": null,
+  "decoders": null,
+  "save_latents": false,
+  "sd_path": "CompVis/stable-diffusion-v1-4",
+  "pixart_path": "PixArt-alpha/PixArt-XL-2-512x512",
+  "unidiffuser_path": "thu-ml/unidiffuser-v1",
+  "sd35_path": "stabilityai/stable-diffusion-3.5-medium",
+  "hf_cache": "/home/rohan/Doom/hf",
+  "save_images": 0,
+  "seed": 0,
+  "out_dir": "/home/rohan/Doom/results/adapt/unet200k_arenas13_map15_r16_k8_s0/scores/step0002000_live_17e74215790bc6c0/heldout",
+  "wandb_run": "",
+  "wandb_project": "doomdit-nexttic",
+  "wandb_entity": null,
+  "wandb_step": null,
+  "step": 2000,
+  "resolved_latent_channels": 4,
+  "resolved_objective": "v",
+  "checkpoint_interface": {
+   "tic_stride": 1,
+   "action_history": 32,
+   "phase_buckets": 0,
+   "control_bits": 19
+  },
+  "game_time_tics": 1,
+  "window_validity": {
+   "episodes": 8,
+   "context_frames": 32,
+   "horizon": 1,
+   "candidate_windows": 40550,
+   "windows": 39590,
+   "excluded_windows": 960,
+   "excluded_fraction": 0.02367447595561036,
+   "control_bits": 19
+  }
+ },
+ "decoder": {
+  "name": "stabilityai/sd-vae-ft-mse",
+  "path": "stabilityai/sd-vae-ft-mse",
+  "identity": "hub:stabilityai/sd-vae-ft-mse",
+  "provenance": "public",
+  "corpus": "none: published weights, never tuned on Doom frames",
+  "provenance_source": "registry:stabilityai/sd-vae-ft-mse",
+  "unseen_map_claim": "ok",
+  "unseen_map_problems": []
+ },
+ "extra_decoders": {}
+}
