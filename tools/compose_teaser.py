@@ -85,8 +85,16 @@ def manifest_of(root, wdir):
 
 
 def controls_of(manifest):
-    """[frozenset of button names] per tic from the manifest's executed controls (list or "+"-joined string)."""
-    raw = next((manifest[k] for k in ("controls", "executed", "buttons", "actions") if k in manifest), [])
+    """[frozenset of button names] per tic from the manifest's executed controls: a list over tics (of name lists
+    or "+"-joined strings), or the steward's `per_tic` list of {tic, control} records (tic 0 then empty)."""
+    per = manifest.get("per_tic")
+    if isinstance(per, list) and per and isinstance(per[0], dict) and "control" in per[0]:
+        n = max(int(r["tic"]) for r in per) + 1
+        raw = [[] for _ in range(n)]
+        for r in per:
+            raw[int(r["tic"])] = r["control"] or []
+    else:
+        raw = next((manifest[k] for k in ("controls", "executed", "buttons", "actions") if k in manifest), [])
     out = []
     for c in raw:
         if isinstance(c, dict):
@@ -96,11 +104,21 @@ def controls_of(manifest):
     return out
 
 
-def action_text(buttons):
-    """A control as printed: lowercase words, joined by " + " in a fixed order ("no input" when empty)."""
-    if not buttons:
-        return "no input"
-    return " + ".join(sorted(b.lower().replace("_", " ") for b in buttons))
+HIDDEN_BUTTONS = ("speed",)       # held nearly always; printing it on every column adds nothing
+PRIORITY = ("attack", "turn left", "turn right", "forward", "move forward", "strafe left", "strafe right",
+            "move left", "move right", "back", "move backward")
+
+
+def button_names(buttons):
+    """A control's printed button names: lowercase words, the always-held run button left out, in priority order."""
+    names = {b.lower().replace("_", " ") for b in buttons} - set(HIDDEN_BUTTONS)
+    return sorted(names, key=lambda n: (PRIORITY.index(n) if n in PRIORITY else len(PRIORITY), n))
+
+
+def action_text(buttons, sep=" + "):
+    """A control as printed ("no input" when nothing but the run button is held)."""
+    names = button_names(buttons)
+    return sep.join(names) if names else "no input"
 
 
 def last_tic(row_dir):
@@ -133,7 +151,12 @@ def spread(items, n):
 
 
 def per_tic_scene(manifest, row):
-    """{tic: scene PSNR} of one row, from the shapes the steward writes."""
+    """{tic: scene PSNR} of one row, from the shapes the steward writes (a `per_tic` list of records with
+    `<model>_scene_psnr`, or per-row series)."""
+    per = manifest.get("per_tic")
+    if isinstance(per, list) and per and isinstance(per[0], dict):
+        key = f"{row.split('_')[0]}_scene_psnr"
+        return {int(r["tic"]): float(r[key]) for r in per if isinstance(r.get(key), (int, float))}
     for container in (manifest.get("per_tic"), manifest.get("rows"), manifest):
         if isinstance(container, dict) and isinstance(container.get(row), dict):
             v = container[row].get("scene_psnr")
@@ -151,8 +174,12 @@ def choose(root, window=None, home=None):
         raise SystemExit(f"no window directories <map>_ep<E>_s<S> under {root}")
 
     def rank(name):
-        r = manifest_of(root, ws[name]).get("richness")
-        return r if isinstance(r, (int, float)) else float("-inf")
+        m = manifest_of(root, ws[name])
+        r = m.get("richness")
+        if isinstance(r, (int, float)):
+            return r
+        rank_sum = (m.get("score") or {}).get("rank_sum")        # the steward's ranking: lower is better
+        return -rank_sum if isinstance(rank_sum, (int, float)) else float("-inf")
 
     unseen = window or max((n for n in ws if is_unseen(n)), key=rank, default=None)
     if unseen is None or unseen not in ws:
@@ -229,7 +256,8 @@ def layout_a(root, out_dir, window=None, home=None, moments=7, adapted_label=DEF
     fw = (width - label_w - ref_w - gap_ref - (len(picks) - 1) * GUTTER - 0.02) / len(picks)
     fh = fw * aspect
     tw, th = fw * true_scale, fh * true_scale
-    head = 2 * 8 / 72
+    lines = max(len(button_names(ctrl[t])) if t < len(ctrl) else 1 for t in picks) or 1
+    head = 8 / 72 + lines * fs.ANNOT_PT * 1.05 / 72 + 2 / 72
     height = head + 2 * fh + GUTTER + 2 / 72 + th + 0.04
     fig = _figure(width, height)
     x0 = label_w + ref_w + gap_ref
@@ -238,9 +266,10 @@ def layout_a(root, out_dir, window=None, home=None, moments=7, adapted_label=DEF
     for i, t in enumerate(picks):
         x = x0 + i * (fw + GUTTER)
         act = action_text(ctrl[t]) if t < len(ctrl) else "?"
-        _text(fig, width, height, x + fw / 2, 0.0, act, ha="center", va="top", fontsize=fs.ANNOT_PT, style="italic")
-        _text(fig, width, height, x + fw / 2, 8 / 72, f"tic {t}", ha="center", va="top", fontsize=fs.MIN_PT,
+        _text(fig, width, height, x + fw / 2, 0.0, f"tic {t}", ha="center", va="top", fontsize=fs.MIN_PT,
               color=fs.CONTEXT_INK)
+        _text(fig, width, height, x + fw / 2, head, action_text(ctrl[t], "\n") if t < len(ctrl) else "?",
+              ha="center", va="bottom", fontsize=fs.ANNOT_PT, style="italic", linespacing=1.0)
         _place(fig, width, height, x, head, fw, fh, frame(rows["model"], t))
         _place(fig, width, height, x, head + fh + GUTTER, fw, fh, frame(rows["adapted"], t))
         _place(fig, width, height, x + (fw - tw) / 2, head + 2 * fh + GUTTER + 2 / 72, tw, th, frame(rows["truth"], t))
@@ -256,9 +285,10 @@ def layout_a(root, out_dir, window=None, home=None, moments=7, adapted_label=DEF
         t_home = home_moment(controls_of(hman), ctrl[picks[0]] if picks[0] < len(ctrl) else frozenset(), 1, hlast)
         rw = ref_w
         rh = rw * aspect
-        _text(fig, width, height, label_w + rw / 2, 0.0, "training map", ha="center", va="top", fontsize=fs.ANNOT_PT)
-        _text(fig, width, height, label_w + rw / 2, 8 / 72, f"tic {t_home}", ha="center", va="top",
+        _text(fig, width, height, label_w + rw / 2, 0.0, f"tic {t_home}", ha="center", va="top",
               fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
+        _text(fig, width, height, label_w + rw / 2, head, "training\nmap", ha="center", va="bottom",
+              fontsize=fs.ANNOT_PT, linespacing=1.0)
         _place(fig, width, height, label_w, head, rw, rh, frame(hrows["model"], t_home))
         _place(fig, width, height, label_w + (rw - rw * true_scale) / 2, head + 2 * fh + GUTTER + 2 / 72,
                rw * true_scale, rh * true_scale, frame(hrows["truth"], t_home))
@@ -280,11 +310,15 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
     hmodel = os.path.join(ws[home_name], ROWS["model"])
     last = min(last_tic(d) for d in rows.values()) - horizon
     hlast = last_tic(hmodel) - horizon
-    chosen, seen = [], set()
-    for t in change_moments(ctrl, 1, last):
-        if ctrl[t] and ctrl[t] not in seen:
-            seen.add(ctrl[t])
+    chosen, names = [], []
+    present = sorted({n for c in ctrl for n in button_names(c)},
+                     key=lambda n: (PRIORITY.index(n) if n in PRIORITY else len(PRIORITY), n))
+    for name in present:
+        t = next((t for t in range(1, last + 1) if name in button_names(ctrl[t]) and
+                  name not in button_names(ctrl[t - 1])), None)
+        if t is not None:
             chosen.append(t)
+            names.append(name)
         if len(chosen) == actions:
             break
     if not chosen:
@@ -293,7 +327,7 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
     cols = ["context", "training map", "zero-shot", adapted_label, "true"]
     sample = frame(rows["model"], chosen[0])
     aspect = sample.shape[0] / sample.shape[1]
-    label_w = max(text_width(action_text(ctrl[t]), style="italic") for t in chosen) + 5 / 72
+    label_w = max(text_width(n, style="italic") for n in names) + 5 / 72
     fw = (width - label_w - (len(cols) - 1) * GUTTER - 4 / 72 - 0.02) / len(cols)
     fh = fw * aspect
     head = 2 * 8 / 72
@@ -306,16 +340,18 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
         _text(fig, width, height, x + fw / 2, 8 / 72, f"+{horizon} tics", ha="center", va="top", fontsize=fs.MIN_PT,
               color=fs.CONTEXT_INK)
     record = {"layout": "B", "window": unseen, "home": home_name, "horizon": horizon, "rows": []}
-    for r, t in enumerate(chosen):
+    for r, (t, name) in enumerate(zip(chosen, names)):
         y = head + r * (fh + GUTTER)
-        th = home_moment(hctrl, ctrl[t], 1, hlast)
+        th = next((u for u in range(1, hlast + 1) if name in button_names(hctrl[u]) and
+                   name not in button_names(hctrl[u - 1])), None) if hlast > 0 else None
+        th = th if th is not None else home_moment(hctrl, ctrl[t], 1, hlast)
         imgs = [frame(rows["truth"], t), frame(hmodel, th + horizon), frame(rows["model"], t + horizon),
                 frame(rows["adapted"], t + horizon), frame(rows["truth"], t + horizon)]
         for x, img in zip(xs, imgs):
             _place(fig, width, height, x, y, fw, fh, img)
-        _text(fig, width, height, label_w - 3 / 72, y + fh / 2, action_text(ctrl[t]), ha="right", va="center",
+        _text(fig, width, height, label_w - 3 / 72, y + fh / 2, name, ha="right", va="center",
               fontsize=fs.ANNOT_PT, style="italic")
-        record["rows"].append({"tic": t, "home_tic": th, "action": action_text(ctrl[t])})
+        record["rows"].append({"tic": t, "home_tic": th, "action": name, "control": action_text(ctrl[t])})
     paths = fs.save(fig, out_dir, stem)
     return paths + [_sidecar(out_dir, stem, record)], record
 
@@ -338,12 +374,15 @@ def main(argv=None):
     p.add_argument("--moments", type=int, default=7, help="layout A: columns")
     p.add_argument("--actions", type=int, default=4, help="layout B: rows")
     p.add_argument("--adapted-label", default=DEFAULT_ADAPTED_LABEL)
+    p.add_argument("--stem", default=None, help="output stem (default fig_teaser / fig_teaser_actions)")
     a = p.parse_args(argv)
     written = []
     if a.layout in ("A", "both"):
-        written += layout_a(a.root, a.out_dir, a.window, a.home, a.moments, a.adapted_label)[0]
+        written += layout_a(a.root, a.out_dir, a.window, a.home, a.moments, a.adapted_label,
+                            stem=a.stem or "fig_teaser")[0]
     if a.layout in ("B", "both"):
-        written += layout_b(a.root, a.out_dir, a.window, a.home, a.actions, a.adapted_label)[0]
+        stem_b = (a.stem + "_actions") if a.stem and a.layout == "both" else (a.stem or "fig_teaser_actions")
+        written += layout_b(a.root, a.out_dir, a.window, a.home, a.actions, a.adapted_label, stem=stem_b)[0]
     for path in written:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     return 0

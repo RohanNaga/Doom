@@ -1,0 +1,32 @@
+{
+ "layout": "B",
+ "window": "unseen_arena07_ep210_s2888",
+ "home": "train_map02_ep6008_s712",
+ "horizon": 8,
+ "rows": [
+  {
+   "tic": 1,
+   "home_tic": 1,
+   "action": "attack",
+   "control": "attack + forward"
+  },
+  {
+   "tic": 2,
+   "home_tic": 58,
+   "action": "turn left",
+   "control": "attack + turn left + forward"
+  },
+  {
+   "tic": 14,
+   "home_tic": 1,
+   "action": "turn right",
+   "control": "attack + turn right + strafe left"
+  },
+  {
+   "tic": 1,
+   "home_tic": 10,
+   "action": "forward",
+   "control": "attack + forward"
+  }
+ ]
+}

@@ -73,6 +73,11 @@ def test_control_changes_and_their_printed_names():
     assert ct.change_moments(ctrl, 1, 40) == [6, 12, 20, 26, 31]
     assert ct.action_text(ctrl[12]) == "attack + turn left"
     assert ct.action_text(frozenset()) == "no input"
+    assert ct.action_text(frozenset({"speed", "forward", "turn left"})) == "turn left + forward"   # run button hidden
+    steward = {"per_tic": [{"tic": 1, "control": ["forward", "speed"], "unet_scene_psnr": 20.0},
+                           {"tic": 2, "control": ["forward", "attack"], "unet_scene_psnr": 19.0}]}
+    assert ct.controls_of(steward)[2] == frozenset({"forward", "attack"})
+    assert ct.per_tic_scene(steward, "unet_tuned") == {1: 20.0, 2: 19.0}
     assert ct.spread(list(range(10)), 4) == [0, 3, 6, 9]
 
 
@@ -94,7 +99,7 @@ def test_layout_a_picks_the_best_ranked_windows_and_draws_every_moment(tmp_path)
 def test_layout_b_one_row_per_action_at_eight_tics(tmp_path):
     root = export(tmp_path)
     paths, rec = ct.layout_b(root, str(tmp_path / "out"), actions=3)
-    assert [r["action"] for r in rec["rows"]] == ["attack", "attack + turn left", "move right"]
+    assert [r["action"] for r in rec["rows"]] == ["attack", "turn left", "move right"]
     assert [r["tic"] for r in rec["rows"]] == [6, 12, 20]
     assert rec["rows"][0]["home_tic"] == 10 and rec["horizon"] == 8
     assert os.path.getsize(tmp_path / "out" / "fig_teaser_actions.png") > 2000

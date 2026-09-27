@@ -1,0 +1,73 @@
+{
+ "layout": "A",
+ "window": "unseen_arena07_ep158_s1672",
+ "home": "train_map02_ep6008_s712",
+ "tics": [
+  1,
+  40,
+  92,
+  132,
+  168,
+  228,
+  256
+ ],
+ "columns": [
+  {
+   "tic": 1,
+   "action": "attack + turn left + strafe left",
+   "scene_psnr": {
+    "model": 20.304,
+    "adapted": 19.609
+   }
+  },
+  {
+   "tic": 40,
+   "action": "turn right + back",
+   "scene_psnr": {
+    "model": 16.41,
+    "adapted": 19.166
+   }
+  },
+  {
+   "tic": 92,
+   "action": "attack + turn right + strafe right",
+   "scene_psnr": {
+    "model": 11.987,
+    "adapted": 16.007
+   }
+  },
+  {
+   "tic": 132,
+   "action": "attack + turn right + strafe left",
+   "scene_psnr": {
+    "model": 14.012,
+    "adapted": 17.44
+   }
+  },
+  {
+   "tic": 168,
+   "action": "turn left + strafe left",
+   "scene_psnr": {
+    "model": 14.9,
+    "adapted": 16.048
+   }
+  },
+  {
+   "tic": 228,
+   "action": "turn right + forward",
+   "scene_psnr": {
+    "model": 14.01,
+    "adapted": 17.903
+   }
+  },
+  {
+   "tic": 256,
+   "action": "attack + strafe right",
+   "scene_psnr": {
+    "model": 12.934,
+    "adapted": 16.299
+   }
+  }
+ ],
+ "home_tic": 58
+}
