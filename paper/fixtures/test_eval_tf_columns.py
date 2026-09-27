@@ -167,7 +167,8 @@ def test_the_existing_summary_and_columns_are_unchanged(tmp_path, tiny_hub, scor
         assert json.dumps(new[k]) == json.dumps(v), k
     old_config = {k: v for k, v in old["config"].items() if k != "out_dir"}
     assert {k: new["config"][k] for k in old_config} == old_config
-    assert set(new["config"]) - set(old["config"]) == {"decoders", "save_latents", "windows_file", "windows_key"}
+    assert set(new["config"]) - set(old["config"]) == {"decoders", "save_latents", "windows_file", "windows_key",
+                                                       "source_root", "source_path"}
     # the per-window file: the old header is the new header's prefix, and every old cell is identical
     assert new_header[:len(old_header)] == old_header
     assert len(new_rows) == len(old_rows) == 8

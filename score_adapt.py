@@ -306,12 +306,19 @@ def decoder_flags(a, extra=True):
     return flags
 
 
+def source_flags(a):
+    """`--source-root` / `--source-path` for the evaluators: where the adapter's frozen source snapshot is on
+    this machine when it is not at the path the checkpoint recorded (the SHA-256 check still applies)."""
+    return (["--source-root", a.source_root] if a.source_root else []) + \
+        (["--source-path", a.source_path] if a.source_path else [])
+
+
 def model_flags(a, recipe):
     """The flags both evaluators need to rebuild the source graph."""
     bb = recipe["backbone"]
     flags = ["--backbone", bb, "--latent-channels", str(recipe["latent_channels"]),
              "--context-frames", str(recipe["context_frames"]), "--num-actions", str(recipe["num_actions"]),
-             "--noise-buckets", str(recipe["noise_buckets"])]
+             "--noise-buckets", str(recipe["noise_buckets"]), *source_flags(a)]
     path = a.backbone_path or recipe.get("warm_start")
     if path and bb in BACKBONE_PATH_FLAG:
         flags += [BACKBONE_PATH_FLAG[bb], path]
@@ -451,6 +458,8 @@ def cmd_score(a):
                 held_cols = window_columns("heldout", os.path.join(out_dir, "heldout", "per_window.csv"),
                                            os.path.join(out_dir, "heldout", "paired_windows.csv"), names)
                 row = {**base, **eval_columns("heldout", held), **held_cols,
+                       # which source snapshot file was loaded, and whether it was a --source-root/-path override
+                       "adapter_source": (held.get("config") or {}).get("adapter_source"),
                        **{k.replace("heldout_", "trainmap_", 1): None
                           for k in list(eval_columns("heldout", {})) + list(held_cols)},
                        **directional_columns({})}
@@ -602,6 +611,10 @@ def build_parser():
     s.add_argument("--latent-shift", type=float, default=None)
     s.add_argument("--backbone-path", default="", help="where the source architecture is read (default: its warm start)")
     s.add_argument("--hf-cache", default=None)
+    s.add_argument("--source-root", default="", help="where the adapter's source snapshot lives on this machine, "
+                   "passed to the evaluators (eval_tf.py --source-root); its SHA-256 must still match")
+    s.add_argument("--source-path", default="", help="the adapter's source snapshot file on this machine, passed to "
+                   "the evaluators; its SHA-256 must still match")
     s.add_argument("--out", default="", help="rows file (default <run-dir>/scores.jsonl)")
     s.add_argument("--no-wandb", dest="wandb", action="store_false")
     s.add_argument("--wandb-project", default="doomdit-nexttic")

@@ -134,11 +134,11 @@ def adapted_checkpoint(tmp, weights="ema", perturb=0.05, **cfg_over):
     return str(path), model, ema, src
 
 
-def ns(ckpt, use_ema):
+def ns(ckpt, use_ema, extra=()):
     return eval_tf.build_parser().parse_args(["--ckpt", ckpt, "--backbone", "pixart", "--latents-dir", "x",
                                               "--split", "x", "--out-dir", "x", "--context-frames", str(F.CTX),
                                               "--num-actions", "3", "--noise-buckets", "4"]
-                                             + (["--use-ema"] if use_ema else []))
+                                             + (["--use-ema"] if use_ema else []) + list(extra))
 
 
 def inputs(n=3, seed=5):
@@ -164,6 +164,60 @@ def test_an_adaptation_checkpoint_rebuilds_the_adapted_model(tiny, tmp_path, wei
             if n in ema:
                 p.copy_(ema[n])
         assert torch.equal(with_ema(**kw), model(**kw))
+
+
+def test_a_moved_source_is_found_by_root_or_path_and_the_row_says_it_was_overridden(tiny, tmp_path):
+    """Scoring on another machine: the recorded (Superman) path is gone, the same bytes live elsewhere."""
+    import shutil
+
+    import directional_check
+    import score_adapt
+    path, model, _, src = adapted_checkpoint(tmp_path)
+    ck = torch.load(path, weights_only=False)
+    trained = eval_tf.checkpoint_interface(ck, ns(path, False))
+    elsewhere = tmp_path / "spiderman" / "results"
+    run = os.path.basename(os.path.dirname(src))                     # the recorded parent, the run directory
+    os.makedirs(elsewhere / run)
+    flat, nested = str(elsewhere / "snap_0200000.pt"), str(elsewhere / run / "snap_0200000.pt")
+    shutil.copy(src, nested)
+    os.remove(src)
+    with pytest.raises(FileNotFoundError):
+        eval_tf.load_model(ns(path, False), "cpu", 4, trained)          # the recorded path alone no longer works
+    kw = inputs()
+    with torch.no_grad():
+        want = model.eval()(**kw)
+    # with only DIR/<recorded parent dir name>/basename present, --source-root finds it; --source-path is exact
+    for extra, used in ((["--source-root", str(elsewhere)], nested), (["--source-path", nested], nested)):
+        a = ns(path, False, extra)
+        m, _, _ = eval_tf.load_model(a, "cpu", 4, trained)
+        with torch.no_grad():
+            assert torch.equal(m(**kw), want)
+        rec = a.adapter_source
+        assert rec["used"] == os.path.abspath(used) and rec["recorded"] == src
+        assert rec["override"] == extra[0].lstrip("-").replace("-", "_") and rec["sha256"] == ck["source"]["sha256"]
+    shutil.copy(nested, flat)
+    a = ns(path, False, ["--source-root", str(elsewhere)])
+    eval_tf.load_model(a, "cpu", 4, trained)
+    assert a.adapter_source["used"] == os.path.abspath(flat)          # DIR/basename is looked up first
+    with pytest.raises(SystemExit, match="neither"):
+        eval_tf.load_model(ns(path, False, ["--source-root", str(tmp_path / "nowhere")]), "cpu", 4, trained)
+    # every evaluator takes the two flags, and the scorer hands them on
+    for p in (eval_tf.build_parser(), directional_check.build_parser()):
+        assert {"--source-root", "--source-path"} <= set(p._option_string_actions)
+    s = score_adapt.build_parser().parse_args(["score", "--run-dir", "r", "--source-root", str(elsewhere)])
+    assert score_adapt.source_flags(s) == ["--source-root", str(elsewhere)]
+
+
+def test_an_override_to_a_different_file_is_refused_by_the_recorded_digest(tiny, tmp_path):
+    path, _, _, src = adapted_checkpoint(tmp_path)
+    other = F.write_source_snapshot(tmp_path / "other" / "snap_0200000.pt", seed=5)
+    trained = eval_tf.checkpoint_interface(torch.load(path, weights_only=False), ns(path, False))
+    for extra in (["--source-root", str(tmp_path / "other")], ["--source-path", other]):
+        with pytest.raises(SystemExit, match="SHA-256"):
+            eval_tf.load_model(ns(path, False, extra), "cpu", 4, trained)
+    with pytest.raises(SystemExit, match="one of"):
+        eval_tf.load_model(ns(path, False, ["--source-root", str(tmp_path / "other"), "--source-path", other]),
+                           "cpu", 4, trained)
 
 
 def test_a_source_whose_bytes_changed_is_refused(tiny, tmp_path):

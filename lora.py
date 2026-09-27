@@ -34,6 +34,7 @@ trainer, one checkpoint format and one evaluator.
 The scale is `alpha / rank`, the LoRA paper's convention, so rank 16 and alpha 16 is a scale of 1.
 """
 import math
+import os
 
 import torch
 import torch.nn as nn
@@ -327,22 +328,49 @@ def load_source_weights(model, source_ck, weights):
     return load_world_model_state(model, source_ck, use_ema=(weights == "ema"))
 
 
-def load_adapter_checkpoint(model, ck, use_ema=False, verify_source=True):
+def resolve_source(recorded, source_root="", source_path=""):
+    """(file to load, override or None) for the source snapshot an adaptation checkpoint records.
+
+    The checkpoint records an absolute path on the machine it trained on. On another machine the same
+    bytes live elsewhere: `source_path` names the file outright, and `source_root` is a directory where
+    the recorded basename is looked up as DIR/basename, then DIR/<recorded parent dir name>/basename.
+    Either way the caller still checks the recorded SHA-256, so an override can only find the same bytes.
+    """
+    if source_root and source_path:
+        raise SystemExit("give one of --source-root and --source-path, not both")
+    if source_path:
+        return source_path, "source_path"
+    if source_root:
+        base = os.path.basename(recorded)
+        parent = os.path.basename(os.path.dirname(recorded))
+        tried = [os.path.join(source_root, base), os.path.join(source_root, parent, base)]
+        for cand in tried:
+            if os.path.isfile(cand):
+                return cand, "source_root"
+        raise SystemExit(f"--source-root {source_root}: neither {tried[0]} nor {tried[1]} exists")
+    return recorded, None
+
+
+def load_adapter_checkpoint(model, ck, use_ema=False, verify_source=True, source_root="", source_path=""):
     """Rebuild an adaptation checkpoint on a freshly built backbone: source weights, adapter, trained parts.
 
-    The source snapshot is the one the checkpoint names, checked against its recorded SHA-256 (the
+    The source snapshot is the one the checkpoint names, or the file `source_root` / `source_path` points
+    to on another machine (`resolve_source`), checked against the recorded SHA-256 either way (the
     `<file>.sha256` cache makes the check free after the first time), loaded with the same weights choice
     the run trained from. `use_ema` selects the adapter's fp32 EMA instead of its live tensors; the
-    frozen backbone is the same either way.
+    frozen backbone is the same either way. Returns {adapter, used, recorded, override, sha256}: which
+    adapter tensors were loaded and which source file, and whether that file was an override.
     """
     src = ck["source"]
-    path = src["path"]
+    path, override = resolve_source(src["path"], source_root, source_path)
+    got = None
     if verify_source and src.get("sha256"):
         from eval_identity import sha256_file
         got = sha256_file(path)
         if got != src["sha256"]:
             raise SystemExit(f"the adaptation's source {path} has SHA-256 {got}, the run trained from "
-                             f"{src['sha256']}; the frozen backbone is not the one the adapter was trained on")
+                             f"{src['sha256']} ({src['path']}); the frozen backbone is not the one the adapter "
+                             "was trained on")
     source_ck = torch.load(path, map_location="cpu", weights_only=False)
     load_source_weights(model, source_ck, src["weights"])
     del source_ck
@@ -351,4 +379,5 @@ def load_adapter_checkpoint(model, ck, use_ema=False, verify_source=True):
     if not ck.get(key):
         raise SystemExit(f"this adaptation checkpoint carries no {key}")
     load_adapter_state(model, ck[key], names)
-    return key
+    return {"adapter": key, "used": os.path.abspath(path), "recorded": src["path"], "override": override,
+            "sha256": got}

@@ -382,7 +382,8 @@ def model_namespace(args):
                               context_frames=args.context_frames, noise_buckets=args.noise_buckets,
                               hf_cache=args.hf_cache, use_ema=args.use_ema, objective="auto", sd_path=args.sd_path,
                               pixart_path=args.pixart_path, unidiffuser_path=args.unidiffuser_path,
-                              sd35_path=args.sd35_path, tic_stride=None, action_history=None)
+                              sd35_path=args.sd35_path, tic_stride=None, action_history=None,
+                              source_root=args.source_root, source_path=args.source_path)
 
 
 def main(args):
@@ -425,7 +426,8 @@ def main(args):
                       "available_turning_windows": available, "window_validity": ds.summary,
                       "motion_mode": f"closed-loop rollout of {MOTION_HORIZON} tics from real context with the "
                                      "recorded controls (eval_tf --horizon-tics contract); h1 is teacher-forced",
-                      "max_shift_px": MAX_SHIFT, "band_rows": list(BAND_ROWS), "sign_deadband_px": SIGN_DEADBAND},
+                      "max_shift_px": MAX_SHIFT, "band_rows": list(BAND_ROWS), "sign_deadband_px": SIGN_DEADBAND,
+                      "adapter_source": getattr(ns, "adapter_source", None)},
            "decoder": decoder_record(args)}
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as f:
@@ -466,6 +468,11 @@ def build_parser():
     p.add_argument("--unidiffuser-path", dest="unidiffuser_path", default=UNIDIFFUSER_DEFAULT)
     p.add_argument("--sd35-path", dest="sd35_path", default=SD35_DEFAULT)
     p.add_argument("--hf-cache", dest="hf_cache", default=None)
+    p.add_argument("--source-root", dest="source_root", default="",
+                   help="adapter checkpoints only: where the recorded source snapshot lives on this machine "
+                        "(eval_tf.py --source-root); its SHA-256 must still match")
+    p.add_argument("--source-path", dest="source_path", default="",
+                   help="adapter checkpoints only: the source snapshot file on this machine; its SHA-256 must match")
     p.add_argument("--out", required=True, help="the JSON report")
     return p
 
