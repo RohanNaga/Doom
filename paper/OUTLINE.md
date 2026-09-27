@@ -1,4 +1,4 @@
-# DoomShift paper outline (working copy, Sep 27 2026, 16:10 EDT)
+# DoomShift paper outline (working copy, Sep 27 2026, 16:30 EDT; text at main af84490)
 
 Title: **DoomShift: Efficient Adaptation of World Models to Domain Shifts**. CoRL 2026 PhysWM workshop, 4 pages plus references, deadline Thu Oct 1, 07:59 EDT. Text lives in Overleaf; this outline is the plan the text follows. Status: **final** (numbers settled), **prov** (number may move when a run finishes), **tbd** (not written or not run).
 
@@ -43,6 +43,7 @@ Title: **DoomShift: Efficient Adaptation of World Models to Domain Shifts**. CoR
 | Data | 17 arenas of the Arnold level pack; ViZDoom deathmatch vs 8 bots, 150 s, every tic, 19 buttons. Four training maps (2 to 5, 500 episodes each), thirteen unseen (24 new episodes each: 16 adapt, 8 held out). | kempka2016vizdoom, lample2017arnold | final | |
 | Three backbones, one training recipe | SD 1.4 U-Net, PixArt-α, SD 3.5 Medium under one next-tic recipe (v-prediction, context noise augmentation, 200k updates, EMA, 10-step DDIM). Four-tic in-distribution numbers. | Figure 2 (method overview) | prov (SD 3.5 200k tonight) | |
 | Decoder | Fine-tuned SD 1 decoder (MSE + 0.1 LPIPS) for every pixel number; MSE alone triples scene LPIPS. SD 3.5 uses its own fine-tuned decoder. | decoder gate results | prov (SD 3.5 decoder column Monday) | |
+| Adaptation (idea) | Keep the weights frozen, train a small adapter on a few episodes of the new arena, score at each update budget; the recipe itself is in Section 5. | | drafted | |
 | What we measure | Four questions, four scores: advantage A (better than copying?), perceptual margin M (looks better than copying?), gap G (how far from the decoder's best?), directional (turns the right way?), plus zero-shot latent skill S0. Scene rows only. A_train as the in-distribution reference. | | final wording; **open decision: raw PSNR/LPIPS with persistence as a baseline line instead of A and M** | Rohan |
 | Table 1 | Training maps vs unseen medians for the three backbones: PSNR, LPIPS, A, M, G, directional; persistence rows. | results/fresh_rescore | prov (SD 3.5 row at 170k) | |
 
@@ -53,8 +54,6 @@ Title: **DoomShift: Efficient Adaptation of World Models to Domain Shifts**. CoR
 | Story sentence | Zero-shot, what does a model keep and what does it lose? | | drafted | |
 | Where the deficit sits | Turn response survives (directional 0.73 to 0.86 vs 0.79 to 0.91 in distribution). A positive on every arena but 5.06 to median 2.03 dB; G grows 3.4 to 5.0 dB. Perceptual margin flips sign on 13 of 13 and it is not the decoder's floor. | Table 1, Figure 3b | final | |
 | Figure 3 | (a) the shift is a step, not a slope: every arena below every training map in S0 for all three backbones; distance d does not order arenas. (b) absolute PSNR and LPIPS per arena with persistence bars. | results/family_step, fresh_rescore | final | |
-| What orders the arenas | S0 predicts the endpoint (rho 0.90 with A at 4k), not the gain; the frozen distance d separates seen from unseen but orders nothing; two transition distances fail even that. | results/distance_v2, appendix | final | |
-| Closed loop | One-tic quality does not guarantee stable rollouts (SD 3.5 collapses; EMA removes checkpoint-specific ones). | appendix closed-loop | final | |
 
 ## 5. Crossing the shift
 
@@ -65,6 +64,7 @@ Title: **DoomShift: Efficient Adaptation of World Models to Domain Shifts**. CoR
 | What it takes | Median A 2.04 to 3.80 dB; 69 percent of the gain by 250 updates; 9 of 13 close half the gap (median budget 1k, 5 within 500); one reaches A_train; one episode gives most of the gain of sixteen (four arenas). LPIPS below persistence on 11 of 13; G back to 3.4 dB. | Figure 4, Table 2, appendix ladder | prov (8k set) | |
 | Figure 4 | (a) median A vs updates with per-arena curves; (b) per-arena dots of gap share with budgets. | results/adapt | prov | |
 | Table 2 | Arenas past half gap, budget, A/M/G at 4k, forgetting and directional; columns LoRA median, LoRA arena 7, full fine-tune. | | tbd cells: forgetting, directional, full fine-tune (Monday) | |
+| What predicts the outcome | S0 tracks the endpoint (rho 0.90 with A at 4k), not the gain; the frozen distance d separates seen from unseen but orders nothing; two transition distances fail even that. Placed after the adaptation results because it uses them. | results/distance_v2, appendix | final | |
 
 ## 6. Limitations and conclusion (three sentences)
 
@@ -72,6 +72,7 @@ Title: **DoomShift: Efficient Adaptation of World Models to Domain Shifts**. CoR
 |---|---|---|---|
 | Result | Off its training maps a Doom world model keeps its controls, loses the arena's appearance, and relearns most of it from eight episodes and a few hundred adapter updates. | drafted | |
 | Limits | 13 arenas of one level pack, one agent, one-tic scoring, mostly one seed; persistence is weak where the camera moves fast. | final | |
+| Closed loop | One-tic quality does not guarantee stable rollouts (SD 3.5 collapses in 23 non-EMA and 9 EMA rollouts of 256; EMA removes checkpoint-specific ones). Moved here from Section 4 so the adaptation bridge is not derailed. | final | |
 | Vision | The pattern (control kept, appearance lost, relearned from a few episodes) is what a deployed world model must detect and repair on its own; DoomShift is a testbed for that loop. | final (Rohan's sentence) | |
 
 ## Supplement (appendix.tex, off in the submission build)
