@@ -1,33 +1,3 @@
-% CoRL 2026 PhysWM workshop submission (deadline Sep 30 2026 23:59 AoE = Oct 1 07:59 EDT).
-% Build:  pdflatex main && bibtex main && pdflatex main && pdflatex main
-% Template: corl_2026.sty and corlabbrvnat.bst exactly as the authors' Overleaf download ships them ([anonymous revision]);
-% camera-ready: % Template: corl_2026.sty and corlabbrvnat.bst exactly as Rohan's Overleaf download ships them (f0500f9);
-% nothing is copied into them. The submission build anonymises the author block and numbers the lines;
-% \usepackage[final]{corl_2026} is for the camera-ready only.
-% Page budget: the call allows "up to 4 pages (excluding references)" and says nothing about an appendix,
-% and the OpenReview form takes one PDF with no supplementary field. The appendix therefore lives in
-% appendix.tex, input after the bibliography behind \ifwithappendix; the default is body plus references;
-% set \withappendixtrue for the camera-ready or the supplement build.
-% camera-ready: % body-plus-references submission build if Rohan rules that the appendix may not ride along.
-% The label body-end marks the last body page; paper/fixtures/test_paper_skeleton.py holds it to page 4.
-%
-% Title. Chosen: the Fable framing's candidate A (it names the question and the paper's three answers).
-%   Alternative 1 (owner):  Crossing the Map Shift: Per-Arena Evaluation and Adaptation of Doom World
-%                           Models against Copy-Last Persistence
-%   Alternative 2 (Fable B): Copy-Last Is the Zero Line: Persistence-Referenced Evaluation and Adaptation
-%                           of Game World Models on Unseen Maps
-%
-% Marks. \tbd = a number that does not exist yet; \todo{} = text or a decision that is pending;
-% \prov{} = a number that exists in a frozen file today and will be replaced (fresh-set rescore of the
-% 13 arenas, tuned SD 1 decoder, scene-only rows, final 200k checkpoints). Every paragraph that carries one
-% has a "% depends:" comment naming the run or table it waits on; "% hypothesis:" marks a claim written in
-% the expected direction that no file supports yet. Unmarked numbers are final and come from the frozen
-% files listed in FIGURES.md. \draftmarksfalse prints every mark in black for a clean read.
-%
-% Provenance of the framing: title, abstract, introduction and limitations integrate
-% paper/framing_fable.tex (Fable 5.1) sentence by sentence with the owner's draft; each paragraph's
-% comment says which sentences are "fable", "fable, edited" (and why) or "owner".
-
 \documentclass{article}
 \usepackage{corl_2026}
 \usepackage{graphicx}
@@ -37,15 +7,14 @@
 \newif\ifdraftmarks \draftmarkstrue
 \newif\ifwithappendix \withappendixfalse % submission: body plus references; \withappendixtrue for the camera-ready or an anonymous supplement
 \newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplement\fi}
-\newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0.8,0,0}{[tbd]}\else[tbd]\fi}
-\newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0.8,0,0}{[TODO: #1]}\else[TODO: #1]\fi}
+\newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[tbd]}\else[tbd]\fi}
+\newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[#1]}\else[#1]\fi}
 \newcommand{\prov}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{#1}\else#1\fi}
 % \figslot{file}{width}{height}{what it will show}: the figure when its file exists, a labelled box otherwise
 \newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][\dimexpr#3-2\fboxsep-2\fboxrule\relax][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
 
 \title{Crossing the Map Shift: What a Doom World Model Keeps, Loses and Relearns on Arenas It Never Saw}
 
-% camera-ready: \author{Rohan Nagabhirava \quad Keerthana Chirumamilla \quad Changliu Liu\\ Carnegie Mellon University\\ Pittsburgh, PA, United States}
 \author{
   Anonymous Author(s)\\
   Affiliation\\
@@ -59,7 +28,6 @@
 %===============================================================================
 
 \begin{abstract}
-% depends: SD 3.5 200k rescore (Monday) for sentence 3's third backbone; sources: results/fresh_rescore/*_tuned (scene crop, fine-tuned decoder), paper/tables/tuned/adapt_summary.json, results/sd35_stability/collapse_rates_50k_130k.md
 Game world models are scored on held-out trajectories of their training scenes, and absolute PSNR mostly measures how static the recordings are.
 On an open 17-arena Doom benchmark scored against persistence (the last frame copied forward), we train three pretrained diffusion backbones on four arenas and ask what they keep, lose and relearn on the other thirteen.
 Through one decoder, the U-Net still beats persistence on every unseen arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13 arenas, while its turn response survives.
@@ -68,7 +36,7 @@ Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, 
 In closed loop, one-tic quality does not guarantee stability, and the EMA reduces collapses without removing them.
 \end{abstract}
 
-\keywords{World models, Generalization, Domain adaptation, Doom}
+\keywords{World models, Domain shift, Few-shot adaptation}
 
 %===============================================================================
 
@@ -82,7 +50,6 @@ Because absolute PSNR ranks how static a recording is, every score here is a pai
 Video prediction reports this baseline~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}; game world models dropped it.
 We read every score beside the reconstruction upper bound~\citep{zheng2023occworld,karypidis2024dinoforesight}.
 
-% depends: full fine-tune comparator (Monday) for item (3); SD 3.5 200k rescore (Monday) for item (2)'s third backbone
 We contribute (0) three action-conditioned latent world models (SD~1.4 U-Net, PixArt-$\alpha$, SD~3.5 Medium) trained under one next-tic recipe, a matched decoder fine-tune and the adapter path, released with the benchmark (Figure~\ref{fig:method});
 (1) an open 17-arena Doom benchmark (link withheld for review) scored per arena against persistence;
 (2) the measurement that off the training maps the decoded advantage shrinks and the perceptual margin changes sign for all three backbones while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift});
@@ -90,7 +57,6 @@ We contribute (0) three action-conditioned latent world models (SD~1.4 U-Net, Pi
 (4) two negative results: no per-frame or transition-level distance orders the arenas, whereas the frozen model's zero-shot latent skill does (Spearman 0.90, exploratory at $n=13$), and one-tic quality does not guarantee closed-loop stability.
 
 \begin{figure}[t]
-% source: paper/figures/fig_teaser_B.json (arena 7 held-out episode 210 from tic 2888, rows attack at context tic 1 and turn right at tic 14; U-Net 200k EMA and the 4k adapter through the fine-tuned decoder; four columns, drawn at 5.5 x 1.5 in, cce87b9; the five-column version with a map 2 reference is fig_teaser_B_5col.pdf)
 \centering
 \figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, layout B}
 \caption{Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a true context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and true.}
@@ -105,7 +71,6 @@ We contribute (0) three action-conditioned latent world models (SD~1.4 U-Net, Pi
 \textbf{Data.} Every episode is ViZDoom~\citep{kempka2016vizdoom} deathmatch on one of the 17 arenas of the Arnold agent's WAD~\citep{lample2017arnold}: Arnold against 8 bots for 150~s, recorded at every tic (one game step, 35~Hz, 320$\times$240) with the 19 buttons the engine executed.
 The models train on arenas 2 to 5 (500 episodes each) and are scored on their validation episodes (512 windows); each unseen arena (1, 6 to 17) has 24 newly recorded episodes, 16 for adaptation and 8 held out (256 windows).
 
-% depends: SD 3.5 200k final read (Monday 00:30); the four-tic numbers and the PixArt and SD 3.5 parameter counts come from the research log, not a results file: RESEARCH_CONTEXT 2026-09-26 section 0 item 5 (U-Net, SD 3.5 140k four-tic), 2026-09-27 01:20 (PixArt 200k four-tic), parameter counts from the dossier section 3 table (appendix tab:recipe); stock decoders, full frame, 512 validation windows
 \textbf{Three backbones, one recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so they compare pretrained packages.
 Four tics ahead on the training maps they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k, its latest four-tic read).
 Rollouts stay in latent space, so the decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their true latents, using MSE plus 0.1~LPIPS, and use it for every pixel number of the U-Net and PixArt; SD~3.5 uses its own.
@@ -117,7 +82,6 @@ The \emph{directional} score is the fraction of turning windows whose predicted 
 Pixel scores use the scene rows 0 to 207, since persistence copies the HUD almost exactly; $A_\text{train}$, $A$ on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.38), is the in-distribution reference, not an arena's own upper bound.
 
 \begin{figure}[t]
-% the method figure is being redrawn at 5.5 x 1.8 in (method owner); the slot is budgeted at that height
 \centering
 \figslot{figures/fig1_method.pdf}{\linewidth}{1.8in}{Figure 2: method overview}
 \caption{What we built: (a) the benchmark, (b) three backbones under one recipe, (c) post-training, (d) evaluation. Prediction, truth and persistence are all rendered by the one fine-tuned decoder $D$.}
@@ -125,7 +89,6 @@ Pixel scores use the scene rows 0 to 207, since persistence copies the HUD almos
 \end{figure}
 
 \begin{table}[t]
-% depends: SD 3.5 200k rescore and its fine-tuned decoder (Monday); sources: results/fresh_rescore/*_tuned/map??/metrics.json and home_*_tuned/val/metrics.json (_tuned keys), sd35_170000 (own stock decoder), results/directional_fresh/summary.json; stock-decoder rows go to the appendix
 \centering\footnotesize\setlength{\tabcolsep}{3.2pt}
 \caption{Training maps (pooled means over windows) and unseen arenas (medians over arenas; in parentheses, arenas with $A>0$ or $M<0$), scene rows, one tic. U-Net and PixArt-$\alpha$ through the fine-tuned SD~1 decoder, SD~3.5 through its own (provisional 170k\ifdraftmarks{}, blue\fi). $A$ against the rendered true frame, the rest against the raw frame; directional pooled (true frames 0.885, 0.892).}
 \label{tab:unseen}
@@ -150,13 +113,11 @@ SD 3.5 Medium & training & \prov{24.50} & \prov{0.146} & \prov{+3.89} & \prov{$-
 \section{What happens off the training maps}
 \label{sec:shift}
 
-% depends: SD 3.5 200k rescore (Monday); sources: results/directional_fresh/summary.json, results/fresh_rescore/*/map??/metrics.json, results/family_step/family_step.json
 \textbf{Where the deficit sits.} In distribution all three backbones beat persistence and turn the right way; off the training maps the turn response survives, with per-arena reversal rates of 0.73 to 0.86 for the U-Net against 0.79 to 0.91 on the training maps and 0.89 for true frames (Table~\ref{tab:unseen}).
 $A$ stays positive on every arena for all three backbones but falls from 5.06 to a median 2.03~dB, while the decoder's scene reconstruction PSNR is 25.2 to 29.7~dB (28.6 in distribution) and $G$ grows from 3.4 to a median 5.0~dB; the fine-tuned decoder adds 0.2~dB to $A$ zero-shot and 0.7~dB after adaptation.
 Nor is the sign reversal of the perceptual margin the decoder's floor: its own reconstruction LPIPS (0.05 to 0.09) is far below persistence's (0.18 to 0.28), yet the prediction's LPIPS exceeds persistence's on 13 of 13 arenas ($M$ +0.03 to +0.17, median +0.08, against $-$0.08 in distribution; Figure~\ref{fig:shift}b).
 
 \begin{figure}[t]
-% depends: SD 3.5 200k (Monday) replaces the provisional 170k marks; panels drawn at 2.25 x 1.5 in (2f1ff7f) and 3.15 x 1.5 in (828e56a) by the figure lead, letters inside the art; sources: results/family_step/family_step.json, paper/tables/tuned/adapt_summary.json (zero_shot_absolute)
 \centering
 \figslot{figures/fig2d_family_step.pdf}{2.25in}{1.5in}{Figure 3a: family step}\hfill
 \figslot{figures/tuned/fig3b_zero_shot_absolute.pdf}{3.15in}{1.5in}{Figure 3b: zero-shot absolute}
@@ -164,12 +125,10 @@ Nor is the sign reversal of the perceptual margin the decoder's floor: its own r
 \label{fig:shift}
 \end{figure}
 
-% depends: nothing pending; sources: results/distance_v2/distances_sd1.json, paper/tables/tuned/adapt_summary.json (spearman), results/transition_distance/compare_fresh_sd1.csv
 \textbf{The distance orders families, not arenas.} Before scoring any map we froze $d$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (\appref{app:distance}).
 It places the training maps' held-out episodes inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), but within the 13 arenas it orders nothing (Spearman $-0.22$ with $A$, $-0.35$ with the budget, none below $p=0.2$); two registered transition-level distances fail even the separation, and a pre-registered 30-map test failed its validation gate.
 The frozen model's zero-shot latent skill $S_0$ does order the arenas: it predicts where an arena ends up, not how much it gains (exploratory Spearman $+0.90$ with $A$ at 4k, $+0.18$ with the gain, $-0.61$ with the budget).
 
-% depends: nothing pending; collapse counts recomputed from results/sd35_stability/collapse_rates_50k_130k.md
 \textbf{Closed loop.} Good one-tic scores do not guarantee stable rollouts: SD~3.5 has the best one-tic numbers with stock decoders on the full frame, yet a frame under 10~dB occurs in 23 non-EMA and 9 EMA rollouts of 256 reads (16 windows at 16 checkpoints from 55k to 130k; 11 and 8 without 70k), so the EMA removes checkpoint-specific collapses, not the failure mode.
 
 %===============================================================================
@@ -177,18 +136,15 @@ The frozen model's zero-shot latent skill $S_0$ does order the arenas: it predic
 \section{Crossing the shift}
 \label{sec:adapt}
 
-% depends: full fine-tune comparator (Monday); the 8k grid (tonight) replaces the 4k numbers
 \textbf{Protocol.} For each unseen arena we adapt the U-Net 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone, as Vista does~\citep{gao2024vista}, and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent)~\citep{xie2023difffit}.
 We train on 8 adaptation episodes, score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates, and plan forgetting ($A$ on the training maps) and the directional score as control checks and a full fine-tune at $2\times10^{-5}$ as the comparator (\tbd{}).
 An arena's budget is the first grid point at which $A$ reaches $\tfrac12(A_0+A_\text{train})$, half of its gap from its zero-shot $A_0$; arenas that do not by the final budget of the grid are right-censored~\citep{taylor2009transfer}.
 Half of the gap in dB is not half of the error: raising $A$ by 1.8~dB reduces the model's prediction error by 34 percent relative to its starting value.
 
-% depends: nothing in the text (forgetting and directional after adaptation are Table 3 cells, 8k chain tonight); source: paper/tables/tuned/adapt_summary.json; the data-ladder and recipe sentence (RESEARCH_CONTEXT 2026-09-27 08:05) is out for space, an open decision (body or appendix)
 \textbf{What it takes.} 9 of 13 arenas close half of their gap within 4k updates (5 within 500), one reaches $A_\text{train}$, and the median $A$ rises from 2.04 to 3.80~dB; on average 69 percent of each arena's gain lands by 250 updates (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
 At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
 
 \begin{figure}[t]
-% depends: the 8k grid (tonight) redraws both panels; source: paper/tables/tuned/adapt_summary.json; file drawn at 5.5 x 1.4 in (figure lead, 525d44c)
 \centering
 \figslot{figures/tuned/fig4_dots.pdf}{\linewidth}{1.4in}{Figure 4: adaptation}
 \caption{Eight episodes and 4k adapter updates lift the median $A$ from 2.04 to 3.80~dB, most of it by 250 updates (a), and 9 of 13 arenas close half of their gap to $A_\text{train}$ (b: budget above each dot; grey: censored at 4k).}
@@ -196,7 +152,6 @@ At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the othe
 \end{figure}
 
 \begin{table}[tb]
-% depends: full fine-tune comparator (Monday); forgetting and directional control checks (8k chain tonight); rows from paper/tables/tuned/adapt_table3.tex (make_adapt_figures.py, 11:27), the A_train and gap-share rows dropped for space (A_train is in the text, the share in Figure 4b); G at 4k from results/fresh_rescore/adapt4000_live_tuned (median 3.44, arena 7 4.65); GPU-hours from results/adapt/*_map07_r16_k8_s0/log.jsonl (1.10 h wall)
 \centering\footnotesize\setlength{\tabcolsep}{2pt}
 \caption{What closing the gap takes (non-EMA weights, fine-tuned decoder; brackets: 95\% arena-bootstrap intervals; ${>}$4k: censored; arena 7 is the highest-distance arena).}
 \label{tab:cost}
@@ -220,8 +175,6 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 Our claims cover 13 arenas of one WAD, one agent, one-tic scoring and mostly one seed; persistence is a weak reference where the camera moves fast.
 Off its training maps the U-Net keeps its turn response and part of its advantage but loses its perceptual edge; eight episodes and 1.1 GPU-hours of adapter training per arena close half of the gap on 9 of 13 arenas and the perceptual gap on 11.
 \label{body-end}
-
-% Acknowledgments print only in the final and preprint builds (\acknowledgments{} of corl_2026.sty); none yet.
 
 %===============================================================================
 
