@@ -320,7 +320,8 @@ def restart_rows(rows, restart_root, found, floor):
     return out, None
 
 
-def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,)):
+def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,),
+        row_order=None):
     """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record."""
     ws = ct.windows(root)
     if not ws:
@@ -330,11 +331,16 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
     starts_on_map2 = {m["action"] for m in found if m["role"] == "training"}
     missing = sorted(a for a, _ in ACTIONS if a not in starts_on_map2)
     picks = candidates(found, n_candidates)
+
+    def in_order(rows):
+        """The rows in the figure's order (the review round: strongest story first); the in-domain starts are
+        assigned in FIGURE_ROWS order before this, so the order shown never changes which start a row gets."""
+        return sorted(rows, key=lambda r: list(row_order).index(r["row"])) if row_order else rows
     sheet = draw_sheet(root, ordered, os.path.join(review_dir, "teaser_contacts.png"))
     written = [sheet]
     floor = in_domain_floor(found)
     for i, pick in enumerate(picks, 1):
-        paths, _ = ct.layout_c(root, out_dir, pick["rows"], stem=f"fig_teaser_C_{i}")
+        paths, _ = ct.layout_c(root, out_dir, in_order(pick["rows"]), stem=f"fig_teaser_C_{i}")
         pick["files"] = [os.path.basename(p) for p in paths]
         written += paths
         if restart_root:
@@ -342,7 +348,8 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
             pick["restart"] = {"skipped": skipped}
             for h in restart_horizons if rows else ():
                 stem = f"fig_teaser_C_{i}_restart" + ("" if h == HORIZON else str(h))
-                paths, side = ct.layout_c(root, out_dir, rows, stem=stem, restart_root=restart_root, horizon=h)
+                paths, side = ct.layout_c(root, out_dir, in_order(rows), stem=stem, restart_root=restart_root,
+                                          horizon=h)
                 shown = [r["story_shown"] for r in side["rows"] if r["story_shown"] is not None]
                 pick["restart"][str(h)] = {"files": [os.path.basename(p) for p in paths], "rows": side["rows"],
                                            "score_shown": round(float(np.mean(shown)), 3) if shown else None}
@@ -367,11 +374,13 @@ def main(argv=None):
     p.add_argument("--candidates", type=int, default=3)
     p.add_argument("--restart-root", default=None,
                    help="the steward's restarted rollouts, <window>_t<T>/...: the candidates' +8 frames come from it")
+    p.add_argument("--row-order", default=None, help="the rows' order, e.g. turn,forward,attack")
     p.add_argument("--restart-horizon", type=int, nargs="+", default=[HORIZON],
                    help="tics after the context for the restarted redraws (the export holds 16); stems gain the "
                         "number past 8, fig_teaser_C_<n>_restart16")
     a = p.parse_args(argv)
-    rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon))
+    rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon),
+              tuple(a.row_order.split(",")) if a.row_order else None)
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):

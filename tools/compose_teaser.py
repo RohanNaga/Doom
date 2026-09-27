@@ -406,18 +406,42 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
     return paths + [_sidecar(out_dir, stem, record)], record
 
 
-def layout_c(root, out_dir, rows, adapted_label=DEFAULT_ADAPTED_LABEL, horizon=HORIZON_B, width=fs.TEXT_WIDTH,
-             max_height=2.2, stem="fig_teaser_C", restart_root=None):
+def held_note(steps, button):
+    """What the recorded controls did with `button` over the rollout steps shown (a list of button sets, step 1
+    first): how many steps from the first it stays pressed, and the other buttons pressed on every one of those
+    steps, e.g. "+forward · 7/16"; "held 15/16" when nothing else is held throughout."""
+    names = [set(button_names(c)) for c in steps]
+    run = next((i for i, c in enumerate(names) if button not in c), len(names))
+    co = set.intersection(*names[:run]) - {button} if run else set()
+    co = sorted(co, key=lambda n: (PRIORITY.index(n) if n in PRIORITY else len(PRIORITY), n))
+    return (f"+{' +'.join(co)} · " if co else "held ") + f"{run}/{len(names)}"
+
+
+def moment_steps(manifest, first, count):
+    """The recorded controls of rollout steps first..first+count-1 from a restart manifest (`control_per_tic`,
+    step k produces restart tic k) or a teaser manifest (`per_tic`, by teaser tic); None when absent."""
+    per = manifest.get("control_per_tic") or manifest.get("per_tic")
+    if not isinstance(per, list):
+        return None
+    by_tic = {int(r["tic"]): r.get("control") or [] for r in per if isinstance(r, dict) and "tic" in r}
+    steps = [by_tic.get(k) for k in range(first, first + count)]
+    return None if any(s is None for s in steps) else steps
+
+
+def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 episodes, 4k updates)",
+             horizon=HORIZON_B, width=fs.TEXT_WIDTH, max_height=2.05, stem="fig_teaser_C", restart_root=None):
     """Layout C (the selection round's form); returns the written paths and the sidecar record. One row per entry
-    of `rows` ({"window", "tic", "button", "home": {"window", "tic"}}), seven frames: the in-domain block (a start
-    of the same button on a training map: its ground-truth context, the U-Net `horizon` tics later and the ground
-    truth then) and the unseen block (ground-truth context at the tic the button starts, zero-shot, adapted and
-    ground truth `horizon` tics later). Model frames carry their scene PSNR beneath.
+    of `rows` ({"row", "window", "tic", "button", "home": {"window", "tic"}}), in the order given, seven frames: the
+    in-domain block (a start of the same button on a training map: its ground-truth context, the U-Net `horizon`
+    tics later and the ground truth then) and the unseen block (ground-truth context at the tic the button starts,
+    zero-shot, adapted and ground truth `horizon` tics later). One number line under every row: persistence under
+    both context frames, scene PSNR under the model frames (labelled once, "scene PSNR (dB)", at the left of the
+    first row), and under each ground-truth frame what the recorded controls did (`held_note`).
 
     With `restart_root` (the steward's `<window>_t<T>/{truth_raw,unet_tuned,adapter_tuned}/tic_00..16` export, 32
-    ground-truth tics ending at T as context) every +8 frame is 8 tics after the context shown, and a missing
-    moment stops the build. Without it the frames come from the one closed-loop rollout per window, so the +8
-    columns are headed "rollout tic t+8" and each context frame carries its rollout tic."""
+    ground-truth tics ending at T as context) every frame is `horizon` tics after the context shown, and a missing
+    moment stops the build. Without it the frames come from the one closed-loop rollout per window, so the note
+    says "rollout tic t+8" and each context frame carries its rollout tic."""
     ws = windows(root)
     fs.style()
     restart = restart_root is not None
@@ -431,78 +455,109 @@ def layout_c(root, out_dir, rows, adapted_label=DEFAULT_ADAPTED_LABEL, horizon=H
             return d, 0, horizon
         return ws[window], tic, tic + horizon
 
-    label_w = max(text_width(r["button"], style="italic") for r in rows) + 5 / 72
+    psnr_label = "scene PSNR (dB)"
+    label_w = max([text_width(r["button"], style="italic") for r in rows] +
+                  [text_width(psnr_label, size=fs.MIN_PT)]) + 5 / 72
     group_gap = 6 / 72
     ncols = 7
     fixed = label_w + (ncols - 2) * GUTTER + group_gap + 0.02
-    head = 3 * 8 / 72
-    psnr_line = 7 / 72
+    head = 4 * 8 / 72
+    number_line = 7 / 72
     n = len(rows)
     d0, c0, _ = source(rows[0]["window"], rows[0]["tic"])
     sample = frame(os.path.join(d0, ROWS["truth"]), c0)
     aspect = sample.shape[0] / sample.shape[1]
     fw = (width - fixed) / ncols
-    fw = min(fw, (max_height - head - n * psnr_line - (n - 1) * GUTTER - 0.02) / n / aspect)
+    fw = min(fw, (max_height - head - n * number_line - (n - 1) * GUTTER - 0.02) / n / aspect)
     fh = fw * aspect
-    height = head + n * (fh + psnr_line) + (n - 1) * GUTTER + 0.02
+    height = head + n * (fh + number_line) + (n - 1) * GUTTER + 0.02
     x0 = max(0.0, (width - (fixed - 0.02 + ncols * fw)) / 2)
     xs, x = [], x0 + label_w
     for i in range(ncols):
         xs.append(x)
         x += fw + (group_gap if i == 2 else GUTTER)
-    plus = f"+{horizon} tics" if restart else f"rollout tic t+{horizon}"
     home_place, away_place = place_name(rows[0]["home"]["window"]), place_name(rows[0]["window"])
-    columns = [{"block": f"{home_place} (in-domain)", "name": "context", "sub": ""},
-               {"block": f"{home_place} (in-domain)", "name": "U-Net", "sub": plus},
-               {"block": f"{home_place} (in-domain)", "name": TRUTH_LABEL, "sub": plus},
-               {"block": away_place, "name": "context", "sub": ""},
-               {"block": away_place, "name": "zero-shot", "sub": plus},
-               {"block": away_place, "name": adapted_label, "sub": plus},
-               {"block": away_place, "name": TRUTH_LABEL, "sub": plus}]
+    context = "context (t = 0)"
+    columns = [{"block": f"{home_place} (in-domain)", "name": context},
+               {"block": f"{home_place} (in-domain)", "name": "U-Net"},
+               {"block": f"{home_place} (in-domain)", "name": TRUTH_LABEL},
+               {"block": away_place, "name": context},
+               {"block": away_place, "name": "zero-shot"},
+               {"block": away_place, "name": adapted_label},
+               {"block": away_place, "name": TRUTH_LABEL}]
+    note = (f"rollout frames at +{horizon} tics after 32 ground-truth context tics" if restart else
+            f"frames at rollout tic t+{horizon} of one closed-loop rollout")
     fig = _figure(width, height)
     for lo, hi in ((0, 2), (3, 6)):
         _text(fig, width, height, (xs[lo] + xs[hi] + fw) / 2, 0.0, columns[lo]["block"], ha="center", va="top",
               fontsize=fs.ANNOT_PT)
+    _text(fig, width, height, (xs[0] + xs[-1] + fw) / 2, 8 / 72, note, ha="center", va="top", fontsize=fs.MIN_PT,
+          color=fs.CONTEXT_INK)
     for xi, col in zip(xs, columns):
-        _text(fig, width, height, xi + fw / 2, 8 / 72, col["name"], ha="center", va="top", fontsize=fs.ANNOT_PT)
-        if col["sub"]:
-            _text(fig, width, height, xi + fw / 2, 16 / 72, col["sub"], ha="center", va="top", fontsize=fs.MIN_PT,
-                  color=fs.CONTEXT_INK)
+        _text(fig, width, height, xi + fw / 2, 16 / 72, col["name"], ha="center", va="top", fontsize=fs.ANNOT_PT)
+    if adapted_note:
+        _text(fig, width, height, xs[5] + fw / 2, 24 / 72, adapted_note, ha="center", va="top", fontsize=fs.MIN_PT,
+              color=fs.CONTEXT_INK)
     record = {"layout": "C", "mode": "restart" if restart else "rollout", "restart_root": restart_root,
-              "horizon": horizon, "size_in": [width, round(height, 4)], "frame_in": [round(fw, 4), round(fh, 4)],
-              "columns": columns, "rows": []}
+              "horizon": horizon, "note": note, "size_in": [width, round(height, 4)],
+              "frame_in": [round(fw, 4), round(fh, 4)], "columns": columns, "rows": []}
     for r, row in enumerate(rows):
-        y = head + r * (fh + psnr_line + GUTTER)
+        y = head + r * (fh + number_line + GUTTER)
         hd, hc, h8 = source(row["home"]["window"], row["home"]["tic"])
         ud, uc, u8 = source(row["window"], row["tic"])
         hman, uman = manifest_of(root, hd), manifest_of(root, ud)
         psnr = {"zero-shot": per_tic_scene(uman, ROWS["model"]).get(u8),
                 "adapted": per_tic_scene(uman, ROWS["adapted"]).get(u8),
                 "in-domain": per_tic_scene(hman, ROWS["model"]).get(h8)}
-        note_h = None if restart else f"rollout tic {row['home']['tic']}"
-        note_u = None if restart else f"rollout tic {row['tic']}"
-        cells = [("in-domain context", os.path.join(hd, ROWS["truth"]), hc, note_h),
+        persistence = {"in-domain": copy_last(hman, h8), "unseen": copy_last(uman, u8)}
+        held = {}
+        for key, man, first in (("in-domain", hman, hc + 1), ("unseen", uman, uc + 1)):
+            steps = moment_steps(man, first, horizon)
+            held[key] = held_note(steps, row["button"]) if steps else None
+        cells = [("in-domain context", os.path.join(hd, ROWS["truth"]), hc,
+                  context_note(persistence["in-domain"], row["home"]["tic"], restart)),
                  ("in-domain", os.path.join(hd, ROWS["model"]), h8, psnr["in-domain"]),
-                 ("in-domain ground truth", os.path.join(hd, ROWS["truth"]), h8, None),
-                 ("context", os.path.join(ud, ROWS["truth"]), uc, note_u),
+                 ("in-domain ground truth", os.path.join(hd, ROWS["truth"]), h8, held["in-domain"]),
+                 ("context", os.path.join(ud, ROWS["truth"]), uc,
+                  context_note(persistence["unseen"], row["tic"], restart)),
                  ("zero-shot", os.path.join(ud, ROWS["model"]), u8, psnr["zero-shot"]),
                  ("adapted", os.path.join(ud, ROWS["adapted"]), u8, psnr["adapted"]),
-                 ("ground truth", os.path.join(ud, ROWS["truth"]), u8, None)]
+                 ("ground truth", os.path.join(ud, ROWS["truth"]), u8, held["unseen"])]
         sources = {}
         for xi, (key, row_dir, tic, value) in zip(xs, cells):
             sources[key] = frame_path(row_dir, tic)
             _place(fig, width, height, xi, y, fw, fh, frame(row_dir, tic))
             if value is not None:
                 _text(fig, width, height, xi + fw / 2, y + fh + 0.5 / 72,
-                      value if isinstance(value, str) else f"{value:.1f} dB", ha="center", va="top",
+                      value if isinstance(value, str) else f"{value:.1f}", ha="center", va="top",
                       fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
+        if r == 0:
+            _text(fig, width, height, x0 + label_w - 3 / 72, y + fh + 0.5 / 72, psnr_label, ha="right", va="top",
+                  fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
         _text(fig, width, height, x0 + label_w - 3 / 72, y + fh / 2, row["button"], ha="right", va="center",
               fontsize=fs.ANNOT_PT, style="italic")
         shown = (round(psnr["adapted"] - psnr["zero-shot"], 3)
                  if psnr["adapted"] is not None and psnr["zero-shot"] is not None else None)
-        record["rows"].append({**row, "scene_psnr": psnr, "story_shown": shown, "sources": sources})
+        record["rows"].append({**row, "scene_psnr": psnr, "persistence": persistence, "held": held,
+                               "story_shown": shown, "sources": sources})
     paths = fs.save(fig, out_dir, stem)
     return paths + [_sidecar(out_dir, stem, record)], record
+
+
+def context_note(persistence, tic, restart):
+    """The line under a context frame: persistence's scene PSNR when the export has it, else (in a long rollout)
+    the frame's rollout tic."""
+    if persistence is not None:
+        return f"persistence {persistence:.1f}"
+    return None if restart else f"rollout tic {tic}"
+
+
+def copy_last(manifest, tic):
+    """Persistence's scene PSNR at `tic` from the restart export's `copylast_scene_psnr`, else None."""
+    series = manifest.get("copylast_scene_psnr")
+    if isinstance(series, list) and 0 <= tic < len(series) and isinstance(series[tic], (int, float)):
+        return float(series[tic])
+    return None
 
 
 def _sidecar(out_dir, stem, record):

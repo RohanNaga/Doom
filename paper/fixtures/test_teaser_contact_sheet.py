@@ -103,7 +103,10 @@ def restart_export(tmp_path, entries):
             series["adapter_tuned"] = [31.0 - t + (2.0 if "ep41" in name else 0.0) + (0.5 if t == 16 else 0.0)
                                        for t in range(17)]
         with open(d / "manifest.json", "w") as f:
-            json.dump({"scene_psnr_vs_truth_raw": series, "copylast_scene_psnr": [99.0] + [18.0] * 16}, f)
+            steps = [{"tic": k, "control": ["speed", "forward"] + (["attack"] if k <= 5 else ["turn left"])}
+                     for k in range(1, 17)]
+            json.dump({"scene_psnr_vs_truth_raw": series, "copylast_scene_psnr": [99.0] + [18.0] * 16,
+                       "control_per_tic": steps}, f)
     return str(root)
 
 
@@ -166,8 +169,9 @@ def test_the_round_scores_every_moment_picks_whole_windows_and_matches_map_2_by_
     # seven frames per row: the in-domain block (context, U-Net, ground truth) and the unseen block (context,
     # zero-shot, adapted, ground truth); without a restart export the +8 frames are headed by their rollout tic
     c1 = json.load(open(out / "fig_teaser_C_1.json"))
-    assert c1["mode"] == "rollout" and len(c1["columns"]) == 7
-    assert c1["columns"][1]["sub"] == "rollout tic t+8" and c1["frame_in"][0] > 0.6
+    assert c1["mode"] == "rollout" and len(c1["columns"]) == 7 and "rollout tic t+8" in c1["note"]
+    assert [c["name"] for c in c1["columns"]][3:] == ["context (t = 0)", "zero-shot", "adapted", "ground truth"]
+    assert c1["frame_in"][0] > 0.55 and c1["size_in"][1] <= 2.05 + 1e-6
 
 
 def test_layout_c_reads_the_restart_export_so_the_plus_8_frame_is_8_tics_after_the_context(tmp_path):
@@ -181,7 +185,7 @@ def test_layout_c_reads_the_restart_export_so_the_plus_8_frame_is_8_tics_after_t
         tcs.ct.layout_c(root, str(tmp_path / "c"), rows, restart_root=restart)
     restart = restart_export(tmp_path, names)
     paths, side = tcs.ct.layout_c(root, str(tmp_path / "c"), rows, restart_root=restart)
-    assert side["mode"] == "restart" and side["columns"][1]["sub"] == "+8 tics"
+    assert side["mode"] == "restart" and "+8 tics after 32 ground-truth context tics" in side["note"]
     first = side["rows"][0]
     assert first["sources"]["zero-shot"].endswith(os.path.join(names[0][0], "unet_tuned", "tic_08.png"))
     assert first["sources"]["context"].endswith(os.path.join(names[0][0], "truth_raw", "tic_00.png"))
@@ -205,14 +209,17 @@ def test_with_a_restart_export_the_candidates_are_redrawn_from_it_and_rescored(t
     assert r["files"][0] == "fig_teaser_C_1_restart.pdf" and r["score_shown"] == pytest.approx(3.0)
     r16 = first["restart"]["16"]                                     # the +16 variant, rescored at +16
     assert r16["files"][0] == "fig_teaser_C_1_restart16.pdf" and r16["score_shown"] == pytest.approx(3.5)
-    assert json.load(open(out / "fig_teaser_C_1_restart16.json"))["columns"][4]["sub"] == "+16 tics"
+    assert "+16 tics" in json.load(open(out / "fig_teaser_C_1_restart16.json"))["note"]
     # the in-domain start is the restarted one of the same button (turn right at 20, not the unexported 5)
     homes = {row["row"]: (row["home"]["window"], row["home"]["tic"]) for row in r["rows"]}
     assert homes == {"attack": ("train_map02_ep6008_s712", 2), "turn": ("train_map02_ep6008_s712", 24),
                      "forward": ("train_map02_ep6024_s900", 24)}
     assert "unseen_arena07_ep9_s200_t" in second["restart"]["skipped"]      # B was not restarted
     side = json.load(open(out / "fig_teaser_C_1_restart.json"))
-    assert side["mode"] == "restart" and side["columns"][4]["sub"] == "+8 tics"
+    assert side["mode"] == "restart" and "+8 tics" in side["note"]
+    # persistence under both context frames, from each moment's copy-last series at +8
+    row = side["rows"][0]
+    assert row["persistence"] == {"in-domain": 18.0, "unseen": 18.0}
 
 
 def test_the_in_domain_start_is_the_brightest_near_one_that_reads_at_least_the_map_2_median():
@@ -231,3 +238,22 @@ def test_the_in_domain_start_is_the_brightest_near_one_that_reads_at_least_the_m
     home, flags = tcs.pick_home(homes, row, floor=20.0, taken=[("w", 9)])
     assert home["tic"] == 3
     assert tcs.pick_home(homes[:2], row, floor=20.0, taken=[("w", 2)]) == (None, None)
+
+
+def test_a_row_names_what_was_really_held_over_the_steps_shown():
+    steps = [{"forward", "turn right", "speed"}] * 7 + [{"forward", "turn left"}] * 4 + [{"forward", "turn right"}] * 5
+    assert tcs.ct.held_note(steps, "turn right") == "+forward \u00b7 7/16"      # the run from step 1, then a switch
+    steps = [{"attack", "strafe right"}] * 3 + [{"attack", "turn left"}] * 12 + [{"back"}]
+    assert tcs.ct.held_note(steps, "attack") == "held 15/16"                    # nothing else held throughout
+
+
+def test_the_rows_follow_the_requested_order(tmp_path):
+    root = export(tmp_path)
+    rec = tcs.run(root, str(tmp_path / "out"), str(tmp_path / "out" / "review"), n_candidates=1,
+                  row_order=("turn", "forward", "attack"))
+    side = json.load(open(tmp_path / "out" / "fig_teaser_C_1.json"))
+    assert [r["row"] for r in side["rows"]] == ["turn", "forward", "attack"]
+    # the order shown does not change which in-domain start a row gets: those are assigned attack, turn, forward
+    plain = tcs.run(root, str(tmp_path / "plain"), str(tmp_path / "plain" / "review"), n_candidates=1)
+    homes = {r["row"]: (r["home"]["window"], r["home"]["tic"]) for r in rec["candidates"][0]["rows"]}
+    assert homes == {r["row"]: (r["home"]["window"], r["home"]["tic"]) for r in plain["candidates"][0]["rows"]}
