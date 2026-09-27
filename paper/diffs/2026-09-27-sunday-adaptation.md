@@ -1,6 +1,6 @@
 # Overleaf diff, Sunday Sep 27 (adaptation, distance, decoder)
 
-Revision 3 (10:05): Opus's statistics view corrected the LPIPS count (11 wins, 2 ties), the ladder gap (0.26 dB) and the $S_0$ claim (predicts the endpoint, not the gain). Revision 2 (09:50) after Astra's truth check (`2026-09-27-sunday-adaptation.review_astra.md`, thread 01a0e2f7-c7dc-7e61-8f28-2ace91b00951): every $G$ number moved to the raw-reference definition; PixArt rank agreement 0.96 (tuned); the 2k-to-4k rise given as a range; seed, ladder and recipe claims scoped to the stock-decoder checks; the failed pre-registered gate kept; Astra's five replacement sentences taken with light edits. Still to reconcile in `main.tex` outside this diff: the older "3.60 to 1.51" and MSE-only decoder mentions in section 3 and Table 3's "Full, arena 7" header.
+Revision 3 (10:10, all three statistics views in, `per-arena-statistics-decision-2026-09-27.md`): "tie" dropped from the LPIPS claim (no equivalence margin), the crossing count carries its arena-bootstrap interval, the ladder gap reads about 0.25 dB; Opus's statistics view corrected the LPIPS count (11 wins, 2 ties), the ladder gap (0.26 dB) and the $S_0$ claim (predicts the endpoint, not the gain). Revision 2 (09:50) after Astra's truth check (`2026-09-27-sunday-adaptation.review_astra.md`, thread 01a0e2f7-c7dc-7e61-8f28-2ace91b00951): every $G$ number moved to the raw-reference definition; PixArt rank agreement 0.96 (tuned); the 2k-to-4k rise given as a range; seed, ladder and recipe claims scoped to the stock-decoder checks; the failed pre-registered gate kept; Astra's five replacement sentences taken with light edits. Still to reconcile in `main.tex` outside this diff: the older "3.60 to 1.51" and MSE-only decoder mentions in section 3 and Table 3's "Full, arena 7" header.
 
 Apply to `main.tex` as it stands in Overleaf. Each item gives the exact current text and the exact replacement. Numbers: tuned decoder (MSE + 0.1 LPIPS) unless marked stock; scene crop; live weights; 256 fresh held-out windows per arena; home = the training maps' 512 validation windows. Sources: `paper/tables/tuned/adapt_cost.tex`, `paper/tables/tuned/adapt_summary.json`, `results/fresh_rescore/*_tuned/map*/metrics.json` (script in the RESEARCH_CONTEXT 2026-09-27 08:05 entry), `.claude/analyses/distance-usefulness-decision-2026-09-27.md`. Final numbers (the arena 6 tuned rescore landed at 08:12: it crosses at 1,000).
 
@@ -20,7 +20,7 @@ Current:
 > We measure what closing half of each arena's gap to the home advantage costs rank-16 adapters on the frozen backbone: \tbd{} updates on \tbd{} of 13 arenas, at \tbd{}~dB of forgetting.
 
 Replace with:
-> Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the home advantage within 4k updates on 9 of 13 arenas (five within 500), recover a median 1.8~dB, and turn the perceptual loss into a win on 11 of 13 arenas and a tie on the other two; one episode already yields most of the gain, and no per-frame or transition-level distance predicts where an arena ends up, while the frozen model's own zero-shot latent skill does.
+> Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the home advantage within 4k updates on 9 of 13 arenas (five within 500), recover a median 1.8~dB, and turn the perceptual loss into a win on 11 of 13 arenas (the other two within 0.01); one episode already yields most of the gain, and no per-frame or transition-level distance predicts where an arena ends up, while the frozen model's own zero-shot latent skill does.
 
 (If this runs the abstract past six sentences, drop "one episode already yields most of the gain, and".)
 
@@ -93,8 +93,8 @@ Current (three sentences with \tbd):
 
 Replace with:
 > \textbf{What it takes.} 9 of 13 arenas close half of their gap within 4k updates (5 within 500; median budget 1k; arenas 1, 8, 12 and 16 censored), one reaches the home line, and the median $A$ rises from 2.04 to 3.80~dB (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}); on average 69 percent of the gain lands by 250 updates, and every curve still rises between 2k and 4k (+0.05 to +0.31~dB, mean +0.13).
-> Adaptation also closes the perceptual gap: at 4k the rendered prediction has lower scene LPIPS than raw persistence on 11 of 13 arenas and ties on the other two ($M$ median $-0.02$ against $+0.08$ zero-shot; arenas 1 and 6 at $+0.001$ and $+0.008$), and the median gap $G$ to the decoder's own reconstruction falls from 5.0 to 3.4~dB, the home value (3.4).
-> Little of the gain needs data: in stock-decoder checks a single adaptation episode finishes within 0.26~dB of sixteen on arenas 7, 8, 12 and 16 (75 to 101 percent of the sixteen-episode gain, \appref{app:perarena-adapt}), and tripling or quintupling the learning rate or extending training to 8k changes $A$ at 4k by less than 0.06~dB on arenas 12 and 16, inside the two-seed spread of 0.02 to 0.06~dB; on these checks the ceiling an arena reaches looks set by the arena rather than by the budget, the rate or the data.
+> Adaptation also closes the perceptual gap: at 4k the rendered prediction has lower scene LPIPS than raw persistence on 11 of 13 arenas, the other two within 0.01 ($M$ median $-0.02$ against $+0.08$ zero-shot), and the median gap $G$ to the decoder's own reconstruction falls from 5.0 to 3.4~dB, the home value (3.4).
+> Little of the gain needs data: in stock-decoder checks a single adaptation episode finishes within about 0.25~dB of sixteen on arenas 7, 8, 12 and 16 (75 to 101 percent of the sixteen-episode gain, \appref{app:perarena-adapt}), and tripling or quintupling the learning rate or extending training to 8k changes $A$ at 4k by less than 0.06~dB on arenas 12 and 16, inside the two-seed spread of 0.02 to 0.06~dB; on these checks the ceiling an arena reaches looks set by the arena rather than by the budget, the rate or the data.
 > The budget tracks the zero-shot latent skill (Spearman $-0.61$) and not $D$ ($-0.35$) or the transition distances, exploratory at $n=13$ with censored budgets; the forgetting and directional guards on all arenas and the full fine-tune comparator are \tbd{} (the guards land with the 8k rerun today, the comparator Monday).
 
 ## 9. Table 3 (lines 241 to 257)
@@ -120,7 +120,7 @@ Current:
 > Off its training maps the U-Net keeps its turn response and part of its advantage over copying, loses its perceptual advantage, and closes half of its gap to the home advantage within \tbd{} adapter updates.
 
 Replace with:
-> Off its training maps the U-Net keeps its turn response and part of its advantage over copying and loses its perceptual advantage; eight episodes and 4k rank-16 adapter updates (1.1 GPU-hours) close half of the gap on 9 of 13 arenas and restore the perceptual tie on 11, and in our checks one episode gives most of that.
+> Off its training maps the U-Net keeps its turn response and part of its advantage over copying and loses its perceptual advantage; eight episodes and 4k rank-16 adapter updates (1.1 GPU-hours) close half of the gap on 9 of 13 arenas (arena-bootstrap 46 to 92 percent) and restore the perceptual advantage on 11, and in our checks one episode gives most of that.
 
 ## Not in this diff (Monday)
 
