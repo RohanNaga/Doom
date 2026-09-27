@@ -1,0 +1,353 @@
+"""
+The teaser: one rollout on an unseen arena at the moments the control changes, zero-shot against after adaptation,
+with the true frames beneath and the same action on a training map for reference (GameNGen's Figure 1 in role).
+
+    python tools/compose_teaser.py                                # layout A from results/teaser, best-ranked window
+    python tools/compose_teaser.py --layout B                     # three or four actions, +8 tics, side by side
+    python tools/compose_teaser.py --window unseen_arena07_ep41_s269 --home train_map02_ep6000_s837
+
+**Input** (`--root`, the steward's `results/teaser/`): one directory per window, `<map>_ep<E>_s<S>/`, holding
+`truth_raw/`, `unet_tuned/` and (on an unseen arena) `adapter_tuned/`, each with `tic_NNN.png` for tic 0 (the last
+context frame) onward, and a `manifest.json` in the window directory or at the root (a `windows` list or dict)
+with per window its `map`, `episode`, `start`, the executed control per tic (`controls`: a list over tics of
+button names, or of strings joined by "+"), per-tic scene PSNR per row, and a `richness` score. Frames are cropped
+to the scene rows 0 to 207 unless a `tic_NNN_scene.png` is beside them.
+
+**Layout A** (`fig_teaser`, full width): columns are the moments of the unseen-arena rollout where the executed
+control changes (`--moments` of them, spread over the rollout; a manifest `moments` list wins), each headed by the
+executed action in italics and its tic; rows are "zero-shot" (the U-Net) and the adapted model, with the true frames
+beneath as a strip about a third of the frame height; a small first column shows the same model on a training map
+at a moment with the first column's action, its truth beneath, as the in-distribution reference.
+
+**Layout B** (`fig_teaser_actions`): one row per action (up to `--actions` distinct actions of the unseen
+rollout): the context frame at the tic the action starts, then the frame 8 tics later from the model on a training
+map (the same action), zero-shot, adapted, and the truth.
+
+Row labels carry at most one number (`--adapted-label`, default "after 8 episodes"); the budget and GPU-hours go in
+the caption. Output: `<out-dir>/<stem>.pdf/.png` through `figstyle.save` and `<stem>.json` with the windows, tics,
+actions and per-tic scene PSNR drawn.
+"""
+import argparse
+import json
+import os
+import re
+import sys
+
+import numpy as np
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO, "paper"))
+import figstyle as fs  # noqa: E402
+
+SCENE_ROWS = 208
+WINDOW_RE = re.compile(r"^(?P<map>.+?)_ep(?P<episode>\d+)_s(?P<start>\d+)$")
+UNSEEN_HINTS = ("unseen", "arena")
+GUTTER = 2 / 72
+ROWS = {"model": "unet_tuned", "adapted": "adapter_tuned", "truth": "truth_raw"}
+DEFAULT_ADAPTED_LABEL = "after 8 episodes"
+HORIZON_B = 8
+
+
+# ---------------------------------------------------------------------------------------------
+# reading the export
+# ---------------------------------------------------------------------------------------------
+
+def windows(root):
+    """{name: directory} of every window directory `<map>_ep<E>_s<S>` under `root`."""
+    return {d: os.path.join(root, d) for d in sorted(os.listdir(root))
+            if WINDOW_RE.match(d) and os.path.isdir(os.path.join(root, d))}
+
+
+def is_unseen(name):
+    m = WINDOW_RE.match(name)
+    return bool(m) and any(h in m["map"] for h in UNSEEN_HINTS) and not m["map"].startswith("train")
+
+
+def manifest_of(root, wdir):
+    """A window's manifest entry: `<window>/manifest.json`, else its entry in `<root>/manifest.json`, else {}."""
+    p = os.path.join(wdir, "manifest.json")
+    if os.path.exists(p):
+        with open(p) as f:
+            return json.load(f)
+    p = os.path.join(root, "manifest.json")
+    if not os.path.exists(p):
+        return {}
+    with open(p) as f:
+        js = json.load(f)
+    name = os.path.basename(wdir)
+    ws = js.get("windows", js) if isinstance(js, dict) else js
+    if isinstance(ws, dict):
+        return ws.get(name, {})
+    return next((e for e in ws if isinstance(e, dict) and name in (
+        e.get("window"), e.get("name"), os.path.basename(str(e.get("dir", "")).rstrip("/")))), {})
+
+
+def controls_of(manifest):
+    """[frozenset of button names] per tic from the manifest's executed controls (list or "+"-joined string)."""
+    raw = next((manifest[k] for k in ("controls", "executed", "buttons", "actions") if k in manifest), [])
+    out = []
+    for c in raw:
+        if isinstance(c, dict):
+            c = c.get("buttons", c.get("names", []))
+        names = c.split("+") if isinstance(c, str) else list(c)
+        out.append(frozenset(n.strip() for n in names if str(n).strip() and str(n).strip().lower() != "none"))
+    return out
+
+
+def action_text(buttons):
+    """A control as printed: lowercase words, joined by " + " in a fixed order ("no input" when empty)."""
+    if not buttons:
+        return "no input"
+    return " + ".join(sorted(b.lower().replace("_", " ") for b in buttons))
+
+
+def last_tic(row_dir):
+    tics = [int(m.group(1)) for f in os.listdir(row_dir) for m in [re.match(r"tic_(\d+)\.png$", f)] if m]
+    return max(tics) if tics else -1
+
+
+def frame(row_dir, tic):
+    """One frame, scene rows only: the `_scene` file, else the full frame cropped to rows 0 to 207."""
+    for digits in (3, 2):
+        base = os.path.join(row_dir, f"tic_{tic:0{digits}d}")
+        if os.path.exists(base + "_scene.png"):
+            return np.asarray(Image.open(base + "_scene.png").convert("RGB"))
+        if os.path.exists(base + ".png"):
+            return np.asarray(Image.open(base + ".png").convert("RGB"))[:SCENE_ROWS]
+    raise SystemExit(f"missing frame {os.path.join(row_dir, f'tic_{tic:03d}.png')}")
+
+
+def change_moments(controls, first, last):
+    """Tics in [first, last] where the executed control differs from the tic before."""
+    return [t for t in range(max(first, 1), min(last, len(controls) - 1) + 1) if controls[t] != controls[t - 1]]
+
+
+def spread(items, n):
+    """Up to n items spread evenly over the list, first and last included."""
+    if len(items) <= n:
+        return list(items)
+    idx = np.linspace(0, len(items) - 1, n).round().astype(int)
+    return [items[i] for i in sorted(set(idx))]
+
+
+def per_tic_scene(manifest, row):
+    """{tic: scene PSNR} of one row, from the shapes the steward writes."""
+    for container in (manifest.get("per_tic"), manifest.get("rows"), manifest):
+        if isinstance(container, dict) and isinstance(container.get(row), dict):
+            v = container[row].get("scene_psnr")
+            if isinstance(v, list):
+                return {i: float(x) for i, x in enumerate(v) if isinstance(x, (int, float))}
+            if isinstance(v, dict):
+                return {int(re.search(r"(\d+)$", str(k)).group(1)): float(x) for k, x in v.items()}
+    return {}
+
+
+def choose(root, window=None, home=None):
+    """(unseen window name, home window name): the named ones, else the best-ranked by `richness`."""
+    ws = windows(root)
+    if not ws:
+        raise SystemExit(f"no window directories <map>_ep<E>_s<S> under {root}")
+
+    def rank(name):
+        r = manifest_of(root, ws[name]).get("richness")
+        return r if isinstance(r, (int, float)) else float("-inf")
+
+    unseen = window or max((n for n in ws if is_unseen(n)), key=rank, default=None)
+    if unseen is None or unseen not in ws:
+        raise SystemExit(f"no unseen-arena window under {root} (named {window!r})")
+    home_name = home or max((n for n in ws if not is_unseen(n)), key=rank, default=None)
+    if home is not None and home not in ws:
+        raise SystemExit(f"no window {home!r} under {root}")
+    return unseen, home_name
+
+
+def home_moment(home_ctrl, action, first, last):
+    """The first tic of the home rollout where `action` starts (or is held), else its first control change."""
+    for t in range(max(first, 1), min(last, len(home_ctrl) - 1) + 1):
+        if home_ctrl[t] == action and home_ctrl[t - 1] != action:
+            return t
+    for t in range(first, min(last, len(home_ctrl) - 1) + 1):
+        if home_ctrl[t] == action:
+            return t
+    changes = change_moments(home_ctrl, first, last)
+    return changes[0] if changes else first
+
+
+# ---------------------------------------------------------------------------------------------
+# drawing
+# ---------------------------------------------------------------------------------------------
+
+def text_width(text, size=fs.ANNOT_PT, **kw):
+    """The printed width (in) of one line of text at `size` pt."""
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(2, 1))
+    t = fig.text(0, 0, text, fontsize=size, **kw)
+    w = t.get_window_extent(fig.canvas.get_renderer()).width / fig.dpi
+    plt.close(fig)
+    return w
+
+
+def _figure(width, height):
+    import matplotlib.pyplot as plt
+    return plt.figure(figsize=(width, height))
+
+
+def _place(fig, width, height, x, y, w, h, img):
+    ax = fig.add_axes([x / width, 1 - (y + h) / height, w / width, h / height])
+    ax.imshow(img, interpolation="lanczos", aspect="auto")
+    ax.set_axis_off()
+    return ax
+
+
+def _text(fig, width, height, x, y, s, **kw):
+    fig.text(x / width, 1 - y / height, s, **kw)
+
+
+def layout_a(root, out_dir, window=None, home=None, moments=7, adapted_label=DEFAULT_ADAPTED_LABEL,
+             true_scale=0.4, width=fs.TEXT_WIDTH, stem="fig_teaser"):
+    """Layout A; returns the written paths and the sidecar record."""
+    unseen, home_name = choose(root, window, home)
+    ws = windows(root)
+    man = manifest_of(root, ws[unseen])
+    ctrl = controls_of(man)
+    rows = {k: os.path.join(ws[unseen], v) for k, v in ROWS.items()}
+    for d in rows.values():
+        if not os.path.isdir(d):
+            raise SystemExit(f"{unseen}: missing row {os.path.basename(d)}")
+    last = min(last_tic(d) for d in rows.values())
+    picks = man.get("moments") or spread(change_moments(ctrl, 1, last), moments)
+    if not picks:
+        raise SystemExit(f"{unseen}: no control changes in tics 1 to {last}; name --moments in the manifest")
+    fs.style()
+    sample = frame(rows["model"], picks[0])
+    aspect = sample.shape[0] / sample.shape[1]
+    label_w = max(text_width(t) for t in ("zero-shot", adapted_label, "true")) + 5 / 72
+    ref_w = 0.0 if home_name is None else 0.62
+    gap_ref = 0.0 if home_name is None else 6 / 72
+    fw = (width - label_w - ref_w - gap_ref - (len(picks) - 1) * GUTTER - 0.02) / len(picks)
+    fh = fw * aspect
+    tw, th = fw * true_scale, fh * true_scale
+    head = 2 * 8 / 72
+    height = head + 2 * fh + GUTTER + 2 / 72 + th + 0.04
+    fig = _figure(width, height)
+    x0 = label_w + ref_w + gap_ref
+    record = {"layout": "A", "window": unseen, "home": home_name, "tics": list(picks), "columns": []}
+    ps = {k: per_tic_scene(man, v) for k, v in ROWS.items()}
+    for i, t in enumerate(picks):
+        x = x0 + i * (fw + GUTTER)
+        act = action_text(ctrl[t]) if t < len(ctrl) else "?"
+        _text(fig, width, height, x + fw / 2, 0.0, act, ha="center", va="top", fontsize=fs.ANNOT_PT, style="italic")
+        _text(fig, width, height, x + fw / 2, 8 / 72, f"tic {t}", ha="center", va="top", fontsize=fs.MIN_PT,
+              color=fs.CONTEXT_INK)
+        _place(fig, width, height, x, head, fw, fh, frame(rows["model"], t))
+        _place(fig, width, height, x, head + fh + GUTTER, fw, fh, frame(rows["adapted"], t))
+        _place(fig, width, height, x + (fw - tw) / 2, head + 2 * fh + GUTTER + 2 / 72, tw, th, frame(rows["truth"], t))
+        record["columns"].append({"tic": t, "action": act, "scene_psnr": {k: ps[k].get(t) for k in ("model",
+                                                                                                    "adapted")}})
+    for y, text in ((head + fh / 2, "zero-shot"), (head + fh + GUTTER + fh / 2, adapted_label),
+                    (head + 2 * fh + GUTTER + 2 / 72 + th / 2, "true")):
+        _text(fig, width, height, label_w - 3 / 72, y, text, ha="right", va="center", fontsize=fs.ANNOT_PT)
+    if home_name is not None:
+        hman = manifest_of(root, ws[home_name])
+        hrows = {k: os.path.join(ws[home_name], ROWS[k]) for k in ("model", "truth")}
+        hlast = min(last_tic(d) for d in hrows.values())
+        t_home = home_moment(controls_of(hman), ctrl[picks[0]] if picks[0] < len(ctrl) else frozenset(), 1, hlast)
+        rw = ref_w
+        rh = rw * aspect
+        _text(fig, width, height, label_w + rw / 2, 0.0, "training map", ha="center", va="top", fontsize=fs.ANNOT_PT)
+        _text(fig, width, height, label_w + rw / 2, 8 / 72, f"tic {t_home}", ha="center", va="top",
+              fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
+        _place(fig, width, height, label_w, head, rw, rh, frame(hrows["model"], t_home))
+        _place(fig, width, height, label_w + (rw - rw * true_scale) / 2, head + 2 * fh + GUTTER + 2 / 72,
+               rw * true_scale, rh * true_scale, frame(hrows["truth"], t_home))
+        record["home_tic"] = t_home
+    paths = fs.save(fig, out_dir, stem)
+    return paths + [_sidecar(out_dir, stem, record)], record
+
+
+def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEFAULT_ADAPTED_LABEL,
+             horizon=HORIZON_B, width=fs.TEXT_WIDTH, stem="fig_teaser_actions"):
+    """Layout B; returns the written paths and the sidecar record."""
+    unseen, home_name = choose(root, window, home)
+    if home_name is None:
+        raise SystemExit("layout B needs a training-map window for its reference column")
+    ws = windows(root)
+    man, hman = manifest_of(root, ws[unseen]), manifest_of(root, ws[home_name])
+    ctrl, hctrl = controls_of(man), controls_of(hman)
+    rows = {k: os.path.join(ws[unseen], v) for k, v in ROWS.items()}
+    hmodel = os.path.join(ws[home_name], ROWS["model"])
+    last = min(last_tic(d) for d in rows.values()) - horizon
+    hlast = last_tic(hmodel) - horizon
+    chosen, seen = [], set()
+    for t in change_moments(ctrl, 1, last):
+        if ctrl[t] and ctrl[t] not in seen:
+            seen.add(ctrl[t])
+            chosen.append(t)
+        if len(chosen) == actions:
+            break
+    if not chosen:
+        raise SystemExit(f"{unseen}: no action starts with {horizon} tics after it")
+    fs.style()
+    cols = ["context", "training map", "zero-shot", adapted_label, "true"]
+    sample = frame(rows["model"], chosen[0])
+    aspect = sample.shape[0] / sample.shape[1]
+    label_w = max(text_width(action_text(ctrl[t]), style="italic") for t in chosen) + 5 / 72
+    fw = (width - label_w - (len(cols) - 1) * GUTTER - 4 / 72 - 0.02) / len(cols)
+    fh = fw * aspect
+    head = 2 * 8 / 72
+    height = head + len(chosen) * fh + (len(chosen) - 1) * GUTTER + 0.02
+    fig = _figure(width, height)
+    xs = [label_w + i * (fw + GUTTER) + (4 / 72 if i else 0) for i in range(len(cols))]
+    for x, c in zip(xs, cols):
+        _text(fig, width, height, x + fw / 2, 0.0, c, ha="center", va="top", fontsize=fs.ANNOT_PT)
+    for x in xs[1:]:
+        _text(fig, width, height, x + fw / 2, 8 / 72, f"+{horizon} tics", ha="center", va="top", fontsize=fs.MIN_PT,
+              color=fs.CONTEXT_INK)
+    record = {"layout": "B", "window": unseen, "home": home_name, "horizon": horizon, "rows": []}
+    for r, t in enumerate(chosen):
+        y = head + r * (fh + GUTTER)
+        th = home_moment(hctrl, ctrl[t], 1, hlast)
+        imgs = [frame(rows["truth"], t), frame(hmodel, th + horizon), frame(rows["model"], t + horizon),
+                frame(rows["adapted"], t + horizon), frame(rows["truth"], t + horizon)]
+        for x, img in zip(xs, imgs):
+            _place(fig, width, height, x, y, fw, fh, img)
+        _text(fig, width, height, label_w - 3 / 72, y + fh / 2, action_text(ctrl[t]), ha="right", va="center",
+              fontsize=fs.ANNOT_PT, style="italic")
+        record["rows"].append({"tic": t, "home_tic": th, "action": action_text(ctrl[t])})
+    paths = fs.save(fig, out_dir, stem)
+    return paths + [_sidecar(out_dir, stem, record)], record
+
+
+def _sidecar(out_dir, stem, record):
+    path = os.path.join(out_dir, f"{stem}.json")
+    with open(path, "w") as f:
+        json.dump(record, f, indent=1)
+        f.write("\n")
+    return path
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description="Compose the teaser from the steward's export.")
+    p.add_argument("--root", default=os.path.join(REPO, "results", "teaser"))
+    p.add_argument("--out-dir", default=os.path.join(REPO, "paper", "figures"))
+    p.add_argument("--layout", choices=("A", "B", "both"), default="both")
+    p.add_argument("--window", default=None, help="the unseen-arena window (default: best richness)")
+    p.add_argument("--home", default=None, help="the training-map window (default: best richness)")
+    p.add_argument("--moments", type=int, default=7, help="layout A: columns")
+    p.add_argument("--actions", type=int, default=4, help="layout B: rows")
+    p.add_argument("--adapted-label", default=DEFAULT_ADAPTED_LABEL)
+    a = p.parse_args(argv)
+    written = []
+    if a.layout in ("A", "both"):
+        written += layout_a(a.root, a.out_dir, a.window, a.home, a.moments, a.adapted_label)[0]
+    if a.layout in ("B", "both"):
+        written += layout_b(a.root, a.out_dir, a.window, a.home, a.actions, a.adapted_label)[0]
+    for path in written:
+        print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
