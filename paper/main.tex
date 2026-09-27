@@ -29,7 +29,7 @@
 
 \begin{abstract}
 Game world models are scored on held-out trajectories of their training scenes, and absolute PSNR mostly measures how static the recordings are.
-On an open 17-arena Doom benchmark scored against persistence (the last frame copied forward), we train three pretrained diffusion backbones on four arenas and ask what they keep, lose and relearn on the other thirteen.
+One Doom level pack has 17 arenas: we train three pretrained diffusion backbones on four of them and ask what they keep, lose and relearn on the other thirteen, scoring every arena against persistence (the last frame copied forward).
 Through one decoder, the U-Net still beats persistence on every unseen arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13 arenas, while its turn response survives.
 A frame distance separates seen from unseen arenas but does not order the unseen ones; the frozen model's zero-shot skill score does.
 Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the in-distribution advantage within 4k updates on 9 of 13 arenas, recover a median 1.8~dB and beat persistence perceptually on 11 of 13.
@@ -44,7 +44,7 @@ In closed loop, one-tic quality does not guarantee stability, and the EMA reduce
 \label{sec:intro}
 
 A learned game simulator is judged on held-out trajectories of the scenes it trained on~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}, yet it must generalize to a new level before it can plan or train a policy there.
-We score a Doom model trained on four deathmatch arenas on each of the thirteen other arenas of the same level pack, then adapt it to each from a few episodes; no published Doom world model is scored on unseen maps, and MultiGen does not report one~\citep{po2026multigen}.
+Of the 17 deathmatch arenas in one Doom level pack we train on four, score the model on each of the other thirteen, then adapt it to each from a few episodes; no published Doom world model is scored on unseen maps, and MultiGen does not report one~\citep{po2026multigen}.
 Held-out domains elsewhere are an embodiment~\citep{chen2026xeworld}, a game or environment~\citep{rigter2024avid,gao2025adaworld} or a building~\citep{koh2021pathdreamer}, none scored per scene against persistence; Doom map holdouts were for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
 Because absolute PSNR ranks how static a recording is, every score is a paired difference against persistence, the last context frame copied forward.
 Video prediction reports this baseline~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}; game world models dropped it.
@@ -69,7 +69,7 @@ We contribute (0) three action-conditioned latent world models (SD~1.4 U-Net, Pi
 \label{sec:bench}
 
 \textbf{Data.} Every episode is ViZDoom~\citep{kempka2016vizdoom} deathmatch on one of the 17 arenas of the Arnold agent's level pack (a Doom WAD file)~\citep{lample2017arnold}: Arnold against 8 bots for 150~s, recorded at every tic (one game step, 35~Hz, 320$\times$240) with the 19 buttons the engine executed.
-The models train on arenas 2 to 5 (500 episodes each) and are scored on their validation episodes (512 windows); each unseen arena (1, 6 to 17) has 24 newly recorded episodes, 16 for adaptation and 8 held out (256 windows).
+Of the 17 arenas, four (2 to 5, 500 episodes each) are the training maps, scored on their validation episodes (512 windows); the other thirteen (1, 6 to 17) are never trained on, and each has 24 newly recorded episodes, 16 for adaptation and 8 held out (256 windows).
 
 \textbf{Three backbones, one recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so they compare pretrained packages.
 Four tics ahead on the training maps they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k, its latest four-tic read).
