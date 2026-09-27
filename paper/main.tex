@@ -1,0 +1,277 @@
+% CoRL 2026 PhysWM workshop submission (deadline Sep 30 2026 23:59 AoE = Oct 1 07:59 EDT).
+% Build:  pdflatex main && bibtex main && pdflatex main && pdflatex main
+% Template: corl_2026.sty and corlabbrvnat.bst exactly as Rohan's Overleaf download ships them (f0500f9);
+% nothing is copied into them. The submission build anonymises the author block and numbers the lines;
+% \usepackage[final]{corl_2026} is for the camera-ready only.
+% Page budget: the call allows "up to 4 pages (excluding references)" and says nothing about an appendix,
+% and the OpenReview form takes one PDF with no supplementary field. The appendix therefore lives in
+% appendix.tex, input after the bibliography behind \ifwithappendix; set \withappendixfalse for a
+% body-plus-references submission build if Rohan rules that the appendix may not ride along.
+% The label body-end marks the last body page; paper/fixtures/test_paper_skeleton.py holds it to page 4.
+%
+% Title. Chosen: the Fable framing's candidate A (it names the question and the paper's three answers).
+%   Alternative 1 (owner):  Crossing the Map Shift: Per-Arena Evaluation and Adaptation of Doom World
+%                           Models against Copy-Last Persistence
+%   Alternative 2 (Fable B): Copy-Last Is the Zero Line: Persistence-Referenced Evaluation and Adaptation
+%                           of Game World Models on Unseen Maps
+%
+% Marks. \tbd = a number that does not exist yet; \todo{} = text or a decision that is pending;
+% \prov{} = a number that exists in a frozen file today and will be replaced (fresh-set rescore of the
+% 13 arenas, tuned SD 1 decoder, scene-only rows, final 200k checkpoints). Every paragraph that carries one
+% has a "% depends:" comment naming the run or table it waits on; "% hypothesis:" marks a claim written in
+% the expected direction that no file supports yet. Unmarked numbers are final and come from the frozen
+% files listed in FIGURES.md. \draftmarksfalse prints every mark in black for a clean read.
+%
+% Provenance of the framing: title, abstract, introduction and limitations integrate
+% paper/framing_fable.tex (Fable 5.1) sentence by sentence with the owner's draft; each paragraph's
+% comment says which sentences are "fable", "fable, edited" (and why) or "owner".
+
+\documentclass{article}
+\usepackage{corl_2026}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+\newif\ifdraftmarks \draftmarkstrue
+\newif\ifwithappendix \withappendixtrue
+\newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0.8,0,0}{[tbd]}\else[tbd]\fi}
+\newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0.8,0,0}{[TODO: #1]}\else[TODO: #1]\fi}
+\newcommand{\prov}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{#1}\else#1\fi}
+% \figslot{file}{width}{height}{what it will show}: the figure when its file exists, a labelled box otherwise
+\newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][#3][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
+
+\title{Crossing the Map Shift: What a Doom World Model Keeps, Loses and Relearns on Arenas It Never Saw}
+
+\author{
+  Rohan Nagabhirava \quad Keerthana Chirumamilla \quad Changliu Liu\\
+  Carnegie Mellon University\\
+  Pittsburgh, PA, United States
+}
+
+\begin{document}
+\maketitle
+
+%===============================================================================
+
+\begin{abstract}
+% depends: fresh-set rescore of the 13 arenas (Sep 27; U-Net 200k EMA today, PixArt 200k and SD 3.5 200k pending), tuned SD 1 decoder, scene rows; 13-arena U-Net LoRA runs (grid 0 to 4,000) and the forgetting read; collapse counts from results/sd35_stability/collapse_rates_50k_130k.md
+% hypothesis: sentence 3's reach to all three backbones (the numbers are the U-Net's; PixArt and SD 3.5 replicate after the rescore) and sentence 5 (the adaptation result)
+% sentence 1: fable, edited (shortened; "a scene's absolute PSNR"); 2: owner, merged with fable's benchmark sentence; 3: fable, edited (the decoded comparison named, the turn response added); 4: fable, shortened; 5: fable, edited; 6: owner (fable left the closed-loop finding to its October paragraph)
+Game world models are scored on held-out trajectories of their training scenes, and absolute PSNR mostly measures how static the footage is.
+On an open 17-arena Doom benchmark scored against copy-last-frame persistence, we train three pretrained diffusion backbones on four arenas and ask what they keep, lose and relearn on the other thirteen.
+Decoded through one decoder, the model still beats copy-last on every unseen arena, but its advantage shrinks from \prov{3.2--4.3}~dB at home to \prov{0.7--2.7}~dB and it loses perceptually on \prov{13 of 13}, while its turn response survives.
+A frame distance to the training footage separates seen from unseen arenas but does not order the unseen ones.
+Rank-16 adapters on the frozen backbone regain half of the home advantage within \tbd{} updates on \tbd{} of 13 arenas at \tbd{}~dB of forgetting.
+In closed loop, one-step quality does not predict stability, and the EMA reduces collapses without removing them.
+\end{abstract}
+
+\keywords{World models, Generalization, Persistence baseline}
+
+%===============================================================================
+
+\section{Introduction}
+\label{sec:intro}
+
+% fable (sentences 1 and 2; "is meant for" -> "is built for"); fable, edited (sentence 3, shortened; the "keeps, loses, relearns" clause now lives in the title)
+A learned game simulator is judged on held-out trajectories of the scenes it trained on~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
+The uses a world model is built for, planning or training a policy in a level nobody showed it, ask what it does on a scene it never saw.
+We ask this for Doom: a model trained on four deathmatch arenas is scored on each of the thirteen other arenas of its WAD, then adapted to each from a few episodes.
+
+% fable, edited: "one to five domains, pooled into one score" (the memos find no per-scene score); "we found no Doom world model" (MultiGen is ambiguous, lit-scene-generalization memo D); Spearman 0.945 recomputed on the 13 unseen arenas from the frozen h1 metrics; fable's Matrix-Game static-output clause cut for space
+% depends: fresh-set rescore (the persistence range and the Spearman are from the pre-Sep-26 episodes)
+The measurement is rare. Held-out scenes appear in world-model papers on one to five domains, pooled~\citep{chen2026xeworld,rigter2024avid,gao2025adaworld,koh2021pathdreamer}, and we found no Doom world model scored on maps it did not train on.
+Absolute PSNR also ranks footage, not models: on our unseen arenas persistence runs from \prov{19.4 to 23.2}~dB and the model's PSNR follows it at Spearman \prov{0.95}.
+Video prediction reported a copy-last baseline~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity} that game world models dropped; we make persistence, defined on every map without training, the zero line: every score is a paired difference against it on the same windows~\citep{bruce2024genie}, beside the reconstruction ceiling~\citep{zheng2023occworld,karypidis2024dinoforesight}.
+
+% fable, edited: its findings paragraph folded into items (2) and (3) with the numbers; "the flip is blur under uncertainty" softened (Section 3 gives it as the expected mechanism); (2) no longer says the decoder is ruled out (the paired stock-versus-tuned decoding is pending); (4) owner, gathering the two negative results
+% depends: fresh-set rescore of the 13 arenas (tuned SD 1 decoder, scene rows) for the numbers of item (2); PixArt 200k and SD 3.5 200k through it for the replication; 13-arena LoRA runs and the full fine-tune comparator on arena 7 for item (3)
+% hypothesis: item (2)'s replication in PixArt and SD 3.5; item (3)'s result
+We contribute (1) an open 17-arena Doom benchmark (link withheld for review) scored per arena against copy-last beside the reconstruction ceiling, with a directional check and closed-loop rollouts; (2) the measurement, for three backbones under one recipe, that the decoded advantage shrinks from \prov{3.2--4.3}~dB at home to \prov{0.7--2.7}~dB unseen and flips perceptually (\prov{13 of 13} LPIPS losses) while the ceiling stays flat and the turn response survives (Figure~\ref{fig:strips}); (3) per-arena adaptation curves: rank-16 adapters regain half of the home advantage within \tbd{} updates on \tbd{} of 13 arenas, against a full fine-tune; and (4) two negative results: a per-frame distance does not order arenas of one WAD, and one-step quality does not predict closed-loop stability.
+
+\begin{figure}[t]
+% depends: figure 1 script (a strip mode of tools/rollout_gif.py or tools/collapse_strip.py) on the U-Net 200k EMA; the two arenas and the held-control windows chosen by a seeded rule before looking at frames
+% hypothesis: the last caption sentence
+\centering
+\figslot{figures/fig1_rollout_strips.pdf}{\linewidth}{1.0in}{Figure 1: rollout strips under held controls, training arena | unseen arena; rows truth, model, copy-last}
+\caption{Rollouts under held controls (turn left, forward, strafe right) on training arena \tbd{} (left) and unseen arena \tbd{} (right). Rows: truth, U-Net 200k EMA, copy-last; tics 1, 4, 8, 16, 32. On the unseen arena the model follows the control but loses texture first.}
+\label{fig:strips}
+\end{figure}
+
+%===============================================================================
+
+\section{Benchmark and recipe}
+\label{sec:bench}
+
+% depends: fresh 24-episode recording of the 13 unseen arenas (328 recorded Sep 26, 16 worker-first episodes set aside) and its SD 1 encode (Sep 27); window manifests from adapt_split.py
+\textbf{Data.} Every episode is ViZDoom~\citep{kempka2016vizdoom} deathmatch on one of the 17 arenas of the Arnold agent's WAD~\citep{lample2017arnold} with Freedoom assets: Arnold against 8 bots for 150 game-seconds, recorded losslessly at every tic (35~Hz, 320$\times$240 with the HUD) with the 19-button control the engine executed (Appendix~\ref{app:protocol}).
+The models train on arenas 2 to 5, Arnold's own training maps (500 episodes each), and are scored there on 25 held-out episodes per map.
+Each unseen arena (1, 6 to 17) has \prov{24} fresh episodes under one pinned protocol, 16 for adaptation and 8 held out, with 32 fixed windows per held-out episode scored at every checkpoint.
+
+% depends: tuned SD 1 decoder (training-map frames only, gated Sep 27); GameNGen facts from arXiv 2408.14837 v2 sec. 3.2.2, read Sep 26
+\textbf{Three backbones, one recipe.} We fine-tune three text-to-image diffusion models into next-tic world models: the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters, 4-channel SD~1.x latents), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT with its own 16-channel latents); backbone and latent space change together, so the rows compare pretrained packages.
+The 32 context latents are stacked on channels with the noisy target, and the 32 executed controls enter as tokens.
+The recipe is shared: $v$-prediction~\citep{salimans2022progressive}, context noise augmentation up to 0.7 in 10 buckets as in GameNGen~\citep{valevski2024gamengen}, AdamW at $5\times10^{-5}$, batch 32, 200k updates, an fp32 EMA at 0.9999, and 10-step DDIM~\citep{song2021ddim} (Appendix~\ref{app:protocol}).
+Rollouts stay in latent space, so the decoder only renders. GameNGen tunes its decoder with MSE alone, and so do we, once, on training-map frames; it then stays frozen.
+
+% depends: tuned SD 1 decoder and scene-only rows (scorer additions for the fresh-set rescore); the -0.77 is from the pre-Sep-26 episodes
+\textbf{What we measure.} Let $x$ be the true next frame, $x_\text{last}$ the last context frame, $z$ and $z_\text{last}$ their latents, $\hat z$ the prediction and $D$ the decoder.
+The \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ puts the model and copy-last through the same decoder, in the form of Genie's $\Delta$PSNR~\citep{bruce2024genie}.
+The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips} is taken against raw persistence; below zero the model looks better than copying.
+The \emph{gap} $G$ is the reconstruction ceiling $\mathrm{PSNR}(D(z),x)$ minus the model's PSNR; a decoder-free latent skill is in Appendix~\ref{app:skill}.
+The \emph{directional} score is the fraction of turning windows whose predicted image shift reverses when left and right are swapped in the newest control (0.91 on true frames).
+Pixel quantities use the scene rows, since the HUD carries 39 to 68 percent of the stock decoder's error and persistence copies it exactly. We never rank maps on raw PSNR against persistence, which tracks how static the footage is (Spearman \prov{$-0.77$}).
+
+%===============================================================================
+
+\begin{table}[t]
+% depends: PixArt 200k final read (Sep 26 night) and SD 3.5 200k (about Sep 28 00:30) replace the provisional rows; tuned-decoder and scene-only columns from scripts/spiderman/rescore_tuned_decoder.sh
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{In domain (512 held-out windows, EMA, stock decoders): PSNR (dB) / LPIPS; 256 tics: PSNR of 16 rollouts at tic 256. Blue: provisional; $^\dagger$150k.}
+\label{tab:indomain}
+\begin{tabular}{lccccc}
+\toprule
+Row (latent channels, parameters) & Updates & 1 tic & 4 tics & 256 tics & Directional \\
+\midrule
+Persistence / copy-seed & -- & 21.57 / 0.203 & 19.21 / 0.354 & 17.52 & 0 \\
+SD 1.4 U-Net (4, 860M) & 200k & 22.49 / 0.177 & 21.33 / 0.224 & 17.81 & 0.867 \\
+PixArt-$\alpha$ (4, 628M) & \prov{155k} & \prov{22.41 / 0.184} & \prov{21.24 / 0.235} & \prov{17.41}$^\dagger$ & \prov{0.859}$^\dagger$ \\
+SD 3.5 Medium (16, 2.27B) & \prov{140k} & \prov{23.26 / 0.133} & \prov{21.59 / 0.197} & \prov{18.03} & \prov{0.852} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+% depends: fresh-set rescore of the 13 arenas and the training maps for all three rows (tuned SD 1 and SD 3.5 decoders, scene rows); the U-Net numbers today are from results/distance_study/scores/040-unet-nexttic_snap_0200000_ema_ddim10/*_h{1,4}/metrics.json (pre-Sep-26 episodes, stock decoder, full frame); U-Net 30-map directional (15 of 30 done)
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\caption{Off the training maps: means over maps (in parentheses, maps beating copy-last). Blue: pre-fresh-set episodes, stock decoder, full frame. The PixArt and SD~3.5 rows take the U-Net's two-row form.}
+\label{tab:unseen}
+\begin{tabular}{llcccccc}
+\toprule
+Row & Maps & Ceiling & $A$, 1 tic & $A$, 4 tics & $M$ & $G$ & Directional \\
+\midrule
+SD 1.4 U-Net & training (4) & \prov{23.91} & \prov{+3.60} (4/4) & \prov{+3.86} (4/4) & \prov{$-$0.027} (4/4) & \prov{1.55} & 0.867 \\
+ & unseen (13) & \prov{23.62} & \prov{+1.51} (13/13) & \prov{+0.81} (11/13) & \prov{+0.105} (0/13) & \prov{2.48} & \tbd \\
+PixArt-$\alpha$ & both groups & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+SD 3.5 Medium & both groups & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{What happens off the training maps}
+\label{sec:shift}
+
+% fable, edited (the ceiling and the survival of the turn response, moved here from its introduction)
+% depends: PixArt 200k and SD 3.5 200k final reads for the in-domain ordering; fresh-set rescore (Table 2, Figure 2), paired stock-versus-tuned decoding of the same predictions (Sep 28), U-Net 30-map directional; step-sweep numbers from dossier 4.2 (U-Net 200k live, training-map windows)
+% hypothesis: PixArt and SD 3.5 show the same shrinkage and flip
+\textbf{Where the deficit sits.} In domain all three rows beat persistence at one and four tics, SD~3.5 by the most, within 0.85~dB of each other, and all turn the right way (Table~\ref{tab:indomain}).
+Off the training maps we read three legs side by side, never summed (Table~\ref{tab:unseen}, Figure~\ref{fig:arenas}).
+The turn response survives (\tbd{} of unseen-arena windows, \prov{0.79 to 0.87} per arena so far, against 0.87 at home).
+The latent prediction loses about 2~dB of $A$, stays positive on every arena at one tic, and turns negative at four tics on arenas \prov{6 and 7}.
+The rendering does not degrade: the ceiling is \prov{23.91}~dB at home and \prov{23.62}~dB unseen, so the loss sits in the predicted latents; decoding the same predictions with the stock and tuned decoders (\tbd{}) tests a decoder failing on off-distribution latents.
+Nor is the perceptual flip the decoder's floor: its own LPIPS (\prov{0.08 to 0.12}) sits below persistence's (\prov{0.15 to 0.23}), and the model still loses against the decoded true frame.
+We expect blur under uncertainty, which PSNR rewards and LPIPS penalises; the sampler sets part of it (50 steps instead of 10 trade 0.25~dB for 0.024 LPIPS at home).
+
+\begin{figure}[t]
+% Figures 2 and 3 share one float row to fit the page budget; Figure 3 is the single panel Rohan specified (advantage against updates), and the perceptual-margin curves the cost decision called a second panel are Figure 5 in Appendix F.
+% depends: Figure 2: fresh-set rescore (per-window rows, tuned SD 1 decoder, scene rows) and D recomputed on the fresh set (a provisional version can be drawn today from results/distance_study/scores/.../*_h1/metrics.json and distances_sd1.json). Figure 3: 13-arena U-Net LoRA runs and score_adapt.py rows (live weights, 256 held-out windows per arena), lines from step-0 training-map predictions through the tuned SD 1 decoder, the full fine-tune comparator on arena 7
+\centering
+\begin{minipage}[t]{0.64\linewidth}\centering
+\figslot{figures/fig2a_advantage_by_distance.pdf}{0.49\linewidth}{1.15in}{2a: $A$ per arena, by $D$}\hfill
+\figslot{figures/fig2b_margin_by_distance.pdf}{0.49\linewidth}{1.15in}{2b: $M$ per arena, by $D$}
+\caption{The 17 arenas sorted by $D$, training maps shaded (U-Net 200k EMA, one tic, 95\% intervals). (a) $A$; dashed: the training maps' mean, dotted: half. (b) $M$. $A$ drops off the training maps without following $D$; $M$ changes sign.}
+\label{fig:arenas}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.33\linewidth}\centering
+\figslot{figures/fig3_adaptation_curves.pdf}{\linewidth}{1.15in}{3: $A$ against LoRA updates, per arena}
+\caption{$A$ against LoRA updates per unseen arena, coloured by $D$; dashed: home advantage, dotted: half; open: censored. Black: full fine-tune.}
+\label{fig:adapt}
+\end{minipage}
+\end{figure}
+
+% depends: D recomputed on the fresh set with the frozen distance_study.py; the within-arena correlation is from the pre-Sep-26 episodes; the transition-level distance chosen (Astra's directed coverage or Opus's kNN transfer gap) and frozen before any adapted score
+\textbf{The distance orders families, not arenas.} Before scoring any map we froze $D$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (Appendix~\ref{app:distance}).
+The training maps sit inside the train-versus-train floor (\prov{0.03 to 0.07} against 0.02 to 0.09) and every unseen arena outside it (\prov{0.115 to 0.282}), but within the 13 arenas $D$ orders nothing (Spearman with $A$ \prov{$-0.23$}; 0.56 is needed at $n=13$).
+The pre-registered 30-map test, which also held campaign maps of another WAD, gave a partial Spearman of $-0.73$ [$-0.84$, $-0.32$] under a failed validation gate, carried by the family contrasts: qualified evidence of a family effect.
+$D$ sees how frames look while the model predicts transitions; a transition-level distance (\todo{name}), frozen before any adapted score, is the adaptation study's second axis.
+
+% collapse counts recomputed from results/sd35_stability/collapse_rates_50k_130k.md (seed-0 windows, 16 reads from 55k to 130k)
+% depends: nothing pending in this paragraph beyond the PixArt 200k rows of Appendix D
+\textbf{Closed loop.} One-step quality does not predict stability: SD~3.5 has the best one-tic numbers, yet at 50k and 70k its live weights fall into an absorbing state where one latent channel's mean is captured and frames go blank (Appendix~\ref{app:closedloop}).
+On 16 fixed windows read every 5k updates from 55k to 130k, a frame under 10~dB occurs in 23 of 256 live and 9 of 256 EMA rollouts, 11 against 8 without the 70k collapse: the EMA removes checkpoint-specific collapses, not the failure mode.
+Both share the sampler, so few-step sampling, which DIAMOND blames for drift~\citep{alonso2024diamond}, cannot explain the difference.
+
+%===============================================================================
+
+\section{Crossing the shift}
+\label{sec:adapt}
+
+% adapter facts: lora.py and adapt_wm.py at eaf565a; U-Net trained total 4.21M = 0.49 percent (RESEARCH_CONTEXT 2026-09-26 20:10); the design also trains the control MLP's position table
+% depends: full fine-tune comparator on arena 7 (Monday if a card idles and arena 7's LoRA curve is flat, else October)
+\textbf{Protocol.} For each unseen arena we adapt the U-Net 200k from its EMA weights with rank-16, $\alpha=16$ LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone, training the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent), since LoRA alone trails full fine-tuning far behind on DiT-XL/2~\citep{xie2023difffit}; Vista uses this rank on a frozen world model~\citep{gao2024vista}.
+We train on 8 episodes (learning rate $10^{-4}$, batch 32) and score the live weights at 0 (the frozen model exactly), 250, 500, 1k, 2k and 4k updates, with the decoder frozen so that rendering repair cannot count as adaptation, and the directional score and $A$ on the training maps (forgetting) as guards.
+A full fine-tune of arena 7, the farthest, is the comparator.
+
+% line 3.60 dB and the step-0 range recomputed from the frozen h1 metrics (stock decoder, full frame, pre-Sep-26 episodes); arenas already past half at step 0 today: 9, 11, 13, 15, 16
+% depends: tuned SD 1 decoder lines, frozen from step-0 predictions on the training maps before any adapted score (cost-target decision); fresh-set step-0 rescore
+\textbf{Cost.} An arena's cost is the first budget at which its $A$ reaches half of the training maps' own advantage (\prov{3.60}~dB, frozen at step 0); we also report 25 and 100 percent, the value at 4k and the area under the curve~\citep{taylor2009transfer}, and right-censor arenas that never cross.
+Every arena starts below the full line (\prov{0.72 to 2.68}~dB); \prov{5} already sit past half of it at step 0 ($M$ curves: Appendix~\ref{app:perarena-adapt}).
+
+% depends: 13-arena U-Net LoRA runs (launch Sep 27 evening; arenas 8, 16, 6, 7 first as the fallback set), score_adapt.py rows and cost, the guards, the full fine-tune comparator on arena 7
+% hypothesis: every clause states the expected direction (design page section 5; cost-target decision; LoRA forgetting less, lit-adapters memo)
+\textbf{What it takes.} \tbd{} of 13 arenas reach half of the home advantage within \tbd{} updates and \tbd{} the full advantage by 4k (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}); \tbd{} tie copy-last in LPIPS by 4k.
+The turn response holds and the training maps lose \tbd{}~dB, consistent with LoRA forgetting less~\citep{biderman2024lora}; the full fine-tune reaches \tbd{}~dB on arena 7 at \tbd{}~dB of forgetting.
+Cost tracks the zero-shot advantage (Spearman \tbd{}) more than $D$ (\tbd{}) or the transition distance (\tbd{}), exploratory at $n=13$.
+
+\begin{table}[t]
+% depends: 13-arena U-Net LoRA runs, the forgetting guard, the full fine-tune comparator on arena 7, GPU-hours from the run logs; trained-parameter counts from lora.parameter_counts (RESEARCH_CONTEXT 2026-09-26 20:10)
+\centering\footnotesize\setlength{\tabcolsep}{3pt}
+\caption{What crossing costs (U-Net 200k, 8 episodes, live weights; ${>}$4k: censored). Forgetting: change in the training maps' $A$. Per arena: Appendix~\ref{app:perarena-adapt}.}
+\label{tab:cost}
+\begin{tabular}{lccc}
+\toprule
+ & LoRA, 13 arenas, median & LoRA, arena 7 & Full, arena 7 \\
+\midrule
+Parameters trained; GPU-hours & 4.2M (0.49\%); \tbd{} & 4.2M; \tbd{} & 860M (all); \tbd{} \\
+Arenas past 25 / 50 / 100\% by 4k & \tbd{} / \tbd{} / \tbd{} of 13 & -- & -- \\
+Cost to 50 / 100\% (updates) & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{} / \tbd{} \\
+$A$ (dB) / $M$ / $G$ (dB) at 4k & \tbd{} / \tbd{} / \tbd{} & \tbd{} / \tbd{} / \tbd{} & \tbd{} / \tbd{} / \tbd{} \\
+Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{} / \tbd{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%===============================================================================
+
+\section{Related work}
+\label{sec:related}
+
+% sources: related-work-map-2026-09-26.md sections 1 and 2; lit-scene-generalization (GameNGen, DIAMOND, MultiGen, Pathdreamer, Doom agents); lit-adapters (AVID, AdaWorld); lit-transferability (Mensink, Westny); adaptation-literature step 7 (EMA versus live is new); GameNGen numbers from arXiv 2408.14837 v1 and v2 sec. 4.2, read Sep 26
+Game world models are scored on held-out trajectories of their training scenes: GameNGen trains for 700k updates at batch 128 on a random 70M-example subset of its agents' play (arXiv v2, \S4.2; v1 reported 900M generated frames)~\citep{valevski2024gamengen}, DIAMOND on one CS:GO map~\citep{alonso2024diamond}, and MultiGen on 100 generated Doom maps without stating whether its test maps are held out~\citep{po2026multigen}.
+XEWorld holds out robot embodiments, finds held-out error tracking an appearance distance, and fine-tunes on 25 to 75 episodes, forgetting a seen robot~\citep{chen2026xeworld}; AVID and AdaWorld adapt world models to a held-out game or environment with data and step curves~\citep{rigter2024avid,gao2025adaworld}; Pathdreamer scores unseen buildings against a nearest-neighbour reprojection~\citep{koh2021pathdreamer}.
+None scores per scene against persistence; Doom map holdouts have been for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
+Dataset distances predict fine-tuned outcomes~\citep{alvarezmelis2020otdd,nguyen2025sotdd}, directed coverage better than symmetric transport~\citep{mensink2021factors,westny2026latent}, but the cost of crossing to each of many targets of one world model has not been measured, nor, that we found, EMA against live weights in closed loop.
+
+\section{Limitations and conclusion}
+\label{sec:limits}
+
+% fable, edited (its "What the arena range cannot show" and the reference sentence, shortened); owner (one-tic scoring, scope, sampler, conclusion); fable's single-protocol and decoder paragraphs moved to Appendix A and Section 4
+% depends: 13-arena LoRA runs for the adaptation clause of the conclusion
+% hypothesis: the adaptation clause of the conclusion
+With arena 7 carrying two thirds of the arenas' spread in $D$, the cost-against-distance test has about 40 percent power at $\rho=0.5$; persistence is weak on fight footage; adapted models are scored one tic ahead; each row is one seed, agent and WAD at 10 sampling steps.
+Off its training maps the model keeps its turn response and part of its advantage over copying, loses its perceptual advantage, and regains half of the home advantage within \tbd{} adapter updates.
+\label{body-end}
+
+% Acknowledgments print only in the final and preprint builds (\acknowledgments{} of corl_2026.sty); none yet.
+
+%===============================================================================
+
+\clearpage
+\bibliography{refs}
+
+\ifwithappendix
+\clearpage
+\appendix
+\input{appendix}
+\fi
+
+\end{document}

@@ -1,0 +1,191 @@
+% appendix.tex: input by main.tex after the bibliography when \withappendixtrue.
+% The PhysWM call limits the paper to "up to 4 pages (excluding references)" and says nothing about an
+% appendix; the OpenReview form takes one PDF. Whether this rides along in the submission PDF is Rohan's call.
+% Marks as in main.tex: \tbd pending, \todo{} pending text, \prov{} provisional (replaced by the fresh-set
+% rescore, the tuned decoder or the final checkpoints); each paragraph that carries one names its source.
+
+\section{Protocol details}
+\label{app:protocol}
+
+% sources: docs/RESEARCHER_DOSSIER.md 2.1 to 2.3 (recorder, executed controls), release/DENSE_CORPUS.md (map split); design page section 3 (fresh set); opus-distance-view section 1 (the arenas 6 to 8 batch)
+% depends: fresh 24-episode recording and SD 1 encode of the 13 unseen arenas (Sep 26 to 27)
+\textbf{Recording.} \texttt{record\_arnold.py} replaces Arnold's evaluation loop with one that steps the engine one tic at a time and stores each frame, then the control it is about to send, then steps. The raw \texttt{buttons} field is the list Arnold \emph{requested}; the engine executes its first 19 entries. Arnold's action builder appends ten weapon-selection names to that list at every game start, so a weapon request lands inside the executed range only in a recorder worker's first episode, and later weapon requests are silently dropped while movement and firing still execute. Requested and executed controls agree on 89 percent of tics, almost all of the rest are dropped weapon requests, and 0.15 percent are anti-stuck overrides. The sidecars store the executed 19-bit string, which is what the models condition on. For the fresh unseen-arena set, \prov{328} episodes were recorded by 16 workers under one pinned protocol (same Arnold build, 8 bots, 150~s, every tic, seeds declared in the corpus README and disjoint from every earlier batch), and each worker's first episode was set aside, leaving \prov{24} per arena. The earlier batches, which the pre-fresh-set numbers in this appendix use, held 4 episodes on arenas 1 and 9 to 15, 10 on 16 and 17 and 20 on 6 to 8; arenas 6 to 8 came from a separate batch that scored lower in decoded advantage (\prov{$p=0.03$}), a batch-map confound the single-protocol set removes.
+
+\textbf{Windows.} A one-tic window is 32 consecutive recorded tics plus the target, inside one life on one map; deaths cut windows, which keeps 85 (arena 1) to 99 percent of candidate starts. The in-domain reads use 512 windows drawn with seed 0 from validation episodes 6000 to 6099 (25 per training map); the per-arena reads use 256 windows per map.
+
+\begin{table}[ht]
+% sources: docs/RESEARCHER_DOSSIER.md section 3 table (parameters, memory, throughput), backbones.py (control paths)
+\centering\footnotesize\setlength{\tabcolsep}{3pt}
+\caption{The three rows under one recipe. Memory and throughput at batch 32 on one A6000. Control tokens enter through cross-attention (U-Net, width 768; PixArt, 4,096) or joint attention (SD~3.5, 4,096, plus a pooled slot carrying the newest control).}
+\label{tab:recipe}
+\begin{tabular}{lccc}
+\toprule
+ & SD 1.4 U-Net & PixArt-$\alpha$ 512 & SD 3.5 Medium \\
+\midrule
+Architecture & U-Net & DiT, cross-attention & MMDiT, joint attention \\
+Latent space & SD 1.x, $4\times32\times40$ & SD 1.x, $4\times32\times40$ & SD 3.5, $16\times32\times40$ \\
+Parameters & 860.5M & 628M & 2,271.7M \\
+Memory; checkpointing & 23.3 GB; off & 26.8 GB; off & 36.8 GB; on \\
+Updates per second & 1.78 to 1.83 & about 1.4 & 0.50 to 0.55 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Recipe notes.} The 1,000-step linear schedule ($\beta$ from $10^{-4}$ to 0.02) is neither backbone's native schedule: 273 of its timesteps are noisier than anything SD~1.4 saw in pretraining, and SD~3.5 was pretrained with rectified flow. Context noise augmentation blends $\sqrt{1-q}\,c+\sqrt{q}\,\epsilon$ with one level $q$ per example drawn below 0.7 and embedded as one of 10 buckets; inference uses clean context and bucket 0. Fused AdamW runs at $5\times10^{-5}$ after 2,000 linear warmup updates, with no weight decay, gradient clipping at 1.0, bf16 autocast over fp32 parameters, seed 0 and no action dropout. The EMA decays at 0.9999 per update, applied as $0.9999^8$ every eighth update, in fp32. Training sees windows from episodes 0 to 1,999 (500 per training map, 9.66M valid windows); 200k updates at batch 32 cover about two thirds of one pass. The decoder tune (\texttt{finetune\_decoder.py}) trains the SD~1.x and SD~3.5 decoders with MSE on training-map frames with the encoder frozen, validates on episodes 6000 to 6099, and keeps the terminal checkpoint; the stock decoders saw no Doom frame.
+
+% sources: dossier 4.2 (U-Net 200k, live weights, h1, 512 training-map validation windows)
+\textbf{Sampler.} Fewer DDIM steps land nearer the conditional mean, which wins PSNR and loses LPIPS. U-Net 200k, live weights, one tic, training-map windows, linear spacing: 4 steps 22.35~dB / 0.272, 8 steps 22.34 / 0.199, 10 steps 22.29 / 0.186, 16 steps 22.20 / 0.171, 50 steps 22.04 / 0.162. Every number in the paper uses 10 steps.
+
+\section{Per-arena zero-shot scores}
+\label{app:perarena}
+
+\begin{table}[ht]
+% depends: fresh-set rescore of the 13 arenas and the training maps (tuned SD 1 decoder, scene rows, per-window CIs by bootstrap over episodes); D recomputed on the fresh set; U-Net 30-map directional (15 of 30 maps done; arena 6 reads 0.789 against ref 0.867)
+% rows generated from results/distance_study/scores/040-unet-nexttic_snap_0200000_ema_ddim10/*_h{1,4}/metrics.json and distances_sd1.json (primary entries), not typed
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\caption{Per arena, U-Net 200k EMA, 256 windows per map, stock decoder, full frame, sorted by $D$. Persistence and raw gain are against the raw last frame; $A$, $M$ and $G$ as in Table~\ref{tab:unseen}. Blue: pre-fresh-set episodes. $^\ast$pooled over the four training maps.}
+\label{tab:perarena}
+\begin{tabular}{rlccccccccc}
+\toprule
+Arena & Role & $D$ & Persist. & Ceiling & $A$, 1 tic & $A$, 4 tics & $M$ & $G$ & Raw gain & Directional \\
+\midrule
+5 & training & \prov{0.026} & \prov{19.76} & \prov{23.38} & \prov{+3.70} & \prov{+3.22} & \prov{$-$0.029} & \prov{1.84} & \prov{+1.79} & 0.867$^\ast$ \\
+3 & training & \prov{0.034} & \prov{21.37} & \prov{23.71} & \prov{+3.21} & \prov{+4.01} & \prov{$-$0.006} & \prov{1.62} & \prov{+0.72} & 0.867$^\ast$ \\
+2 & training & \prov{0.065} & \prov{21.92} & \prov{23.80} & \prov{+3.23} & \prov{+3.23} & \prov{$-$0.016} & \prov{1.37} & \prov{+0.51} & 0.867$^\ast$ \\
+4 & training & \prov{0.069} & \prov{22.70} & \prov{24.74} & \prov{+4.26} & \prov{+4.98} & \prov{$-$0.056} & \prov{1.36} & \prov{+0.68} & 0.867$^\ast$ \\
+\midrule
+8 & unseen & \prov{0.115} & \prov{23.20} & \prov{24.33} & \prov{+1.29} & \prov{+1.05} & \prov{+0.077} & \prov{2.05} & \prov{$-$0.92} & \tbd \\
+15 & unseen & \prov{0.127} & \prov{19.85} & \prov{23.75} & \prov{+2.68} & \prov{+1.14} & \prov{+0.079} & \prov{2.61} & \prov{+1.30} & \tbd \\
+12 & unseen & \prov{0.128} & \prov{21.69} & \prov{23.39} & \prov{+1.07} & \prov{+0.96} & \prov{+0.104} & \prov{2.01} & \prov{$-$0.31} & \tbd \\
+17 & unseen & \prov{0.130} & \prov{19.37} & \prov{22.84} & \prov{+1.30} & \prov{+0.79} & \prov{+0.155} & \prov{2.94} & \prov{+0.53} & \tbd \\
+14 & unseen & \prov{0.146} & \prov{21.75} & \prov{23.87} & \prov{+1.33} & \prov{+0.35} & \prov{+0.109} & \prov{2.39} & \prov{$-$0.28} & \tbd \\
+11 & unseen & \prov{0.150} & \prov{20.83} & \prov{24.09} & \prov{+1.80} & \prov{+0.95} & \prov{+0.080} & \prov{2.91} & \prov{+0.35} & \tbd \\
+13 & unseen & \prov{0.156} & \prov{19.37} & \prov{22.69} & \prov{+1.80} & \prov{+0.90} & \prov{+0.125} & \prov{2.53} & \prov{+0.79} & \tbd \\
+10 & unseen & \prov{0.162} & \prov{22.60} & \prov{24.20} & \prov{+1.67} & \prov{+1.93} & \prov{+0.069} & \prov{1.96} & \prov{$-$0.36} & \tbd \\
+16 & unseen & \prov{0.164} & \prov{20.03} & \prov{23.03} & \prov{+1.92} & \prov{+1.11} & \prov{+0.163} & \prov{2.23} & \prov{+0.77} & \tbd \\
+1 & unseen & \prov{0.179} & \prov{21.93} & \prov{23.74} & \prov{+1.09} & \prov{+0.49} & \prov{+0.138} & \prov{2.04} & \prov{$-$0.23} & \tbd \\
+9 & unseen & \prov{0.180} & \prov{22.58} & \prov{24.63} & \prov{+2.05} & \prov{+1.64} & \prov{+0.063} & \prov{2.11} & \prov{$-$0.06} & \tbd \\
+6 & unseen & \prov{0.188} & \prov{20.72} & \prov{22.85} & \prov{+0.72} & \prov{$-$0.06} & \prov{+0.122} & \prov{2.44} & \prov{$-$0.31} & \prov{0.79} \\
+7 & unseen & \prov{0.282} & \prov{19.53} & \prov{23.58} & \prov{+0.88} & \prov{$-$0.76} & \prov{+0.084} & \prov{4.00} & \prov{+0.05} & \tbd \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% recomputed from the same files (Spearman over the 13 unseen arenas); HUD share: (32/240) x HUD-row MSE over full-frame MSE of the ceiling, from hud_vae_psnr and vae_psnr
+% depends: fresh-set rescore (every correlation below is recomputed on it)
+\textbf{What the variation between arenas follows.} Across the 13 unseen arenas, raw gain over persistence tracks persistence PSNR (Spearman \prov{$-0.77$}) and the model's absolute PSNR tracks it at \prov{0.95}, while $A$ does not (\prov{$-0.05$}): the model's pixel error has a floor set by the decoder and by blur, and raw persistence has none, so on static footage raw persistence wins however good the latent prediction is. The gap $G$ tracks persistence too (\prov{$-0.80$}), which is why it is a table column and not a cost axis. The 32 HUD rows, which the stock decoder renders at about 18~dB and persistence copies exactly, carry 39 to 68 percent of the ceiling's squared error on the 17 arenas.
+
+\section{The distance}
+\label{app:distance}
+
+% sources: distance-study-design-2026-09-24.md sections 2 and 5; dossier 7.2 to 7.5; results/distance_study/distances_sd1.json (config, floor, checks) and figure_unet_h1_amended/stats.json (primary, within_cluster, amended_assessment)
+% depends: D recomputed on the fresh set with the frozen code; the transition-level distance frozen before any adapted score
+\textbf{Definition, frozen Sep 25 before any map was scored.} A map is a cloud of 1,000 frames: 4 episodes $\times$ 250 frames at least 32 tics into a life, averaged over ten random 4-episode subsets where a map has more episodes. Features are SD~1.x latents with the padding rows removed, pooled $5\times5$ to 192 dimensions. Each frame is weighted by its latent motion $\lVert z_t-z_{t-1}\rVert$ plus a floor that gives the quietest half of the cloud 25 percent of the weight. The reference is 50 seeded training episodes per training map, 250 frames each, 25 per motion decile. $D(m)=\min_k \mathrm{SW}_2(\text{cloud}_m,\text{reference}_k)$ over the four training maps, with 1,000 projection directions shared by every distance; the nearest map, not the pooled corpus, because transport to a mixture charges a seen map for not resembling the other three. A disjoint second reference draw gives the train-versus-train floor, 0.022 to 0.093. Pixel-space and SD~3.5-space versions rank the 30 maps of the pre-registered set like the primary (Kendall $\tau$ 0.70 and 0.76).
+
+\begin{table}[ht]
+% sources: dossier 7.4 and results/distance_study/distances_sd1.json checks; the amended reading is figure_unet_h1_amended/stats.json amended_assessment
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{The pre-declared validation checks of $D$ on the 30-map set (SD~1.x space). The pre-declared gate required all five; it failed, and the pre-declared verdict ``does not support'' stands. The dated amendment separates checks of the measurement (i, iii, v) from an assumption about the maps (iv) and a subset tolerance stricter than the estimator reported (ii).}
+\label{tab:checks}
+\begin{tabular}{clc}
+\toprule
+Check & What it tests & Result \\
+\midrule
+(i) & the four training maps sit inside the floor band & pass (0.026 to 0.069) \\
+(ii) & disjoint 4-episode subsets agree within 10\% & fail (8 campaign maps, 0.108 to 0.288) \\
+(iii) & the two reference draws rank maps alike ($\rho\ge0.95$) & pass (0.996) \\
+(iv) & arenas 6 to 8 sit nearer than every campaign map & fail (arena 7 at 0.282) \\
+(v) & $|\rho(D,\text{Kish }n_\text{eff})|<0.4$ & pass ($-$0.022) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% sources: results/distance_study/figure_unet_h1/stats.json (primary, leave-one-out, within_cluster, secondary.gain_h4) and figure_unet_h1_amended/stats.json (structural_controls, summary)
+% depends: the Spiderman rerun of the structural controls with the per-window files (the local amended CIs resampled without them); the within-unseen partial is recomputed on the fresh set
+\textbf{The pre-registered test.} On 30 maps (the 17 arenas and 13 campaign maps of another WAD that the paper otherwise leaves in the dataset release), the partial Spearman of the U-Net's one-tic raw gain on $D$, controlling for persistence PSNR, is $-0.73$ [$-0.84$, $-0.32$] (permutation $p=10^{-4}$), negative in all 30 leave-one-map-out refits and $-0.80$ at four tics. Within the 17 arenas it is $-0.57$, within the campaign maps $-0.38$ with an interval that crosses zero, and with a training-map indicator and a family indicator as covariates $-0.42$ [\prov{$-0.63$}, \prov{$+0.13$}]. Within the 13 unseen arenas it is \prov{$-0.12$}. The dated amended assessment reads ``qualified evidence for the pooled U-Net association; original gate failed; unseen-only trend inconclusive; cross-backbone replication pending''.
+
+% depends: the transition-distance design round (Astra's directed coverage of transition windows; Opus's kNN transfer gap), validated on zero-shot data and frozen before any 13-arena adapted score; computed on the fresh set
+\textbf{The transition-level distance.} $D$ reads single frames; the model predicts a transition from 32 frames and a control. The second axis of the adaptation study is a directed distance on transition windows (state, recent motion, next change and the executed controls), from the target's windows to the nearest training windows, chosen between two candidates and frozen before any adapted score: \todo{the chosen definition and its validation: floor on disjoint source episodes, a rise under shuffled transitions and shuffled controls, split-half map reliability}. Directed coverage predicted transfer better than symmetric transport in two studies~\citep{mensink2021factors,westny2026latent}.
+
+\section{Closed loop}
+\label{app:closedloop}
+
+% counts recomputed from results/sd35_stability/collapse_rates_50k_130k.md; mechanism from dossier 6.2; the live-minus-EMA interval is Astra's cluster bootstrap over the 16 windows (astra-review-2026-09-26.md)
+% depends: PixArt 200k final read (two-seed rollouts) and SD 3.5 200k read add rows
+\textbf{The failure.} In SD~3.5's collapsed rollouts the latent's overall scale stays inside the real range while one channel's per-frame mean is captured at a fixed value: channel 13, whose mean sits near $+0.45$ in real footage, drops to $-1.39$ to $-1.50$ (17 of the 22 collapsed rollouts at 70k, both window sets) or $-2.60$ to $-2.73$ (the blank frames). Later EMA excursions shift channels 15 and 8 as well, so the absorbing states are a family of per-channel mean shifts. Noise augmentation trains against isotropic corruption of the context, not a structured shift in one direction of latent space, and teacher-forced reads never feed a prediction back, so neither guards against it.
+
+\begin{table}[ht]
+\centering\footnotesize\setlength{\tabcolsep}{5pt}
+\caption{SD~3.5 collapse events on the same 16 seed-0 windows at every 5k from 55k to 130k (256 rollouts per weight set). (a) a frame under 10~dB; (b) under 12~dB at tic 256; (c) channel 13's mean below $-0.9$ at tic 256 (real range $-0.44$ to $0.80$). Live minus EMA for (a): 5.5 points [2.7, 7.8], bootstrapped over the 16 windows.}
+\label{tab:collapse}
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{55k to 130k} & \multicolumn{3}{c}{without 70k} \\
+Weights & (a) & (b) & (c) & (a) & (b) & (c) \\
+\midrule
+Live & 23 / 256 & 17 / 256 & 14 / 256 & 11 / 240 & 6 / 240 & 4 / 240 \\
+EMA & 9 / 256 & 4 / 256 & 4 / 256 & 8 / 240 & 3 / 240 & 4 / 240 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+% exists: paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg (tools/collapse_strip.py at 42a4688)
+\centering
+\figslot{figures/sd35_70k_live_vs_ema_rollout_strip.jpg}{\linewidth}{3.2in}{SD 3.5 70k live versus EMA rollout strip}
+\caption{SD~3.5 at 70k updates, two validation windows (map 2 above, map 5 below); rows are the recorded frames, the live-weight rollout and the EMA rollout at tics 1 to 256. The live rollouts flood to flat blue (channel 13 near $-2.6$) or grey (near $-1.4$) while the HUD, weapon and crosshair persist; the EMA rollouts drift from the true trajectory but stay coherent scenes.}
+\label{fig:collapse}
+\end{figure}
+
+% sources: dossier 5.1 (U-Net 200k rollouts), RESEARCH_CONTEXT 2026-09-26 12:10 (PixArt 150k) and 17:10 (SD 3.5 140k)
+% depends: PixArt 200k and SD 3.5 200k rollout reads
+\textbf{EMA against live, all rows.} At 256 tics on the seed-0 windows the EMA and live weights read 17.81 and 15.87~dB for the U-Net at 200k, \prov{17.41} and \prov{15.97} for PixArt at 150k and \prov{18.03} and \prov{17.53} for SD~3.5 at 140k, against 17.52 for copy-seed. The EMA led the live weights at every recorded teacher-forced read once its start weights had washed out (by 40k for the U-Net). The adaptation curves score the live adapter weights, because an EMA at 0.999 still carries the step-0 model at 0.78 after 250 updates.
+
+\section{Latent skill, and LoRA against full fine-tuning}
+\label{app:skill}
+
+% depends: latent-ratio rescore of the 13 arenas and the training maps (eval_tf.py latent_mse_ratio per window, fresh set); 13-arena LoRA runs; full fine-tune comparator on arena 7
+The latent skill $S=10\,\overline{\log_{10}(\text{copy-last latent MSE}/\text{model latent MSE})}$ is a geometric mean over windows, so near-static windows cannot dominate it, and no decoder touches it. It compares predictions only within one backbone, because the latent spaces differ. Zero-shot $S$ is \tbd{}~dB on the training maps and \tbd{}~dB on the unseen arenas. Because a full fine-tune also moves the input projection and every layer the decoder's input depends on, the LoRA-against-full comparison is read in $S$ as well: on arena 7, $S$ at 4,000 updates is \tbd{} for LoRA and \tbd{} for the full fine-tune.
+
+\section{Per-arena adaptation}
+\label{app:perarena-adapt}
+
+\begin{table}[ht]
+% depends: 13-arena U-Net LoRA runs (score_adapt.py score and cost; live weights), forgetting and directional guards; D and step-0 A are today's provisional values and are replaced by the fresh-set rescore
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\caption{Per unseen arena, sorted by $D$: step-0 decoded advantage, the first grid budget at which $A$ reaches 25, 50 and 100 percent of the training maps' advantage (${>}$4k: censored), $A$ and $M$ at 4,000 updates, forgetting (change in the training maps' $A$) and the directional score at 4,000.}
+\label{tab:perarena-adapt}
+\begin{tabular}{rccccccccc}
+\toprule
+Arena & $D$ & $A$ at 0 & 25\% & 50\% & 100\% & $A$ at 4k & $M$ at 4k & Forgetting & Directional \\
+\midrule
+8 & \prov{0.115} & \prov{+1.29} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+15 & \prov{0.127} & \prov{+2.68} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+12 & \prov{0.128} & \prov{+1.07} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+17 & \prov{0.130} & \prov{+1.30} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+14 & \prov{0.146} & \prov{+1.33} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+11 & \prov{0.150} & \prov{+1.80} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+13 & \prov{0.156} & \prov{+1.80} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+10 & \prov{0.162} & \prov{+1.67} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+16 & \prov{0.164} & \prov{+1.92} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+1 & \prov{0.179} & \prov{+1.09} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+9 & \prov{0.180} & \prov{+2.05} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+6 & \prov{0.188} & \prov{+0.72} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+7 & \prov{0.282} & \prov{+0.88} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[ht]
+% depends: 13-arena U-Net LoRA runs and score_adapt.py rows (live weights, 256 held-out windows per arena); the line from step-0 training-map predictions through the tuned SD 1 decoder; the full fine-tune comparator on arena 7
+\centering
+\figslot{figures/fig5_adaptation_margin.pdf}{0.6\linewidth}{1.8in}{Figure 5: $M$ against LoRA updates, one line per arena}
+\caption{The second panel of the adaptation study: perceptual margin $M$ against LoRA updates, one line per unseen arena coloured by $D$, with zero (ties copy-last) and the training maps' margin; open markers: arenas censored at 4,000 updates. Black: full fine-tune, arena 7.}
+\label{fig:adapt-margin}
+\end{figure}
+
+\section{Public Doom world models}
+\label{app:public}
+
+% sources: main-, astra- and opus-decoder-baselines-view-2026-09-26.md (Hugging Face API file lists and READMEs checked Sep 26)
+Two open GameNGen reproductions (Stiegler's and Taketani's) release weights; both train on one map (\texttt{deathmatch\_simple}) at 320$\times$240 every tic, with 18 and 12 discrete actions that do not cover Arnold's combined controls. DIAMOND's released model is CS:GO, Oasis is a gated Minecraft model, and PlayGen and MultiGen release no Doom weights. Scoring a one-map public model on our arenas would measure its own transfer to Arnold's footage, confounded by map, assets, behaviour and recipe, not compare recipes; we leave it to a later version, scored home and away with only the windows whose control history maps exactly.
