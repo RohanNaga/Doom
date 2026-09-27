@@ -262,9 +262,9 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 \label{sec:related}
 
 % sources: related-work-map-2026-09-26.md sections 1 and 2; lit-scene-generalization (GameNGen, DIAMOND, MultiGen, Pathdreamer, Doom agents); lit-adapters (AVID, AdaWorld); lit-transferability (Mensink, Westny); adaptation-literature step 7 (EMA versus live is new); GameNGen numbers from arXiv 2408.14837 v1 and v2 sec. 4.2, read Sep 26
-XEWorld holds out two robot embodiments, scored separately, finds held-out error tracking an appearance distance, and fine-tunes on 25 to 75 episodes~\citep{chen2026xeworld}; AVID and AdaWorld adapt world models to a held-out game or environment~\citep{rigter2024avid,gao2025adaworld}; Pathdreamer scores unseen buildings against a nearest-neighbour reprojection~\citep{koh2021pathdreamer}.
+XEWorld holds out two robot embodiments, finds their error tracking an appearance distance, and fine-tunes on 25 to 75 episodes~\citep{chen2026xeworld}; AVID and AdaWorld adapt to a held-out game or environment~\citep{rigter2024avid,gao2025adaworld}; Pathdreamer scores unseen buildings against a reprojection baseline~\citep{koh2021pathdreamer}.
 None scores per scene against persistence; Doom map holdouts have been for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
-Dataset distances predict fine-tuned outcomes~\citep{alvarezmelis2020otdd,nguyen2025sotdd}; in two studies a directed measure, nearest-source coverage~\citep{mensink2021factors} or latent KL~\citep{westny2026latent}, predicted transfer better than a symmetric transport distance.
+Dataset distances predict fine-tuned outcomes~\citep{alvarezmelis2020otdd,nguyen2025sotdd}, and directed measures~\citep{mensink2021factors,westny2026latent} do so better than symmetric transport distances.
 We found no measurement of the cost of crossing from one world model to many targets, nor of EMA against live weights in closed loop.
 
 \section{Limitations and conclusion}
