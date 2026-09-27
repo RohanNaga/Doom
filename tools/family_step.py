@@ -367,15 +367,21 @@ FAMILY_SIZE = (2.25, 1.5)                   # Figure 3a beside 3b in one row, se
 DEFICIT_SIZE = maf.HALF_SIZE
 
 
+def band_label(ax, floor):
+    """The band's direct label, "train vs train d" on two lines, centred on the band in its empty lower part (the
+    training maps' points sit above 2 dB, and the persistence line and its label run along 0)."""
+    return ax.text((floor["min"] + floor["max"]) / 2, 0.12, "train vs\ntrain $d$", transform=ax.get_xaxis_transform(),
+                   ha="center", va="bottom", fontsize=fs.ANNOT_PT, color=fs.TRAINING_LINE, linespacing=1.0)
+
+
 def fig_family_step(entries, floor, out_dir):
     """Figure 3a: zero-shot skill S0 against the frame distance D per map, three backbones in their encoding colours
     and markers; the training maps' D floor as the grey band; per backbone the step drawn as two median segments,
     one across the training maps' D range and one across the arenas', keyed in the empty upper right; copy-last at 0.
-    At 2.25 in the band is too narrow to hold its label, so "training maps" sits at the band's top."""
+    The band is named inside itself (`band_label`), since the caption no longer describes it."""
     fig, (ax,) = fs.new_figure(FAMILY_SIZE)
     fs.training_band(ax, floor["min"], floor["max"])
-    ax.text((floor["min"] + floor["max"]) / 2, 0.985, "training maps", transform=ax.get_xaxis_transform(),
-            ha="center", va="top", fontsize=fs.ANNOT_PT, color=fs.TRAINING_LINE)
+    band_label(ax, floor)
     handles = []
     for name, e in entries.items():
         key = fs.backbone_of(name)

@@ -283,3 +283,15 @@ def test_the_two_panels_are_written_in_the_builders_style(tmp_path):
         m = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]", pdf)
         assert float(m.group(1)) / 72 == pytest.approx(size[0], abs=0.01)
         assert float(m.group(2)) / 72 == pytest.approx(size[1], abs=0.01)
+
+
+def test_the_band_is_labelled_in_the_figure_as_the_train_vs_train_distance_range():
+    # the caption no longer describes the band (page 4 is full), so the figure names it inside the band
+    fs.fs.style()
+    fig, (ax,) = fs.fs.new_figure(fs.FAMILY_SIZE)
+    ax.set_xlim(0, 0.3)
+    ax.set_ylim(-0.2, 5.3)
+    t = fs.band_label(ax, {"min": 0.022, "max": 0.093})
+    assert t.get_text().replace("\n", " ") == "train vs train $d$" and t.get_fontsize() >= fs.fs.MIN_PT
+    x, y = t.get_position()
+    assert 0.022 < x < 0.093 and y < 0.5                              # centred on the band, in its empty lower part
