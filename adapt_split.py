@@ -31,19 +31,26 @@ first `--adapt-episodes` (default 16) are the adaptation budget. The data ladder
 the step curve trains on the first `--step-curve-k` (default 8), which is what the trainer uses unless its
 `--adapt-episodes-k` names another rung (`adapt_episodes`).
 
-**Windows.** A fixed draw of `--windows-per-episode` (32) one-tic windows from EACH held-out episode (256
+**Windows.** A fixed draw of `--windows-per-episode` (32) windows from EACH held-out episode (256
 per map at 8 held out), seeded by (split seed, episode) so each episode's draw is its own, recorded as
-[episode, start row] pairs under `held_out_windows`. Every checkpoint of every run on this split, step 0
+[episode, start row] pairs under `held_out_windows`. A held-out episode with fewer valid windows is an
+error, so every held-out episode weighs the same. Every checkpoint of every run on this split, step 0
 included, is scored on exactly these windows, so the zero-shot number on them is the step-0 row. With
 `--map-split`, the distance study's own draw (256 windows over all of the map's episodes, `eval_tf.draw_windows`
 with seed 0) is recorded too, restricted to the held-out episodes (`legacy_held_out_windows`): a
 cross-check against the frozen zero-shot scores, not the primary outcome. `windows_in_dataset` turns either
 list back into dataset indices for `eval_tf.py --windows-file`.
 
-The window rules are `doom_data.tic_window_starts` at horizon 1 (tic continuity, one life, one map) over the
+Every drawn window is valid at `--window-horizon` tics (default 4, recorded as `window_horizon`): its context
+and the next four tics lie in one life, so the same windows file serves the one-tic read and the four-tic
+read (a window valid at four tics is valid at one). The window rules are `doom_data.tic_window_starts` at
+that horizon (tic continuity, one life, one map) over the
 episodes in `doom_data.list_latent_episodes` order, which is exactly how `TicWindowDataset` enumerates them,
 so a recorded window is a dataset window by construction; the scorer refuses any that is not. Only the
 sidecars are read, so one split serves every latent space of a corpus.
+
+An existing file is never replaced by a different split: the lists AND the identity-bearing meta (corpus,
+episode source and its hash, counts, ladder, seed, window settings) must match, or `--force` is needed.
 
 The file keeps `val` (the held-out episodes) and `train` (the step-curve episodes) as well, so `eval_tf.py`
 and `directional_check.py` read it unchanged with `--subset val`.
@@ -61,12 +68,14 @@ DEFAULT_HELD_OUT = 8
 DEFAULT_LADDER = (1, 2, 4, 8, 16)
 DEFAULT_STEP_CURVE_K = 8
 DEFAULT_WINDOWS_PER_EPISODE = 32
+DEFAULT_WINDOW_HORIZON = 4      # the longest teacher-forced read the windows must serve (eval_tf --horizon-tics 4)
 LEGACY_WINDOWS = 256            # the distance study's per-map draw
 CONTEXT_FRAMES = 32
 WINDOW_KEY = "held_out_windows"
 LEGACY_KEY = "legacy_held_out_windows"
 WINDOW_KEYS = (WINDOW_KEY, LEGACY_KEY)
 KIND = "adapt_split"
+NON_IDENTITY_META = ("code", "note")       # meta fields a rerun may change without changing the split
 SUBSET = "val"                  # the key eval_tf.py and directional_check.py read (make_dense_eval_splits.SUBSET)
 REPO = os.path.dirname(os.path.abspath(__file__))
 
@@ -153,21 +162,27 @@ def pairs_at(per_episode, indices):
 
 
 def draw_held_out_windows(latents_dir, held_out, per_episode=DEFAULT_WINDOWS_PER_EPISODE, seed=0,
-                          context_frames=CONTEXT_FRAMES):
+                          context_frames=CONTEXT_FRAMES, horizon=DEFAULT_WINDOW_HORIZON):
     """([episode, start] pairs, {episode: windows available}): `per_episode` windows from each held-out episode.
 
     Each episode draws from its own generator, seeded by (seed, episode), so an episode's windows do not
-    depend on which other episodes are held out. An episode with fewer valid windows gives all of them.
+    depend on which other episodes are held out. Only starts valid at `horizon` tics are drawn, so one windows
+    file serves every read up to that horizon. An episode with fewer than `per_episode` such windows is
+    an error, not a smaller draw: the protocol is the same number of windows from every held-out episode
+    (8 x 32 = 256 by default), so every episode weighs the same in every mean.
     """
-    per = window_starts(latents_dir, held_out, context_frames, 1)
-    pairs, available = [], {}
+    per = window_starts(latents_dir, held_out, context_frames, horizon)
+    available = {int(ep): 0 for ep in held_out}
+    available.update({int(ep): int(len(starts)) for ep, starts in per})
+    short = {e: n for e, n in sorted(available.items()) if n < per_episode}
+    if short:
+        raise ValueError(f"held-out episode(s) with fewer than {per_episode} windows valid at {horizon} tics: {short} "
+                         "(episode: windows). Every held-out episode must give the same number; hold out other "
+                         "episodes (another --seed) or lower --windows-per-episode for the whole study")
+    pairs = []
     for ep, starts in per:
-        available[int(ep)] = int(len(starts))
-        pick = np.random.RandomState([int(seed), int(ep)]).choice(len(starts), size=min(per_episode, len(starts)),
-                                                                   replace=False)
+        pick = np.random.RandomState([int(seed), int(ep)]).choice(len(starts), size=per_episode, replace=False)
         pairs += [[int(ep), int(s)] for s in np.sort(starts[pick])]
-    for ep in held_out:
-        available.setdefault(int(ep), 0)
     return pairs, available
 
 
@@ -245,6 +260,8 @@ def manifest_maps(path):
         data = json.loads(text)
     except ValueError:
         data = [json.loads(ln) for ln in text.splitlines() if ln.strip()]      # JSON lines
+    if isinstance(data, dict) and any(k in data for k in ("episode_id", "episode")):
+        data = [data]            # JSON lines holding ONE record parse as a single object, not a map table
     if isinstance(data, dict) and isinstance(data.get("episodes"), list):
         data = data["episodes"]
     out = {}
@@ -318,19 +335,18 @@ def split_filename(set_name, map_id, seed, n_adapt=DEFAULT_ADAPT, n_held_out=DEF
 
 def build_split(episodes, set_name, map_id, latents_dir, seed=0, n_adapt=DEFAULT_ADAPT, n_held_out=DEFAULT_HELD_OUT,
                 ladder=DEFAULT_LADDER, step_curve_k=DEFAULT_STEP_CURVE_K,
-                windows_per_episode=DEFAULT_WINDOWS_PER_EPISODE, context_frames=CONTEXT_FRAMES, legacy=False,
+                windows_per_episode=DEFAULT_WINDOWS_PER_EPISODE, context_frames=CONTEXT_FRAMES,
+                window_horizon=DEFAULT_WINDOW_HORIZON, legacy=False,
                 legacy_windows=LEGACY_WINDOWS, legacy_seed=0, source=None, source_kind=None):
     """The whole split record: episodes, the ladder, the held-out window draw, the legacy draw, provenance."""
     ep = make_adapt_split(episodes, seed, n_adapt, n_held_out, ladder, step_curve_k)
-    windows, available = draw_held_out_windows(latents_dir, ep["held_out"], windows_per_episode, seed, context_frames)
-    short = {e: n for e, n in available.items() if n < windows_per_episode}
-    if short:
-        print(f"note: held-out episode(s) with fewer than {windows_per_episode} valid windows give all they have: {short}")
+    windows, available = draw_held_out_windows(latents_dir, ep["held_out"], windows_per_episode, seed, context_frames,
+                                               window_horizon)
     meta = {"kind": KIND, "set": set_name, "map": int(map_id), "corpus": f"{set_name}_map{int(map_id):02d}",
             "seed": int(seed), "n_adapt": int(n_adapt), "n_held_out": int(n_held_out),
             "ladder": ep["ladder"], "step_curve_k": ep["step_curve_k"],
             "episodes": sorted(int(e) for e in episodes), "num_episodes": len(episodes),
-            "context_frames": int(context_frames), "window_horizon": 1, "num_windows": len(windows),
+            "context_frames": int(context_frames), "window_horizon": int(window_horizon), "num_windows": len(windows),
             "windows_per_episode": int(windows_per_episode), "window_seed": int(seed),
             "held_out_windows_available": {str(e): n for e, n in sorted(available.items())},
             "latents_dir": os.path.abspath(latents_dir), "subset_key": SUBSET,
@@ -355,15 +371,32 @@ def build_split(episodes, set_name, map_id, latents_dir, seed=0, n_adapt=DEFAULT
     return out
 
 
+def split_identity(split):
+    """What makes two split files the same split: every list and every identity-bearing meta field.
+
+    The code commit and the note are left out (a rerun from a newer checkout is the same split); the corpus
+    (set, map, latent directory), the episode source and its hash, the counts, the ladder, the seed and the
+    window draw's settings and availability are in, so identical lists written from another corpus or
+    another manifest are a different split.
+    """
+    meta = split.get("meta", {}) or {}
+    return {**{k: v for k, v in split.items() if k != "meta"},
+            "meta": {k: v for k, v in meta.items() if k not in NON_IDENTITY_META}}
+
+
 def write_split(split, path, force=False):
-    """Write atomically; an existing file with different content is refused unless `force`."""
+    """Write atomically; an existing file that is a different split (`split_identity`) is refused unless `force`."""
     text = json.dumps(split, indent=1)
     if os.path.exists(path) and not force:
         with open(path) as f:
             old = json.load(f)
-        if {k: v for k, v in old.items() if k != "meta"} != {k: v for k, v in split.items() if k != "meta"}:
-            raise SystemExit(f"{path} exists with a different split; checkpoints record its hash, so it is not "
-                             "overwritten (pass --force to replace it deliberately)")
+        a, b = split_identity(old), split_identity(split)
+        if a != b:
+            differ = sorted([k for k in set(a) | set(b) if k != "meta" and a.get(k) != b.get(k)]
+                            + [f"meta.{k}" for k in set(a["meta"]) | set(b["meta"])
+                               if a["meta"].get(k) != b["meta"].get(k)])
+            raise SystemExit(f"{path} exists as a different split (differs in {differ[:8]}); checkpoints record "
+                             "its hash, so it is not overwritten (pass --force to replace it deliberately)")
         return path, False
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     tmp = f"{path}.tmp.{os.getpid()}"
@@ -425,7 +458,7 @@ def main(argv=None):
         if not episodes or set_name is None or map_id is None or not latents_dir:
             raise SystemExit("name the map and its corpus: see --help for the four sources")
         split = build_split(episodes, set_name, map_id, latents_dir, a.seed, a.adapt_episodes, a.held_out_episodes,
-                            ladder, a.step_curve_k, a.windows_per_episode, a.context_frames,
+                            ladder, a.step_curve_k, a.windows_per_episode, a.context_frames, a.window_horizon,
                             legacy=(kind == "distance_study_split") and not a.no_legacy,
                             legacy_windows=a.legacy_windows, legacy_seed=a.legacy_seed, source=source,
                             source_kind=kind)
@@ -461,7 +494,10 @@ def build_parser():
     p.add_argument("--step-curve-k", type=int, default=DEFAULT_STEP_CURVE_K,
                    help="adaptation episodes of the step curve, the trainer's default rung (default 8)")
     p.add_argument("--windows-per-episode", type=int, default=DEFAULT_WINDOWS_PER_EPISODE,
-                   help="fixed one-tic windows drawn from each held-out episode (default 32, 256 per map at 8)")
+                   help="fixed windows drawn from each held-out episode (default 32, 256 per map at 8)")
+    p.add_argument("--window-horizon", type=int, default=DEFAULT_WINDOW_HORIZON,
+                   help="every drawn window is valid at this many tics ahead (default 4), so one file serves the "
+                        "one-tic and the four-tic read")
     p.add_argument("--context-frames", type=int, default=CONTEXT_FRAMES)
     p.add_argument("--legacy-windows", type=int, default=LEGACY_WINDOWS,
                    help="the distance study's per-map draw size, recorded restricted to the held-out episodes")
