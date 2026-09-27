@@ -352,6 +352,29 @@ def row_picks(found, n=2, steps=HORIZON):
     return {"floor": round(floor, 3), "rows": rows}
 
 
+def restart_home(homes, restart_root, steps, taken=()):
+    """Among the training-map moments restarted in `restart_root` (`<window>_t<T>`), the one whose U-Net scene PSNR
+    beats persistence's by most at +`steps` (ties, to 0.01 dB: the brighter), weapon flashes excluded unless
+    nothing else is left, no frames shared with `taken`; None when no candidate was restarted."""
+    scored = []
+    for h in homes:
+        if overlaps(h["window"], h["tic"], taken):
+            continue
+        path = os.path.join(restart_root, f"{h['window']}_t{h['tic']}", "manifest.json")
+        if not os.path.exists(path):
+            continue
+        with open(path) as f:
+            man = json.load(f)
+        model = ct.per_tic_scene(man, ct.ROWS["model"]).get(steps)
+        copy = ct.copy_last(man, steps)
+        if model is None or copy is None:
+            continue
+        scored.append({**h, "in_domain_restart": round(model, 3), "persistence_restart": round(copy, 3),
+                       "advantage": round(model - copy, 3)})
+    scored = [h for h in scored if not h.get("flash")] or scored
+    return max(scored, key=lambda h: (round(h["advantage"], 2), h["luma"])) if scored else None
+
+
 def hold_figure_rows(picks, k=0, chosen=None):
     """Layout C rows from the hold round: the k-th unseen pick of each row with the row's in-domain moment, or with
     `chosen` ([(row, pick number from 1)]) those rows only, in that order."""
@@ -456,6 +479,17 @@ def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None
     counts = {f"{role}:{b}": sum(1 for m in found if m["role"] == role and m["button"] == b)
               for role in ("unseen", "training") for b in buttons}
     picks = row_picks(found, n=2, steps=steps)
+    if restart_root and os.path.isdir(restart_root):
+        # with restarts on disk the in-domain moment is the restarted one that beats persistence by most at +steps
+        taken = []
+        for p in picks["rows"]:
+            if not p["unseen"]:
+                continue
+            homes = [m for m in found if m["role"] == "training" and m["button"] == p["unseen"][0]["button"]]
+            best = restart_home(homes, restart_root, steps, taken)
+            if best is not None:
+                p["home_proxy"], p["home"] = p["home"], {**best, "rule": "restarted advantage over persistence"}
+                taken.append((best["window"], best["tic"]))
     order = list(row_order) if row_order else [r for r, _ in FIGURE_ROWS]
     written = []
     have = (set(os.listdir(restart_root)) if restart_root and os.path.isdir(restart_root) else set())

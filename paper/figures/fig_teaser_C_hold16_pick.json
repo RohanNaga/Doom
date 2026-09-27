@@ -54,31 +54,31 @@
    "adapted": 17.334,
    "depth": 233,
    "home": {
-    "window": "train_map02_ep6024_s4424",
-    "tic": 147,
+    "window": "train_map02_ep6092_s2440",
+    "tic": 139,
     "button": "forward",
-    "control": "attack + forward",
-    "in_domain": 20.228,
-    "luma": 42.48
+    "control": "turn right + forward",
+    "in_domain": 20.293,
+    "luma": 39.08
    },
    "scene_psnr": {
     "zero-shot": 12.054,
     "adapted": 17.334,
-    "in-domain": 20.228
+    "in-domain": 20.293
    },
    "persistence": {
     "in-domain": null,
     "unseen": null
    },
    "held": {
-    "in-domain": "+attack \u00b7 16/16",
+    "in-domain": "held 16/16",
     "unseen": "held 16/16"
    },
    "story_shown": 5.28,
    "sources": {
-    "in-domain context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6024_s4424/truth_raw/tic_147.png",
-    "in-domain": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6024_s4424/unet_tuned/tic_163.png",
-    "in-domain ground truth": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6024_s4424/truth_raw/tic_163.png",
+    "in-domain context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6092_s2440/truth_raw/tic_139.png",
+    "in-domain": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6092_s2440/unet_tuned/tic_155.png",
+    "in-domain ground truth": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6092_s2440/truth_raw/tic_155.png",
     "context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep210_s2888/truth_raw/tic_217.png",
     "zero-shot": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep210_s2888/unet_tuned/tic_233.png",
     "adapted": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep210_s2888/adapter_tuned/tic_233.png",
@@ -97,16 +97,16 @@
    "depth": 93,
    "home": {
     "window": "train_map02_ep6064_s2312",
-    "tic": 177,
+    "tic": 229,
     "button": "attack",
-    "control": "turn right + back",
-    "in_domain": 19.922,
-    "luma": 51.22
+    "control": "attack + turn left + forward",
+    "in_domain": 20.167,
+    "luma": 50.66
    },
    "scene_psnr": {
     "zero-shot": 13.518,
     "adapted": 19.954,
-    "in-domain": 19.922
+    "in-domain": 20.167
    },
    "persistence": {
     "in-domain": null,
@@ -118,9 +118,9 @@
    },
    "story_shown": 6.436,
    "sources": {
-    "in-domain context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6064_s2312/truth_raw/tic_177.png",
-    "in-domain": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6064_s2312/unet_tuned/tic_193.png",
-    "in-domain ground truth": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6064_s2312/truth_raw/tic_193.png",
+    "in-domain context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6064_s2312/truth_raw/tic_229.png",
+    "in-domain": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6064_s2312/unet_tuned/tic_245.png",
+    "in-domain ground truth": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6064_s2312/truth_raw/tic_245.png",
     "context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep288_s456/truth_raw/tic_077.png",
     "zero-shot": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep288_s456/unet_tuned/tic_093.png",
     "adapted": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep288_s456/adapter_tuned/tic_093.png",

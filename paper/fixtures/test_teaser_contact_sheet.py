@@ -303,3 +303,28 @@ def test_the_hold_round_composes_a_chosen_subset_of_rows_into_a_fixed_slot(tmp_p
         ("forward", picks["forward"]["unseen"][1]["window"], picks["forward"]["unseen"][1]["tic"]),
         ("attack", picks["attack"]["unseen"][0]["window"], picks["attack"]["unseen"][0]["tic"])]
     assert side["size_in"][0] == pytest.approx(5.5) and side["size_in"][1] <= 1.5 + 1e-6
+
+
+def test_with_restarts_the_in_domain_moment_is_the_one_that_beats_persistence_most(tmp_path):
+    root = tmp_path / "restart"
+
+    def restarted(name, unet16, copy16):
+        os.makedirs(root / name / "truth_raw", exist_ok=True)
+        series = {"unet_tuned": [0.0] * 16 + [unet16]}
+        with open(root / name / "manifest.json", "w") as f:
+            json.dump({"scene_psnr_vs_truth_raw": series, "copylast_scene_psnr": [0.0] * 16 + [copy16]}, f)
+
+    restarted("m_ep1_s1_t10", 21.0, 17.9)          # +3.1
+    restarted("m_ep1_s1_t60", 21.0, 15.6)          # +5.4, but a weapon flash
+    restarted("m_ep2_s1_t10", 20.0, 16.9)          # +3.1, brighter than the first
+    restarted("m_ep3_s1_t10", 18.8, 17.6)          # +1.2
+    homes = [{"window": "m_ep1_s1", "tic": 10, "luma": 40.0},
+             {"window": "m_ep1_s1", "tic": 60, "luma": 90.0, "flash": True},
+             {"window": "m_ep2_s1", "tic": 10, "luma": 45.0},
+             {"window": "m_ep3_s1", "tic": 10, "luma": 60.0},
+             {"window": "m_ep4_s1", "tic": 10, "luma": 99.0}]  # never restarted
+    home = tcs.restart_home(homes, str(root), 16)
+    assert (home["window"], home["tic"]) == ("m_ep2_s1", 10) and home["advantage"] == pytest.approx(3.1)
+    home = tcs.restart_home(homes, str(root), 16, taken=[("m_ep2_s1", 12)])
+    assert (home["window"], home["tic"]) == ("m_ep1_s1", 10)
+    assert tcs.restart_home(homes[3:], str(root), 16, taken=[("m_ep3_s1", 10)]) is None
