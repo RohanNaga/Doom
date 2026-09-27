@@ -13,7 +13,7 @@
 % \figslot{file}{width}{height}{what it will show}: the figure when its file exists, a labelled box otherwise
 \newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][\dimexpr#3-2\fboxsep-2\fboxrule\relax][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
 
-\title{Crossing the Map Shift: What a Doom World Model Keeps, Loses and Relearns on Arenas It Never Saw}
+\title{DoomShift: What a Doom World Model Keeps, Loses and Relearns on Arenas It Never Saw}
 
 \author{
   Anonymous Author(s)\\
@@ -29,7 +29,7 @@
 
 \begin{abstract}
 Game world models are scored on held-out trajectories of their training scenes, and absolute PSNR mostly measures how static the recordings are.
-One Doom level pack has 17 arenas: we train three pretrained diffusion backbones on four of them and ask what they keep, lose and relearn on the other thirteen, scoring every arena against persistence (the last frame copied forward).
+One Doom level pack has 17 arenas; DoomShift trains three pretrained diffusion backbones on four of them and ask what they keep, lose and relearn on the other thirteen, scoring every arena against persistence (the last frame copied forward).
 Through one decoder, the U-Net still beats persistence on every unseen arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13 arenas, while its turn response survives.
 A frame distance separates seen from unseen arenas but does not order the unseen ones; the frozen model's zero-shot skill score does.
 Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the in-distribution advantage within 4k updates on 9 of 13 arenas, recover a median 1.8~dB and beat persistence perceptually on 11 of 13.
@@ -51,7 +51,7 @@ Video prediction reports this baseline~\citep{mathieu2016deep,lotter2017prednet,
 We read every score beside the reconstruction upper bound~\citep{zheng2023occworld,karypidis2024dinoforesight}.
 
 We contribute (0) three action-conditioned latent world models (SD~1.4 U-Net, PixArt-$\alpha$, SD~3.5 Medium) trained under one next-tic recipe, a matched decoder fine-tune and the adapter path, released with the benchmark (Figure~\ref{fig:method});
-(1) an open 17-arena Doom benchmark (link withheld for review) scored per arena against persistence;
+(1) DoomShift, an open benchmark of the 17 arenas (link withheld for review) scored per arena against persistence;
 (2) the measurement that off the training maps the decoded advantage shrinks and the perceptual margin changes sign for all three backbones while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift});
 (3) per-arena adaptation curves for rank-16 adapters, with the budget to close half of each arena's gap to the in-distribution advantage (median 1k updates; 9 of 13 by 4k) and a planned full fine-tune comparator (\tbd{}); and
 (4) two negative results: no per-frame or transition-level distance orders the arenas, whereas the frozen model's zero-shot latent skill does (Spearman 0.90, exploratory at $n=13$), and one-tic quality does not guarantee closed-loop stability.
