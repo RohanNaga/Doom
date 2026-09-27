@@ -121,3 +121,14 @@ def test_layout_b_takes_the_named_actions_into_a_fixed_slot(tmp_path):
     assert (w, h) == (pytest.approx(5.5, abs=0.01), pytest.approx(1.5, abs=0.01))
     with pytest.raises(SystemExit, match="turn right"):
         ct.layout_b(root, str(tmp_path / "out"), pick=["attack", "turn right"], slot_height=1.5)
+
+
+def test_layout_b_without_the_training_map_column_needs_no_training_window(tmp_path):
+    root = export(tmp_path)
+    os.remove(os.path.join(root, "train_map02_ep6024_s1428", "unet_tuned", "tic_018.png"))   # never read
+    paths, rec = ct.layout_b(root, str(tmp_path / "out"), pick=["attack", "move right"], slot_height=1.5,
+                             reference=False)
+    assert rec["columns"] == ["context", "zero-shot", ct.DEFAULT_ADAPTED_LABEL, "true"]
+    assert rec["home"] is None and all("home_tic" not in r for r in rec["rows"])
+    w, h = mediabox(str(tmp_path / "out" / "fig_teaser_actions.pdf"))
+    assert (w, h) == (pytest.approx(5.5, abs=0.01), pytest.approx(1.5, abs=0.01))

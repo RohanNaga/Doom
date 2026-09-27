@@ -22,7 +22,8 @@ at a moment with the first column's action, its truth beneath, as the in-distrib
 **Layout B** (`fig_teaser_actions`): one row per action (up to `--actions` distinct actions of the unseen
 rollout, or the ones `--pick` names, in that order): the context frame at the tic the action starts, then the frame
 8 tics later from the model on a training map (the same action), zero-shot, adapted, and the truth. `--height` fixes
-the page height for a slot: the frames shrink to fit it and the block is centred across the width.
+the page height for a slot: the frames shrink to fit it and the block is centred across the width. `--no-reference`
+drops the training-map column (and needs no training-map window).
 
 Row labels carry at most one number (`--adapted-label`, default "after 8 episodes"); the budget and GPU-hours go in
 the caption. Output: `<out-dir>/<stem>.pdf/.png` through `figstyle.save` and `<stem>.json` with the windows, tics,
@@ -299,19 +300,24 @@ def layout_a(root, out_dir, window=None, home=None, moments=7, adapted_label=DEF
 
 
 def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEFAULT_ADAPTED_LABEL,
-             horizon=HORIZON_B, width=fs.TEXT_WIDTH, stem="fig_teaser_actions", pick=None, slot_height=None):
+             horizon=HORIZON_B, width=fs.TEXT_WIDTH, stem="fig_teaser_actions", pick=None, slot_height=None,
+             reference=True):
     """Layout B; returns the written paths and the sidecar record. `pick` names the rows' actions in order (each
-    must start in the rollout with `horizon` tics after it); `slot_height` fixes the page height in inches."""
+    must start in the rollout with `horizon` tics after it); `slot_height` fixes the page height in inches;
+    `reference=False` drops the training-map column."""
     unseen, home_name = choose(root, window, home)
-    if home_name is None:
+    if not reference:
+        home_name = None
+    elif home_name is None:
         raise SystemExit("layout B needs a training-map window for its reference column")
     ws = windows(root)
-    man, hman = manifest_of(root, ws[unseen]), manifest_of(root, ws[home_name])
-    ctrl, hctrl = controls_of(man), controls_of(hman)
+    ctrl = controls_of(manifest_of(root, ws[unseen]))
     rows = {k: os.path.join(ws[unseen], v) for k, v in ROWS.items()}
-    hmodel = os.path.join(ws[home_name], ROWS["model"])
     last = min(last_tic(d) for d in rows.values()) - horizon
-    hlast = last_tic(hmodel) - horizon
+    if reference:
+        hctrl = controls_of(manifest_of(root, ws[home_name]))
+        hmodel = os.path.join(ws[home_name], ROWS["model"])
+        hlast = last_tic(hmodel) - horizon
     chosen, names = [], []
     present = sorted({n for c in ctrl for n in button_names(c)},
                      key=lambda n: (PRIORITY.index(n) if n in PRIORITY else len(PRIORITY), n))
@@ -334,7 +340,7 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
         late = [n for n in pick if n not in names]
         raise SystemExit(f"{unseen}: {', '.join(late)} never starts with {horizon} tics after it")
     fs.style()
-    cols = ["context", "training map", "zero-shot", adapted_label, "true"]
+    cols = ["context"] + (["training map"] if reference else []) + ["zero-shot", adapted_label, "true"]
     sample = frame(rows["model"], chosen[0])
     aspect = sample.shape[0] / sample.shape[1]
     label_w = max(text_width(n, style="italic") for n in names) + 5 / 72
@@ -354,19 +360,23 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
     for x in xs[1:]:
         _text(fig, width, height, x + fw / 2, 8 / 72, f"+{horizon} tics", ha="center", va="top", fontsize=fs.MIN_PT,
               color=fs.CONTEXT_INK)
-    record = {"layout": "B", "window": unseen, "home": home_name, "horizon": horizon, "rows": []}
+    record = {"layout": "B", "window": unseen, "home": home_name, "horizon": horizon, "columns": cols, "rows": []}
     for r, (t, name) in enumerate(zip(chosen, names)):
         y = head + r * (fh + GUTTER)
-        th = next((u for u in range(1, hlast + 1) if name in button_names(hctrl[u]) and
-                   name not in button_names(hctrl[u - 1])), None) if hlast > 0 else None
-        th = th if th is not None else home_moment(hctrl, ctrl[t], 1, hlast)
-        imgs = [frame(rows["truth"], t), frame(hmodel, th + horizon), frame(rows["model"], t + horizon),
-                frame(rows["adapted"], t + horizon), frame(rows["truth"], t + horizon)]
+        imgs = [frame(rows["truth"], t), frame(rows["model"], t + horizon), frame(rows["adapted"], t + horizon),
+                frame(rows["truth"], t + horizon)]
+        row = {"tic": t, "action": name, "control": action_text(ctrl[t])}
+        if reference:
+            th = next((u for u in range(1, hlast + 1) if name in button_names(hctrl[u]) and
+                       name not in button_names(hctrl[u - 1])), None) if hlast > 0 else None
+            th = th if th is not None else home_moment(hctrl, ctrl[t], 1, hlast)
+            imgs.insert(1, frame(hmodel, th + horizon))
+            row["home_tic"] = th
         for x, img in zip(xs, imgs):
             _place(fig, width, height, x, y, fw, fh, img)
         _text(fig, width, height, x0 + label_w - 3 / 72, y + fh / 2, name, ha="right", va="center",
               fontsize=fs.ANNOT_PT, style="italic")
-        record["rows"].append({"tic": t, "home_tic": th, "action": name, "control": action_text(ctrl[t])})
+        record["rows"].append(row)
     paths = fs.save(fig, out_dir, stem)
     return paths + [_sidecar(out_dir, stem, record)], record
 
@@ -390,6 +400,7 @@ def main(argv=None):
     p.add_argument("--actions", type=int, default=4, help="layout B: rows")
     p.add_argument("--pick", default=None, help="layout B: the rows' actions in order, comma-separated")
     p.add_argument("--height", type=float, default=None, help="layout B: the page height of a fixed slot (in)")
+    p.add_argument("--no-reference", action="store_true", help="layout B: drop the training-map column")
     p.add_argument("--adapted-label", default=DEFAULT_ADAPTED_LABEL)
     p.add_argument("--stem", default=None, help="output stem (default fig_teaser / fig_teaser_actions)")
     a = p.parse_args(argv)
@@ -401,7 +412,7 @@ def main(argv=None):
         stem_b = (a.stem + "_actions") if a.stem and a.layout == "both" else (a.stem or "fig_teaser_actions")
         pick = [n.strip() for n in a.pick.split(",")] if a.pick else None
         written += layout_b(a.root, a.out_dir, a.window, a.home, a.actions, a.adapted_label, stem=stem_b,
-                            pick=pick, slot_height=a.height)[0]
+                            pick=pick, slot_height=a.height, reference=not a.no_reference)[0]
     for path in written:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     return 0

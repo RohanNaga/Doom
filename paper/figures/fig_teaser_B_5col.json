@@ -1,10 +1,11 @@
 {
  "layout": "B",
  "window": "unseen_arena07_ep210_s2888",
- "home": null,
+ "home": "train_map02_ep6008_s712",
  "horizon": 8,
  "columns": [
   "context",
+  "training map",
   "zero-shot",
   "after 8 episodes",
   "true"
@@ -13,12 +14,14 @@
   {
    "tic": 1,
    "action": "attack",
-   "control": "attack + forward"
+   "control": "attack + forward",
+   "home_tic": 1
   },
   {
    "tic": 14,
    "action": "turn right",
-   "control": "attack + turn right + strafe left"
+   "control": "attack + turn right + strafe left",
+   "home_tic": 1
   }
  ]
 }
