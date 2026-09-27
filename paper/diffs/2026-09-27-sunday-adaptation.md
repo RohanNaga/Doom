@@ -143,6 +143,6 @@ Replace with:
 The appendix's decoder paragraph (appendix.tex line 35) changes the same way; the launcher is `scripts/spiderman/decoder_mse_lpips.sh` (3,486 steps, lr 1e-5, batch 24, 4.0 h on an A6000; gate +4.33 dB, LPIPS $-$0.039 on the dev set).
 
 
-## 12. The decoder's symbol (Rohan, 13:55)
+## 12. The two symbols (Rohan, 14:00)
 
-`main.tex` uses $D$ both for the decoder (line 124 and wherever "$D(\cdot)$" renders a latent) and for the frame distance (section 3). Write the decoder in words everywhere ("the decoder", "decoded through the decoder"), never "the same decoder $D$"; $D$ is the distance only. In the method figure the evaluation box reads "decoder" and the caption says once that prediction, truth and copy-last are all rendered by the one fine-tuned decoder.
+The decoder keeps its short form $D$ (the method figure's boxes use it; the evaluation box reads "decoder $D$", never "same decoder $D$"), and the frame distance becomes lowercase $d$ everywhere: section 3's distance paragraph, the appendix's distance section, Figure 3a's axis label, Table 3 and the per-arena tables' "$D$" column, and every "$D$" in the sentences of this diff that means the distance (items 3, 5 and 8). The caption of the method figure says once that prediction, truth and copy-last are all rendered by the one fine-tuned decoder.
