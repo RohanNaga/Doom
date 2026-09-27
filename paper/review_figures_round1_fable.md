@@ -62,3 +62,14 @@ Figure 4 and the appendix panels (`paper/make_adapt_figures.py`):
 - Astra 28: applied. Diamonds mark the measured budgets on every small multiple, and the key lists "measured read".
 - Astra 30: applied. The threshold axis runs from 0 dB, with a vertical copy-last line labelled at the foot.
 - Rohan's addition: `fig4a_gapshare` is drawn beside 4a for the round-2 choice. It plots the share of each arena's gap to the in-distribution reference closed, per arena faint, with the IQM and its nested band and lines at 0.5 (half-gap) and 1 (the reference). The IQM share at 4k is 0.61.
+
+Training curves (`tools/training_curves.py`, taken over from 5cece32):
+
+- Astra 25 (bug): applied. The tool imports `figstyle` instead of names the builder no longer defines, and it rebuilds.
+- Astra 18: applied. The y axis is PSNR minus the same windows' raw copy-last PSNR, labelled "gain over raw copy-last (dB)", with the black zero line labelled "copy-last". It is not called A.
+- Astra 19 and Fable 15: applied. The body panel `fig1_curves` draws EMA only, and live sits dotted beside it in the full-width appendix `figA_training_curves`.
+- Astra 20: applied. The lines use the encoding colours, with circle, square and triangle markers every 50k. The markers are open because every read goes through the stock decoder.
+- Astra 21 and Fable 15: applied. End labels at 6.5 pt replace the legend, with leaders where U-Net and PixArt end within 0.01 dB of each other.
+- Astra 22 with the change: `fig1_curves` is 1.5 x 1.4 in for a place in Figure 1's row. Since the method stays full width, `figA_training_curves` is the full-width appendix version; the paper owner places one of the two.
+- Astra 23 with the change: the reads are window means without intervals, as stated in the docstring and the draft caption. The per-window files are on Spiderman for Monday.
+- Astra 24 and Fable 13, 14: applied through the sidecar `fig1_curves.json`. It lists the reads clipped below -1 dB (the 5k to 20k EMA reads, 6.69 to 20.41 dB PSNR) and the provisional SD 3.5 170k read, which is drawn as an unjoined marker. The draft caption discloses both.

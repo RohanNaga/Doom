@@ -1,0 +1,118 @@
+{
+ "weights": [
+  "ema",
+  "live"
+ ],
+ "floor_db": -1.0,
+ "persistence_psnr": {
+  "unet": 21.56569146923721,
+  "pixart": 21.56569146923721,
+  "sd35": 21.56569146923721
+ },
+ "clipped_reads": [
+  {
+   "backbone": "unet",
+   "weights": "ema",
+   "step": 5000,
+   "psnr": 11.76,
+   "gain": -9.81
+  },
+  {
+   "backbone": "unet",
+   "weights": "ema",
+   "step": 10000,
+   "psnr": 14.65,
+   "gain": -6.92
+  },
+  {
+   "backbone": "unet",
+   "weights": "ema",
+   "step": 20000,
+   "psnr": 20.07,
+   "gain": -1.5
+  },
+  {
+   "backbone": "pixart",
+   "weights": "ema",
+   "step": 5000,
+   "psnr": 10.79,
+   "gain": -10.77
+  },
+  {
+   "backbone": "pixart",
+   "weights": "ema",
+   "step": 10000,
+   "psnr": 14.56,
+   "gain": -7.0
+  },
+  {
+   "backbone": "pixart",
+   "weights": "ema",
+   "step": 15000,
+   "psnr": 19.59,
+   "gain": -1.98
+  },
+  {
+   "backbone": "sd35",
+   "weights": "ema",
+   "step": 5000,
+   "psnr": 6.69,
+   "gain": -14.88
+  },
+  {
+   "backbone": "sd35",
+   "weights": "ema",
+   "step": 10000,
+   "psnr": 15.57,
+   "gain": -5.99
+  },
+  {
+   "backbone": "sd35",
+   "weights": "ema",
+   "step": 15000,
+   "psnr": 20.41,
+   "gain": -1.15
+  }
+ ],
+ "noted_reads": [
+  {
+   "backbone": "sd35",
+   "step": 170000,
+   "weights": "ema",
+   "psnr": 23.356793208047748,
+   "note": "provisional fresh-rescore home read, not a steward read"
+  }
+ ],
+ "last_reads": {
+  "unet": {
+   "ema": {
+    "step": 200000,
+    "gain": 0.9231279343366623
+   },
+   "live": {
+    "step": 200000,
+    "gain": 0.727066108956933
+   }
+  },
+  "pixart": {
+   "ema": {
+    "step": 200000,
+    "gain": 0.9139199312776327
+   },
+   "live": {
+    "step": 200000,
+    "gain": 0.7769600860774517
+   }
+  },
+  "sd35": {
+   "ema": {
+    "step": 155000,
+    "gain": 1.746058052405715
+   },
+   "live": {
+    "step": 155000,
+    "gain": 1.4295500665903091
+   }
+  }
+ }
+}

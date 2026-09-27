@@ -107,10 +107,13 @@ def test_series_are_sorted_in_thousands_of_updates_and_noted_reads_are_kept_apar
     assert apart["k_updates"] == [35.0] and apart["psnr"] == [23.0]
 
 
-def test_the_axis_floor_comes_from_live_reads_and_persistence_not_the_ema_warm_up(tmp_path):
-    lo, hi = tc.y_limits(tc.load_curves(str(write_curves(tmp_path))))
-    assert lo <= 21.1 and lo > 15.0       # the EMA's 6.7 dB warm-up read stays below the frame
-    assert hi >= 23.0
+def test_the_gain_axis_clips_the_ema_warm_up_and_lists_every_clipped_read(tmp_path):
+    curves = tc.load_curves(str(write_curves(tmp_path)))
+    lo, hi = tc.y_limits(curves)
+    assert lo == tc.FLOOR and hi >= 23.0 - 21.5          # the gain over copy-last, not PSNR
+    assert tc.series(curves[0], "ema")["gain"] == pytest.approx([11.8 - 21.5, 14.6 - 21.5, 21.9 - 21.5])
+    clipped = {(r["backbone"], r["step"]) for r in tc.clipped_reads(curves)}
+    assert clipped == {("unet", 5000), ("unet", 10000), ("pixart", 5000), ("pixart", 10000), ("sd35", 5000)}
 
 
 def test_the_figure_is_written_as_pdf_and_png_at_the_panel_size(tmp_path):
@@ -125,14 +128,22 @@ def test_the_figure_is_written_as_pdf_and_png_at_the_panel_size(tmp_path):
     assert b"/Type3" not in open(pdf, "rb").read()
     w, h = mediabox(pdf)
     assert w == pytest.approx(tc.PANEL_SIZE[0], abs=0.01) and h == pytest.approx(tc.PANEL_SIZE[1], abs=0.01)
+    w, h = mediabox(out / "figA_training_curves.pdf")
+    assert w == pytest.approx(tc.APPENDIX_SIZE[0], abs=0.01)
+    side = json.load(open(out / "fig1_curves.json"))
+    assert side["weights"] == ["ema"] and side["noted_reads"][0]["step"] == 35000
+    assert {r["backbone"] for r in side["clipped_reads"]} == {"unet", "pixart", "sd35"}
 
 
-def test_the_drawn_lines_are_ema_solid_live_dotted_and_persistence_dashed(tmp_path):
-    fig, ax = tc.draw(tc.load_curves(str(write_curves(tmp_path))))
-    styles = {ln.get_label(): ln.get_linestyle() for ln in ax.get_lines()}
-    assert styles["U-Net (SD 1.4) EMA"] == "-" and styles["U-Net (SD 1.4) live"] == ":"
-    assert "PixArt-alpha live" not in styles          # no live reads, no dotted line
-    assert styles["persistence"] == "--"
-    persistence = next(ln for ln in ax.get_lines() if ln.get_label() == "persistence")
-    assert set(persistence.get_ydata()) == {21.5}
-    assert ax.get_xlabel().startswith("updates (thousands)")
+def test_the_drawn_lines_are_ema_solid_live_dotted_and_copy_last_the_zero_line(tmp_path):
+    curves = tc.load_curves(str(write_curves(tmp_path)))
+    fig, ax = tc.draw(curves, weights=tc.WEIGHTS, size=tc.APPENDIX_SIZE)
+    lines = {ln.get_label(): ln for ln in ax.get_lines()}
+    assert lines["U-Net (SD 1.4) EMA"].get_linestyle() == "-" and lines["U-Net (SD 1.4) live"].get_linestyle() == ":"
+    assert "PixArt-alpha live" not in lines          # no live reads, no dotted line
+    assert lines["U-Net (SD 1.4) EMA"].get_color() == "#0072B2"      # the encoding table's U-Net blue
+    zero = lines["copy-last"]
+    assert set(zero.get_ydata()) == {0} and zero.get_linestyle() == "-"
+    assert ax.get_xlabel().startswith("updates (thousands)") and "copy-last" in ax.get_ylabel()
+    body_fig, body = tc.draw(curves)                     # the body panel: EMA only
+    assert not any(ln.get_label().endswith(" live") for ln in body.get_lines())

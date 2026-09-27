@@ -1,5 +1,6 @@
 """
-One-tic PSNR on the training maps' validation windows against updates, for the three backbones.
+Training curves of the three backbones: one-tic gain over raw copy-last on the training maps' validation windows
+against updates.
 
     python tools/training_curves.py
     python tools/training_curves.py --curves-dir results/training_curves --out-dir paper/figures
@@ -15,13 +16,23 @@ such as the steward's combined `training_curves_h1.json`, are not read: only the
 A missing backbone file is skipped; a file whose `backbone` disagrees with its name, a read with unknown
 weights, a non-finite value, a negative step, or two reads of one step and weight set stop the run.
 
-**Output.** `<out-dir>/fig1_curves.pdf` and `.png`, drawn at `PANEL_SIZE` with `paper/make_adapt_figures.py`'s
-`style()`, `new_figure()` and `save()` so it prints at the paper's type sizes, in its backbone colours
-(U-Net, PixArt, SD 3.5 as in Figure 2): EMA reads solid, live reads dotted where present, persistence dashed,
-x in thousands of updates. A read carrying a `note` (SD 3.5's provisional 170k read from another scorer, for
-example) is drawn as an open marker and not joined to its line. The y axis starts just below the lowest live
-read and persistence, so the EMA's warm-up reads (the fp32 EMA at 0.9999 still averages the pretrained start
-for the first few thousand updates, 7 to 12 dB at 5k) enter from below the frame rather than flattening it.
+**Quantity.** Each read's PSNR minus its file's raw copy-last (persistence) PSNR on the same windows: the gain over
+raw copy-last in dB, with copy-last the zero line. It is a raw-frame, stock-decoder, full-frame read, so it is not
+the paper's decoded, scene-crop advantage A and the axis does not call it A. The reads are window means without
+intervals.
+
+**Outputs** (`paper/FIGURE_STANDARDS.md`, Figure 1b, and round 1 of the figure review), drawn with `figstyle`:
+
+- `fig1_curves.pdf/.png`, `PANEL_SIZE` (1.5 in wide, for a place in Figure 1's row): EMA weights only, one line
+  per backbone in its encoding colour with its marker (open: every read is through the stock decoder) at every
+  50k updates, labelled at its right end (leaders where the labels had to move apart), the zero line labelled
+  "copy-last".
+- `figA_training_curves.pdf/.png`, full width: the same with the live weights dotted beside each EMA line.
+
+A read carrying a `note` (SD 3.5's provisional 170k read from another scorer) is an open marker not joined to its
+line. Early EMA reads fall far below copy-last (the fp32 EMA at 0.9999 still averages the pretrained start for the
+first few thousand updates, 6.7 to 11.8 dB PSNR at 5k); the axis floor clips them, and every clipped read is
+printed and written to `<stem>.json` beside the figure so the caption can disclose it.
 """
 import argparse
 import json
@@ -32,19 +43,21 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "paper"))
-from make_adapt_figures import INK, MARKERS, MUTED, SECONDARY, SERIES, new_figure, save, style  # noqa: E402
-
-from matplotlib.lines import Line2D  # noqa: E402
+import figstyle as fs  # noqa: E402
+from matplotlib import ticker  # noqa: E402
 
 BACKBONES = ("unet", "pixart", "sd35")
 WEIGHTS = ("ema", "live")
 LINESTYLES = {"ema": "-", "live": ":"}
-PANEL_SIZE = (1.7, 1.15)
+PANEL_SIZE = (1.5, 1.4)
+APPENDIX_SIZE = (fs.TEXT_WIDTH, 1.8)
 STEM = "fig1_curves"
+APPENDIX_STEM = "figA_training_curves"
 DEFAULT_CURVES_DIR = os.path.join(REPO, "results", "training_curves")
 DEFAULT_OUT_DIR = os.path.join(REPO, "paper", "figures")
-FLOOR_MARGIN = 0.35     # dB below the lowest live read or persistence
-CEILING_MARGIN = 0.15   # dB above the highest drawn read
+FLOOR = -1.0            # dB of gain: the axis floor; reads below it are clipped and disclosed
+CEILING_MARGIN = 0.25   # dB above the highest drawn read
+MARK_EVERY = 50000      # updates between markers on a line
 
 
 def _finite(v):
@@ -100,67 +113,67 @@ def load_curves(curves_dir):
 
 
 def series(curve, weights, noted=False):
-    """{"k_updates", "psnr"} of one weight set, in step order: the joined reads, or with `noted` the reads
-    that carry a note and are drawn apart."""
+    """{"k_updates", "psnr", "gain"} of one weight set, in step order: the joined reads, or with `noted` the reads
+    that carry a note and are drawn apart. The gain is the read's PSNR minus the file's raw copy-last PSNR."""
     rs = [r for r in curve["reads"] if r["weights"] == weights and bool(r.get("note")) == noted]
-    return {"k_updates": [r["step"] / 1000.0 for r in rs], "psnr": [float(r["psnr"]) for r in rs]}
+    base = curve["persistence"]["psnr"]
+    return {"k_updates": [r["step"] / 1000.0 for r in rs], "psnr": [float(r["psnr"]) for r in rs],
+            "gain": [float(r["psnr"]) - base for r in rs]}
 
 
-def y_limits(curves):
-    """(floor, ceiling) in dB: the floor from the live reads and persistence, the ceiling from every read."""
-    anchors = [c["persistence"]["psnr"] for c in curves]
-    anchors += [r["psnr"] for c in curves for r in c["reads"] if r["weights"] == "live"]
-    if all(r["weights"] == "ema" for c in curves for r in c["reads"]):
-        # no live reads anywhere: the late half of each EMA curve stands in for them
-        for c in curves:
-            ema = [r["psnr"] for r in c["reads"] if r["weights"] == "ema"]
-            anchors += ema[len(ema) // 2:]
-    top = max([r["psnr"] for c in curves for r in c["reads"]] + anchors)
-    return math.floor((min(anchors) - FLOOR_MARGIN) * 2) / 2, top + CEILING_MARGIN
+def y_limits(curves, weights=WEIGHTS):
+    """(floor, ceiling) of the gain axis: the fixed floor below copy-last, the ceiling from every drawn read."""
+    gains = [v for c in curves for w in weights for noted in (False, True) for v in series(c, w, noted)["gain"]]
+    return FLOOR, max(gains + [0.0]) + CEILING_MARGIN
 
 
-def display_label(label):
-    """The file's label as printed: Greek alpha for PixArt, as the paper writes it."""
-    return label.replace("-alpha", "-\u03b1")
-
-
-def draw(curves, size=PANEL_SIZE):
-    """The panel: (figure, axes). Colours and markers follow the backbone's slot in `BACKBONES`."""
-    style()
-    fig, (ax,) = new_figure(size)
-    lo, hi = y_limits(curves)
-    pers = {round(c["persistence"]["psnr"], 6) for c in curves}
+def clipped_reads(curves, weights=WEIGHTS):
+    """The reads under the axis floor, for the caption: [{backbone, weights, step, psnr, gain}]."""
+    out = []
     for c in curves:
-        slot = BACKBONES.index(c["backbone"])
-        colour, marker = SERIES[slot % len(SERIES)], MARKERS[slot % len(MARKERS)]
-        for w in WEIGHTS:
+        for w in weights:
+            s = series(c, w)
+            out += [{"backbone": c["backbone"], "weights": w, "step": round(k * 1000), "psnr": round(p, 2),
+                     "gain": round(g, 2)} for k, p, g in zip(s["k_updates"], s["psnr"], s["gain"]) if g < FLOOR]
+    return out
+
+
+def draw(curves, weights=("ema",), size=PANEL_SIZE):
+    """The panel: (figure, axes). Colours and markers are the encoding table's; stock-decoder reads are open."""
+    fs.style()
+    fig, (ax,) = fs.new_figure(size)
+    lo, hi = y_limits(curves, weights)
+    ends = []
+    for c in curves:
+        ent = fs.BACKBONES[c["backbone"]]
+        for w in weights:
             s = series(c, w)
             if s["k_updates"]:
-                ax.plot(s["k_updates"], s["psnr"], color=colour, ls=LINESTYLES[w], lw=0.9 if w == "ema" else 0.8,
-                        zorder=3 if w == "ema" else 2, label=f"{c['label']} {w.upper() if w == 'ema' else w}")
+                every = [i for i, k in enumerate(s["k_updates"]) if round(k * 1000) % MARK_EVERY == 0]
+                if not every or s["k_updates"][-1] - s["k_updates"][every[-1]] >= MARK_EVERY / 2000:
+                    every.append(len(s["k_updates"]) - 1)      # the last read, unless a marker sits close by
+                ax.plot(s["k_updates"], s["gain"], color=ent.colour, ls=LINESTYLES[w],
+                        lw=fs.DATA_LW if w == "ema" else 0.8, zorder=3 if w == "ema" else 2,
+                        marker=ent.marker if w == "ema" else None, markevery=sorted(set(every)), ms=3.5,
+                        mfc="white", mec=ent.colour, mew=0.7, label=f"{c['label']} {w.upper() if w == 'ema' else w}")
+                if w == "ema":
+                    # the label sits right of the backbone's rightmost mark, a noted read included
+                    right_k = max(s["k_updates"] + series(c, w, noted=True)["k_updates"])
+                    ends.append((right_k, s["gain"][-1], ent.label, ent.colour))
             apart = series(c, w, noted=True)
             if apart["k_updates"]:
-                ax.plot(apart["k_updates"], apart["psnr"], ls="none", marker=marker, ms=2.6, mfc="white",
-                        mec=colour, mew=0.6, zorder=4, label=f"{c['label']} {w} (noted)")
-        if len(pers) > 1:
-            # different window sets: each backbone's own persistence, in its colour
-            ax.axhline(c["persistence"]["psnr"], color=colour, lw=0.6, ls="--", zorder=1, label="persistence")
-    if len(pers) == 1:
-        ax.axhline(curves[0]["persistence"]["psnr"], color=MUTED, lw=0.7, ls="--", zorder=1, label="persistence")
-        ax.text(0.98, curves[0]["persistence"]["psnr"] + 0.03, "persistence", transform=ax.get_yaxis_transform(),
-                ha="right", va="bottom", fontsize=5.5, color=SECONDARY)
+                ax.plot(apart["k_updates"], apart["gain"], ls="none", marker=ent.marker, ms=3.5, mfc="white",
+                        mec=ent.colour, mew=0.7, zorder=4, label=f"{c['label']} {w} (noted)")
+    fs.end_labels(ax, ends, gap=(hi - lo) * 0.13, leaders=True)
+    ax.axhline(0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref", label="copy-last")
+    ax.text(1.0, 0, "copy-last", transform=ax.get_yaxis_transform(), ha="right", va="bottom", fontsize=fs.ANNOT_PT)
     right = max(r["step"] for c in curves for r in c["reads"]) / 1000.0
-    ax.set_xlim(0, right * 1.02)
+    ax.set_xlim(0, right * (1.02 if size[0] < 3 else 1.1))
     ax.set_ylim(lo, hi)
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(100 if size[0] < 3 else 50))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1.0))
     ax.set_xlabel("updates (thousands)")
-    ax.set_ylabel("one-tic PSNR (dB)")
-    handles = [Line2D([], [], color=SERIES[BACKBONES.index(c["backbone"]) % len(SERIES)], lw=1.0,
-                      label=display_label(c["label"])) for c in curves]
-    handles += [Line2D([], [], color=INK, lw=0.9, ls="-", label="EMA")]
-    if any(r["weights"] == "live" for c in curves for r in c["reads"]):
-        handles += [Line2D([], [], color=INK, lw=0.8, ls=":", label="live")]
-    ax.legend(handles=handles, loc="lower right", ncol=2, fontsize=5, handlelength=1.4, columnspacing=0.8,
-              handletextpad=0.4, labelspacing=0.2)
+    ax.set_ylabel("gain over raw\ncopy-last (dB)" if size[1] < 1.6 else "gain over raw copy-last (dB)")
     return fig, ax
 
 
@@ -169,17 +182,32 @@ def main(argv=None):
     p.add_argument("--curves-dir", default=DEFAULT_CURVES_DIR, help="directory holding <backbone>.json")
     p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     p.add_argument("--stem", default=STEM)
+    p.add_argument("--appendix-stem", default=APPENDIX_STEM)
     a = p.parse_args(argv)
     curves = load_curves(a.curves_dir)
-    fig, _ = draw(curves)
-    for path in save(fig, a.out_dir, a.stem):
+    written = []
+    for stem, weights, size in ((a.stem, ("ema",), PANEL_SIZE), (a.appendix_stem, WEIGHTS, APPENDIX_SIZE)):
+        fig, _ = draw(curves, weights, size)
+        written += fs.save(fig, a.out_dir, stem)
+        side = os.path.join(a.out_dir, f"{stem}.json")
+        with open(side, "w") as f:
+            json.dump({"weights": list(weights), "floor_db": FLOOR,
+                       "persistence_psnr": {c["backbone"]: c["persistence"]["psnr"] for c in curves},
+                       "clipped_reads": clipped_reads(curves, weights),
+                       "noted_reads": [{"backbone": c["backbone"], **{k: r[k] for k in ("step", "weights", "psnr")},
+                                        "note": r["note"]} for c in curves for r in c["reads"] if r.get("note")],
+                       "last_reads": {c["backbone"]: {w: {"step": int(series(c, w)["k_updates"][-1] * 1000),
+                                                          "gain": series(c, w)["gain"][-1]}
+                                                      for w in weights if series(c, w)["k_updates"]}
+                                      for c in curves}}, f, indent=1)
+            f.write("\n")
+        written.append(side)
+    for path in written:
         print("wrote", path)
+    for r in clipped_reads(curves):
+        print(f"clipped below {FLOOR:g} dB: {r['backbone']} {r['weights']} {r['step']}: {r['psnr']} dB PSNR "
+              f"({r['gain']:+.2f} dB)")
     for c in curves:
-        for w in WEIGHTS:
-            s = series(c, w)
-            if s["k_updates"]:
-                print(f"{c['backbone']} {w}: {len(s['k_updates'])} reads, {s['k_updates'][0]:g}k to "
-                      f"{s['k_updates'][-1]:g}k, last {s['psnr'][-1]:.2f} dB")
         for r in c["reads"]:
             if r.get("note"):
                 print(f"{c['backbone']} {r['weights']} {r['step']}: drawn apart ({r['note']})")
