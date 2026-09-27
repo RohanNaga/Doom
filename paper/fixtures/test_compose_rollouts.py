@@ -79,7 +79,7 @@ def mediabox(path):
 
 def test_the_composer_draws_both_controls_and_both_maps_at_full_width(tmp_path):
     root = write_export(tmp_path / "export")
-    paths, notes = cr.compose(root, str(tmp_path / "out"))
+    paths, notes = cr.compose(root, str(tmp_path / "out"), tics=cr.WIDE_TICS)
     pdf = str(tmp_path / "out" / "fig2_rollouts.pdf")
     assert pdf in paths and os.path.getsize(tmp_path / "out" / "fig2_rollouts.png") > 5000
     assert b"/Type3" not in open(pdf, "rb").read()
@@ -93,7 +93,7 @@ def test_the_composer_draws_both_controls_and_both_maps_at_full_width(tmp_path):
     # the model rows carry their per-tic scene PSNR from the manifest (tuned rows are 4th and 6th in the fixture)
     expected = {"1": 24.8, "2": 24.5, "4": 24.0, "8": 23.0, "16": 21.0, "32": 17.0}
     assert arena["rows"]["unet_tuned"]["scene_psnr"] == expected
-    assert arena["rows"]["adapter_tuned"]["label"] == "after 8 episodes,\n4k updates"
+    assert arena["rows"]["adapter_tuned"]["label"] == "LoRA 4k"
     assert arena["rows"]["truth_raw"]["scene_psnr"] == {}                  # true rows get no numbers
     # each map has its own true row
     assert set(side["blocks"][0]["windows"]["train_map02"]["rows"]) == {"truth_raw", "unet_tuned"}
@@ -116,8 +116,8 @@ def test_a_missing_frame_stops_the_build_with_its_path(tmp_path):
 
 def test_a_root_manifest_and_the_stacked_layout(tmp_path):
     root = write_export(tmp_path / "export", manifest_at_root=True)
-    cr.compose(root, str(tmp_path / "side"))
-    cr.compose(root, str(tmp_path / "stack"), stack=True)
+    cr.compose(root, str(tmp_path / "side"), tics=cr.WIDE_TICS)
+    cr.compose(root, str(tmp_path / "stack"), tics=cr.WIDE_TICS, stack=True)
     side = json.load(open(tmp_path / "side" / "fig2_rollouts.json"))
     assert side["blocks"][1]["windows"]["train_map02"]["rows"]["unet_tuned"]["scene_psnr"]["1"] == pytest.approx(24.8)
     _, h_side = mediabox(str(tmp_path / "side" / "fig2_rollouts.pdf"))
@@ -153,3 +153,34 @@ def test_the_stewards_manifest_shape_a_root_list_of_windows_with_per_tic_series(
     arena = out["blocks"][0]["windows"]["unseen_arena07"]
     assert arena["start_row"] == 837 and arena["episode"] == 41
     assert arena["rows"]["adapter_tuned"]["scene_psnr"]["1"] == pytest.approx(22.8)
+
+
+def test_the_tic_zero_column_is_the_raw_context_frame_in_every_row(tmp_path):
+    root = write_export(tmp_path / "export")
+    cr.compose(root, str(tmp_path / "out"), stack=True, map_controls={"train_map02": "forward"})
+    side = json.load(open(tmp_path / "out" / "fig2_rollouts.json"))
+    assert side["tics"] == [0, 1, 4, 16, 32]
+    # map 2 comes from its forward window until the brighter re-pick lands; stacked, it is drawn once
+    assert side["blocks"][0]["windows"]["train_map02"]["dir"] == "train_map02_forward"
+    assert "train_map02" not in side["blocks"][1]["windows"] and side["drawn_once"] == ["train_map02"]
+    assert side["frame_in"][0] == pytest.approx(cr.STACKED_FRAME_IN)
+    rows = side["blocks"][0]["windows"]["unseen_arena07"]["rows"]
+    assert {r["tic0"] for r in rows.values()} == {"truth_raw"}         # the model rows too
+
+
+def test_a_per_block_window_override_and_a_second_root_manifest(tmp_path):
+    root = write_export(tmp_path / "export", manifest_at_root=True)
+    # a brighter map 2 window under another name, its manifest in a second root file
+    import shutil
+    shutil.copytree(os.path.join(root, "train_map02_turn_left"), os.path.join(root, "train_map02_turn_left_bright"))
+    side = json.load(open(os.path.join(root, "manifest.json")))["windows"]["train_map02_turn_left"]
+    entry = {**side, "dir": "/sata2/x/train_map02_turn_left_bright", "start_row": 2208}
+    with open(os.path.join(root, "manifest_bright.json"), "w") as f:
+        json.dump({"windows": [entry]}, f)
+    cr.compose(root, str(tmp_path / "out"), stack=True,
+               map_controls={"train_map02:turn_left": "turn_left_bright"})
+    out = json.load(open(tmp_path / "out" / "fig2_rollouts.json"))
+    left, fwd = out["blocks"]
+    assert left["windows"]["train_map02"]["dir"] == "train_map02_turn_left_bright"
+    assert left["windows"]["train_map02"]["start_row"] == 2208
+    assert fwd["windows"]["train_map02"]["dir"] == "train_map02_forward" and out["drawn_once"] == []

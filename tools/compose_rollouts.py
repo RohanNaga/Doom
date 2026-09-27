@@ -26,6 +26,7 @@ windows (episode, start tic), the files drawn and the PSNR numbers printed, for 
 frame stops the build with its path; a model row with no PSNR in the manifest is drawn without numbers and noted.
 """
 import argparse
+import glob
 import json
 import os
 import re
@@ -39,12 +40,13 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "paper"))
 import figstyle as fs  # noqa: E402
 
-TICS = (0, 1, 2, 4, 8, 16, 32)
+TICS = (0, 1, 4, 16, 32)             # the stacked layout (round 2); the wide one uses WIDE_TICS
+WIDE_TICS = (0, 1, 2, 4, 8, 16, 32)
 CONTROLS = ("turn_left", "forward")
 CONTROL_LABELS = {"turn_left": "held turn left", "turn_right": "held turn right", "forward": "held forward",
                   "strafe": "held strafe", "fight": "fight"}
 # (window map, group label, [(row label, row directory stem)]); the decoder suffix is added per row
-ADAPTED_LABEL = "after 8 episodes,\n4k updates"
+ADAPTED_LABEL = "LoRA 4k"      # round 2 (Astra 1): the episodes and budget go in the caption
 GROUPS = (("train_map02", "map 2\n(training)", (("true", "truth"), ("U-Net", "unet"))),
           ("unseen_arena07", "arena 7\n(unseen)",
            (("true", "truth"), ("zero-shot", "unet"), (ADAPTED_LABEL, "adapter"))))
@@ -70,24 +72,35 @@ def window_dirs(root):
 
 
 def load_manifest(root, window_dir):
-    """The window's manifest: `<window>/manifest.json`, else its entry in `<root>/manifest.json`, else {}."""
+    """The window's manifest: `<window>/manifest.json`, else its entry in a root manifest (`manifest.json` first,
+    then any `manifest_*.json`, such as the steward's `manifest_bright.json`), matched by the window directory's
+    name; a `<map>_<control>` match counts only in `manifest.json`. {} when none names it."""
     p = os.path.join(window_dir, "manifest.json")
     if os.path.exists(p):
         with open(p) as f:
             return json.load(f)
-    p = os.path.join(root, "manifest.json")
-    if os.path.exists(p):
-        with open(p) as f:
+    name = os.path.basename(window_dir)
+    paths = [os.path.join(root, "manifest.json")] + sorted(
+        q for q in glob.glob(os.path.join(root, "manifest_*.json")))
+    fallback = {}
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        with open(path) as f:
             js = json.load(f)
-        name = os.path.basename(window_dir)
         windows = js.get("windows", js) if isinstance(js, dict) else js
         if isinstance(windows, dict):
-            return windows.get(name, {})
-        if isinstance(windows, list):
-            return next((e for e in windows if isinstance(e, dict) and name in (
-                e.get("window"), os.path.basename(str(e.get("dir", "")).rstrip("/")),
-                f"{e.get('map')}_{e.get('control')}")), {})
-    return {}
+            if name in windows:
+                return windows[name]
+            continue
+        for e in windows if isinstance(windows, list) else []:
+            if not isinstance(e, dict):
+                continue
+            if name in (e.get("window"), os.path.basename(str(e.get("dir", "")).rstrip("/"))):
+                return e
+            if not fallback and path.endswith("manifest.json") and name == f"{e.get('map')}_{e.get('control')}":
+                fallback = e
+    return fallback
 
 
 def as_tic_series(v):
@@ -133,28 +146,46 @@ def frame(row_dir, tic, scene=True):
     return img[:SCENE_ROWS] if scene else img
 
 
-def plan(root, controls, decoder, truth, notes):
-    """The blocks and groups to draw: [(control, header, {group map: window dir})] and the group rows."""
+def plan(root, controls, decoder, truth, notes, map_controls=None):
+    """The blocks and groups to draw: [(control, header, {group map: window dir})] and the group rows.
+    `map_controls` ({map: control}) draws a map's rows from another control's window in every block (the map 2
+    rows from the forward window until the steward's brighter re-pick lands); the group label then names it."""
     windows = window_dirs(root)
+    map_controls = map_controls or {}
+
+    def window_control(gmap, control):
+        return map_controls.get(f"{gmap}:{control}", map_controls.get(gmap, control))
+
     blocks = []
     for control in controls:
-        found = {g[0]: windows.get((g[0], control)) for g in GROUPS}
+        found = {g[0]: windows.get((g[0], window_control(g[0], control))) for g in GROUPS}
         missing = [m for m, d in found.items() if d is None]
         if missing:
             raise SystemExit(f"no window directory for {missing} under control {control!r} in {root}")
         blocks.append((control, CONTROL_LABELS.get(control, control.replace("_", " ")), found))
     groups = []
     for gmap, glabel, rows in GROUPS:
+        other = map_controls.get(gmap)
+        if other:
+            # a map drawn from one control's window in every block says so in its group label
+            base = other.split("_bright")[0]
+            glabel = glabel.replace("\n", f", {CONTROL_LABELS.get(base, base.replace('_', ' '))}\n")
         groups.append((gmap, glabel, [(label, f"{stem}_{truth if stem == 'truth' else decoder}", stem != "truth")
                                       for label, stem in rows]))
     return blocks, groups
 
 
+STACKED_FRAME_IN = 0.7       # the stacked layout's frame width (round 2: readable frames, about 0.7 in)
+
+
 def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth="raw", stack=False,
-            width=fs.TEXT_WIDTH, stem="fig2_rollouts"):
-    """Compose Figure 2 and write it with its sidecar; returns the written paths and the notes."""
+            width=fs.TEXT_WIDTH, stem="fig2_rollouts", map_controls=None, max_frame=None):
+    """Compose Figure 2 and write it with its sidecar; returns the written paths and the notes.
+
+    The tic-0 column shows the same raw last context frame in every row of a group (headed "0*"): raw persistence
+    copies it at every later tic, and a decoded context frame would not be that prediction (round 2, Astra 3)."""
     notes = []
-    blocks, groups = plan(root, controls, decoder, truth, notes)
+    blocks, groups = plan(root, controls, decoder, truth, notes, map_controls)
     fs.style()
     import matplotlib.pyplot as plt
 
@@ -181,16 +212,37 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
     left = group_w + row_w
     avail = width - left - 0.02 - (n_side - 1) * BLOCK_GAP - n_side * ((per_block - 1) * GUTTER + CONTEXT_GAP)
     fw = avail / (n_side * ncols)
+    if max_frame is None and stack:
+        max_frame = STACKED_FRAME_IN
+    if max_frame and fw > max_frame:
+        # capped frames: the page shrinks to the content, which LaTeX centres, instead of leaving a blank margin
+        fw = max_frame
+        width = left + 0.02 + n_side * (ncols * fw + (per_block - 1) * GUTTER + CONTEXT_GAP) + \
+            (n_side - 1) * BLOCK_GAP
     fh = fw * aspect
 
     def group_height(rows):
         return sum(fh + (PSNR_LINE if model else 0.0) for _, _, model in rows) + ROW_GAP * (len(rows) - 1)
 
-    body = sum(group_height(rows) for _, _, rows in groups) + GROUP_GAP * (len(groups) - 1)
+    # a group whose window repeats the one an earlier stacked block drew (a map drawn from one control's window
+    # in every block) is drawn once, in the first block
+    drawn_once = {g[0] for g in groups if stack and len({b[2][g[0]] for b in blocks}) == 1 and len(blocks) > 1}
+
+    def block_groups(b):
+        return [g for g in groups if not (b > 0 and g[0] in drawn_once)]
+
+    def body_of(b):
+        gs = block_groups(b)
+        return sum(group_height(rows) for _, _, rows in gs) + GROUP_GAP * (len(gs) - 1)
+
     stacks = len(blocks) if stack else 1
-    height = stacks * (2 * HEADER_LINE + body) + (stacks - 1) * GROUP_GAP * 2 + 0.02
+    tops = [0.0]
+    for b in range(1, stacks):
+        tops.append(tops[-1] + 2 * HEADER_LINE + body_of(b - 1) + 2 * GROUP_GAP)
+    height = tops[-1] + 2 * HEADER_LINE + body_of(stacks - 1) + 0.02
     fig = plt.figure(figsize=(width, height))
     record = {"root": os.path.relpath(root, REPO) if root.startswith(REPO) else root, "decoder": decoder,
+              "drawn_once": sorted(drawn_once),
               "truth": truth, "tics": list(tics), "frame_in": [round(fw, 4), round(fh, 4)], "blocks": []}
 
     def place(x, y, w, h):
@@ -201,15 +253,16 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
 
     for b, (control, header, found) in enumerate(blocks):
         bx = left + (0 if stack else b * (ncols * fw + (per_block - 1) * GUTTER + CONTEXT_GAP + BLOCK_GAP))
-        by = (b * (2 * HEADER_LINE + body + 2 * GROUP_GAP)) if stack else 0.0
+        by = tops[b] if stack else 0.0
         xs = [bx + (0 if i == 0 else fw + CONTEXT_GAP + (i - 1) * (fw + GUTTER)) for i in range(ncols)]
         block_w = xs[-1] + fw - bx
         fig_text(bx + block_w / 2, by, header, ha="center", va="top", fontsize=fs.LABEL_PT)
         for x, tic in zip(xs, tics):
-            fig_text(x + fw / 2, by + HEADER_LINE, str(tic), ha="center", va="top", fontsize=fs.TICK_PT)
+            fig_text(x + fw / 2, by + HEADER_LINE, "0*" if tic == 0 else str(tic), ha="center", va="top",
+                     fontsize=fs.TICK_PT)
         y = by + 2 * HEADER_LINE
         entry = {"control": control, "windows": {}}
-        for gmap, glabel, rows in groups:
+        for gmap, glabel, rows in (block_groups(b) if stack else groups):
             wdir = found[gmap]
             manifest = load_manifest(root, wdir)
             entry["windows"][gmap] = {"dir": os.path.basename(wdir),
@@ -221,9 +274,11 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
                 row_dir = os.path.join(wdir, row)
                 if not os.path.isdir(row_dir):
                     raise SystemExit(f"missing row directory {row_dir}")
+                context_dir = os.path.join(wdir, f"truth_{truth}")
                 for x, tic in zip(xs, tics):
                     ax = place(x, y, fw, fh)
-                    ax.imshow(frame(row_dir, tic), interpolation="lanczos", aspect="auto")
+                    src = context_dir if tic == 0 and os.path.isdir(context_dir) else row_dir
+                    ax.imshow(frame(src, tic), interpolation="lanczos", aspect="auto")
                     ax.set_axis_off()
                 if b == 0 or stack:
                     fig_text(left - 3 / 72, y + fh / 2, label, ha="right", va="center", fontsize=fs.ANNOT_PT,
@@ -238,7 +293,8 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
                             shown[tic] = round(series[tic], 1)
                             fig_text(x + fw / 2, y + fh + 0.5 / 72, f"{series[tic]:.1f}", ha="center", va="top",
                                      fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
-                entry["windows"][gmap]["rows"][row] = {"label": label, "scene_psnr": shown}
+                tic0 = os.path.basename(context_dir if os.path.isdir(context_dir) else row_dir)
+                entry["windows"][gmap]["rows"][row] = {"label": label, "scene_psnr": shown, "tic0": tic0}
                 y += fh + (PSNR_LINE if model else 0.0) + ROW_GAP
             y += GROUP_GAP - ROW_GAP
             if b == 0 or stack:
@@ -263,10 +319,16 @@ def main(argv=None):
     p.add_argument("--decoder", default="tuned", help="the model rows' decoder (row directory suffix)")
     p.add_argument("--truth", default="raw", help="the true rows' source (raw, stock or tuned)")
     p.add_argument("--stack", action="store_true", help="stack the control blocks instead of side by side")
+    p.add_argument("--stem", default="fig2_rollouts")
+    p.add_argument("--map-control", action="append", default=[], metavar="MAP[:BLOCK]=WINDOW_CONTROL",
+                   help="draw a map's rows from another window: in every block (train_map02=forward) or in one "
+                        "block (train_map02:turn_left=turn_left_bright)")
     a = p.parse_args(argv)
     if a.tics[0] != 0:
         raise SystemExit("the first tic column is the tic-0 context frame: --tics must start with 0")
-    paths, notes = compose(a.root, a.out_dir, a.controls, tuple(a.tics), a.decoder, a.truth, a.stack)
+    map_controls = dict(spec.split("=", 1) for spec in a.map_control)
+    paths, notes = compose(a.root, a.out_dir, a.controls, tuple(a.tics), a.decoder, a.truth, a.stack,
+                           stem=a.stem, map_controls=map_controls)
     for path in paths:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for n in notes:
