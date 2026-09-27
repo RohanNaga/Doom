@@ -1,6 +1,6 @@
 # Title candidates (Sep 27 2026)
 
-Current (Rohan, Sep 27 13:45): **DoomShift: Efficient Adaptation of World Models to Nearby Domain Shifts** (option 1). Runner-up: option 5.
+Current (Rohan, Sep 27 14:05): **DoomShift: Efficient Adaptation of World Models to Domain Shifts** (option 1 without "nearby"). Runner-up: option 5.
 
 ## Adaptation first
 1. DoomShift: Efficient Adaptation of World Models to Nearby Domain Shifts
