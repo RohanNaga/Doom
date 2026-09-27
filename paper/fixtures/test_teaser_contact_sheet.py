@@ -290,3 +290,16 @@ def test_the_hold_round_picks_rows_across_windows_with_a_held_in_domain_start(tm
     side = json.load(open(out / "fig_teaser_C_hold8.json"))
     assert [r["row"] for r in side["rows"]] == ["turn", "forward", "attack"]
     assert all(r["held"]["unseen"].endswith("8/8") and r["held"]["in-domain"].endswith("8/8") for r in side["rows"])
+
+
+def test_the_hold_round_composes_a_chosen_subset_of_rows_into_a_fixed_slot(tmp_path):
+    root = export(tmp_path)
+    out = tmp_path / "out"
+    rec = tcs.run(root, str(out), str(out / "review"), hold_steps=8, hold_rows=("forward:2", "attack:1"),
+                  max_height=1.5)
+    side = json.load(open(out / "fig_teaser_C_hold8_pick.json"))
+    picks = {p["row"]: p for p in rec["hold"]["rows"]}
+    assert [(r["row"], r["window"], r["tic"]) for r in side["rows"]] == [
+        ("forward", picks["forward"]["unseen"][1]["window"], picks["forward"]["unseen"][1]["tic"]),
+        ("attack", picks["attack"]["unseen"][0]["window"], picks["attack"]["unseen"][0]["tic"])]
+    assert side["size_in"][0] == pytest.approx(5.5) and side["size_in"][1] <= 1.5 + 1e-6

@@ -352,13 +352,17 @@ def row_picks(found, n=2, steps=HORIZON):
     return {"floor": round(floor, 3), "rows": rows}
 
 
-def hold_figure_rows(picks, k=0):
-    """Layout C rows from the hold round: the k-th unseen pick of each row with the row's in-domain moment."""
+def hold_figure_rows(picks, k=0, chosen=None):
+    """Layout C rows from the hold round: the k-th unseen pick of each row with the row's in-domain moment, or with
+    `chosen` ([(row, pick number from 1)]) those rows only, in that order."""
+    by_row = {p["row"]: p for p in picks["rows"]}
+    wanted = chosen or [(p["row"], k + 1) for p in picks["rows"]]
     out = []
-    for p in picks["rows"]:
-        if p["home"] is None or len(p["unseen"]) <= k:
+    for row, number in wanted:
+        p = by_row.get(row)
+        if p is None or p["home"] is None or len(p["unseen"]) < number:
             return None
-        m = p["unseen"][k]
+        m = p["unseen"][number - 1]
         out.append({"row": p["row"], "window": m["window"], "tic": m["tic"], "button": m["button"],
                     "control": m["control"], "story": m["story"], "zero_shot": m["zero_shot"],
                     "adapted": m["adapted"], "depth": m["depth"],
@@ -391,14 +395,14 @@ def restart_rows(rows, restart_root, found, floor):
 
 
 def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,),
-        row_order=None, hold_steps=None):
+        row_order=None, hold_steps=None, hold_rows=None, max_height=2.05):
     """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record. With
     `hold_steps` it runs the hold round instead (`run_hold`)."""
     ws = ct.windows(root)
     if not ws:
         raise SystemExit(f"no window directories <map>_ep<E>_s<S> under {root}")
     if hold_steps:
-        return run_hold(root, out_dir, review_dir, hold_steps, restart_root, row_order)
+        return run_hold(root, out_dir, review_dir, hold_steps, restart_root, row_order, hold_rows, max_height)
     found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir)]
     ordered = sorted(found, key=sort_key)
     starts_on_map2 = {m["action"] for m in found if m["role"] == "training"}
@@ -439,11 +443,13 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
     return rec
 
 
-def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None):
+def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None, hold_rows=None,
+             max_height=2.05):
     """The hold round: every moment whose button is pressed on all `steps` restart steps, counted per button and
     role; the per-row picks (`row_picks`); layout C of the first and second picks at +`steps` from the continuous
     rollouts (`fig_teaser_C_hold<steps>[_alt]`) and, when the restart export holds every moment, from it
-    (`..._restart`). Writes `<review-dir>/teaser_hold<steps>.json`."""
+    (`..._restart`); with `hold_rows` (["forward:2", "attack:1"]: row and pick number) also those rows only, in
+    that order, at most `max_height` tall (`..._pick`). Writes `<review-dir>/teaser_hold<steps>.json`."""
     ws = ct.windows(root)
     found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir, hold_steps=steps)]
     buttons = ("attack", "turn left", "turn right", "forward", "strafe left", "strafe right")
@@ -453,18 +459,23 @@ def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None
     order = list(row_order) if row_order else [r for r, _ in FIGURE_ROWS]
     written = []
     have = (set(os.listdir(restart_root)) if restart_root and os.path.isdir(restart_root) else set())
-    for k, suffix in ((0, ""), (1, "_alt")):
-        rows = hold_figure_rows(picks, k)
+    chosen = [(spec.split(":")[0], int(spec.split(":")[1])) for spec in hold_rows] if hold_rows else None
+    for k, suffix, subset in ((0, "", None), (1, "_alt", None), (0, "_pick", chosen)):
+        if suffix == "_pick" and not chosen:
+            continue
+        rows = hold_figure_rows(picks, k, subset)
         if rows is None:
             continue
-        rows = sorted(rows, key=lambda r: order.index(r["row"]))
+        if not subset:
+            rows = sorted(rows, key=lambda r: order.index(r["row"]))
         stem = f"fig_teaser_C_hold{steps}{suffix}"
-        written += ct.layout_c(root, out_dir, rows, stem=stem, horizon=steps)[0]
+        height = max_height if subset else 2.05
+        written += ct.layout_c(root, out_dir, rows, stem=stem, horizon=steps, max_height=height)[0]
         need = [f"{r['window']}_t{r['tic']}" for r in rows] + [f"{r['home']['window']}_t{r['home']['tic']}"
                                                                for r in rows]
         if restart_root and all(d in have for d in need):
             written += ct.layout_c(root, out_dir, rows, stem=stem + "_restart", horizon=steps,
-                                   restart_root=restart_root)[0]
+                                   restart_root=restart_root, max_height=height)[0]
         elif restart_root:
             picks.setdefault("restart_missing", {})[stem] = [d for d in need if d not in have]
     rec = {"root": root, "hold_steps": steps, "counts": counts, **picks}
@@ -487,12 +498,16 @@ def main(argv=None):
     p.add_argument("--row-order", default=None, help="the rows' order, e.g. turn,forward,attack")
     p.add_argument("--hold-steps", type=int, default=None,
                    help="the hold round: moments whose button is pressed on every one of the next N restart steps")
+    p.add_argument("--hold-rows", default=None,
+                   help="the hold round's chosen figure: row:pick pairs in order, e.g. forward:2,attack:1")
+    p.add_argument("--max-height", type=float, default=2.05, help="the chosen figure's page height at most (in)")
     p.add_argument("--restart-horizon", type=int, nargs="+", default=[HORIZON],
                    help="tics after the context for the restarted redraws (the export holds 16); stems gain the "
                         "number past 8, fig_teaser_C_<n>_restart16")
     a = p.parse_args(argv)
     rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon),
-              tuple(a.row_order.split(",")) if a.row_order else None, a.hold_steps)
+              tuple(a.row_order.split(",")) if a.row_order else None, a.hold_steps,
+              tuple(a.hold_rows.split(",")) if a.hold_rows else None, a.max_height)
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):

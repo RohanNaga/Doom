@@ -209,23 +209,5 @@
     "at_floor": true
    }
   }
- ],
- "restart_missing": {
-  "fig_teaser_C_hold16": [
-   "unseen_arena07_ep158_s1672_t208",
-   "unseen_arena07_ep41_s4360_t204",
-   "unseen_arena07_ep288_s456_t77",
-   "train_map02_ep6008_s712_t37",
-   "train_map02_ep6024_s4424_t147",
-   "train_map02_ep6064_s2312_t177"
-  ],
-  "fig_teaser_C_hold16_alt": [
-   "unseen_arena07_ep158_s1672_t39",
-   "unseen_arena07_ep210_s2888_t217",
-   "unseen_arena07_ep197_s2184_t37",
-   "train_map02_ep6008_s712_t37",
-   "train_map02_ep6024_s4424_t147",
-   "train_map02_ep6064_s2312_t177"
-  ]
- }
+ ]
 }
