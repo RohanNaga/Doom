@@ -11,22 +11,10 @@
    "control": "attack + forward"
   },
   {
-   "tic": 2,
-   "home_tic": 58,
-   "action": "turn left",
-   "control": "attack + turn left + forward"
-  },
-  {
    "tic": 14,
    "home_tic": 1,
    "action": "turn right",
    "control": "attack + turn right + strafe left"
-  },
-  {
-   "tic": 1,
-   "home_tic": 10,
-   "action": "forward",
-   "control": "attack + forward"
   }
  ]
 }

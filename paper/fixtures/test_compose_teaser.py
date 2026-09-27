@@ -110,3 +110,14 @@ def test_a_missing_frame_stops_with_its_path(tmp_path):
     os.remove(os.path.join(root, "unseen_arena07_ep41_s269", "adapter_tuned", "tic_026.png"))
     with pytest.raises(SystemExit, match="adapter_tuned/tic_026"):
         ct.layout_a(root, str(tmp_path / "out"), moments=4)
+
+
+def test_layout_b_takes_the_named_actions_into_a_fixed_slot(tmp_path):
+    root = export(tmp_path)
+    paths, rec = ct.layout_b(root, str(tmp_path / "out"), pick=["attack", "move right"], slot_height=1.5)
+    assert [r["action"] for r in rec["rows"]] == ["attack", "move right"]      # the named order, not the priority
+    assert [r["tic"] for r in rec["rows"]] == [6, 20]
+    w, h = mediabox(str(tmp_path / "out" / "fig_teaser_actions.pdf"))
+    assert (w, h) == (pytest.approx(5.5, abs=0.01), pytest.approx(1.5, abs=0.01))
+    with pytest.raises(SystemExit, match="turn right"):
+        ct.layout_b(root, str(tmp_path / "out"), pick=["attack", "turn right"], slot_height=1.5)
