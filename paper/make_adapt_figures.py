@@ -1349,13 +1349,18 @@ def fig_dots(stats, records, home, out_dir, band=None):
     by_skill = sorted(records, key=lambda r: (r["S0"] is None, -(r["S0"] or 0), r["arena"]))
     order = [r["arena"] for r in by_skill if str(r["arena"]) in shares]
     crossing = stats["attainment_half_gap"]["crossing_step"]
+    lowered = False
     for i, a in enumerate(order):
         v, step = shares[str(a)], crossing.get(str(a))
         never = step is None
         bx.plot([i], [v], ls="none", marker="o", ms=4.0, mew=0.8, mec=ADAPTER.colour,
                 mfc="white" if never else ADAPTER.colour, zorder=3)
-        # a censored arena sits just under the 0.5 line, so its "never" goes beneath the dot, clear of the line
-        bx.annotate("never" if never else step_label(step), (i, v), xytext=(0, -5 if never else 4),
+        # a censored arena sits just under the 0.5 line, so its "never" goes beneath the dot, clear of the line;
+        # neighbouring "never" labels alternate between two depths so they do not overlap
+        prev_never = i > 0 and crossing.get(str(order[i - 1])) is None
+        lowered = never and prev_never and not lowered
+        dy = (-12 if lowered else -5) if never else 4
+        bx.annotate("never" if never else step_label(step), (i, v), xytext=(0, dy),
                     textcoords="offset points", ha="center", va="top" if never else "bottom", fontsize=fs.MIN_PT,
                     color=fs.CONTEXT_INK, annotation_clip=False)
     for y, text, style in ((0.0, "zero-shot", "-"), (0.5, "half of the gap", (0, (1, 1.2))),
