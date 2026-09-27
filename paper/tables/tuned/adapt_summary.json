@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_adapt_figures.py",
- "generated_at": "2026-09-27T08:32:15-04:00",
+ "generated_at": "2026-09-27T09:12:30-04:00",
  "decoder": "tuned",
  "home": 5.0592508260160685,
  "home_source": "results/home_unet_tuned/metrics.json",
@@ -1058,227 +1058,6 @@
  },
  "recipe": [],
  "zero_shot": {
-  "unet": {
-   "source": "adaptation step 0",
-   "home": 5.0592508260160685,
-   "maps": {
-    "8": {
-     "A": 2.036097891628742,
-     "A_ci": [
-      1.8305467441678047,
-      2.244750351086259
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "15": {
-     "A": 2.8785769753158092,
-     "A_ci": [
-      2.657359872944653,
-      3.0870629817247393
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "17": {
-     "A": 1.645927906036377,
-     "A_ci": [
-      1.433394752535969,
-      1.8411375310271978
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "12": {
-     "A": 1.7893540859222412,
-     "A_ci": [
-      1.611926009412855,
-      1.975007385574281
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "14": {
-     "A": 1.8517136983573437,
-     "A_ci": [
-      1.4493353741243482,
-      2.158804221078753
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "13": {
-     "A": 2.121122594922781,
-     "A_ci": [
-      1.9413333632051946,
-      2.311339388694614
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "10": {
-     "A": 2.307948589324951,
-     "A_ci": [
-      2.051174208521843,
-      2.560862674191594
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "11": {
-     "A": 2.276899054646492,
-     "A_ci": [
-      2.0352404532022774,
-      2.513865417987108
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "16": {
-     "A": 2.5265442188829184,
-     "A_ci": [
-      2.37915744073689,
-      2.6515336526557802
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "1": {
-     "A": 1.8385154083371162,
-     "A_ci": [
-      1.68996049053967,
-      1.9708770997822285
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "9": {
-     "A": 2.8779164142906666,
-     "A_ci": [
-      2.6398800635710358,
-      3.115668408386409
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "6": {
-     "A": 1.068928960710764,
-     "A_ci": [
-      0.9272539695724845,
-      1.1931502162478864
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "7": {
-     "A": 1.0703127905726433,
-     "A_ci": [
-      0.8224064037203789,
-      1.3135007969103751
-     ],
-     "M": null,
-     "M_ci": null
-    }
-   }
-  },
-  "adapt4000_live": {
-   "source": "results/fresh_rescore/adapt4000_live",
-   "home": null,
-   "home_M": null,
-   "maps": {
-    "1": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "6": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "7": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "8": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "9": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "10": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "11": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "12": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "13": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "14": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "15": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "16": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "17": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    }
-   }
-  },
   "adapt4000_live_tuned": {
    "source": "results/fresh_rescore/adapt4000_live_tuned",
    "home": null,
@@ -1452,104 +1231,6 @@
       -0.05116101106577844,
       -0.030922689418730442
      ]
-    }
-   }
-  },
-  "pixart200k_ema": {
-   "source": "results/fresh_rescore/pixart200k_ema",
-   "home": null,
-   "home_M": null,
-   "maps": {
-    "1": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "6": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "7": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "8": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "9": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "10": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "11": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "12": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "13": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "14": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "15": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "16": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "17": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
     }
    }
   },
@@ -1735,199 +1416,179 @@
    "home_M": null,
    "maps": {
     "1": {
-     "A": null,
-     "M": null,
+     "A": 1.35922347381711,
+     "M": 0.05302085909352172,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.1860137308016419,
+      1.5339058347977697
+     ],
+     "M_ci": [
+      0.04211032726816484,
+      0.06386781963483372
+     ]
     },
     "6": {
-     "A": null,
-     "M": null,
+     "A": 0.3670894354581833,
+     "M": 0.12330503723569564,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      0.22744978414848446,
+      0.5260796285234391
+     ],
+     "M_ci": [
+      0.11735283634479857,
+      0.12939881006241194
+     ]
     },
     "7": {
-     "A": null,
-     "M": null,
+     "A": 0.6773370802402496,
+     "M": 0.03929086818243377,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      0.464565624576062,
+      0.9210766494274139
+     ],
+     "M_ci": [
+      0.03277865170311998,
+      0.04479148301979876
+     ]
     },
     "8": {
-     "A": null,
-     "M": null,
+     "A": 1.6363823749125004,
+     "M": 0.013324441066288273,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.4233086770400405,
+      1.8342448442243036
+     ],
+     "M_ci": [
+      -0.0026033966399609198,
+      0.026004606659625992
+     ]
     },
     "9": {
-     "A": null,
-     "M": null,
+     "A": 2.3814318403601646,
+     "M": 0.059099506586790085,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      2.144997750595212,
+      2.5898419662378727
+     ],
+     "M_ci": [
+      0.04997126796770317,
+      0.06873678317388111
+     ]
     },
     "10": {
-     "A": null,
-     "M": null,
+     "A": 1.853223543614149,
+     "M": 0.08406612620456144,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.6353425597772002,
+      2.0922225843183697
+     ],
+     "M_ci": [
+      0.07719272027316038,
+      0.09051431306252196
+     ]
     },
     "11": {
-     "A": null,
-     "M": null,
+     "A": 1.7049100883305073,
+     "M": 0.04077186161885038,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.4508597771637142,
+      1.9589151167310774
+     ],
+     "M_ci": [
+      0.026093660108745097,
+      0.05525393848729434
+     ]
     },
     "12": {
-     "A": null,
-     "M": null,
+     "A": 1.4985982440412045,
+     "M": 0.035737224854528904,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.3466788027435541,
+      1.62860317658633
+     ],
+     "M_ci": [
+      0.021981571692595025,
+      0.05513339684694074
+     ]
     },
     "13": {
-     "A": null,
-     "M": null,
+     "A": 1.298060480505228,
+     "M": 0.07985417540112394,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.0849103937856852,
+      1.5087494179606438
+     ],
+     "M_ci": [
+      0.07032576319033979,
+      0.08999555374248303
+     ]
     },
     "14": {
-     "A": null,
-     "M": null,
+     "A": 1.321567103266716,
+     "M": 0.049898788309292286,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      0.8576438998803496,
+      1.7049374394118786
+     ],
+     "M_ci": [
+      0.03853804656605462,
+      0.060167216135050675
+     ]
     },
     "15": {
-     "A": null,
-     "M": null,
+     "A": 2.585072658956051,
+     "M": 0.058770979681867175,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      2.471299611032009,
+      2.7018722631037235
+     ],
+     "M_ci": [
+      0.04715217839220713,
+      0.07007184446956671
+     ]
     },
     "16": {
-     "A": null,
-     "M": null,
+     "A": 1.8724467027932405,
+     "M": 0.13730429123097565,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.752969392389059,
+      1.9863006884697825
+     ],
+     "M_ci": [
+      0.11693740986811463,
+      0.15484231422306038
+     ]
     },
     "17": {
-     "A": null,
-     "M": null,
+     "A": 1.3889462016522884,
+     "M": 0.09811219018592965,
      "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    }
-   }
-  },
-  "unet200k_ema": {
-   "source": "results/fresh_rescore/unet200k_ema",
-   "home": null,
-   "home_M": null,
-   "maps": {
-    "1": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "6": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "7": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "8": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "9": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "10": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "11": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "12": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "13": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "14": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "15": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "16": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
-    },
-    "17": {
-     "A": null,
-     "M": null,
-     "n": 256,
-     "A_ci": null,
-     "M_ci": null
+     "A_ci": [
+      1.166093838773668,
+      1.5656822510063648
+     ],
+     "M_ci": [
+      0.08843727028870489,
+      0.10644890943476638
+     ]
     }
    }
   },
   "unet200k_ema_tuned": {
    "source": "results/fresh_rescore/unet200k_ema_tuned",
-   "home": null,
+   "home": 5.0592508260160685,
    "home_M": null,
    "maps": {
     "1": {
@@ -2133,7 +1794,7 @@
   },
   {
    "path": "results/adapt/unet200k_arenas13_map07_r16_k8_s0/scores.jsonl",
-   "sha256": "058c4bdccb849f5e798395072c7967709adff19c035beb40ed17a6fcbec894d8"
+   "sha256": "d5c58ed8940f2d792348b62d2e312d01973b51d0fea8f227aea62ac9c134c69c"
   },
   {
    "path": "results/adapt/unet200k_arenas13_map07_r16_k8_s1/scores.jsonl",
@@ -2303,11 +1964,6 @@
   "unet200k_arenas13_map16_r16_k8_s0_g8k: no step-0 heldout_A_tuned; left out",
   "unet200k_arenas13_map16_r16_k8_s0_lr3e4: no step-0 heldout_A_tuned; left out",
   "unet200k_arenas13_map16_r16_k8_s0_lr5e4: no step-0 heldout_A_tuned; left out",
-  "unet200k_arenas13_map16_r16_k8_s1: no step-0 heldout_A_tuned; left out",
-  "results/fresh_rescore/adapters: no one-tic eval_tf reads keyed by map; row adapters skipped",
-  "results/fresh_rescore/home_pixart200k_ema: no one-tic eval_tf reads keyed by map; row home_pixart200k_ema skipped",
-  "results/fresh_rescore/home_pixart200k_ema_tuned: no one-tic eval_tf reads keyed by map; row home_pixart200k_ema_tuned skipped",
-  "results/fresh_rescore/home_unet200k_ema: no one-tic eval_tf reads keyed by map; row home_unet200k_ema skipped",
-  "results/fresh_rescore/home_unet200k_ema_tuned: no one-tic eval_tf reads keyed by map; row home_unet200k_ema_tuned skipped"
+  "unet200k_arenas13_map16_r16_k8_s1: no step-0 heldout_A_tuned; left out"
  ]
 }

@@ -86,9 +86,11 @@ RUN_RE = re.compile(r"_map(?P<map>\d+)_r(?P<rank>\d+)_k(?P<k>\d+)_s(?P<seed>\d+)
 MAP_DIR_RE = re.compile(r"(?:^|[_-])map0*(?P<map>\d+)(?:_h(?P<h>\d+))?$|^0*(?P<bare>\d+)$")
 DECODER_A_RE = re.compile(r"^heldout_A_([A-Za-z][A-Za-z0-9]*)$")
 ROW_NAMES = {"unet": "U-Net", "pixart": "PixArt", "sd35": "SD 3.5",
-             "unet200k_ema": "U-Net", "pixart200k_ema": "PixArt", "adapt4000_live": "U-Net + LoRA (4k)",
-             "sd35_ema": "SD 3.5 (provisional)"}
-ROW_ORDER = ("unet", "unet200k_ema", "pixart", "pixart200k_ema", "sd35", "sd35_ema", "adapt4000_live")
+             "unet200k_ema": "U-Net", "pixart200k_ema": "PixArt", "sd35_ema": "SD 3.5 (provisional)",
+             "sd35_170000": "SD 3.5 (170k, provisional)", "adapt4000_live": "U-Net + LoRA (4k)",
+             "unet200k_ema_tuned": "U-Net", "pixart200k_ema_tuned": "PixArt", "adapt4000_live_tuned": "U-Net + LoRA (4k)"}
+ROW_ORDER = ("unet", "unet200k_ema", "unet200k_ema_tuned", "pixart", "pixart200k_ema", "pixart200k_ema_tuned",
+             "sd35", "sd35_ema", "sd35_170000", "adapt4000_live", "adapt4000_live_tuned")
 RECIPE_ORDER = ("lr3e4", "lr5e4", "g8k")
 RECIPE_LABELS = {"lr3e4": "lr 3e-4", "lr5e4": "lr 5e-4", "g8k": "8k grid"}
 RECIPE_TICKS = (50, 250, 1000, 4000, 8000)      # labelled steps on the recipe panels' narrow axes
@@ -1021,7 +1023,10 @@ def fig_zero_shot(zero_shot, D, key, out_dir, stem, ylabel, zero=False):
     A backbone keeps its colour and marker whichever rows are present (U-Net, PixArt, SD 3.5, then others).
     """
     names = [r for r in ROW_ORDER if r in zero_shot] + sorted(r for r in zero_shot if r not in ROW_ORDER)
-    slot = {n: i for i, n in enumerate(list(ROW_ORDER) + [n for n in names if n not in ROW_ORDER])}
+    # one colour and marker per family, whichever row names are present: U-Net, PixArt, SD 3.5, then the adapters
+    def family(n):
+        return 3 if n.startswith("adapt") else 1 if n.startswith("pixart") else 2 if n.startswith("sd35") else 0
+    slot = {n: family(n) for n in names}
     rows = [n for n in names if any(v.get(key) is not None for v in zero_shot[n]["maps"].values())]
     arenas = sorted({a for r in rows for a, v in zero_shot[r]["maps"].items() if v.get(key) is not None and a in D},
                     key=lambda a: (D[a], a))
@@ -1059,7 +1064,7 @@ def fig_zero_shot(zero_shot, D, key, out_dir, stem, ylabel, zero=False):
     ax.set_ylabel(ylabel)
     ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
     if len(rows) > 1:
-        fig.legend(loc="outside upper center", ncol=len(rows), handletextpad=0.1, columnspacing=0.8,
+        fig.legend(loc="outside upper center", ncol=min(len(rows), 2), handletextpad=0.1, columnspacing=0.8,
                    fontsize=5)
     return save(fig, out_dir, stem)
 
@@ -1094,8 +1099,16 @@ def zero_shot_rows(a, records, home, draws, notes):
         if not sep:
             raise SystemExit(f"--zero-shot {spec!r}: expected NAME=DIR")
         dirs.append((name, path))
+    names = {name for name, _ in dirs}
     for name, path in dirs:
-        maps = load_zero_shot_row(path, a.decoder, draws, a.seed)
+        if a.decoder == STOCK and name.endswith("_tuned"):
+            continue
+        if a.decoder != STOCK and (name + "_" + a.decoder) in names:
+            continue  # its rescored twin carries this decoder's columns
+        if name.startswith("home_") or name == "adapters":
+            continue
+        # SD 3.5 renders through its own 16-channel decoder, so its row keeps the stock columns in every pass
+        maps = load_zero_shot_row(path, STOCK if name.startswith("sd35") else a.decoder, draws, a.seed)
         if not maps:
             notes.append(f"{rel(path)}: no one-tic eval_tf reads keyed by map; row {name} skipped")
             continue
@@ -1103,6 +1116,10 @@ def zero_shot_rows(a, records, home, draws, notes):
         out[name] = {"source": rel(path), "home": own if own is not None else (home if name == "unet" else None),
                      "home_M": median_or_none([maps[m]["M"] for m in TRAINING_MAPS if m in maps]),
                      "maps": maps}
+    if any(n.startswith("unet200k") for n in out) and "unet" in out:
+        fresh = next(n for n in out if n.startswith("unet200k"))
+        out[fresh]["home"] = out[fresh]["home"] if out[fresh]["home"] is not None else out["unet"]["home"]
+        del out["unet"]  # the fresh read is the same model on the same windows; keep one marker per arena
     return out
 
 
