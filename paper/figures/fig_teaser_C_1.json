@@ -101,26 +101,26 @@
    "edges": 0.132,
    "depth": 41,
    "home": {
-    "window": "train_map02_ep6024_s2568",
-    "tic": 37,
+    "window": "train_map02_ep6008_s712",
+    "tic": 38,
     "button": "turn right",
-    "control": "turn right + back",
-    "depth": 45,
-    "in_domain": 22.946,
-    "luma": 45.49,
+    "control": "attack + turn right",
+    "depth": 46,
+    "in_domain": 20.392,
+    "luma": 37.9,
     "near": true,
     "at_floor": true
    },
    "scene_psnr": {
     "zero-shot": 13.934,
     "adapted": 19.314,
-    "in-domain": 22.946
+    "in-domain": 20.392
    },
    "story_shown": 5.38,
    "sources": {
-    "in-domain context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6024_s2568/truth_raw/tic_037.png",
-    "in-domain": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6024_s2568/unet_tuned/tic_045.png",
-    "in-domain ground truth": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6024_s2568/truth_raw/tic_045.png",
+    "in-domain context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6008_s712/truth_raw/tic_038.png",
+    "in-domain": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6008_s712/unet_tuned/tic_046.png",
+    "in-domain ground truth": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/train_map02_ep6008_s712/truth_raw/tic_046.png",
     "context": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep288_s456/truth_raw/tic_033.png",
     "zero-shot": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep288_s456/unet_tuned/tic_041.png",
     "adapted": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser/unseen_arena07_ep288_s456/adapter_tuned/tic_041.png",

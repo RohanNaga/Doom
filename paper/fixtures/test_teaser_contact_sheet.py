@@ -70,7 +70,8 @@ def write_window(root, name, controls, zs, ad=None, colour=True, luma=None):
 ARENA_A = held([(3, 12, ["attack"]), (15, 23, ["turn right"]), (26, 33, ["forward"])])
 ARENA_B = held([(1, 10, ["attack"]), (5, 13, ["forward"]), (12, 16, ["turn left"]),
                 (18, 27, ["turn right", "strafe left"]), (20, 28, ["forward"]), (28, 36, ["attack"])])
-MAP_2 = held([(2, 11, ["attack"]), (5, 14, ["turn right"]), (20, 29, ["turn right"]), (24, 33, ["forward"])])
+MAP_2 = held([(2, 11, ["attack"]), (13, 21, ["turn right"]), (24, 32, ["turn right"])])
+MAP_2B = held([(5, 13, ["forward"]), (24, 32, ["forward"])])
 
 
 def export(tmp_path):
@@ -80,7 +81,8 @@ def export(tmp_path):
                  ad=lambda t: 15.5 + (1.0 if t == 28 else 0.0))       # the overlapping forward at 20 scores best
     # map 2's first turn right (tics 5 to 13) is bright, its second (20 to 28) dark
     write_window(root, "train_map02_ep6008_s712", MAP_2, zs=lambda t: 25.0 - 0.1 * t, colour=False,
-                 luma=lambda t: 200 if 5 <= t <= 13 else 50)
+                 luma=lambda t: 200 if 13 <= t <= 21 else 50)
+    write_window(root, "train_map02_ep6024_s900", MAP_2B, zs=lambda t: 24.0 - 0.1 * t, colour=False)
     return str(root)
 
 
@@ -145,8 +147,11 @@ def test_the_round_scores_every_moment_picks_whole_windows_and_matches_map_2_by_
     assert rows["attack"]["tic"] == 3 and rows["turn"]["tic"] == 15 and rows["forward"]["tic"] == 26
     # in-domain: map 2's own turn right; both starts lie within 20 rollout tics of the arena row's depth 23 (13 and
     # 28), and the brighter one wins although the other is closer
-    assert rows["turn"]["home"]["tic"] == 5 and rows["turn"]["home"]["button"] == "turn right"
+    assert rows["turn"]["home"]["tic"] == 13 and rows["turn"]["home"]["button"] == "turn right"
     assert rows["turn"]["home"]["near"] is True
+    # forward: the only near start (24, depth 32) reads below the map-2 median, so it is taken and flagged
+    assert (rows["forward"]["home"]["window"], rows["forward"]["home"]["tic"]) == ("train_map02_ep6024_s900", 24)
+    assert rows["forward"]["home"]["at_floor"] is False
     # B's attack at depth 36 has no map-2 attack within 20 tics (depth 10): the closest is taken and flagged
     b_attack = next(r for r in picks[1]["rows"] if r["row"] == "attack")
     assert b_attack["home"]["tic"] == 2 and b_attack["home"]["near"] is False
@@ -189,8 +194,8 @@ def test_with_a_restart_export_the_candidates_are_redrawn_from_it_and_rescored(t
     # the steward restarted arena A's three rows and map 2's attack, second turn right and forward starts only
     a_rows = [("unseen_arena07_ep41_s100_t3", True), ("unseen_arena07_ep41_s100_t15", True),
               ("unseen_arena07_ep41_s100_t26", True)]
-    home = [("train_map02_ep6008_s712_t2", False), ("train_map02_ep6008_s712_t20", False),
-            ("train_map02_ep6008_s712_t24", False)]
+    home = [("train_map02_ep6008_s712_t2", False), ("train_map02_ep6008_s712_t24", False),
+            ("train_map02_ep6024_s900_t24", False)]
     restart = restart_export(tmp_path, a_rows + home)
     out = tmp_path / "out"
     rec = tcs.run(root, str(out), str(out / "review"), n_candidates=2, restart_root=restart,
@@ -203,8 +208,8 @@ def test_with_a_restart_export_the_candidates_are_redrawn_from_it_and_rescored(t
     assert json.load(open(out / "fig_teaser_C_1_restart16.json"))["columns"][4]["sub"] == "+16 tics"
     # the in-domain start is the restarted one of the same button (turn right at 20, not the unexported 5)
     homes = {row["row"]: (row["home"]["window"], row["home"]["tic"]) for row in r["rows"]}
-    assert homes == {"attack": ("train_map02_ep6008_s712", 2), "turn": ("train_map02_ep6008_s712", 20),
-                     "forward": ("train_map02_ep6008_s712", 24)}
+    assert homes == {"attack": ("train_map02_ep6008_s712", 2), "turn": ("train_map02_ep6008_s712", 24),
+                     "forward": ("train_map02_ep6024_s900", 24)}
     assert "unseen_arena07_ep9_s200_t" in second["restart"]["skipped"]      # B was not restarted
     side = json.load(open(out / "fig_teaser_C_1_restart.json"))
     assert side["mode"] == "restart" and side["columns"][4]["sub"] == "+8 tics"
@@ -212,13 +217,17 @@ def test_with_a_restart_export_the_candidates_are_redrawn_from_it_and_rescored(t
 
 def test_the_in_domain_start_is_the_brightest_near_one_that_reads_at_least_the_map_2_median():
     row = {"depth": 50}
-    homes = [{"tic": 1, "depth": 45, "luma": 180.0, "in_domain": 7.0},     # a weapon flash the model misses
-             {"tic": 2, "depth": 60, "luma": 90.0, "in_domain": 21.0},
-             {"tic": 3, "depth": 52, "luma": 40.0, "in_domain": 24.0},
-             {"tic": 4, "depth": 200, "luma": 250.0, "in_domain": 30.0}]    # far outside the 20-tic window
+    homes = [{"window": "w", "tic": 1, "depth": 45, "luma": 180.0, "in_domain": 7.0},   # a flash the model misses
+             {"window": "w", "tic": 2, "depth": 60, "luma": 90.0, "in_domain": 21.0},
+             {"window": "v", "tic": 3, "depth": 52, "luma": 40.0, "in_domain": 24.0},
+             {"window": "w", "tic": 40, "depth": 200, "luma": 250.0, "in_domain": 30.0}]  # outside the 20-tic window
     home, flags = tcs.pick_home(homes, row, floor=20.0)
     assert home["tic"] == 2 and flags == {"near": True, "at_floor": True}
     home, flags = tcs.pick_home(homes[:1], row, floor=20.0)                   # nothing near reads that well
     assert home["tic"] == 1 and flags == {"near": True, "at_floor": False}
     home, flags = tcs.pick_home(homes[3:], row, floor=20.0)                   # nothing near at all: the closest
-    assert home["tic"] == 4 and flags == {"near": False, "at_floor": True}
+    assert home["tic"] == 40 and flags == {"near": False, "at_floor": True}
+    # a start whose +8 span overlaps one another row already shows is never reused (the same frames twice)
+    home, flags = tcs.pick_home(homes, row, floor=20.0, taken=[("w", 9)])
+    assert home["tic"] == 3
+    assert tcs.pick_home(homes[:2], row, floor=20.0, taken=[("w", 2)]) == (None, None)

@@ -29,7 +29,7 @@ does not overlap another row's (so no two rows show the same moment); windows ra
 story; each row paired with a real start of the same button on a training map: among those within `NEAR_TICS` = 20
 rollout tics of the row and reading at least the training maps' median in-domain PSNR, the one with the brighter
 ground truth (mean luma of its context and +8 frames; map 2 is dark); see `pick_home` for the fallbacks, which the
-sidecar flags (`near`, `at_floor`). The top `--candidates` are composed as
+sidecar flags (`near`, `at_floor`); no two rows' in-domain starts share frames. The top `--candidates` are composed as
 `<out-dir>/fig_teaser_C_<n>.pdf` (`compose_teaser.layout_c`); with `--restart-root` their +8 frames come from the
 steward's rollouts restarted at each moment, and `--restart-horizon 8 16` adds the +16 redraw
 (`fig_teaser_C_<n>_restart16`), each rescored from the frames it shows. Actions that never start on a training
@@ -146,11 +146,20 @@ def in_domain_floor(all_moments):
                             if m["role"] == "training" and m["in_domain"] is not None]))
 
 
-def pick_home(homes, row, floor):
-    """The in-domain start for one figure row, and how it was found. Among the starts within `NEAR_TICS` rollout
-    tics of the row whose in-domain scene PSNR reaches `floor` (the training-map median: a typical read, not a
-    failure such as a weapon flash the model misses), the brightest ground truth wins, since map 2 is dark; with
-    none reaching the floor, the near start that reads best; with none near, the closest start."""
+def overlaps(window, tic, taken):
+    """True when (window, tic) shares frames with a taken start: the same window within `HORIZON` tics."""
+    return any(window == w and abs(tic - t) <= HORIZON for w, t in taken)
+
+
+def pick_home(homes, row, floor, taken=()):
+    """The in-domain start for one figure row and how it was found, or (None, None) when every start overlaps one
+    in `taken` (another row's in-domain start: a row must not repeat another's frames). Among the starts within
+    `NEAR_TICS` rollout tics of the row whose in-domain scene PSNR reaches `floor` (the training-map median: a
+    typical read, not a failure such as a weapon flash the model misses), the brightest ground truth wins, since
+    map 2 is dark; with none reaching the floor, the near start that reads best; with none near, the closest."""
+    homes = [h for h in homes if not overlaps(h["window"], h["tic"], taken)]
+    if not homes:
+        return None, None
     near = [h for h in homes if abs(h["depth"] - row["depth"]) <= NEAR_TICS]
     typical = [h for h in near if h["in_domain"] is not None and h["in_domain"] >= floor]
     if typical:
@@ -170,7 +179,7 @@ def candidates(all_moments, n):
     picks = []
     for window in sorted({m["window"] for m in all_moments if m["role"] == "unseen"}):
         mine = [m for m in all_moments if m["window"] == window and m["story"] is not None]
-        rows, used = [], set()
+        rows, used, taken = [], set(), []
         for row, buttons in FIGURE_ROWS:
             options = sorted((m for m in mine if m["button"] in buttons
                               and all(abs(m["tic"] - u) > HORIZON for u in used)),
@@ -180,11 +189,12 @@ def candidates(all_moments, n):
                 homes = [h for h in training if h["button"] == m["button"]]
                 if homes:
                     break
-            if not options or not homes:
+            home, flags = pick_home(homes or [], m, floor, taken) if options else (None, None)
+            if home is None:
                 rows = None
                 break
-            home, flags = pick_home(homes, m, floor)
             used.add(m["tic"])
+            taken.append((home["window"], home["tic"]))
             rows.append({"row": row, "window": window, "tic": m["tic"], "button": m["button"],
                          "control": m["control"],
                          "story": m["story"], "zero_shot": m["zero_shot"], "adapted": m["adapted"],
@@ -291,7 +301,7 @@ def restart_rows(rows, restart_root, found, floor):
     its in-domain start becomes a restarted training-map start of the same button (by `pick_home` among those).
     Returns (rows, None), or (None, the first missing piece)."""
     have = {d for d in os.listdir(restart_root) if os.path.isdir(os.path.join(restart_root, d))}
-    out = []
+    out, taken = [], []
     for row in rows:
         name = f"{row['window']}_t{row['tic']}"
         if name not in have:
@@ -301,7 +311,10 @@ def restart_rows(rows, restart_root, found, floor):
         if not homes:
             return None, f"no restarted {row['button']} start on a training map"
         # every restarted rollout is HORIZON tics deep, so depth no longer separates the starts
-        home, flags = pick_home([{**h, "depth": HORIZON} for h in homes], {**row, "depth": HORIZON}, floor)
+        home, flags = pick_home([{**h, "depth": HORIZON} for h in homes], {**row, "depth": HORIZON}, floor, taken)
+        if home is None:
+            return None, f"every restarted {row['button']} start overlaps another row's in-domain start"
+        taken.append((home["window"], home["tic"]))
         keep = ("window", "tic", "button", "control", "depth", "in_domain", "luma")
         out.append({**row, "home": {**{k: home[k] for k in keep}, **flags}})
     return out, None
