@@ -33,6 +33,10 @@ The study pipeline runs on the CPU beside the latents, as three subcommands (mem
     python distance_study.py splits --out results/distance_study --eval val=... --eval unseen2=...
     python distance_study.py distances --space sd1 --out results/distance_study --bootstrap 200
 
+`transitions`, `coverage`, `transfer-gap` and `compare` (Sep 26 2026) are the transition-level candidates that
+replace or accompany D (directed coverage of transition windows, the kNN transfer gap); they live in
+`transition_distance.py`, whose docstring defines the window, the two metrics and the command lines.
+
 `clouds` cuts every episode into lives the way the scored windows are cut, draws 250 target-eligible
 frames per episode (25 per motion decile) and writes `clouds/<space>/<set>.npz`; the reference is 50
 seeded episodes per training map, and `--draw 2` is a disjoint second draw for the noise floor.
@@ -1478,7 +1482,8 @@ def cmd_distances(a):
 # ---------------------------------------------------------------------------------------------
 
 def build_parser():
-    p = argparse.ArgumentParser(description="The map-distance study: clouds, splits, distances (CPU).")
+    p = argparse.ArgumentParser(description="The map-distance study: clouds, splits, distances, and the "
+                                            "transition-level transitions, coverage, transfer-gap, compare (CPU).")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("clouds", help="draw per-episode frame clouds and write clouds/<space>/<set>.npz")
@@ -1529,12 +1534,19 @@ def build_parser():
     d.add_argument("--mixture-projections", dest="mixture_projections", type=int, default=MIXTURE_PROJECTIONS)
     d.add_argument("--block", type=int, default=DIRECTION_BLOCK)
     d.add_argument("--limit", type=int, default=0, help="smoke runs: only the first N map points")
+
+    # the transition-level distances (Sep 26 2026) live in their own module; imported here, not at the top,
+    # because that module imports this one
+    import transition_distance
+    transition_distance.add_parsers(sub)
     return p
 
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
-    return {"clouds": cmd_clouds, "splits": cmd_splits, "distances": cmd_distances}[a.cmd](a)
+    import transition_distance
+    return {"clouds": cmd_clouds, "splits": cmd_splits, "distances": cmd_distances,
+            **transition_distance.COMMANDS}[a.cmd](a)
 
 
 if __name__ == "__main__":
