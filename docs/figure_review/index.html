@@ -121,10 +121,10 @@ svg text{font-family:"IBM Plex Sans",sans-serif}
 <tr><td>Parameters trained; GPU-h per arena</td><td>4.2M (0.49%); 1.1</td><td>4.2M; 1.1</td><td>860M (all); <i>Mon</i></td></tr>
 <tr><td>Arenas past half gap / home line by 4k</td><td>9 / 1 of 13</td><td>—</td><td><i>Mon</i> / <i>Mon</i></td></tr>
 <tr><td>Cost to half gap / home line</td><td>1k / &gt;4k</td><td>250 / &gt;4k</td><td><i>Mon</i></td></tr>
-<tr><td>A / M / G at 4k</td><td>+3.80 / −0.02 / 1.40</td><td>+3.86 / −0.03 / 1.28</td><td><i>Mon</i></td></tr>
+<tr><td>A / M / G at 4k</td><td>+3.80 / −0.02 / 3.44</td><td>+3.86 / −0.03 / 4.65</td><td><i>Mon</i></td></tr>
 <tr><td>Forgetting / directional at 4k</td><td><i>8k chain, ~16:00</i></td><td>−1.16 dB / 0.85 (ref 0.89)</td><td><i>Mon</i></td></tr>
 </tbody></table></div>
-<p class="note">Arena 7's guard row is real (stock decoder): the adapter's directional score rises from 0.77 to 0.85 and the training maps lose 1.16 dB of their advantage. The other 12 arrive with the 8k chain; the 8k set then replaces "4k" by "8k" in every row where the tail moved, and the cost column gets the early grid points.</p>
+<p class="note">G is the gap between the decoder's reconstruction of the true latent and the rendered prediction, both against the raw frame (Astra's truth check moved it to this definition: zero-shot median 5.0, adapted 3.4, home 3.4). Arena 7's guard row is real (stock decoder): the adapter's directional score rises from 0.77 to 0.85 and the training maps lose 1.16 dB of their advantage. The other 12 arrive with the 8k chain; the 8k set then replaces "4k" by "8k" in every row where the tail moved, and the cost column gets the early grid points.</p>
 
 <h2>Table 2 · the three rows, provisional <span class="tag paper">paper</span></h2>
 <p class="note">Pooled over the 13 arenas' 3,328 held-out windows and the training maps' 512 validation windows; raw frames; each backbone's own stock decoder. SD 3.5 is the 170k EMA and changes Monday after 200k.</p>
