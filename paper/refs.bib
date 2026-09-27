@@ -1,179 +1,463 @@
-% arXiv ids marked "card" were read from .claude/analyses/lit/*.md or RESEARCH_CONTEXT.md.
-% Entries marked % VERIFY were written from memory and need a check against arXiv before submission.
+% refs.bib for paper/main.tex (CoRL 2026 PhysWM draft), rebuilt 2026-09-26.
+%
+% Sources. Every arXiv entry's title, author list and first-version date were read from its arXiv
+% abstract page on 2026-09-26 (curl of arxiv.org/abs/<id>, the citation_title / citation_author meta
+% tags). Venues come from the arXiv comments or journal-ref field where it names one, otherwise from the
+% literature memo that read the proceedings PDF (named per entry); where neither confirms a venue the
+% entry is cited as an arXiv preprint and the venue is marked VERIFY in its comment.
+% Which memo each citation comes from: .claude/analyses/related-work-map-2026-09-26.md and the five
+% memos beside it. Entries marked "outside the memos" are method references (autoencoder, backbones,
+% sampler, objective, metric, engine) that the memos did not cover; they were verified the same way.
+% Keys follow firstauthorYYYYshortword, reusing the Sep 16 keys where the paper is the same.
 
-% ---- Doom and game world models ----
+% ---- Game and interactive world models ----
 
-@article{valevski2024gamengen,
-  title   = {Diffusion Models Are Real-Time Game Engines},
-  author  = {Valevski, Dani and Leviathan, Yaniv and Arar, Moab and Fruchter, Shlomi},
-  journal = {arXiv preprint arXiv:2408.14837},
-  year    = {2024}
+% arXiv comment: ICLR 2025. Facts used: v2 sec. 4.2 (70M-example subset, 700k updates, batch 128), v1 sec. 4.2 (900M generated frames), sec. 3.2.2 (decoder tuned with MSE alone); read 2026-09-26.
+@inproceedings{valevski2024gamengen,
+  title         = {Diffusion Models Are Real-Time Game Engines},
+  author        = {Valevski, Dani and Leviathan, Yaniv and Arar, Moab and Fruchter, Shlomi},
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  year          = {2025},
+  eprint        = {2408.14837},
+  archiveprefix = {arXiv}
 }
 
-@article{po2026multigen,
-  title   = {MultiGen: Level-Design for Editable Multiplayer Worlds in Diffusion Game Engines},
-  author  = {Po, Ryan and Zhang, David Junhao and Hertz, Amir and Wetzstein, Gordon and Wadhwa, Neal and Ruiz, Nataniel},
-  journal = {arXiv preprint arXiv:2603.06679},
-  year    = {2026}
-}
-
-% VERIFY author list; the literature card gives only the arXiv id and title.
-@article{playgen2024,
-  title   = {Playable Game Generation},
-  author  = {Yang, Mingyu and Du, Junyou and Xu, Zhaohui and Jiang, Yu and Li, Weihao and Chen, Ling and Wang, Zhengguo and Cheng, Zhicheng and Xu, Fei and Li, Wenjie and Tu, Zhiquan},
-  journal = {arXiv preprint arXiv:2412.00887},
-  year    = {2024}
-}
-
+% arXiv comment: NeurIPS 2024 (Spotlight).
 @inproceedings{alonso2024diamond,
-  title     = {Diffusion for World Modeling: Visual Details Matter in Atari},
-  author    = {Alonso, Eloi and Jelley, Adam and Micheli, Vincent and Kanervisto, Anssi and Storkey, Amos and Pearce, Tim and Fleuret, Fran{\c{c}}ois},
-  booktitle = {Advances in Neural Information Processing Systems},
-  year      = {2024},
-  note      = {arXiv:2405.12399}
+  title         = {Diffusion for World Modeling: Visual Details Matter in {Atari}},
+  author        = {Alonso, Eloi and Jelley, Adam and Micheli, Vincent and Kanervisto, Anssi and Storkey, Amos and Pearce, Tim and Fleuret, Fran{\c{c}}ois},
+  booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year          = {2024},
+  eprint        = {2405.12399},
+  archiveprefix = {arXiv}
 }
 
-@misc{oasis2024,
-  title        = {Oasis: A Universe in a Transformer},
-  author       = {{Decart} and {Etched}},
-  year         = {2024},
-  howpublished = {\url{https://oasis-model.github.io/}; code and 500M weights at \url{https://github.com/etched-ai/open-oasis}}
-}
-
-% VERIFY author list; card gives id and title only.
-@article{mineworld2025,
-  title   = {MineWorld: A Real-Time and Open-Source Interactive World Model on Minecraft},
-  author  = {Guo, Junliang and Ye, Yang and He, Tianyu and Wu, Haoyu and Jiang, Yushu and Pearce, Tim and Bian, Jiang},
-  journal = {arXiv preprint arXiv:2504.08388},
-  year    = {2025}
-}
-
+% arXiv only. The Sep 16 entry's author list was wrong (second author onward); corrected from the abs page.
 @article{he2025matrixgame2,
-  title   = {Matrix-Game 2.0: An Open-Source, Real-Time, and Streaming Interactive World Model},
-  author  = {He, Xianglong and Zhang, Chunli and Yu, Huanyu and Wang, Yiding and Guo, Zhaowei and others},
-  journal = {arXiv preprint arXiv:2508.13009},
-  year    = {2025}
+  title         = {Matrix-Game 2.0: An Open-Source, Real-Time, and Streaming Interactive World Model},
+  author        = {He, Xianglong and Peng, Chunli and Liu, Zexiang and Wang, Boyang and Zhang, Yifan and Cui, Qi and Kang, Fei and Jiang, Biao and An, Mengyin and Ren, Yangyang and Xu, Baixin and Guo, Hao-Xiang and Gong, Kaixiong and Wu, Size and Li, Wei and Song, Xuchen and Liu, Yang and Li, Yangguang and Zhou, Yahui},
+  journal       = {arXiv preprint arXiv:2508.13009},
+  year          = {2025},
+  eprint        = {2508.13009},
+  archiveprefix = {arXiv}
 }
 
-@article{huang2026nanowm,
-  title   = {Nano World Models: A Minimalist Implementation of Future Video Prediction},
-  author  = {Huang, Siqiao and Kaushik, Partha and Chen, Michael and Pan, Hengkai and Chehab, Omar and Moreno-Pino, Fernando and Geng, Kaiwen and Simchowitz, Max},
-  journal = {arXiv preprint arXiv:2605.23993},
-  year    = {2026}
+% arXiv only; whether its test maps are held out is not stated (lit-scene-generalization memo, D).
+@article{po2026multigen,
+  title         = {{MultiGen}: Level-Design for Editable Multiplayer Worlds in Diffusion Game Engines},
+  author        = {Po, Ryan and Zhang, David Junhao and Hertz, Amir and Wetzstein, Gordon and Wadhwa, Neal and Ruiz, Nataniel},
+  journal       = {arXiv preprint arXiv:2603.06679},
+  year          = {2026},
+  eprint        = {2603.06679},
+  archiveprefix = {arXiv}
 }
 
-% ---- Warm starts ----
-
-@inproceedings{peebles2023dit,
-  title     = {Scalable Diffusion Models with Transformers},
-  author    = {Peebles, William and Xie, Saining},
-  booktitle = {IEEE/CVF International Conference on Computer Vision (ICCV)},
-  year      = {2023},
-  note      = {arXiv:2212.09748}
+% arXiv only (venue VERIFY). Facts used: sec. 5.3 to 5.4 (appearance distance r = 0.812; full fine-tuning on 25 to 75 episodes; seen-robot forgetting), verified by main against the arXiv HTML (related-work map).
+@article{chen2026xeworld,
+  title         = {{XEWorld}: Can Action-Conditioned World Models Generalize to Unseen Robot Embodiments?},
+  author        = {Chen, Yixiang and Yang, Jiabing and Xu, Yuan and Ma, Qisen and He, Keji and Li, Peiyan and Wang, Kai and He, Ziheng and Wu, Xiangnan and Liu, Jing and Liu, Nianfeng and Huang, Yan and Wang, Liang},
+  journal       = {arXiv preprint arXiv:2608.05799},
+  year          = {2026},
+  eprint        = {2608.05799},
+  archiveprefix = {arXiv}
 }
 
-@inproceedings{chen2023pixart,
-  title     = {PixArt-$\alpha$: Fast Training of Diffusion Transformer for Photorealistic Text-to-Image Synthesis},
-  author    = {Chen, Junsong and Yu, Jincheng and Ge, Chongjian and Yao, Lewei and Xie, Enze and Wu, Yue and Wang, Zhongdao and Kwok, James and Luo, Ping and Lu, Huchuan and Li, Zhenguo},
-  booktitle = {International Conference on Learning Representations (ICLR)},
-  year      = {2024},
-  note      = {arXiv:2310.00426}
+% Venue: RLC 2025, from the RLJ PDF (lit-adapters memo, B); the ICLR 2025 listing remains VERIFY.
+@inproceedings{rigter2024avid,
+  title         = {{AVID}: Adapting Video Diffusion Models to World Models},
+  author        = {Rigter, Marc and Gupta, Tarun and Hilmkil, Agrin and Ma, Chao},
+  booktitle     = {Reinforcement Learning Conference (RLC)},
+  year          = {2025},
+  eprint        = {2410.12822},
+  archiveprefix = {arXiv}
 }
 
-% VERIFY venue and full author list (card gives id 2112.10752 from memory, not from a literature card).
-@inproceedings{rombach2022ldm,
-  title     = {High-Resolution Image Synthesis with Latent Diffusion Models},
-  author    = {Rombach, Robin and Blattmann, Andreas and Lorenz, Dominik and Esser, Patrick and Ommer, Bj{\"o}rn},
-  booktitle = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
-  year      = {2022},
-  note      = {arXiv:2112.10752; weights \url{https://huggingface.co/CompVis/stable-diffusion-v1-4}}
+% arXiv comment: ICML 2025.
+@inproceedings{gao2025adaworld,
+  title         = {{AdaWorld}: Learning Adaptable World Models with Latent Actions},
+  author        = {Gao, Shenyuan and Zhou, Siyuan and Du, Yilun and Zhang, Jun and Gan, Chuang},
+  booktitle     = {International Conference on Machine Learning (ICML)},
+  year          = {2025},
+  eprint        = {2503.18938},
+  archiveprefix = {arXiv}
 }
 
-@inproceedings{bao2023unidiffuser,
-  title     = {One Transformer Fits All Distributions in Multi-Modal Diffusion at Scale},
-  author    = {Bao, Fan and Nie, Shen and Xue, Kaiwen and Li, Chongxuan and Pu, Shi and Wang, Yaole and Yue, Gang and Cao, Yue and Su, Hang and Zhu, Jun},
-  booktitle = {International Conference on Machine Learning (ICML)},
-  year      = {2023},
-  note      = {arXiv:2303.06555}
+% arXiv comment: ICCV 2021.
+@inproceedings{koh2021pathdreamer,
+  title         = {Pathdreamer: A World Model for Indoor Navigation},
+  author        = {Koh, Jing Yu and Lee, Honglak and Yang, Yinfei and Baldridge, Jason and Anderson, Peter},
+  booktitle     = {IEEE/CVF International Conference on Computer Vision (ICCV)},
+  year          = {2021},
+  eprint        = {2105.08756},
+  archiveprefix = {arXiv}
 }
 
-% VERIFY author list; card confirms id 2504.13074 and title only.
-@article{chen2025skyreels,
-  title   = {SkyReels-V2: Infinite-length Film Generative Model},
-  author  = {Chen, Guibin and Li, Dixuan and Lin, Jiangping and Liu, Kunqi and Zhang, Hao and others},
-  journal = {arXiv preprint arXiv:2504.13074},
-  year    = {2025},
-  note    = {Weights \url{https://huggingface.co/Skywork/SkyReels-V2-DF-1.3B-540P}}
+% arXiv comment names no venue (ICML 2024 per the memos, VERIFY); cited for the delta-PSNR form only.
+@article{bruce2024genie,
+  title         = {Genie: Generative Interactive Environments},
+  author        = {Bruce, Jake and Dennis, Michael and Edwards, Ashley and Parker-Holder, Jack and Shi, Yuge and Hughes, Edward and Lai, Matthew and Mavalankar, Aditi and Steigerwald, Richie and Apps, Chris and Aytar, Yusuf and Bechtle, Sarah and Behbahani, Feryal and Chan, Stephanie and Heess, Nicolas and Gonzalez, Lucy and Osindero, Simon and Ozair, Sherjil and Reed, Scott and Zhang, Jingwei and Zolna, Konrad and Clune, Jeff and de Freitas, Nando and Singh, Satinder and Rockt{\"a}schel, Tim},
+  journal       = {arXiv preprint arXiv:2402.15391},
+  year          = {2024},
+  eprint        = {2402.15391},
+  archiveprefix = {arXiv}
 }
 
-% ---- Environment, agent, assets ----
-
-% VERIFY arXiv id (1605.02097) written from memory.
-@inproceedings{kempka2016vizdoom,
-  title     = {{ViZDoom}: A {Doom}-based {AI} Research Platform for Visual Reinforcement Learning},
-  author    = {Kempka, Micha{\l} and Wydmuch, Marek and Runc, Grzegorz and Toczek, Jakub and Ja{\'s}kowski, Wojciech},
-  booktitle = {IEEE Conference on Computational Intelligence and Games (CIG)},
-  year      = {2016},
-  note      = {arXiv:1605.02097}
+% arXiv comment: NeurIPS 2024. Fact used: App. C.3, frozen U-Net with rank-16 LoRA (lit-adapters memo, B).
+@inproceedings{gao2024vista,
+  title         = {Vista: A Generalizable Driving World Model with High Fidelity and Versatile Controllability},
+  author        = {Gao, Shenyuan and Yang, Jiazhi and Chen, Li and Chitta, Kashyap and Qiu, Yihang and Geiger, Andreas and Zhang, Jun and Li, Hongyang},
+  booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year          = {2024},
+  eprint        = {2405.17398},
+  archiveprefix = {arXiv}
 }
 
+% ---- Persistence references and forecasting tables ----
+
+% Venue ICLR 2017 (distance-study literature memo, Q4). Trained on KITTI, tested on unseen CalTech against Copy Last Frame.
+@inproceedings{lotter2017prednet,
+  title         = {Deep Predictive Coding Networks for Video Prediction and Unsupervised Learning},
+  author        = {Lotter, William and Kreiman, Gabriel and Cox, David},
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  year          = {2017},
+  eprint        = {1605.08104},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: NeurIPS 2019. Copy-last beats every model on Human3.6M (App. Figs. 8 to 10).
+@inproceedings{villegas2019fidelity,
+  title         = {High Fidelity Video Prediction with Large Stochastic Recurrent Neural Networks},
+  author        = {Villegas, Ruben and Pathak, Arkanath and Kannan, Harini and Erhan, Dumitru and Le, Quoc V. and Lee, Honglak},
+  booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year          = {2019},
+  eprint        = {1911.01655},
+  archiveprefix = {arXiv}
+}
+
+% Venue ICLR 2016 (distance-study literature memo, Q4). "Last input" baseline, moving-area evaluation.
+@inproceedings{mathieu2016deep,
+  title         = {Deep Multi-Scale Video Prediction beyond Mean Square Error},
+  author        = {Mathieu, Michael and Couprie, Camille and LeCun, Yann},
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  year          = {2016},
+  eprint        = {1511.05440},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment names no venue (ECCV 2024 per the memos, VERIFY). Table 1: reconstruction, Copy&Paste and model rows.
+@article{zheng2023occworld,
+  title         = {{OccWorld}: Learning a {3D} Occupancy World Model for Autonomous Driving},
+  author        = {Zheng, Wenzhao and Chen, Weiliang and Huang, Yuanhui and Zhang, Borui and Duan, Yueqi and Lu, Jiwen},
+  journal       = {arXiv preprint arXiv:2311.16038},
+  year          = {2023},
+  eprint        = {2311.16038},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: NeurIPS 2025. Table 2: oracle 77.0, copy-last 54.7, prediction 71.8 mIoU.
+@inproceedings{karypidis2024dinoforesight,
+  title         = {{DINO-Foresight}: Looking into the Future with {DINO}},
+  author        = {Karypidis, Efstathios and Kakogeorgiou, Ioannis and Gidaris, Spyros and Komodakis, Nikos},
+  booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year          = {2025},
+  eprint        = {2412.11673},
+  archiveprefix = {arXiv}
+}
+
+% ---- Distances and transfer ----
+
+% Venue NeurIPS 2020 (distance-study literature memo, Q1, proceedings PDF read).
+@inproceedings{alvarezmelis2020otdd,
+  title         = {Geometric Dataset Distances via Optimal Transport},
+  author        = {Alvarez-Melis, David and Fusi, Nicol{\`o}},
+  booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year          = {2020},
+  eprint        = {2002.02923},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: accepted to ICML 2025.
+@inproceedings{nguyen2025sotdd,
+  title         = {Lightspeed Geometric Dataset Distance via Sliced Optimal Transport},
+  author        = {Nguyen, Khai and Nguyen, Hai and Pham, Tuan and Ho, Nhat},
+  booktitle     = {International Conference on Machine Learning (ICML)},
+  year          = {2025},
+  eprint        = {2501.18901},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: accepted for future publication in TPAMI (issue and year VERIFY). Table 10: EMD tau 0.20 vs nearest-source 0.42.
+@article{mensink2021factors,
+  title         = {Factors of Influence for Transfer Learning across Diverse Appearance Domains and Task Types},
+  author        = {Mensink, Thomas and Uijlings, Jasper and Kuznetsova, Alina and Gygli, Michael and Ferrari, Vittorio},
+  journal       = {arXiv preprint arXiv:2103.13318; accepted to IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  year          = {2021},
+  eprint        = {2103.13318},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: accepted to ECCV 2026. Table 2: Wasserstein rho about 0.48 vs latent KL about 0.81.
+@inproceedings{westny2026latent,
+  title         = {Unveiling Transferability in Trajectory Prediction via Latent Scene Embeddings},
+  author        = {Westny, Theodor and Axelsson, David and Olofsson, Bj{\"o}rn and Frisk, Erik},
+  booktitle     = {European Conference on Computer Vision (ECCV)},
+  year          = {2026},
+  eprint        = {2606.30777},
+  archiveprefix = {arXiv}
+}
+
+% JMLR 10(56):1633-1685, 2009; title and authors read from jmlr.org/papers/v10/taylor09a.html on 2026-09-26. Time to threshold depends on the threshold chosen (sec. 2.1; lit-transferability memo, E).
+@article{taylor2009transfer,
+  title         = {Transfer Learning for Reinforcement Learning Domains: A Survey},
+  author        = {Taylor, Matthew E. and Stone, Peter},
+  journal       = {Journal of Machine Learning Research},
+  volume        = {10},
+  number        = {56},
+  pages         = {1633--1685},
+  year          = {2009},
+  url           = {https://www.jmlr.org/papers/v10/taylor09a.html}
+}
+
+% ---- Adaptation ----
+
+% Venue ICLR 2022 (from Vista's bibliography, lit-adapters memo, A; the arXiv comment is silent).
+@inproceedings{hu2022lora,
+  title         = {{LoRA}: Low-Rank Adaptation of Large Language Models},
+  author        = {Hu, Edward J. and Shen, Yelong and Wallis, Phillip and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Shean and Wang, Lu and Chen, Weizhu},
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  year          = {2022},
+  eprint        = {2106.09685},
+  archiveprefix = {arXiv}
+}
+
+% Venue ICCV 2023 (CVF open access, lit-adapters memo, A). Table 1: LoRA-R16 mean FID 81.31 vs full fine-tune 16.59, verified by main against the arXiv HTML.
+@inproceedings{xie2023difffit,
+  title         = {{DiffFit}: Unlocking Transferability of Large Diffusion Models via Simple Parameter-Efficient Fine-Tuning},
+  author        = {Xie, Enze and Yao, Lewei and Shi, Han and Liu, Zhili and Zhou, Daquan and Liu, Zhaoqiang and Li, Jiawei and Li, Zhenguo},
+  booktitle     = {IEEE/CVF International Conference on Computer Vision (ICCV)},
+  year          = {2023},
+  eprint        = {2304.06648},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: TMLR, August 2024.
+@article{biderman2024lora,
+  title         = {{LoRA} Learns Less and Forgets Less},
+  author        = {Biderman, Dan and Portes, Jacob and Ortiz, Jose Javier Gonzalez and Paul, Mansheej and Greengard, Philip and Jennings, Connor and King, Daniel and Havens, Sam and Chiley, Vitaliy and Frankle, Jonathan and Blakeney, Cody and Cunningham, John P.},
+  journal       = {Transactions on Machine Learning Research},
+  year          = {2024},
+  eprint        = {2405.09673},
+  archiveprefix = {arXiv}
+}
+
+% ---- Engine and agent ----
+
+% Venue AAAI 2017 (lit-scene-generalization memo, E). The agent and its WAD: github.com/glample/Arnold.
 @inproceedings{lample2017arnold,
-  title     = {Playing {FPS} Games with Deep Reinforcement Learning},
-  author    = {Lample, Guillaume and Chaplot, Devendra Singh},
-  booktitle = {AAAI Conference on Artificial Intelligence},
-  year      = {2017},
-  note      = {arXiv:1609.05521; agent and WAD at \url{https://github.com/glample/Arnold}}
+  title         = {Playing {FPS} Games with Deep Reinforcement Learning},
+  author        = {Lample, Guillaume and Chaplot, Devendra Singh},
+  booktitle     = {AAAI Conference on Artificial Intelligence},
+  year          = {2017},
+  eprint        = {1609.05521},
+  archiveprefix = {arXiv}
 }
 
-% VERIFY: cite the Freedoom release version actually used (freedoom2.wad).
-@misc{freedoom,
-  title        = {Freedoom: Phase 2},
-  author       = {{The Freedoom Project}},
-  year         = {2024},
-  howpublished = {\url{https://freedoom.github.io/}, BSD licence}
+% arXiv only (IEEE Transactions on Games per the memos, VERIFY). Unseen-map tracks for agents.
+@article{wydmuch2018vizdoom,
+  title         = {{ViZDoom} Competitions: Playing {Doom} from Pixels},
+  author        = {Wydmuch, Marek and Kempka, Micha{\l} and Ja{\'s}kowski, Wojciech},
+  journal       = {arXiv preprint arXiv:1809.03470},
+  year          = {2018},
+  eprint        = {1809.03470},
+  archiveprefix = {arXiv}
 }
 
-% ---- Diffusion, metrics ----
+% Outside the memos. arXiv journal-ref: Proceedings of IEEE CIG 2016.
+@inproceedings{kempka2016vizdoom,
+  title         = {{ViZDoom}: A {Doom}-based {AI} Research Platform for Visual Reinforcement Learning},
+  author        = {Kempka, Micha{\l} and Wydmuch, Marek and Runc, Grzegorz and Toczek, Jakub and Ja{\'s}kowski, Wojciech},
+  booktitle     = {IEEE Conference on Computational Intelligence and Games (CIG)},
+  year          = {2016},
+  eprint        = {1605.02097},
+  archiveprefix = {arXiv}
+}
 
-% VERIFY arXiv id (2202.00512) written from memory.
+% ---- Backbones, objective, sampler, metric (outside the memos) ----
+
+% arXiv comment: CVPR 2022. The SD 1.x autoencoder and U-Net.
+@inproceedings{rombach2022ldm,
+  title         = {High-Resolution Image Synthesis with Latent Diffusion Models},
+  author        = {Rombach, Robin and Blattmann, Andreas and Lorenz, Dominik and Esser, Patrick and Ommer, Bj{\"o}rn},
+  booktitle     = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year          = {2022},
+  eprint        = {2112.10752},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment names no venue (ICLR 2024, VERIFY).
+@article{chen2023pixart,
+  title         = {{PixArt}-$\alpha$: Fast Training of Diffusion Transformer for Photorealistic Text-to-Image Synthesis},
+  author        = {Chen, Junsong and Yu, Jincheng and Ge, Chongjian and Yao, Lewei and Xie, Enze and Wu, Yue and Wang, Zhongdao and Kwok, James and Luo, Ping and Lu, Huchuan and Li, Zhenguo},
+  journal       = {arXiv preprint arXiv:2310.00426},
+  year          = {2023},
+  eprint        = {2310.00426},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment names no venue (ICML 2024, VERIFY). The SD 3 MMDiT family; SD 3.5 Medium is its released successor.
+@article{esser2024sd3,
+  title         = {Scaling Rectified Flow Transformers for High-Resolution Image Synthesis},
+  author        = {Esser, Patrick and Kulal, Sumith and Blattmann, Andreas and Entezari, Rahim and M{\"u}ller, Jonas and Saini, Harry and Levi, Yam and Lorenz, Dominik and Sauer, Axel and Boesel, Frederic and Podell, Dustin and Dockhorn, Tim and English, Zion and Lacey, Kyle and Goodwin, Alex and Marek, Yannik and Rombach, Robin},
+  journal       = {arXiv preprint arXiv:2403.03206},
+  year          = {2024},
+  eprint        = {2403.03206},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: ICLR 2022. The v-prediction target.
 @inproceedings{salimans2022progressive,
-  title     = {Progressive Distillation for Fast Sampling of Diffusion Models},
-  author    = {Salimans, Tim and Ho, Jonathan},
-  booktitle = {International Conference on Learning Representations (ICLR)},
-  year      = {2022},
-  note      = {arXiv:2202.00512}
+  title         = {Progressive Distillation for Fast Sampling of Diffusion Models},
+  author        = {Salimans, Tim and Ho, Jonathan},
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  year          = {2022},
+  eprint        = {2202.00512},
+  archiveprefix = {arXiv}
 }
 
-% VERIFY arXiv id (2010.02502) written from memory.
+% arXiv comment: ICLR 2021.
 @inproceedings{song2021ddim,
-  title     = {Denoising Diffusion Implicit Models},
-  author    = {Song, Jiaming and Meng, Chenlin and Ermon, Stefano},
-  booktitle = {International Conference on Learning Representations (ICLR)},
-  year      = {2021},
-  note      = {arXiv:2010.02502}
+  title         = {Denoising Diffusion Implicit Models},
+  author        = {Song, Jiaming and Meng, Chenlin and Ermon, Stefano},
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  year          = {2021},
+  eprint        = {2010.02502},
+  archiveprefix = {arXiv}
 }
 
-% VERIFY arXiv id (1801.03924) written from memory.
+% arXiv comment: CVPR 2018.
 @inproceedings{zhang2018lpips,
-  title     = {The Unreasonable Effectiveness of Deep Features as a Perceptual Metric},
-  author    = {Zhang, Richard and Isola, Phillip and Efros, Alexei A. and Shechtman, Eli and Wang, Oliver},
-  booktitle = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
-  year      = {2018},
-  note      = {arXiv:1801.03924}
+  title         = {The Unreasonable Effectiveness of Deep Features as a Perceptual Metric},
+  author        = {Zhang, Richard and Isola, Phillip and Efros, Alexei A. and Shechtman, Eli and Wang, Oliver},
+  booktitle     = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year          = {2018},
+  eprint        = {1801.03924},
+  archiveprefix = {arXiv}
 }
 
-% VERIFY arXiv id (1812.01717) written from memory.
+% arXiv comment names no venue (CVPR 2024 per the adaptation memo, VERIFY). EMA length sets image quality (sec. 3).
+@article{karras2024edm2,
+  title         = {Analyzing and Improving the Training Dynamics of Diffusion Models},
+  author        = {Karras, Tero and Aittala, Miika and Lehtinen, Jaakko and Hellsten, Janne and Aila, Timo and Laine, Samuli},
+  journal       = {arXiv preprint arXiv:2312.02696},
+  year          = {2023},
+  eprint        = {2312.02696},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: NeurIPS 2024. Tokenizer-only adaptation to an unseen domain (adaptation memo, step 4).
+@inproceedings{wu2024ivideogpt,
+  title         = {{iVideoGPT}: Interactive {VideoGPTs} are Scalable World Models},
+  author        = {Wu, Jialong and Yin, Shaofeng and Feng, Ningya and He, Xu and Li, Dong and Hao, Jianye and Long, Mingsheng},
+  booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year          = {2024},
+  eprint        = {2405.15223},
+  archiveprefix = {arXiv}
+}
+
+% ---- Entries kept for the retired Sep 16 draft (paper/main_sep16_exposure_draft.tex) ----
+% Not cited by main.tex; kept so the retired draft still resolves. Re-verified on 2026-09-26 the same way;
+% three author lists and one author order in the Sep 16 file were wrong and are corrected here.
+
+% arXiv only. Sep 16 author list was wrong from the second author on; corrected.
+@article{playgen2024,
+  title         = {Playable Game Generation},
+  author        = {Yang, Mingyu and Li, Junyou and Fang, Zhongbin and Chen, Sheng and Yu, Yangbin and Fu, Qiang and Yang, Wei and Ye, Deheng},
+  journal       = {arXiv preprint arXiv:2412.00887},
+  year          = {2024},
+  eprint        = {2412.00887},
+  archiveprefix = {arXiv}
+}
+
+@article{mineworld2025,
+  title         = {{MineWorld}: A Real-Time and Open-Source Interactive World Model on {Minecraft}},
+  author        = {Guo, Junliang and Ye, Yang and He, Tianyu and Wu, Haoyu and Jiang, Yushu and Pearce, Tim and Bian, Jiang},
+  journal       = {arXiv preprint arXiv:2504.08388},
+  year          = {2025},
+  eprint        = {2504.08388},
+  archiveprefix = {arXiv}
+}
+
+% Sep 16 author list was wrong from the second author on; corrected.
+@article{chen2025skyreels,
+  title         = {{SkyReels-V2}: Infinite-length Film Generative Model},
+  author        = {Chen, Guibin and Lin, Dixuan and Yang, Jiangping and Lin, Chunze and Zhu, Junchen and Fan, Mingyuan and Zhang, Hao and Chen, Sheng and Chen, Zheng and Ma, Chengcheng and Xiong, Weiming and Wang, Wei and Pang, Nuo and Kang, Kang and Xu, Zhiheng and Jin, Yuzhe and Liang, Yupeng and Song, Yubing and Zhao, Peng and Xu, Boyuan and Qiu, Di and Li, Debang and Fei, Zhengcong and Li, Yang and Zhou, Yahui},
+  journal       = {arXiv preprint arXiv:2504.13074},
+  year          = {2025},
+  eprint        = {2504.13074},
+  archiveprefix = {arXiv}
+}
+
+% Sep 16 entry swapped the fifth and sixth authors; corrected.
+@article{huang2026nanowm,
+  title         = {Nano World Models: A Minimalist Implementation of Future Video Prediction},
+  author        = {Huang, Siqiao and Kaushik, Partha and Chen, Michael and Pan, Hengkai and Geng, Kaiwen and Chehab, Omar and Moreno-Pino, Fernando and Simchowitz, Max},
+  journal       = {arXiv preprint arXiv:2605.23993},
+  year          = {2026},
+  eprint        = {2605.23993},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment: accepted to ICML 2023.
+@inproceedings{bao2023unidiffuser,
+  title         = {One Transformer Fits All Distributions in Multi-Modal Diffusion at Scale},
+  author        = {Bao, Fan and Nie, Shen and Xue, Kaiwen and Li, Chongxuan and Pu, Shi and Wang, Yaole and Yue, Gang and Cao, Yue and Su, Hang and Zhu, Jun},
+  booktitle     = {International Conference on Machine Learning (ICML)},
+  year          = {2023},
+  eprint        = {2303.06555},
+  archiveprefix = {arXiv}
+}
+
+% arXiv comment names no venue (ICCV 2023, VERIFY).
+@article{peebles2023dit,
+  title         = {Scalable Diffusion Models with Transformers},
+  author        = {Peebles, William and Xie, Saining},
+  journal       = {arXiv preprint arXiv:2212.09748},
+  year          = {2022},
+  eprint        = {2212.09748},
+  archiveprefix = {arXiv}
+}
+
 @article{unterthiner2018fvd,
-  title   = {Towards Accurate Generative Models of Video: A New Metric and Challenges},
-  author  = {Unterthiner, Thomas and van Steenkiste, Sjoerd and Kurach, Karol and Marinier, Rapha{\"e}l and Michalski, Marcin and Gelly, Sylvain},
-  journal = {arXiv preprint arXiv:1812.01717},
-  year    = {2018}
+  title         = {Towards Accurate Generative Models of Video: A New Metric \& Challenges},
+  author        = {Unterthiner, Thomas and van Steenkiste, Sjoerd and Kurach, Karol and Marinier, Raphael and Michalski, Marcin and Gelly, Sylvain},
+  journal       = {arXiv preprint arXiv:1812.01717},
+  year          = {2018},
+  eprint        = {1812.01717},
+  archiveprefix = {arXiv}
 }
 
-@inproceedings{baker2022vpt,
-  title     = {Video PreTraining ({VPT}): Learning to Act by Watching Unlabeled Online Videos},
-  author    = {Baker, Bowen and Akkaya, Ilge and Zhokhov, Peter and Huizinga, Joost and Tang, Jie and Ecoffet, Adrien and Houghton, Brandon and Sampedro, Raul and Clune, Jeff},
-  booktitle = {Advances in Neural Information Processing Systems},
-  year      = {2022},
-  note      = {arXiv:2206.11795}
+% arXiv comment names no venue (NeurIPS 2022, VERIFY).
+@article{baker2022vpt,
+  title         = {Video {PreTraining} ({VPT}): Learning to Act by Watching Unlabeled Online Videos},
+  author        = {Baker, Bowen and Akkaya, Ilge and Zhokhov, Peter and Huizinga, Joost and Tang, Jie and Ecoffet, Adrien and Houghton, Brandon and Sampedro, Raul and Clune, Jeff},
+  journal       = {arXiv preprint arXiv:2206.11795},
+  year          = {2022},
+  eprint        = {2206.11795},
+  archiveprefix = {arXiv}
+}
+
+% Project page answered 200 on 2026-09-26; no paper exists.
+@misc{oasis2024,
+  title         = {Oasis: A Universe in a Transformer},
+  author        = {{Decart} and {Etched}},
+  year          = {2024},
+  howpublished  = {\url{https://oasis-model.github.io/}}
+}
+
+% Project page answered 200 on 2026-09-26. VERIFY the release version of freedoom2.wad used.
+@misc{freedoom,
+  title         = {Freedoom: Phase 2},
+  author        = {{The Freedoom Project}},
+  year          = {2024},
+  howpublished  = {\url{https://freedoom.github.io/}}
 }
