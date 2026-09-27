@@ -1,0 +1,24 @@
+{
+ "layout": "B",
+ "window": "unseen_arena07_ep210_s2888",
+ "home": null,
+ "horizon": 8,
+ "columns": [
+  "context",
+  "zero-shot",
+  "after 8 episodes",
+  "ground truth"
+ ],
+ "rows": [
+  {
+   "tic": 1,
+   "action": "attack",
+   "control": "attack + forward"
+  },
+  {
+   "tic": 14,
+   "action": "turn right",
+   "control": "attack + turn right + strafe left"
+  }
+ ]
+}
