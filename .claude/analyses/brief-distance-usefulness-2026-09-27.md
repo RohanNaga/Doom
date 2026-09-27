@@ -1,0 +1,17 @@
+# Brief: is the distance useful, and how should it be adapted to this problem? (for Sunday Sep 27, once the fresh-set numbers exist)
+
+Three independent reviewers (Opus 5.5 high, Fable 5.1, Astra); the others' answers withheld; Rohan reads the three side by side. This is the second distance round. The first (`main-`, `astra-`, `opus-distance-*-2026-09-26.md`) converged on the diagnosis: the frozen per-frame distance D separates families (training against unseen, arenas against campaign) and does not order the 13 unseen arenas, where the zero-shot gain tracks motion; and on two candidates now implemented (`transition_distance.py`, `distance_study.py transitions|coverage|transfer-gap|compare`): directed coverage of transition windows, and the kNN transfer gap G. This round runs when the following exist on the fresh 24-episode arena set: D recomputed on it, coverage and G with their ablations and bootstraps (`results/transition_distance/compare_fresh_sd1.*`), the zero-shot skill and decoded advantage per arena from the fresh-set rescore, and the first LoRA curves (13 arenas, one seed, 0 to 4,000 updates) with their half-gap crossings.
+
+## Rohan's question, in his words
+
+"Our distance metric: is this going to be useful, what should we do, and how should we adapt it to our needs here in this dataset and this variation of the problem we had from before." The "before" is his NVIDIA internship method: per-scenario appearance coverage of a driving test set by the training set, scored against per-scenario performance. Here the model predicts transitions, the maps of one WAD share appearance, and the outcome of interest is the adaptation cost.
+
+## Questions
+
+1. **Does any distance order the arenas?** With the fresh-set numbers: Spearman and partial Spearman (on persistence PSNR and on motion) of D, coverage and G against (a) the zero-shot decoded advantage, (b) the zero-shot latent skill, (c) the half-gap adaptation cost with censoring handled, (d) the advantage at 4,000 updates; leave-one-arena-out prediction error against predict-the-mean; the pre-registered incremental test (does the distance add anything beyond zero-shot error and motion). State plainly which, if any, is useful for which outcome.
+2. **What should the x axis of the adaptation figure be?** Frozen D, coverage, G, or the zero-shot deficit itself (which needs no distance). Argue from the numbers and from what a reader can compute before training on a new map.
+3. **How should the metric be adapted to this problem** if none of the three is enough: features (state, dynamics, control history, innovation), direction (target covered by source), memory (training episodes, training plus validation), window density, motion weighting, what to hold fixed, and the validation protocol before freezing. Give one concrete next version and its cost.
+4. **What the paper should say on Sep 30**, in two or three sentences, about the distance: which claim survives, which is dropped, and how the failed pre-registered gate and the family effect are stated.
+5. **October.** The one experiment that would settle whether a pre-computed distance can predict adaptation cost in this domain (for example distance-stratified generated arenas), with its cost.
+
+Memo under 1,000 words, one-line answers at the top, every number recomputed from the files, citations by arXiv id (Mensink 2103.13318, Westny 2606.30777, s-OTDD 2501.18901, OTDD, LEEP 2002.12462, Ben-David 2010, Hanneke-Kpotufe 2002.04747, XEWorld 2608.05799).
