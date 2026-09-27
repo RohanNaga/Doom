@@ -90,10 +90,14 @@ Of these, four (2 to 5, 500 episodes each) are the training maps, scored on vali
 Four tics ahead on the training maps they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k).
 The decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their ground-truth latents, using MSE plus 0.1~LPIPS (MSE alone triples scene LPIPS, 0.092 to 0.339), and use it for every pixel number of the U-Net and PixArt; SD~3.5 uses its own.
 
-\textbf{What we measure.} With $x$ the ground-truth next frame, $x_\text{last}$ the last context frame, $z$, $z_\text{last}$ their latents, $\hat z$ the prediction and $D$ the decoder, the \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ is the PSNR gain over persistence, a paired difference like Genie's $\Delta$PSNR~\citep{bruce2024genie}.
-The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips} is below zero when the model looks better than copying, the \emph{gap} $G=\mathrm{PSNR}(D(z),x)-\mathrm{PSNR}(D(\hat z),x)$ is the distance to the reconstruction upper bound ($M$ and $G$ are scored against the raw frame), and the \emph{zero-shot latent skill score} $S_0$ is $10\log_{10}$ of persistence's latent MSE over the model's.
-The \emph{directional} score is the fraction of turning windows whose predicted view turns the other way when left and right are swapped in the newest control.
-Pixel scores use the scene rows 0 to 207, since persistence copies the HUD almost exactly; $A_\text{train}$, $A$ on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.38), is the in-distribution reference, not an arena's own upper bound.
+\textbf{What we measure.} Four scores answer four questions about one predicted frame $\hat z$, given the ground-truth next frame $x$ with latent $z$, the last context frame $x_\text{last}$ with latent $z_\text{last}$, and the decoder $D$.
+How much better than copying is it? The \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$, a paired difference like Genie's $\Delta$PSNR~\citep{bruce2024genie}.
+Does it look better than copying? The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips}, negative when it does.
+How far is it from the best the decoder can render? The \emph{gap} $G=\mathrm{PSNR}(D(z),x)-\mathrm{PSNR}(D(\hat z),x)$ to the reconstruction upper bound.
+Does it turn the right way? The \emph{directional} score, the fraction of turning windows whose predicted view turns the other way when left and right are swapped in the newest control.
+Before any decoding, the \emph{zero-shot latent skill} $S_0$, $10\log_{10}$ of persistence's latent MSE over the model's, scores the model in its own space.
+$M$ and $G$ are scored against the raw frame; pixel scores use the scene rows 0 to 207, since persistence copies the HUD almost exactly.
+$A_\text{train}$, the advantage on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.38), is the in-distribution reference every arena is measured against, not an arena's own upper bound.
 
 \begin{figure}[t]
 \centering
@@ -127,6 +131,8 @@ SD 3.5 Medium & training & \prov{24.50} & \prov{0.146} & \prov{+3.89} & \prov{$-
 \section{What happens off the training maps}
 \label{sec:shift}
 
+Zero-shot, the question is what a model keeps and what it loses when it meets an arena it never saw.
+
 \textbf{Where the deficit sits.} In distribution all backbones beat persistence and turn correctly; off the training maps the turn response survives (U-Net reversal rates 0.73 to 0.86 per arena against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
 $A$ stays positive on every arena and backbone but falls from 5.06 to a median 2.03~dB, while the decoder's scene reconstruction PSNR is 25.2 to 29.7~dB and $G$ grows from 3.4 to a median 5.0~dB; the fine-tuned decoder adds 0.2~dB to $A$ zero-shot and 0.7~dB after adaptation.
 Nor is the perceptual sign reversal the decoder's floor: its own reconstruction LPIPS (0.05 to 0.09) is far below persistence's (0.18 to 0.28), yet the prediction's LPIPS exceeds it on 13 of 13 arenas ($M$ +0.03 to +0.17, median +0.08, against $-$0.08 in distribution; Figure~\ref{fig:shift}b).
@@ -149,12 +155,16 @@ It places the training maps' held-out episodes inside the train-versus-train flo
 \section{Crossing the shift}
 \label{sec:adapt}
 
+The rest of the paper asks what it takes to relearn what was lost.
+
 \textbf{Protocol.} For each unseen arena we adapt the U-Net 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent)~\citep{xie2023difffit}.
 We train on 8 adaptation episodes (1.1 A4000 GPU-hours per arena for 4k updates) and score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates; forgetting ($A$ on the training maps), the directional check and a full fine-tune comparator at $2\times10^{-5}$ are in progress (\tbd{}).
 An arena's budget is the first grid point at which $A$ reaches $\tfrac12(A_0+A_\text{train})$, half of its gap from its zero-shot $A_0$; arenas that do not by the final budget of the grid are right-censored~\citep{taylor2009transfer}.
 Half of the gap in dB is not half of the error: the median gain of 1.8~dB removes 34 percent of the model's starting error.
 
-\textbf{What it takes.} Eight episodes and 4k updates raise the median $A$ from 2.04 to 3.80~dB, and on average 69 percent of each arena's gain comes within 250 updates; 9 of 13 arenas close half of their gap (median budget 1k [250, ${>}$4k]; 5 within 500), one reaches $A_\text{train}$, and on four arenas one episode gives most of the gain (\appref{app:perarena-adapt}) (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
+\textbf{What it takes.} Eight episodes and 4k updates raise the median $A$ from 2.04 to 3.80~dB, and on average 69 percent of each arena's gain comes within 250 updates (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
+9 of 13 arenas close half of their gap, with a median budget of 1k updates [250, ${>}$4k] and 5 arenas within 500; one reaches $A_\text{train}$.
+Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
 
 \begin{figure}[t]
@@ -185,7 +195,8 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 \section{Limitations and conclusion}
 \label{sec:limits}
 
-Eight episodes and a rank-16 adapter close half of the in-distribution gap on 9 of 13 arenas, most of it within 250 updates; the claims cover 13 arenas of one level pack, one agent, one-tic scoring and mostly one seed, and persistence is weak where the camera moves fast.
+Off its training maps a Doom world model keeps its controls, loses the arena's appearance, and relearns most of it from eight episodes and a few hundred adapter updates.
+The claims cover 13 arenas of one level pack, one agent, one-tic scoring and mostly one seed, and persistence is a weak reference where the camera moves fast.
 The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.
 \label{body-end}
 
