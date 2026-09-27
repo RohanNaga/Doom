@@ -49,16 +49,17 @@ Rank-16 adapters trained on eight episodes close half of an arena's gap to the i
 \section{Introduction}
 \label{sec:intro}
 
-A learned simulator is only useful where it is faithful, and a robot or an agent that moves to a new room, level or workspace needs to know how much of its world model still holds there and what it costs to make the rest hold.
-Game worlds let us ask that question with the engine held fixed and only the environment changed, yet game simulators are judged on held-out trajectories of their training scenes~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
-Of the 17 deathmatch arenas in one Doom level pack we train on four, score the model on each of the other thirteen and adapt it to each from a few episodes; no published Doom world model is scored on unseen maps, and MultiGen does not report one~\citep{po2026multigen}; held-out embodiments~\citep{chen2026xeworld}, games~\citep{rigter2024avid,gao2025adaworld} and buildings~\citep{koh2021pathdreamer} have been scored, never per scene against persistence.
-Because absolute PSNR ranks how static a recording is, every score is a paired difference against persistence, the last context frame copied forward, as in video prediction~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity} but not in game world models, beside the reconstruction upper bound~\citep{zheng2023occworld,karypidis2024dinoforesight}.
+Game world models now render playable worlds from pixels and controls: GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond}, and Matrix-Game~2 and MultiGen scale the recipe to open worlds and many games~\citep{he2025matrixgame2,po2026multigen}.
+Each is trained and judged in one environment: its score is a held-out trajectory of its training scenes, and no published Doom world model is scored on a map it never saw.
 
-We contribute (1) a few-episode adaptation recipe, a rank-16 adapter on the frozen backbone trained on eight episodes of the new arena, and the protocol that scores it: per arena, the budget to close half of the gap to the in-distribution advantage.
-It closes half the gap on 9 of 13 arenas within 4k updates (median budget 1k [250, ${>}$4k]; 1.1 A4000 GPU-hours per arena), recovers a median 1.8~dB, beats persistence perceptually on 11 of 13, and on four arenas one episode gives most of the gain (Figure~\ref{fig:adapt}, \appref{app:perarena-adapt}; full fine-tune comparator \tbd{});
+A learned simulator is only useful where it is faithful, and a robot or an agent that moves to a new room, level or workspace needs to know how much of its world model still holds there and what it costs to make the rest hold.
+Game worlds let us ask that question with the engine held fixed and only the environment changed.
+So we ask: when a world model meets a new arena of the same game, what does it keep, what does it lose, and how many episodes and updates does it take to relearn the rest?
+
+We contribute (1) a few-episode adaptation recipe, a rank-16 adapter trained on eight episodes of the new arena, and the per-arena protocol that scores it, under which 9 of 13 unseen arenas close half of their gap to the in-distribution advantage within 4k updates (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{});
 (2) the shift itself: off the training maps the decoded advantage shrinks and the perceptual margin changes sign for all three backbones while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift});
-(3) the frozen model's zero-shot latent skill predicts where an arena ends up (Spearman 0.90, exploratory at $n=13$) while no per-frame or transition-level distance orders the arenas, and one-tic quality does not guarantee closed-loop stability; and
-(4) DoomShift, the 17-arena benchmark scored per arena against persistence, released with the three models, the decoder fine-tune and the adapter path (Figure~\ref{fig:method}; link withheld for review).
+(3) the frozen model's zero-shot latent skill predicts where an arena ends up (Spearman 0.90, exploratory at $n=13$) while no footage distance orders the arenas, and one-tic quality does not guarantee closed-loop stability; and
+(4) DoomShift, the 17-arena benchmark scored per arena, released with the three models, the decoder fine-tune and the adapter path (Figure~\ref{fig:method}; link withheld for review).
 
 \begin{figure}[t]
 \centering
@@ -66,6 +67,16 @@ It closes half the gap on 9 of 13 arenas within 4k updates (median budget 1k [25
 \caption{Off its training maps the U-Net keeps moving and firing but renders the arena in training-map masonry; eight episodes restore it. Selected windows, 16 tics after the context frame, the row's button held throughout; arena 7 zero-shot and after 4k adapter updates on 8 episodes; fine-tuned decoder, raw ground truth, scene PSNR; persistence scores 16 to 19~dB on these windows.}
 \label{fig:teaser}
 \end{figure}
+
+%===============================================================================
+
+\section{Prior work}
+\label{sec:prior}
+
+Held-out evaluation of world models has meant a new embodiment~\citep{chen2026xeworld}, a new game or environment~\citep{rigter2024avid,gao2025adaworld} or a new building~\citep{koh2021pathdreamer}, never a new scene of the same game scored one by one; Doom map holdouts exist only for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
+Adapting a pretrained video model to a new domain with a small adapter is how Vista and AdaWorld reach new driving scenes and games~\citep{gao2024vista,gao2025adaworld}; we measure what that adaptation costs per scene.
+Persistence, the last frame copied forward, is the standard reference of video prediction~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}, and Genie reports the same paired $\Delta$PSNR~\citep{bruce2024genie}; game world models dropped it, and absolute PSNR then ranks how static a recording is.
+The reconstruction upper bound, the decoder applied to the ground-truth latent, caps any latent model's score~\citep{zheng2023occworld,karypidis2024dinoforesight}, and we read every score beside it.
 
 %===============================================================================
 
@@ -139,11 +150,11 @@ It places the training maps' held-out episodes inside the train-versus-train flo
 \label{sec:adapt}
 
 \textbf{Protocol.} For each unseen arena we adapt the U-Net 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent)~\citep{xie2023difffit}.
-We train on 8 adaptation episodes and score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates; forgetting ($A$ on the training maps), the directional check and a full fine-tune comparator at $2\times10^{-5}$ are in progress (\tbd{}).
+We train on 8 adaptation episodes (1.1 A4000 GPU-hours per arena for 4k updates) and score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates; forgetting ($A$ on the training maps), the directional check and a full fine-tune comparator at $2\times10^{-5}$ are in progress (\tbd{}).
 An arena's budget is the first grid point at which $A$ reaches $\tfrac12(A_0+A_\text{train})$, half of its gap from its zero-shot $A_0$; arenas that do not by the final budget of the grid are right-censored~\citep{taylor2009transfer}.
 Half of the gap in dB is not half of the error: the median gain of 1.8~dB removes 34 percent of the model's starting error.
 
-\textbf{What it takes.} Eight episodes and 4k updates raise the median $A$ from 2.04 to 3.80~dB, and on average 69 percent of each arena's gain comes within 250 updates; 9 of 13 arenas close half of their gap (5 within 500) and one reaches $A_\text{train}$ (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
+\textbf{What it takes.} Eight episodes and 4k updates raise the median $A$ from 2.04 to 3.80~dB, and on average 69 percent of each arena's gain comes within 250 updates; 9 of 13 arenas close half of their gap (median budget 1k [250, ${>}$4k]; 5 within 500), one reaches $A_\text{train}$, and on four arenas one episode gives most of the gain (\appref{app:perarena-adapt}) (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
 At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
 
 \begin{figure}[t]
