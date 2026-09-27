@@ -19,7 +19,10 @@ An adaptation checkpoint (`adapt_wm.py`, a LoRA adapter on a frozen snapshot) is
 `--ckpt adapter_0000250.pt` rebuilds the frozen source it names and applies the adapter, and `--use-ema`
 selects the adapter's EMA. `--windows-file <adaptation split> --windows-key held_out_windows` scores exactly
 the windows that split recorded instead of a fresh `--num-windows` draw (`adapt_split.py`); without it the
-draw is unchanged.
+draw is unchanged. The adapter records its source snapshot's absolute path on the machine it trained on;
+`--source-root DIR` (DIR/basename, then DIR/<recorded parent dir name>/basename) or `--source-path FILE` finds
+the same file elsewhere, the recorded SHA-256 still has to match, and `adapter_source` in the config says which
+file was loaded and whether it was an override.
 
 One pass leaves every per-window quantity a table needs in `per_window.csv` (the cohesion decision,
 `.claude/analyses/evaluation-cohesion-decision-2026-09-26.md`, item 3). Every column that existed before
@@ -276,8 +279,11 @@ def load_model(args, device, latent_channels, trained):
     from lora import is_adapter_checkpoint, load_adapter_checkpoint
     if is_adapter_checkpoint(ck):
         # a LoRA adaptation (adapt_wm.py): its frozen source snapshot, then the adapter and the parts it
-        # trained, live or EMA; `ck["args"]` is the source run's, so the graph above is the source's graph
-        load_adapter_checkpoint(model, ck, args.use_ema)
+        # trained, live or EMA; `ck["args"]` is the source run's, so the graph above is the source's graph.
+        # Which source file was loaded, and whether it was an override, rides on `args` into the config.
+        args.adapter_source = load_adapter_checkpoint(model, ck, args.use_ema,
+                                                      source_root=getattr(args, "source_root", "") or "",
+                                                      source_path=getattr(args, "source_path", "") or "")
         return model.to(device).eval(), ck.get("step", "?"), checkpoint_objective(ck, args.objective)
     if args.use_ema and not ck.get("ema"):
         raise SystemExit(f"--use-ema requested but {args.ckpt} carries no EMA weights (use a recovery checkpoint, not best.pt)")
@@ -649,6 +655,11 @@ def build_parser():
                    help="held_out_windows: the split's fixed draw from its held-out episodes (score with --split "
                         "<the adaptation split>); legacy_held_out_windows: the distance study's draw restricted to "
                         "them (score with --split <the map's distance-study split> to keep its noise keys)")
+    p.add_argument("--source-root", default="",
+                   help="adapter checkpoints only: a directory holding the recorded source snapshot on this machine "
+                        "(DIR/basename, then DIR/<recorded parent dir name>/basename); its SHA-256 must still match")
+    p.add_argument("--source-path", default="",
+                   help="adapter checkpoints only: the source snapshot file on this machine; its SHA-256 must match")
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--num-workers", type=int, default=2,
                    help="DataLoader worker processes; 0 loads in this process, which the trainer's periodic reads "

@@ -218,6 +218,8 @@ def test_every_checkpoint_is_scored_per_weights_and_step_zero_is_the_frozen_scor
     by = {(r["step"], r["weights"]): r for r in rows}
     r0 = by[(0, "live")]
     assert r0["map"] == "unseen_map17" and r0["seed"] == 0 and r0["heldout_windows"] == 12
+    # the row names the source snapshot file it scored on; here the recorded one, no override
+    assert r0["adapter_source"]["used"] == os.path.abspath(src) and r0["adapter_source"]["override"] is None
     assert r0["heldout_latent_mse_ratio"] is not None and r0["heldout_psnr"] is None      # no raw frames here
     # the per-window rows are kept, and the latent skill is -10 x the mean log10 ratio over them
     import csv
