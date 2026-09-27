@@ -49,7 +49,8 @@ Rank-16 adapters trained on eight episodes close half of an arena's gap to the i
 \section{Introduction}
 \label{sec:intro}
 
-Game world models now render playable worlds from pixels and controls: GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond}, and Matrix-Game~2 and MultiGen scale the recipe to open worlds and many games~\citep{he2025matrixgame2,po2026multigen}.
+Game world models now render playable worlds from pixels and controls: GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond}, and Matrix-Game~2 scales the recipe to open worlds~\citep{he2025matrixgame2}.
+MultiGen trains one Doom model on 100 procedurally generated maps with a pre-trained agent~\citep{po2026multigen}, the closest prior work to ours; it scores PSNR, SSIM and LPIPS on its training distribution and reports no map outside it.
 Each operates in the one environment it was trained on and is judged only there: its score is a held-out trajectory of its training scenes, and none is shown to generalize to a new environment of the same game.
 
 A learned simulator is only useful where it is faithful, and a robot or an agent that moves to a new room, level or workspace needs to know how much of its world model still holds there and what it costs to make the rest hold.
@@ -78,9 +79,10 @@ We contribute:
 \section{Prior work}
 \label{sec:related}
 
-Held-out evaluation of world models has meant a new embodiment~\citep{chen2026xeworld}, a new game or environment~\citep{rigter2024avid,gao2025adaworld} or a new building~\citep{koh2021pathdreamer}; to our knowledge, no published game world model is scored on unseen maps of the same game, and Doom map holdouts exist only for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
-Adapting a pretrained video model to a new domain with a small adapter is how Vista and AdaWorld reach new driving scenes and games~\citep{gao2024vista,gao2025adaworld}; we measure the budget that adaptation needs per scene.
-Persistence is the standard reference of video prediction~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}, and Genie reports the same paired $\Delta$PSNR~\citep{bruce2024genie}; game world models dropped it, and absolute PSNR then ranks how static a recording is.
+Held-out evaluation of world models has meant a new embodiment (concurrent work~\citep{chen2026xeworld}), a new game or environment~\citep{rigter2024avid,gao2025adaworld} or a new building~\citep{koh2021pathdreamer}; to our knowledge, no published game world model is scored on unseen maps of the same game, and Doom map holdouts exist only for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
+Pretrained video models have been moved to new domains by a short full fine-tune (AdaWorld~\citep{gao2025adaworld}) or by a small adapter on a frozen model (AVID~\citep{rigter2024avid}); Vista adds action control to a frozen backbone with LoRA~\citep{gao2024vista}.
+We measure the budget a small adapter needs per scene.
+Persistence is the standard reference of video prediction~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}; game world models dropped it, and absolute PSNR then ranks how static a recording is.
 The reconstruction upper bound, the decoder applied to the ground-truth latent, is in practice the best a latent model rendered through that decoder can score~\citep{zheng2023occworld,karypidis2024dinoforesight}, and we read every score beside it.
 
 %===============================================================================
@@ -94,7 +96,7 @@ Of these, four (2 to 5, 500 episodes each) are the training maps, scored on vali
 \textbf{Three backbones, one training recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; 32 context tics, $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so this compares pretrained packages.
 
 \textbf{What we measure.} Four scores answer four questions about one predicted frame $\hat z$, given the ground-truth next frame $x$ with latent $z$, the last context frame $x_\text{last}$ with latent $z_\text{last}$, and the decoder $D$.
-How much better than copying is it? The \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$, a paired difference like Genie's $\Delta$PSNR~\citep{bruce2024genie}.
+How much better than copying is it? The \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$, a paired difference in the spirit of Genie's $\Delta$PSNR~\citep{bruce2024genie}, with persistence rather than random actions as the reference.
 Does it look better than copying? The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips}, negative when it does.
 How far is it from the best the decoder can render? The \emph{gap} $G=\mathrm{PSNR}(D(z),x)-\mathrm{PSNR}(D(\hat z),x)$ to the reconstruction upper bound.
 Does it turn the right way? The \emph{directional} score, the fraction of turning windows whose predicted view turns the other way when left and right are swapped in the newest control.
