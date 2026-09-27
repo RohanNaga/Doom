@@ -547,3 +547,49 @@ def test_the_headline_variant_flag_promotes_the_8k_grid_and_its_budget(tmp_path)
     assert s["across_arenas"]["steps"] == list(steps8)
     assert s["recipe"] == []                  # the base-recipe runs anchor the recipe tests; they are not tests
     assert os.path.getsize(tmp_path / "f" / "fig4_adaptation.pdf") > 1000
+
+
+# ---------------------------------------------------------------------------------------------
+# Figure 3b: zero-shot A and M per arena through both decoders
+# ---------------------------------------------------------------------------------------------
+
+def write_paired(root, row, arena, a_stock, a_tuned, m_stock, m_tuned, name=None, tuned_twin=True):
+    """One eval_tf read carrying stock and tuned columns (a `_tuned` twin) or stock columns only."""
+    d = os.path.join(str(root), row + ("_tuned" if tuned_twin else ""), name or f"map{arena:02d}")
+    os.makedirs(d, exist_ok=True)
+    m = {"scene_psnr_dec": {"mean": 20.0 + a_stock, "n": 256}, "scene_copy_psnr_dec": {"mean": 20.0},
+         "scene_lpips_raw": {"mean": 0.2 + m_stock}, "scene_persist_lpips_raw": {"mean": 0.2}}
+    if tuned_twin:
+        m.update({"scene_psnr_dec_tuned": {"mean": 21.0 + a_tuned}, "scene_copy_psnr_dec_tuned": {"mean": 21.0},
+                  "scene_lpips_raw_tuned": {"mean": 0.2 + m_tuned}})
+    with open(os.path.join(d, "metrics.json"), "w") as f:
+        json.dump(m, f)
+
+
+def test_figure_3b_pairs_the_decoders_per_backbone_in_zero_shot_skill_order(tmp_path):
+    distances = write_distances(tmp_path / "distances.json")
+    # arena 9 has the higher zero-shot skill, so it comes first although its number is larger
+    write_run(tmp_path, 6, ARENA_A[6], skill=[1.0, 1.5, 2.0])
+    write_run(tmp_path, 9, ARENA_A[9], skill=[1.8, 2.0, 2.2])
+    fresh = tmp_path / "fresh"
+    for arena, (a, m) in {6: (1.0, 0.10), 9: (2.0, 0.05)}.items():
+        write_paired(fresh, "unet200k_ema", arena, a, a + 0.3, m, m - 0.03)
+        write_paired(fresh, "pixart200k_ema", arena, a + 0.2, a + 0.4, m, m - 0.02)
+        write_paired(fresh, "sd35_170000", arena, a - 0.5, None, m + 0.01, None, tuned_twin=False)
+        write_paired(fresh, "adapt4000_live", arena, a + 1.5, a + 2.0, m - 0.08, m - 0.1)
+    write_paired(fresh, "home_unet200k_ema", 0, 4.0, 5.0, -0.05, -0.08, name="val")
+    out, tables = cli(tmp_path, distances, "--fresh-root", str(fresh))
+    assert os.path.getsize(os.path.join(out, "fig3b_zero_shot_paired.png")) > 1000
+    w, h = mediabox(os.path.join(out, "fig3b_zero_shot_paired.pdf"))
+    assert w == pytest.approx(maf.FIG3B_SIZE[0], abs=0.01) and h == pytest.approx(maf.FIG3B_SIZE[1], abs=0.01)
+    zp = summary(tables)["zero_shot_paired"]
+    assert zp["order"] == [9, 6]
+    rows = zp["rows"]
+    assert set(rows) == {"unet", "pixart", "sd35", "adapter"}
+    assert rows["unet"]["stock"]["maps"]["6"]["A"] == pytest.approx(1.0)
+    assert rows["unet"]["tuned"]["maps"]["6"]["A"] == pytest.approx(1.3)
+    assert rows["unet"]["tuned"]["maps"]["9"]["M"] == pytest.approx(0.02)
+    assert rows["unet"]["tuned"]["home"]["A"] == pytest.approx(5.0)
+    assert rows["unet"]["stock"]["home"]["A"] == pytest.approx(4.0)
+    assert "tuned" not in rows["sd35"]                 # SD 3.5 has no tuned read: no filled marker is invented
+    assert rows["sd35"]["stock"]["maps"]["9"]["A"] == pytest.approx(1.5)

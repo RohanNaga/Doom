@@ -243,3 +243,18 @@ Each entry answers the comment of the same number: "applied" names where, otherw
 ### Figure 4 and the statistics decision (beyond round 0)
 
 Built from `per-arena-statistics-decision-2026-09-27.md`: `fig4_adaptation` is (a) the interquartile mean of A across the 13 arenas with a nested bootstrap band (10,000 draws; arenas, then each arena's held-out episodes, paired across steps) over the faint per-arena curves, and (b) cumulative attainment of the half-gap line, one minus Kaplan-Meier, with its band, the at-risk row (13, 13, 9, 8, 6, 4), per-arena crossing ticks with arena numbers (open ticks right of 4k for the four censored arenas) and the fixed 3.5 dB threshold as a thin dotted curve. The appendix adds `figA_adapt_arenas` (13 small multiples with episode bands and a key in the empty slot) and `figA_adapt_profiles` (0, 500 and 4k updates). `adapt_summary.json` gains `across_arenas` and `home_ci`; `adapt_table3.tex` is Table 3's tabular with arena-bootstrap intervals in brackets, the share of the gap closed (0.58 [0.49, 0.74]), the training maps' A with its episode interval (5.06 [4.75, 5.38]) and the median budget with its censoring ("1,000 [250, >4,000]; 4 of 13 censored"). The median-budget interval runs past 4k because 5 percent of the nested resamples have a censored median; the main view's "[250, 2k]" was the interval of the finite medians only. No "tie" wording remains: the summary counts `margin_lower_by_budget` (11) and `margin_within_001_by_budget` (2).
+
+### Comments 15 to 24 (Figure 3b, `fig3b_zero_shot_paired`)
+
+The body panel is now `fig3b_zero_shot_paired` (3.3 x 1.9 in): unseen arenas as columns in the order of the U-Net's zero-shot skill S0 (decision item 6), A on the top row and M on the bottom row, one colour and marker per backbone, stock decoder open and tuned decoder filled on the same windows with a thin grey segment between them, episode intervals, the adapter at 4k as a filled diamond on the A row, and the training maps' reads in a first column under the grey band. `fig2a` and `fig2b` stay as one-decoder appendix variants in the same S0 order.
+
+15. Applied: A at 4k now has its own marker and sits only on the A row of Figure 3b, and the y label no longer says A0; in `fig2a` the axis reads "A (dB)".
+16. Applied: each backbone's own training-maps value appears in the training-maps column, in its own colour and fill. I drew these as points rather than the short rules the brief asked for, so the open/filled decoder encoding carries over.
+17. Partly applied: the training maps get a column, but it holds the pooled read (`home_<row>/val`), not maps 2 to 5 separately. The per-map training reads are not in `results/fresh_rescore`, and that blocks the per-map rows.
+18. Applied: arenas are ordered by S0 on a categorical axis, and D appears nowhere on it.
+19. Applied: the backbones sit at fixed offsets inside each arena column, and each stock/tuned pair shares one x, so no two markers of one arena overlap.
+20. Applied: SD 3.5 has only a stock read, so it is drawn open and no tuned marker is invented. The caption states the decoder per backbone.
+21. Applied: the M row is labelled "M (LPIPS)" with "lower is better", and no adapter M is drawn there.
+22. Applied: M ticks are every 0.1 in Figure 3b and every 0.05 in `fig2b`, both including values below zero.
+23. Applied: the zero line is labelled "copy-last" on both rows.
+24. Applied: M is the bottom row of Figure 3b and shares the arena columns with A.

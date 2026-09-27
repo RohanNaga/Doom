@@ -54,8 +54,11 @@ faint per-arena curves, (b) the attainment curves with the at-risk row and per-a
 `figA_adapt_arenas` (the per-arena small multiples with episode bands), `figA_adapt_profiles`,
 `fig3_adaptation_curves` (A per arena, the blue ramp keyed to S0, three arenas labelled), `fig3_adaptation_skill`
 (S instead of A), `fig3_adaptation_seeds`, `fig_adapt_ladder` and `fig_adapt_recipe` (when their runs carry the
-decoder), `fig2c_outcomes_by_skill` (A at the budget against S0), `fig2a_advantage_by_distance` and, with
-`--with-raw`, `fig2b_margin_by_distance` (zero-shot A and M per arena and backbone). In `--tables-dir`, under a
+decoder), `fig2c_outcomes_by_skill` (A at the budget against S0), `fig3b_zero_shot_paired` (Figure 3b: zero-shot
+A and M per arena in S0 order for every backbone under `--fresh-root`, stock decoder open and tuned filled on the
+same windows, the training maps' reads in a first column, the 4k adapter on the A row), and the appendix variants
+`fig2a_advantage_by_distance` and, with `--with-raw`, `fig2b_margin_by_distance` (one decoder per build, arenas in
+S0 order despite the historical names). In `--tables-dir`, under a
 provenance header: `adapt_cost.tex` (per arena), `adapt_perarena.tex` (the appendix table body), `adapt_table3.tex`
 (Table 3's tabular with arena-bootstrap intervals in brackets), and `adapt_summary.json`, the numbers the text
 quotes.
@@ -399,6 +402,58 @@ def load_zero_shot_row(row_dir, decoder, draws=0, seed=0):
             if rec["M"] is not None:
                 rec["M_ci"] = episode_bootstrap(*window_outcome(windows, "B", decoder), draws, seed)
         out[int(m["map"] or m["bare"])] = rec
+    return out
+
+
+def home_read(root, row, decoder, draws, seed):
+    """{A, M, A_ci, M_ci} of a backbone's training-maps read `<root>/home_<row>/**/metrics.json` under `decoder`."""
+    found = sorted(glob.glob(os.path.join(root, f"home_{row}", "**", "metrics.json"), recursive=True))
+    if len(found) != 1:
+        return None
+    with open(found[0]) as f:
+        metrics = json.load(f)
+    out = {"A": metrics_outcome(metrics, "A", decoder), "M": metrics_outcome(metrics, "B", decoder),
+           "A_ci": None, "M_ci": None}
+    pw = os.path.join(os.path.dirname(found[0]), "per_window.csv")
+    if draws and os.path.exists(pw):
+        windows = read_windows(pw)
+        out["A_ci"] = episode_bootstrap(*window_outcome(windows, "A", decoder), draws, seed)
+        if out["M"] is not None:
+            out["M_ci"] = episode_bootstrap(*window_outcome(windows, "B", decoder), draws, seed)
+    return out if out["A"] is not None else None
+
+
+def paired_zero_shot(root, draws, seed, notes):
+    """{backbone: {decoder: {"maps": {arena: {A, M, A_ci, M_ci}}, "home": {...}, "source": dir}}} for both decoders.
+
+    A row `<name>` and its rescored twin `<name>_tuned` are one backbone's reads of the same windows; the stock
+    columns come from the plain directory (or the twin, which carries them too), the tuned columns from the twin.
+    A backbone with more than one row name keeps the first in sorted order and notes the rest.
+    """
+    if not root or not os.path.isdir(root):
+        return {}
+    names = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)) and not d.startswith("home_")
+                   and d != "adapters")
+    bases = sorted({n[:-len("_tuned")] if n.endswith("_tuned") else n for n in names})
+    out = {}
+    for base in bases:
+        key = fs.backbone_of(base)
+        if key in out:
+            notes.append(f"Figure 3b: {base} is a second {key} row; {out[key]['name']} is drawn")
+            continue
+        twin = base + "_tuned" if base + "_tuned" in names else None
+        entry = {"name": base}
+        for decoder, row in (("stock", base if base in names else twin), ("tuned", twin)):
+            if row is None:
+                continue
+            maps = load_zero_shot_row(os.path.join(root, row), decoder, draws, seed)
+            maps = {m: e for m, e in maps.items() if e["A"] is not None}
+            if maps:
+                entry[decoder] = {"maps": maps, "source": rel(os.path.join(root, row)),
+                                  "home": home_read(root, row, decoder, draws, seed)
+                                  or home_read(root, base, decoder, draws, seed)}
+        if "stock" in entry or "tuned" in entry:
+            out[key] = entry
     return out
 
 
@@ -1438,6 +1493,70 @@ def fig_skill(records, home, budget, out_dir, band=None):
     return fs.save(fig, out_dir, "fig2c_outcomes_by_skill")
 
 
+FIG3B_SIZE = (3.3, 1.9)
+PAIRED_OFFSETS = {"unet": -0.27, "pixart": -0.09, "sd35": 0.09, "adapter": 0.27}
+
+
+def fig_zero_shot_paired(paired, order, out_dir):
+    """Figure 3b: zero-shot A (top) and M (bottom) per unseen arena, arenas ordered by the U-Net's zero-shot skill
+    S0 and the training maps' reads in a first column under the grey band; one colour and marker per backbone,
+    open for the stock decoder and filled for the tuned one on the same windows, a thin grey segment joining each
+    pair; episode intervals above the markers; the 4k adapter (tuned decoder) as its own diamond on the A row;
+    copy-last as the zero line of both rows."""
+    fig, (ax, mx) = fs.new_figure(FIG3B_SIZE, nrows=2, sharex=True, h_pad=0.01, hspace=0.02)
+    train_w = 2.0
+    xpos = {a: train_w + 0.5 + i for i, a in enumerate(order)}
+    xpos["train"] = train_w / 2
+    drawn = {"A": [], "M": []}
+    for panel, key in ((ax, "A"), (mx, "M")):
+        fs.training_band(panel, 0.0, train_w)
+        for backbone, entry in paired.items():
+            if backbone == "adapter" and key == "M":
+                continue
+            ent = fs.BACKBONES[backbone]
+            off = PAIRED_OFFSETS[backbone] * (1.6 if backbone != "adapter" else 1.0)
+            decoders = ("tuned",) if backbone == "adapter" else ("stock", "tuned")
+            for col in ["train"] + list(order):
+                vals = {}
+                for d in decoders:
+                    src = entry.get(d)
+                    if not src:
+                        continue
+                    e = src["home"] if col == "train" else src["maps"].get(col)
+                    if e and e.get(key) is not None:
+                        vals[d] = (e[key], e.get(f"{key}_ci"))
+                if not vals or (backbone == "adapter" and col == "train"):
+                    continue
+                x = xpos[col] + (off * (1.8 if col == "train" else 1.0))
+                if len(vals) == 2:
+                    panel.plot([x, x], [vals["stock"][0], vals["tuned"][0]], color=fs.FAINT, lw=fs.MIN_LW, zorder=2)
+                for d, (v, ci) in vals.items():
+                    if ci:
+                        panel.plot([x, x], ci, color=ent.colour, lw=fs.MIN_LW, zorder=4, solid_capstyle="butt")
+                    panel.plot([x], [v], ls="none", marker=ent.marker, ms=3.0, mew=0.6, mec=ent.colour,
+                               mfc=ent.colour if d == "tuned" else "white", zorder=3)
+                    drawn[key].append(v)
+        fs.copy_last_line(panel, where=0.0, align="left")
+        panel.tick_params(axis="x", length=0)
+    ax.set_ylabel("$A$ (dB)")
+    mx.set_ylabel("$M$ (LPIPS)")
+    mx.text(0.995, 0.03, "lower is better", transform=mx.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
+            color=fs.CONTEXT_INK)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
+    mx.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
+    ax.set_ylim(min(0.0, min(drawn["A"])) - 0.4, max(drawn["A"]) + 0.5)
+    if drawn["M"]:
+        mx.set_ylim(min(0.0, min(drawn["M"])) - 0.03, max(drawn["M"]) + 0.03)
+    ticks = [xpos["train"]] + [xpos[a] for a in order]
+    mx.set_xticks(ticks, ["training\nmaps"] + [str(a) for a in order])
+    for t in mx.xaxis.get_ticklabels()[:1]:
+        t.set_fontsize(fs.MIN_PT)
+        t.set_linespacing(0.9)
+    mx.set_xlim(-0.1, xpos[order[-1]] + 0.6 if order else train_w + 0.5)
+    mx.set_xlabel("unseen arena, by the U-Net's zero-shot skill $S_0$")
+    return fs.save(fig, out_dir, "fig3b_zero_shot_paired")
+
+
 def fig_zero_shot(zero_shot, order, key, out_dir, stem, ylabel, zero=False):
     """Zero-shot A (or M) per arena, arenas in `order`, training maps first under the grey band; one marker per
     backbone (encoding table), open for its stock decoder and filled for the tuned one; each backbone's home as a
@@ -1638,6 +1757,8 @@ def main(argv=None):
             notes.append(f"arena {r['arena']}: scored to step {r['last_step']} of {budget}; left out of the counts")
 
     zero_shot = zero_shot_rows(a, records, home, a.bootstrap, notes)
+    paired = paired_zero_shot(a.fresh_root, a.bootstrap, a.seed, notes)
+    s0_order = [r["arena"] for r in sorted(records, key=lambda r: (r["S0"] is None, -(r["S0"] or 0), r["arena"]))]
     margins_from_adapter_row(records, zero_shot, budget, notes)
     summary = build_summary(records, budget, home)
     seed_summary = seed_entries(anchors, seeds, records_of, budget, a.headline_variant)
@@ -1656,6 +1777,9 @@ def main(argv=None):
                "per_arena": records, "seeds": seed_summary, "ladder": ladder_summary,
                "recipe": recipe_entries(anchors, base, recipe, records_of, seed_summary),
                "zero_shot": {k: {**v, "maps": without_paths(v["maps"])} for k, v in zero_shot.items()},
+               "zero_shot_paired": {"order": s0_order, "rows": {
+                   k: {d: {"source": e[d]["source"], "home": e[d]["home"], "maps": without_paths(e[d]["maps"])}
+                       for d in ("stock", "tuned") if d in e} for k, e in paired.items()}},
                "inputs": inputs, "notes": notes}
 
     os.makedirs(a.tables_dir, exist_ok=True)
@@ -1686,7 +1810,8 @@ def main(argv=None):
 
     fs.style()
     written += draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary,
-                            recipe, base, records_of, zero_shot, notes, band=(home_ci or {}).get("ci"))
+                            recipe, base, records_of, zero_shot, notes, band=(home_ci or {}).get("ci"),
+                            paired=paired, s0_order=s0_order)
     for p in written:
         print("wrote", rel(p))
     for n in notes:
@@ -1695,7 +1820,7 @@ def main(argv=None):
 
 
 def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary, recipe,
-                 base, records_of, zero_shot, notes, band=None):
+                 base, records_of, zero_shot, notes, band=None, paired=None, s0_order=()):
     """Every figure the data support; a figure the data cannot fill is refused by `figstyle.save` and noted.
     `band` is the training maps' 95% episode interval, drawn around their dashed reference line."""
     written = []
@@ -1724,9 +1849,12 @@ def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors
     if [r for r in recipe if records_of.get(r.name)]:
         written += attempt(fig_recipe, recipe, anchors, base, seeds, records_of, home, a.decoder, a.out_dir,
                            band=band)
+    order = [a_ for a_ in s0_order if any(a_ in e.get(d, {}).get("maps", {}) for e in (paired or {}).values()
+                                          for d in ("stock", "tuned"))]
+    if order:
+        written += attempt(fig_zero_shot_paired, paired, order, a.out_dir)
     if zero_shot:
-        order = [r["arena"] for r in sorted(records, key=lambda r: (r["S0"] is None, -(r["S0"] or 0), r["arena"]))]
-        order = [m for m in TRAINING_MAPS if any(m in v["maps"] for v in zero_shot.values())] + order
+        order = [m for m in TRAINING_MAPS if any(m in v["maps"] for v in zero_shot.values())] + list(s0_order)
         written += attempt(fig_zero_shot, zero_shot, order, "A", a.out_dir, "fig2a_advantage_by_distance",
                            "$A$ (dB)")
         if a.with_raw and any(e.get("M") is not None for v in zero_shot.values() for e in v["maps"].values()):
