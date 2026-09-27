@@ -12,17 +12,17 @@ Status as of 2026-09-27 (after the joint review; `REVIEW_LOG.md`). The submissio
 Status words: **exists** (the file or every number is in the repo today), **provisional** (numbers exist but will be replaced: fresh-set rescore, tuned SD 1 decoder, scene rows, final 200k checkpoints), **pending** (nothing exists yet).
 Figures are drawn by `\figslot{file}{width}{height}{label}` in `main.tex`: when `paper/<file>` exists it is included, otherwise a labelled box stands in. Dropping the file into `paper/figures/` under the name below is all a figure needs.
 
-## Body captions as set in `main.tex` (paper owner, 2026-09-27)
+## Body captions as set in `main.tex` (paper owner, 2026-09-27; synced to main e766322)
 
-These are the captions of the four-page body; the draft captions below are the longer reading notes they were cut from, and where the two differ these win. Figure 1 drops the owner's training-map clause because the column is gone (cce87b9).
+These are the captions of the four-page body; the draft captions below are the longer reading notes they were cut from, and where the two differ these win. Figure 1 drops the owner's training-map clause because the column is gone (cce87b9). Figure 3's caption no longer describes the band in (a), so the figure labels it itself ("train vs train $d$").
 
 **Figure 1** (`fig:teaser`, `figures/fig_teaser_B.pdf`, 5.5 x 1.5 in). Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a ground-truth context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and ground truth.
 
-**Figure 2** (`fig:method`, `figures/fig1_method.pdf`, 5.5 x 1.8 in). What we built: (a) the benchmark, (b) three backbones under one recipe, (c) post-training, (d) evaluation. Prediction, truth and persistence are all rendered by the one fine-tuned decoder $D$.
+**Figure 2** (`fig:method`, `figures/fig1_method.pdf`, 5.5 x 1.8 in). What we built: (a) the benchmark, (b) three backbones under one recipe, (c) post-training, (d) evaluation. Prediction, ground truth and persistence are all rendered by the one fine-tuned decoder $D$.
 
-**Figure 3** (`fig:shift`, `figures/fig2d_family_step.pdf`, 2.25 x 1.5 in, beside `figures/tuned/fig3b_zero_shot_absolute.pdf`, 3.15 x 1.5 in). (a) The shift is a gap, not a slope: every unseen arena has lower zero-shot latent skill $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman −0.05, −0.15, −0.17; band: the train-versus-train $d$ range). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Raw ground-truth frame, scene rows, one tic, 95% episode-bootstrap intervals; U-Net and PixArt-α through the fine-tuned SD 1 decoder (filled), SD 3.5 through its own (open, provisional 170k).
+**Figure 3** (`fig:shift`, `figures/fig2d_family_step.pdf`, 2.25 x 1.5 in, beside `figures/tuned/fig3b_zero_shot_absolute.pdf`, 3.15 x 1.5 in). (a) The shift is a gap, not a slope: every unseen arena has lower zero-shot latent skill $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman −0.05, −0.15, −0.17). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Scene rows, one tic, 95% episode-bootstrap intervals; filled: fine-tuned SD 1 decoder (U-Net, PixArt-α); open: SD 3.5's own (provisional 170k).
 
-**Figure 4** (`fig:adapt`, `figures/tuned/fig4_dots.pdf`, 5.5 x 1.4 in). Eight episodes and 4k adapter updates lift the median $A$ from 2.04 to 3.80 dB, most of it by 250 updates (a), and 9 of 13 arenas close half of their gap to $A_\text{train}$ (b: budget above each dot; grey: censored at 4k).
+**Figure 4** (`fig:adapt`, `figures/tuned/fig4_dots.pdf`, 5.5 x 1.4 in). Eight episodes and 4k updates lift the median $A$ from 2.04 to 3.80 dB, most of it by 250 updates (a); 9 of 13 arenas close half of their gap to $A_\text{train}$ (b; budgets above dots; grey: censored).
 
 ## Draft captions (figure lead, round 2, 2026-09-27; for the paper owner to paste and trim)
 
