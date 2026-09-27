@@ -25,7 +25,8 @@ One pass leaves every per-window quantity a table needs in `per_window.csv` (the
 `.claude/analyses/evaluation-cohesion-decision-2026-09-26.md`, item 3). Every column that existed before
 it keeps its name, value and position; the additions follow them:
 
-* `copy_lpips_dec`, the decoded copy-last frame's LPIPS against the decoded truth, beside `lpips_dec`;
+* `copy_lpips_dec` and `copy_lpips_raw`, the decoded copy-last frame's LPIPS against the decoded and the raw
+  truth, beside `lpips_dec` and `lpips_raw`;
 * a pixel MSE beside every PSNR (`psnr` replaced by `mse` in the name), so a mean of PSNRs and the PSNR
   of a mean MSE can both be recomputed;
 * `scene_*`, every full-frame pixel metric again on rows 0 to 207, the frame without the 32-row HUD that
@@ -69,9 +70,12 @@ from wandb_log import add_eval_args, log_evaluation
 HUD_ROWS = 32
 # The per-window columns the frozen results were read from, in their original order. per_window.csv
 # and metrics.json keep them first, so every earlier reader, positional or by name, reads the same file.
-LEGACY_COLUMNS = ("psnr_dec", "lpips_dec", "copy_psnr_dec", "latent_mse", "copy_latent_mse", "latent_mse_ratio",
+# The frozen distance-study scores came from 6a33311 and ca03bad, which had no copy-last latent columns;
+# 60d99c4 added those two, so they follow the frozen set rather than sit inside it.
+LEGACY_COLUMNS = ("psnr_dec", "lpips_dec", "copy_psnr_dec", "latent_mse",
                   "hud_psnr_dec", "psnr_raw", "lpips_raw", "copy_psnr_raw", "vae_psnr", "vae_lpips",
-                  "hud_psnr_raw", "hud_vae_psnr", "persist_psnr_raw", "persist_lpips_raw", "persist_hud_psnr_raw")
+                  "hud_psnr_raw", "hud_vae_psnr", "persist_psnr_raw", "persist_lpips_raw", "persist_hud_psnr_raw",
+                  "copy_latent_mse", "latent_mse_ratio")
 # columns that identify or flag a window rather than score it; they are never averaged
 WINDOW_COLUMNS = ("index", "episode", "map", "start", "action", "tics_since_decision",
                   "start_tic", "scored_tic", "dup_raw", "dup_latent")
@@ -146,7 +150,7 @@ def decoder_metrics(pred, gt, last, lp, raw=None):
     m.update(pair_metrics(last, gt, lp, "copy_psnr_dec", "copy_lpips_dec"))
     if raw is not None:
         m.update(pair_metrics(pred, raw, lp, "psnr_raw", "lpips_raw", "hud_psnr_raw"))
-        m.update(pair_metrics(last, raw, lp, "copy_psnr_raw"))
+        m.update(pair_metrics(last, raw, lp, "copy_psnr_raw", "copy_lpips_raw"))
         m.update(pair_metrics(gt, raw, lp, "vae_psnr", "vae_lpips", "hud_vae_psnr"))
     return m
 

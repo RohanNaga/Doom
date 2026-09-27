@@ -134,7 +134,7 @@ def test_crop_strips_padding_and_lpips_uses_identical_normalization():
     assert torch.equal(calls[1][1], calls[0][1][:, :, :208])
 
 
-def test_lpips_call_budget_is_eighteen_for_two_decoders():
+def test_lpips_call_budget_is_twenty_two_for_two_decoders():
     calls = []
 
     def lp(a, b):
@@ -145,7 +145,8 @@ def test_lpips_call_budget_is_eighteen_for_two_decoders():
     for _ in range(2):
         eval_tf.decoder_metrics(x, x, x, lp, x)
     eval_tf.persistence_metrics(x, x, lp)
-    assert len(calls) == 18  # eight per decoder plus two decoder-free persistence reads
+    # ten per decoder (finding 3 adds copy_lpips_raw and its scene crop) plus two decoder-free persistence reads
+    assert len(calls) == 22
 
 
 def test_every_nodup_column_uses_the_same_mask_with_a_second_decoder(
