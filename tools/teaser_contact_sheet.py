@@ -34,10 +34,18 @@ sidecar flags (`near`, `at_floor`); no two rows' in-domain starts share frames. 
 steward's rollouts restarted at each moment, and `--restart-horizon 8 16` adds the +16 redraw
 (`fig_teaser_C_<n>_restart16`), each rescored from the frames it shows. Actions that never start on a training
 map are reported.
+
+**The hold round** (`--hold-steps 16`, `run_hold`): moments whose button is pressed on every restart step; the
+in-domain moment of each row shown (`--hold-rows`) is the restarted training-map moment that beats persistence by
+most at +16 (brightness breaks ties, weapon flashes are excluded by the window-relative guard, no two rows share
+frames). `--home-root results/teaser_maps345` takes the training-map moments from that export instead of
+`--root`'s; every restarted candidate is drawn with its numbers on `<review-dir>/teaser_hold16_restarts.png`, and
+`--home-moments forward:<window>_t<T>` names a row's moment by eye over the rule's pick (both kept in the record).
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 import numpy as np
@@ -56,8 +64,15 @@ ACTIONS = (("attack", ("attack",)), ("turn left", ("turn left",)), ("turn right"
 FIGURE_ROWS = (("attack", ("attack",)), ("turn", ("turn left", "turn right")), ("forward", ("forward",)))
 EDGE_THRESHOLD = 0.1
 NEAR_TICS = 20                     # an in-domain start this close in rollout depth counts as matched
-FLASH_CHROMA = 12.0                # mean CIELAB chroma above this is a weapon flash: map 2's stone sits at 2 to 5
+# A weapon flash, relative to the window (maps 3 to 5 are far more colourful than map 2's stone, so an absolute
+# chroma bar flags every frame there): an endpoint frame's mean CIELAB chroma more than FLASH_EXCESS above the
+# median over the window's ground-truth frames, or one 8-connected blob of saturated bright pixels (HSV S and V at
+# least BLOB_SV) covering more than FLASH_BLOB of the scene. Astra's rule for the maps 3 to 5 round.
+FLASH_EXCESS = 6.0
+FLASH_BLOB = 0.08
+BLOB_SV = 0.8
 THUMB = (128, 83)                  # px, 0.4 of the 320 x 208 scene crop
+RESTART_THUMB = (240, 156)         # px, 0.75 of the scene crop: the restart sheet is judged by eye
 TEXT_W = 318
 PAD = 4
 
@@ -118,6 +133,29 @@ def luma(img):
     return float((img[..., :3].astype(np.float64) @ np.array([0.299, 0.587, 0.114])).mean())
 
 
+def saturated_blob(img):
+    """The largest 8-connected blob of saturated bright pixels (HSV S and V both at least `BLOB_SV`) as a share of
+    the image's pixels."""
+    from scipy import ndimage
+    c = img[..., :3].astype(np.float64) / 255.0
+    v, lo = c.max(axis=-1), c.min(axis=-1)
+    s = np.where(v > 0, (v - lo) / np.maximum(v, 1e-12), 0.0)
+    labels, n = ndimage.label((s >= BLOB_SV) & (v >= BLOB_SV), structure=np.ones((3, 3), bool))
+    return float(np.bincount(labels.ravel())[1:].max() / labels.size) if n else 0.0
+
+
+def is_flash(frames, median_chroma):
+    """True when any of `frames` (a moment's context and ground-truth endpoint) shows a weapon flash: chroma more
+    than `FLASH_EXCESS` above the window's median, or a saturated bright blob over `FLASH_BLOB` of the scene."""
+    return any(chroma(f) > median_chroma + FLASH_EXCESS or saturated_blob(f) > FLASH_BLOB for f in frames)
+
+
+def window_chroma(row_dir):
+    """The median mean chroma over every exported frame of one row (scene rows)."""
+    tics = sorted({int(m.group(1)) for f in os.listdir(row_dir) for m in [re.match(r"tic_(\d+)", f)] if m})
+    return float(np.median([chroma(ct.frame(row_dir, t)) for t in tics]))
+
+
 def window_moments(root, name, wdir, hold_steps=None):
     """Every scored moment of one window: starts held `HOLD` tics scored at +`HORIZON`, or with `hold_steps` the
     tics whose button is pressed on every one of the next `hold_steps` steps, scored at +`hold_steps`."""
@@ -131,6 +169,7 @@ def window_moments(root, name, wdir, hold_steps=None):
     found = (list(held_moments(ctrl, last, hold_steps)) if hold_steps else
              [(a, b, t, None) for a, b, t in moments(ctrl, last)])
     out = []
+    median = window_chroma(os.path.join(wdir, ct.ROWS["truth"])) if found else None
     for action, button, t, starts in found:
         gt = ct.frame(os.path.join(wdir, ct.ROWS["truth"]), t + horizon)
         context = ct.frame(os.path.join(wdir, ct.ROWS["truth"]), t)
@@ -139,7 +178,8 @@ def window_moments(root, name, wdir, hold_steps=None):
                "zero_shot" if unseen else "in_domain": zs.get(t + horizon),
                "chroma": round(chroma(gt), 2), "edges": round(edge_density(gt), 4),
                "luma": round((luma(context) + luma(gt)) / 2, 2),
-               "flash": max(chroma(context), chroma(gt)) > FLASH_CHROMA}
+               "chroma_ends": [round(chroma(context), 2), round(chroma(gt), 2)],
+               "chroma_median": round(median, 2), "flash": is_flash([context, gt], median)}
         if hold_steps:
             held = [set(ct.button_names(c)) for c in ctrl[t + 1:t + hold_steps + 1]]
             rec.update({"held": hold_steps, "starts": starts,
@@ -352,10 +392,10 @@ def row_picks(found, n=2, steps=HORIZON):
     return {"floor": round(floor, 3), "rows": rows}
 
 
-def restart_home(homes, restart_root, steps, taken=()):
-    """Among the training-map moments restarted in `restart_root` (`<window>_t<T>`), the one whose U-Net scene PSNR
-    beats persistence's by most at +`steps` (ties, to 0.01 dB: the brighter), weapon flashes excluded unless
-    nothing else is left, no frames shared with `taken`; None when no candidate was restarted."""
+def restart_scores(homes, restart_root, steps, taken=()):
+    """The training-map moments restarted in `restart_root` (`<window>_t<T>`), each with the U-Net's and
+    persistence's scene PSNR at +`steps`, their difference (`advantage`) and what the recorded controls held
+    (`held_note`), best advantage first (ties: the brighter); moments sharing frames with `taken` are left out."""
     scored = []
     for h in homes:
         if overlaps(h["window"], h["tic"], taken):
@@ -369,10 +409,80 @@ def restart_home(homes, restart_root, steps, taken=()):
         copy = ct.copy_last(man, steps)
         if model is None or copy is None:
             continue
+        held = ct.moment_steps(man, 1, steps)
         scored.append({**h, "in_domain_restart": round(model, 3), "persistence_restart": round(copy, 3),
-                       "advantage": round(model - copy, 3)})
+                       "advantage": round(model - copy, 3),
+                       "held_note": ct.held_note(held, h["button"]) if held else None})
+    return sorted(scored, key=lambda h: (-round(h["advantage"], 2), -h["luma"], h["window"], h["tic"]))
+
+
+def restart_home(homes, restart_root, steps, taken=()):
+    """Among the training-map moments restarted in `restart_root` (`<window>_t<T>`), the one whose U-Net scene PSNR
+    beats persistence's by most at +`steps` (ties, to 0.01 dB: the brighter), weapon flashes excluded unless
+    nothing else is left, no frames shared with `taken`; None when no candidate was restarted."""
+    scored = restart_scores(homes, restart_root, steps, taken)
     scored = [h for h in scored if not h.get("flash")] or scored
-    return max(scored, key=lambda h: (round(h["advantage"], 2), h["luma"])) if scored else None
+    return scored[0] if scored else None
+
+
+def named_home(name, homes, scored, taken):
+    """The training-map moment `name` (`<window>_t<T>`) chosen by eye over the rule's pick: it must be a held moment
+    of the row's button (`homes`), restarted (`scored`), and share no frames with `taken`."""
+    if not any(f"{h['window']}_t{h['tic']}" == name for h in homes):
+        raise SystemExit(f"{name} is not a held moment of the row's button on a training map")
+    hit = next((h for h in scored if f"{h['window']}_t{h['tic']}" == name), None)
+    if hit is None:
+        raise SystemExit(f"the restart export has no {name}")
+    if overlaps(hit["window"], hit["tic"], taken):
+        raise SystemExit(f"{name} shares frames with another row's in-domain moment")
+    return hit
+
+
+def draw_restart_sheet(restart_root, restarted, steps, path):
+    """The restarted in-domain candidates on one PNG, judged by eye: per figure row every restarted training-map
+    moment of its button, best advantage over persistence first, as context (t = 0), U-Net +`steps` and ground
+    truth +`steps` with the numbers the rule reads (U-Net and persistence scene PSNR, their difference, what was
+    held, brightness, chroma against the window's median, the flash guard) and the rule's and the figure's pick."""
+    small, body, head = _font(15), _font(17), _font(22)
+    tw, th = RESTART_THUMB
+    text_w = 700
+    line_h = th + 22 + PAD
+    blocks = [(row, ms) for row, ms in restarted.items() if ms]
+    width = 3 * (tw + PAD) + text_w + 3 * PAD
+    height = sum(40 + len(ms) * line_h for _, ms in blocks) + 2 * PAD
+    sheet = Image.new("RGB", (width, height), "white")
+    d = ImageDraw.Draw(sheet)
+    y = PAD
+    for row, ms in blocks:
+        d.rectangle([0, y, width, y + 34], fill=(235, 235, 235))
+        d.text((PAD + 4, y + 5), f"{row}  ·  training-map moments restarted after 32 ground-truth context tics, "
+               f"by U-Net minus persistence scene PSNR at +{steps} (dB)", font=head, fill=(0, 0, 0))
+        y += 40
+        for m in ms:
+            name = f"{m['window']}_t{m['tic']}"
+            cells = [("truth", 0, "context (t = 0)"), ("model", steps, f"U-Net +{steps}  {m['in_domain_restart']:.1f}"),
+                     ("truth", steps, f"ground truth +{steps}")]
+            for k, (r, tic, caption) in enumerate(cells):
+                x = PAD + k * (tw + PAD)
+                img = ct.frame(os.path.join(restart_root, name, ct.ROWS[r]), tic)
+                sheet.paste(Image.fromarray(img).resize(RESTART_THUMB, Image.LANCZOS), (x, y))
+                d.text((x, y + th + 2), caption, font=small, fill=(60, 60, 60))
+            tx = PAD + 3 * (tw + PAD) + 8
+            c0, c1 = m.get("chroma_ends", [None, None])
+            marks = [w for w, on in (("rule pick", m.get("rule_pick")), ("in the figure", m.get("chosen"))) if on]
+            text = [(name.replace("train_", ""), (0, 0, 0)),
+                    (f"U-Net {m['in_domain_restart']:.2f} dB   persistence {m['persistence_restart']:.2f} dB   "
+                     f"advantage {m['advantage']:+.2f} dB", (0, 70, 110)),
+                    (f"{m['button']}: {m['held_note'] or '-'}   (control at t = 0: {m['control']})", (0, 0, 0)),
+                    (f"luma {m['luma']:.1f}   C* {_fmt(c0)} / {_fmt(c1)} (window median {_fmt(m.get('chroma_median'))})"
+                     f"   flash {'yes' if m.get('flash') else 'no'}", (0, 0, 0)),
+                    ("  ·  ".join(marks), (170, 60, 0))]
+            for j, (line, colour) in enumerate(text):
+                d.text((tx, y + 4 + j * 26), line, font=body, fill=colour)
+            y += line_h
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    sheet.save(path, optimize=True)
+    return path
 
 
 def hold_figure_rows(picks, k=0, chosen=None):
@@ -418,15 +528,18 @@ def restart_rows(rows, restart_root, found, floor):
 
 
 def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,),
-        row_order=None, hold_steps=None, hold_rows=None, max_height=2.05, persistence=True):
+        row_order=None, hold_steps=None, hold_rows=None, max_height=2.05, persistence=True, home_root=None,
+        home_moments=None):
     """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record. With
-    `hold_steps` it runs the hold round instead (`run_hold`)."""
+    `hold_steps` it runs the hold round instead (`run_hold`, which alone takes `home_root` and `home_moments`)."""
     ws = ct.windows(root)
     if not ws:
         raise SystemExit(f"no window directories <map>_ep<E>_s<S> under {root}")
     if hold_steps:
         return run_hold(root, out_dir, review_dir, hold_steps, restart_root, row_order, hold_rows, max_height,
-                        persistence)
+                        persistence, home_root, home_moments)
+    if home_root or home_moments:
+        raise SystemExit("--home-root and --home-moments belong to the hold round (--hold-steps)")
     found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir)]
     ordered = sorted(found, key=sort_key)
     tail = "" if persistence else "_nopersistence"     # the default figures stay as they are
@@ -470,35 +583,62 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
 
 
 def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None, hold_rows=None,
-             max_height=2.05, persistence=True):
+             max_height=2.05, persistence=True, home_root=None, home_moments=None):
     """The hold round: every moment whose button is pressed on all `steps` restart steps, counted per button and
     role; the per-row picks (`row_picks`); layout C of the first and second picks at +`steps` from the continuous
     rollouts (`fig_teaser_C_hold<steps>[_alt]`) and, when the restart export holds every moment, from it
     (`..._restart`); with `hold_rows` (["forward:2", "attack:1"]: row and pick number) also those rows only, in
-    that order, at most `max_height` tall (`..._pick`). Writes `<review-dir>/teaser_hold<steps>.json`."""
+    that order, at most `max_height` tall (`..._pick`). Writes `<review-dir>/teaser_hold<steps>.json`.
+
+    With `home_root` the training-map moments come from that export instead of `root`'s (the unseen ones stay).
+    With restarts on disk every restarted training-map moment of a row's button is scored and drawn on
+    `<review-dir>/teaser_hold<steps>_restarts.png`, and `home_moments` ({row: "<window>_t<T>"}) names a row's
+    in-domain moment by eye over the rule's pick, which the record keeps as `home_rule`."""
     ws = ct.windows(root)
-    found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir, hold_steps=steps)]
+    found = [m for name, wdir in ws.items() if not (home_root and not ct.is_unseen(name))
+             for m in window_moments(root, name, wdir, hold_steps=steps)]
+    if home_root:
+        found += [m for name, wdir in ct.windows(home_root).items() if not ct.is_unseen(name)
+                  for m in window_moments(home_root, name, wdir, hold_steps=steps)]
     buttons = ("attack", "turn left", "turn right", "forward", "strafe left", "strafe right")
     counts = {f"{role}:{b}": sum(1 for m in found if m["role"] == role and m["button"] == b)
               for role in ("unseen", "training") for b in buttons}
     picks = row_picks(found, n=2, steps=steps)
+    home_moments = dict(home_moments or {})
+    restarted = {}
+    chosen_rows = [(spec.split(":")[0], int(spec.split(":")[1])) for spec in hold_rows] if hold_rows else None
+    shown = {row for row, _ in chosen_rows} if chosen_rows else None
     if restart_root and os.path.isdir(restart_root):
-        # with restarts on disk the in-domain moment is the restarted one that beats persistence by most at +steps
+        # with restarts on disk the in-domain moment is the restarted one that beats persistence by most at +steps;
+        # with `hold_rows` only the rows the figure shows take one, so a row left out cannot claim a shown row's
         taken = []
         for p in picks["rows"]:
-            if not p["unseen"]:
+            if not p["unseen"] or (shown and p["row"] not in shown):
                 continue
             homes = [m for m in found if m["role"] == "training" and m["button"] == p["unseen"][0]["button"]]
             best = restart_home(homes, restart_root, steps, taken)
-            if best is not None:
-                p["home_proxy"], p["home"] = p["home"], {**best, "rule": "restarted advantage over persistence"}
-                taken.append((best["window"], best["tic"]))
+            scored = restart_scores(homes, restart_root, steps)
+            chosen = best
+            if p["row"] in home_moments:
+                chosen = named_home(home_moments.pop(p["row"]), homes, scored, taken)
+                p["home_rule"] = best
+            if chosen is not None:
+                rule = "named" if chosen is not best else "restarted advantage over persistence"
+                p["home_proxy"], p["home"] = p["home"], {**chosen, "rule": rule}
+                taken.append((chosen["window"], chosen["tic"]))
+            key = (lambda h: (h["window"], h["tic"]))
+            restarted[p["row"]] = [{**h, "rule_pick": best is not None and key(h) == key(best),
+                                    "chosen": chosen is not None and key(h) == key(chosen)} for h in scored]
+    if home_moments:
+        raise SystemExit(f"no restarted row takes the named in-domain moments {home_moments}")
+    sheet = (draw_restart_sheet(restart_root, restarted, steps,
+                                os.path.join(review_dir, f"teaser_hold{steps}_restarts.png"))
+             if any(restarted.values()) else None)
     order = list(row_order) if row_order else [r for r, _ in FIGURE_ROWS]
     written = []
     have = (set(os.listdir(restart_root)) if restart_root and os.path.isdir(restart_root) else set())
-    chosen = [(spec.split(":")[0], int(spec.split(":")[1])) for spec in hold_rows] if hold_rows else None
-    for k, suffix, subset in ((0, "", None), (1, "_alt", None), (0, "_pick", chosen)):
-        if suffix == "_pick" and not chosen:
+    for k, suffix, subset in ((0, "", None), (1, "_alt", None), (0, "_pick", chosen_rows)):
+        if suffix == "_pick" and not chosen_rows:
             continue
         rows = hold_figure_rows(picks, k, subset)
         if rows is None:
@@ -509,7 +649,7 @@ def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None
         tail = "" if persistence else "_nopersistence"      # the default figures stay as they are
         height = max_height if subset else 2.05
         written += ct.layout_c(root, out_dir, rows, stem=stem + tail, horizon=steps, max_height=height,
-                               persistence=persistence)[0]
+                               persistence=persistence, home_root=home_root)[0]
         need = [f"{r['window']}_t{r['tic']}" for r in rows] + [f"{r['home']['window']}_t{r['home']['tic']}"
                                                                for r in rows]
         if restart_root and all(d in have for d in need):
@@ -517,13 +657,15 @@ def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None
                                    restart_root=restart_root, max_height=height, persistence=persistence)[0]
         elif restart_root:
             picks.setdefault("restart_missing", {})[stem] = [d for d in need if d not in have]
-    rec = {"root": root, "hold_steps": steps, "counts": counts, **picks}
+    rec = {"root": root, "home_root": home_root, "restart_root": restart_root, "hold_steps": steps,
+           "counts": counts, **picks, "restarted": restarted}
     side = os.path.join(review_dir, f"teaser_hold{steps}.json")
     os.makedirs(review_dir, exist_ok=True)
     with open(side, "w") as f:
         json.dump(rec, f, indent=1)
         f.write("\n")
-    return {"hold": rec, "written": written + [side], "candidates": [], "missing_on_map2": []}
+    return {"hold": rec, "written": written + [side] + ([sheet] if sheet else []), "candidates": [],
+            "missing_on_map2": []}
 
 
 def main(argv=None):
@@ -545,10 +687,18 @@ def main(argv=None):
     p.add_argument("--restart-horizon", type=int, nargs="+", default=[HORIZON],
                    help="tics after the context for the restarted redraws (the export holds 16); stems gain the "
                         "number past 8, fig_teaser_C_<n>_restart16")
+    p.add_argument("--home-root", default=None,
+                   help="the hold round: the export whose training-map windows supply the in-domain moments "
+                        "(e.g. results/teaser_maps345); --root then supplies the unseen ones only")
+    p.add_argument("--home-moments", default=None,
+                   help="the hold round: row:<window>_t<T> pairs naming a row's restarted in-domain moment by eye "
+                        "over the rule's pick, e.g. forward:train_map05_ep6059_s4104_t239")
     a = p.parse_args(argv)
+    named = dict(spec.split(":", 1) for spec in a.home_moments.split(",")) if a.home_moments else None
     rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon),
               tuple(a.row_order.split(",")) if a.row_order else None, a.hold_steps,
-              tuple(a.hold_rows.split(",")) if a.hold_rows else None, a.max_height, not a.no_persistence)
+              tuple(a.hold_rows.split(",")) if a.hold_rows else None, a.max_height, not a.no_persistence,
+              a.home_root, named)
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):

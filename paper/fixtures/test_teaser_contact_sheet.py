@@ -345,3 +345,121 @@ def test_the_no_persistence_flag_writes_its_own_figures_beside_the_default_ones(
     assert all(r["context_notes"]["unseen"] in (None,) or r["context_notes"]["unseen"].startswith("rollout tic")
                for r in side["rows"])
     assert not (out / "fig_teaser_C_hold8_pick.json").exists()      # the default figure is left as it was
+
+
+def test_the_flash_guard_is_relative_to_the_window_so_a_colourful_map_is_not_all_flash():
+    grey = np.full((208, 320, 3), 110, np.uint8)
+    flesh = grey.copy()
+    flesh[:] = (190, 60, 50)                                         # a red map: every frame has chroma above 12
+    orange = grey.copy()
+    orange[:, :160] = (255, 140, 0)                                  # a muzzle or plasma flash lights half the frame
+    assert tcs.chroma(flesh) > tcs.FLASH_EXCESS + 12.0               # the old absolute guard flagged all of it
+    assert not tcs.is_flash([flesh, flesh], tcs.chroma(flesh))
+    assert tcs.is_flash([grey, orange], tcs.chroma(grey)) and not tcs.is_flash([grey, grey], tcs.chroma(grey))
+    # the same saturated pixels scattered (no two 8-adjacent) against gathered in one blob: equal chroma, and only
+    # the blob is a flash
+    scattered, blob = grey.copy(), grey.copy()
+    scattered[::2, ::2] = (255, 0, 0)
+    n = scattered[::2, ::2].shape[0] * scattered[::2, ::2].shape[1]
+    blob.reshape(-1, 3)[:n] = (255, 0, 0)
+    assert tcs.saturated_blob(scattered) < 0.001 and tcs.saturated_blob(blob) > tcs.FLASH_BLOB
+    assert not tcs.is_flash([scattered], tcs.chroma(scattered))
+    assert tcs.is_flash([blob], tcs.chroma(blob))
+
+
+def restarted_moment(root, name, unet, copy, button, steps=16, unseen=False):
+    """One restarted moment in the steward's layout: frames 0..steps per row, the U-Net's scene PSNR `unet` and
+    persistence's `copy` at every step, `button` pressed on every step."""
+    d = root / name
+    rows = ["truth_raw", "unet_tuned"] + (["adapter_tuned"] if unseen else [])
+    for k, row in enumerate(rows):
+        os.makedirs(d / row, exist_ok=True)
+        for t in range(steps + 1):
+            Image.fromarray(img(50 + k + len(name), t, colour=False)).save(d / row / f"tic_{t:02d}.png")
+    series = {"unet_tuned": [99.0] + [unet] * steps}
+    if unseen:
+        series["adapter_tuned"] = [99.0] + [unet + 3.0] * steps
+    with open(d / "manifest.json", "w") as f:
+        json.dump({"scene_psnr_vs_truth_raw": series, "copylast_scene_psnr": [99.0] + [copy] * steps,
+                   "control_per_tic": [{"tic": k, "control": ["speed", button]} for k in range(1, steps + 1)]}, f)
+
+
+def home_export(tmp_path):
+    """Training windows of maps 3 and 5 in their own export, as `results/teaser_maps345/` is; map 5 holds turn right
+    with forward, so a turn row not in the figure could claim its forward moments (as map 4's t481 did)."""
+    root = tmp_path / "maps345"
+    write_window(root, "train_map03_ep6037_s200", held([(4, 20, ["attack"])]), zs=lambda t: 21.0, colour=False)
+    write_window(root, "train_map05_ep6059_s300", held([(3, 30, ["forward", "turn right"])]), zs=lambda t: 22.0,
+                 colour=False)
+    return str(root)
+
+
+def restart_unseen_picks(root, tmp_path, restart):
+    """Restart the first unseen pick of the forward and attack rows (from a hold round without restarts)."""
+    first = tcs.run(root, str(tmp_path / "first"), str(tmp_path / "first" / "review"), hold_steps=8)
+    for p in first["hold"]["rows"]:
+        if p["row"] in ("forward", "attack"):
+            m = p["unseen"][0]
+            restarted_moment(restart, f"{m['window']}_t{m['tic']}", 20.0, 16.0, m["button"], unseen=True)
+
+
+def test_the_in_domain_block_can_come_from_another_export_and_its_restarts_are_drawn_on_one_sheet(tmp_path):
+    root, homes = export(tmp_path), home_export(tmp_path)
+    restart = tmp_path / "restart"
+    restart_unseen_picks(root, tmp_path, restart)
+    # map 2's attack start beats persistence by most, but map 2 is not in the home export, so it never shows
+    restarted_moment(restart, "train_map02_ep6008_s712_t1", 30.0, 16.0, "attack")
+    restarted_moment(restart, "train_map03_ep6037_s200_t3", 20.0, 17.0, "attack")      # +3
+    restarted_moment(restart, "train_map03_ep6037_s200_t5", 21.0, 16.0, "attack")      # +5: the rule's attack
+    restarted_moment(restart, "train_map05_ep6059_s300_t2", 22.0, 16.0, "forward")     # +6
+    restarted_moment(restart, "train_map05_ep6059_s300_t10", 23.0, 16.0, "forward")    # +7: the rule's forward
+    restarted_moment(restart, "train_map05_ep6059_s300_t20", 22.5, 16.0, "forward")    # +6.5
+    out = tmp_path / "out"
+    rec = tcs.run(root, str(out), str(out / "review"), hold_steps=8, restart_root=str(restart), home_root=homes,
+                  hold_rows=("forward:1", "attack:1"), max_height=1.5, persistence=False)
+    rows = {p["row"]: p for p in rec["hold"]["rows"]}
+    assert (rows["forward"]["home"]["window"], rows["forward"]["home"]["tic"]) == ("train_map05_ep6059_s300", 10)
+    assert (rows["attack"]["home"]["window"], rows["attack"]["home"]["tic"]) == ("train_map03_ep6037_s200", 5)
+    assert rec["hold"]["home_root"] == homes
+    # only the rows the figure shows take in-domain moments, so the turn row (map 5 holds turn right too) takes none
+    scored = rec["hold"]["restarted"]
+    assert set(scored) == {"forward", "attack"}
+    # every restarted training-map moment of a row's button is scored on the sheet, best advantage first
+    assert [(m["window"], m["tic"]) for m in scored["forward"]] == [
+        ("train_map05_ep6059_s300", 10), ("train_map05_ep6059_s300", 20), ("train_map05_ep6059_s300", 2)]
+    assert [m["advantage"] for m in scored["attack"]] == [pytest.approx(5.0), pytest.approx(3.0)]
+    top = scored["forward"][0]
+    assert top["held_note"] == "held 8/8" and top["rule_pick"] is True and top["chosen"] is True
+    assert os.path.getsize(out / "review" / "teaser_hold8_restarts.png") > 10000
+    # the figure's in-domain block spans two maps, so its header names neither and each context frame its map
+    side = json.load(open(out / "fig_teaser_C_hold8_pick_restart_nopersistence.json"))
+    assert side["columns"][0]["block"] == "training maps (in-domain)"
+    assert [r["context_notes"]["in-domain"] for r in side["rows"]] == ["map 5", "map 3"]
+    assert [r["context_notes"]["unseen"] for r in side["rows"]] == [None, None]
+    # the row's `control` is the context tic's; what each rollout step 1..8 executed is listed beside it
+    assert side["rows"][0]["step_controls"] == {"in-domain": ["forward"] * 8, "unseen": ["forward"] * 8}
+
+
+def test_a_named_in_domain_moment_overrides_the_rule_and_the_record_keeps_both(tmp_path):
+    root, homes = export(tmp_path), home_export(tmp_path)
+    restart = tmp_path / "restart"
+    restart_unseen_picks(root, tmp_path, restart)
+    restarted_moment(restart, "train_map03_ep6037_s200_t5", 21.0, 16.0, "attack")
+    restarted_moment(restart, "train_map05_ep6059_s300_t10", 23.0, 16.0, "forward")
+    restarted_moment(restart, "train_map05_ep6059_s300_t20", 22.5, 16.0, "forward")
+    out = tmp_path / "out"
+    args = ["--root", root, "--home-root", homes, "--restart-root", str(restart), "--out-dir", str(out),
+            "--review-dir", str(out / "review"), "--hold-steps", "8", "--hold-rows", "forward:1,attack:1",
+            "--no-persistence"]
+    tcs.main(args + ["--home-moments", "forward:train_map05_ep6059_s300_t20"])
+    rec = json.load(open(out / "review" / "teaser_hold8.json"))
+    fwd = next(p for p in rec["rows"] if p["row"] == "forward")
+    assert (fwd["home"]["window"], fwd["home"]["tic"], fwd["home"]["rule"]) == ("train_map05_ep6059_s300", 20, "named")
+    assert (fwd["home_rule"]["window"], fwd["home_rule"]["tic"]) == ("train_map05_ep6059_s300", 10)
+    assert [(m["tic"], m["rule_pick"], m["chosen"]) for m in rec["restarted"]["forward"]] == [
+        (10, True, False), (20, False, True)]
+    side = json.load(open(out / "fig_teaser_C_hold8_pick_restart_nopersistence.json"))
+    assert (side["rows"][0]["home"]["window"], side["rows"][0]["home"]["tic"]) == ("train_map05_ep6059_s300", 20)
+    # a named moment that was never restarted stops the build with its name
+    with pytest.raises(SystemExit, match="train_map05_ep6059_s300_t3"):
+        tcs.main(args + ["--home-moments", "forward:train_map05_ep6059_s300_t3"])

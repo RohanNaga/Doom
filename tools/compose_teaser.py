@@ -430,7 +430,7 @@ def moment_steps(manifest, first, count):
 
 def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 episodes, 4k updates)",
              horizon=HORIZON_B, width=fs.TEXT_WIDTH, max_height=2.05, stem="fig_teaser_C", restart_root=None,
-             persistence=True):
+             persistence=True, home_root=None):
     """Layout C (the selection round's form); returns the written paths and the sidecar record. One row per entry
     of `rows` ({"row", "window", "tic", "button", "home": {"window", "tic"}}), in the order given, seven frames: the
     in-domain block (a start of the same button on a training map: its ground-truth context, the U-Net `horizon`
@@ -443,8 +443,9 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     ground-truth tics ending at T as context) every frame is `horizon` tics after the context shown, and a missing
     moment stops the build. Without it the frames come from the one closed-loop rollout per window, so the note
     says "rollout tic t+8" and each context frame carries its rollout tic. `persistence=False` leaves the
-    persistence numbers off the context frames (they stay in the sidecar) for a caption that states them once."""
-    ws = windows(root)
+    persistence numbers off the context frames (they stay in the sidecar) for a caption that states them once.
+    `home_root` is a second export the in-domain windows may come from (the training maps 3 to 5 export)."""
+    ws = {**(windows(home_root) if home_root else {}), **windows(root)}
     fs.style()
     restart = restart_root is not None
 
@@ -478,7 +479,11 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     for i in range(ncols):
         xs.append(x)
         x += fw + (group_gap if i == 2 else GUTTER)
-    home_place, away_place = place_name(rows[0]["home"]["window"]), place_name(rows[0]["window"])
+    away_place = place_name(rows[0]["window"])
+    home_places = [place_name(r["home"]["window"]) for r in rows]
+    # rows from different training maps: the header says "training maps" and each in-domain context names its map
+    mixed = len(set(home_places)) > 1
+    home_place = "training maps" if mixed else home_places[0]
     context = "context (t = 0)"
     columns = [{"block": f"{home_place} (in-domain)", "name": context},
                {"block": f"{home_place} (in-domain)", "name": "U-Net"},
@@ -513,12 +518,14 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
                 "in-domain": per_tic_scene(hman, ROWS["model"]).get(h8)}
         copy_scores = {"in-domain": copy_last(hman, h8), "unseen": copy_last(uman, u8)}
         notes = {"in-domain": context_note(copy_scores["in-domain"] if persistence else None, row["home"]["tic"],
-                                           restart),
+                                           restart, home_places[r].replace("training ", "") if mixed else None),
                  "unseen": context_note(copy_scores["unseen"] if persistence else None, row["tic"], restart)}
-        held = {}
+        held, step_controls = {}, {}
         for key, man, first in (("in-domain", hman, hc + 1), ("unseen", uman, uc + 1)):
             steps = moment_steps(man, first, horizon)
             held[key] = held_note(steps, row["button"]) if steps else None
+            # the row's `control` is the context tic's (t = 0); these are what rollout steps 1..horizon executed
+            step_controls[key] = [action_text(s) for s in steps] if steps else None
         cells = [("in-domain context", os.path.join(hd, ROWS["truth"]), hc, notes["in-domain"]),
                  ("in-domain", os.path.join(hd, ROWS["model"]), h8, psnr["in-domain"]),
                  ("in-domain ground truth", os.path.join(hd, ROWS["truth"]), h8, held["in-domain"]),
@@ -542,17 +549,20 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
         shown = (round(psnr["adapted"] - psnr["zero-shot"], 3)
                  if psnr["adapted"] is not None and psnr["zero-shot"] is not None else None)
         record["rows"].append({**row, "scene_psnr": psnr, "persistence": copy_scores, "context_notes": notes,
-                               "held": held, "story_shown": shown, "sources": sources})
+                               "held": held, "step_controls": step_controls, "story_shown": shown,
+                               "sources": sources})
     paths = fs.save(fig, out_dir, stem)
     return paths + [_sidecar(out_dir, stem, record)], record
 
 
-def context_note(persistence, tic, restart):
+def context_note(persistence, tic, restart, place=None):
     """The line under a context frame: persistence's scene PSNR when the export has it, else (in a long rollout)
-    the frame's rollout tic."""
+    the frame's rollout tic; `place` ("map 5") first when the block's rows come from different maps."""
     if persistence is not None:
-        return f"persistence {persistence:.1f}"
-    return None if restart else f"rollout tic {tic}"
+        note = f"persistence {persistence:.1f}"
+    else:
+        note = None if restart else f"rollout tic {tic}"
+    return " · ".join(s for s in (place, note) if s) or None
 
 
 def copy_last(manifest, tic):
