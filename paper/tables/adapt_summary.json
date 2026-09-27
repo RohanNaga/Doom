@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_adapt_figures.py",
- "generated_at": "2026-09-27T02:22:55-04:00",
+ "generated_at": "2026-09-27T02:24:11-04:00",
  "decoder": "stock",
  "home": 4.138,
  "home_source": "default: stock decoder, scene crop, training maps' 512 validation windows (2026-09-27)",

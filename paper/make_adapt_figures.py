@@ -85,8 +85,10 @@ DEFAULT_BUDGET = 4000
 RUN_RE = re.compile(r"_map(?P<map>\d+)_r(?P<rank>\d+)_k(?P<k>\d+)_s(?P<seed>\d+)(?:_(?P<variant>\w+))?$")
 MAP_DIR_RE = re.compile(r"(?:^|[_-])map0*(?P<map>\d+)(?:_h(?P<h>\d+))?$|^0*(?P<bare>\d+)$")
 DECODER_A_RE = re.compile(r"^heldout_A_([A-Za-z][A-Za-z0-9]*)$")
-ROW_NAMES = {"unet": "U-Net", "pixart": "PixArt", "sd35": "SD 3.5"}
-ROW_ORDER = ("unet", "pixart", "sd35")
+ROW_NAMES = {"unet": "U-Net", "pixart": "PixArt", "sd35": "SD 3.5",
+             "unet200k_ema": "U-Net", "pixart200k_ema": "PixArt", "adapt4000_live": "U-Net + LoRA (4k)",
+             "sd35_ema": "SD 3.5 (provisional)"}
+ROW_ORDER = ("unet", "unet200k_ema", "pixart", "pixart200k_ema", "sd35", "sd35_ema", "adapt4000_live")
 RECIPE_ORDER = ("lr3e4", "lr5e4", "g8k")
 RECIPE_LABELS = {"lr3e4": "lr 3e-4", "lr5e4": "lr 5e-4", "g8k": "8k grid"}
 RECIPE_TICKS = (50, 250, 1000, 4000, 8000)      # labelled steps on the recipe panels' narrow axes
