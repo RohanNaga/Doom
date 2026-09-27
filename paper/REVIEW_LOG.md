@@ -160,3 +160,7 @@ After the cuts: the submission build is 7 pages (body pages 1 to 4, references 5
   - provenance for the Table 1 directional values (SD 3.5 140k's 0.852 is in the Sep 26 19:50 log entry);
   - missing `copy_lpips_dec`;
   - the frozen inference rule for censored costs.
+
+## 2026-09-27 09:50, Sunday diff (adaptation, distance, decoder)
+
+Fable wrote `paper/diffs/2026-09-27-sunday-adaptation.md`; Astra truth-checked every number (`...review_astra.md`, 82 numbers: 65 confirmed, 7 wrong, 3 stock-only, 7 without a local source). Applied: the $G$ convention (both terms against the raw true frame, as `score_adapt.py` defines it; home 3.4, unseen 3.7 to 6.9, adapted 3.4), PixArt rank 0.96, the 2k-to-4k range, stock-decoder scoping of the seed, ladder and recipe sentences, the failed gate kept, "families" replaced by training maps versus unseen arenas, Astra's five sentences with light edits. Not applied: calling the $S_0$ result "exploratory" in the abstract (kept as a result with $n = 13$ stated in the body), dropping "property of the footage" entirely (rewritten to "shared by two backbones on the same latents"). Open in `main.tex`: the section 3 "3.60 to 1.51" and MSE-only mentions, Table 3's third-column header.
