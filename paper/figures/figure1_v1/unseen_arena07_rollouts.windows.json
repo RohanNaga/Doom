@@ -1,0 +1,31 @@
+{
+ "window_seed": 0,
+ "noise_seed": 0,
+ "subset": "val",
+ "split": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/split_val.json",
+ "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_eval_v2_pertic/arenas13",
+ "context_frames": 32,
+ "horizon": 32,
+ "tic_stride": 1,
+ "step": 200000,
+ "windows": [
+  {
+   "index": 0,
+   "episode": 41,
+   "start": 1,
+   "map": 7
+  },
+  {
+   "index": 1,
+   "episode": 41,
+   "start": 57,
+   "map": 7
+  },
+  {
+   "index": 2,
+   "episode": 41,
+   "start": 345,
+   "map": 7
+  }
+ ]
+}

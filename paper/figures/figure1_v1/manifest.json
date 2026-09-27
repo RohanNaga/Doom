@@ -1,0 +1,38 @@
+[
+ {
+  "map": "train_map02",
+  "pattern": "turn_left",
+  "episode": 6000,
+  "start": 837
+ },
+ {
+  "map": "train_map02",
+  "pattern": "forward",
+  "episode": 6000,
+  "start": 69
+ },
+ {
+  "map": "train_map02",
+  "pattern": "strafe",
+  "episode": 6000,
+  "start": 1838
+ },
+ {
+  "map": "unseen_arena07",
+  "pattern": "turn_left",
+  "episode": 41,
+  "start": 1
+ },
+ {
+  "map": "unseen_arena07",
+  "pattern": "forward",
+  "episode": 41,
+  "start": 57
+ },
+ {
+  "map": "unseen_arena07",
+  "pattern": "strafe",
+  "episode": 41,
+  "start": 345
+ }
+]
