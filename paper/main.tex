@@ -265,7 +265,7 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 XEWorld holds out two robot embodiments, finds their error tracking an appearance distance, and fine-tunes on 25 to 75 episodes~\citep{chen2026xeworld}; AVID and AdaWorld adapt to a held-out game or environment~\citep{rigter2024avid,gao2025adaworld}; Pathdreamer scores unseen buildings against a reprojection baseline~\citep{koh2021pathdreamer}.
 None scores per scene against persistence; Doom map holdouts have been for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
 Dataset distances predict fine-tuned outcomes~\citep{alvarezmelis2020otdd,nguyen2025sotdd}, and directed measures~\citep{mensink2021factors,westny2026latent} do so better than symmetric transport distances.
-We found no measurement of the cost of crossing from one world model to many targets, nor of EMA against live weights in closed loop.
+We found no per-target measurement of a world model's crossing cost, nor of EMA against live weights in closed loop.
 
 \section{Limitations and conclusion}
 \label{sec:limits}
@@ -273,7 +273,7 @@ We found no measurement of the cost of crossing from one world model to many tar
 % fable, edited (its "What the arena range cannot show" and the reference sentence, shortened); owner (one-tic scoring, scope, sampler, conclusion); fable's single-protocol and decoder paragraphs moved to Appendix A and Section 4
 % depends: 13-arena LoRA runs for the adaptation clause of the conclusion
 % hypothesis: the adaptation clause of the conclusion
-With arena 7 carrying two thirds of the arenas' spread in $D$, the cost-against-distance test has about 40 percent power at $\rho=0.5$; persistence is weak on fight footage; adapted models are scored one tic ahead; each row is one seed, agent and WAD at 10 sampling steps.
+With arena 7 carrying two thirds of the arenas' spread in $D$, the cost-against-distance test has about 40 percent power at $\rho=0.5$; persistence is weak on fight footage; adaptation is scored one tic ahead; one seed, one agent, one WAD, 10 sampling steps.
 Off its training maps the U-Net keeps its turn response and part of its advantage over copying, loses its perceptual advantage, and closes half of its gap to the home advantage within \tbd{} adapter updates.
 \label{body-end}
 
