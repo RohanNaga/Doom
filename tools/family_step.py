@@ -61,6 +61,7 @@ import make_adapt_figures as maf  # noqa: E402
 from score_adapt import DUPLICATE_FLAGS  # noqa: E402
 
 from matplotlib import ticker  # noqa: E402  (maf has already selected the Agg backend)
+from matplotlib.lines import Line2D  # noqa: E402
 
 TRAINING_MAPS = maf.TRAINING_MAPS
 BACKBONES = ("unet200k_ema", "pixart200k_ema", "sd35_170000")
@@ -362,19 +363,20 @@ def write_csv(path, entries, adapt):
                             "lora_censored_half_gap": a.get("censored_half_gap")})
 
 
-FAMILY_SIZE = (fs.TEXT_WIDTH, 1.8)          # Figure 3a at full width (the coordinator's brief, round 1)
+FAMILY_SIZE = (2.25, 1.5)                   # Figure 3a beside 3b in one row, set unscaled (paper owner, 2026-09-27)
 DEFICIT_SIZE = maf.HALF_SIZE
 
 
 def fig_family_step(entries, floor, out_dir):
     """Figure 3a: zero-shot skill S0 against the frame distance D per map, three backbones in their encoding colours
     and markers; the training maps' D floor as the grey band; per backbone the step drawn as two median segments,
-    one across the training maps' D range and one across the arenas', labelled at the right; copy-last at 0."""
+    one across the training maps' D range and one across the arenas', keyed in the empty upper right; copy-last at 0.
+    At 2.25 in the band is too narrow to hold its label, so "training maps" sits at the band's top."""
     fig, (ax,) = fs.new_figure(FAMILY_SIZE)
     fs.training_band(ax, floor["min"], floor["max"])
-    ax.text((floor["min"] + floor["max"]) / 2, 0.07, "training maps ($d$ floor)", transform=ax.get_xaxis_transform(),
-            ha="center", va="bottom", fontsize=fs.ANNOT_PT, color=fs.TRAINING_LINE)
-    ends = []
+    ax.text((floor["min"] + floor["max"]) / 2, 0.985, "training maps", transform=ax.get_xaxis_transform(),
+            ha="center", va="top", fontsize=fs.ANNOT_PT, color=fs.TRAINING_LINE)
+    handles = []
     for name, e in entries.items():
         key = fs.backbone_of(name)
         ent = fs.BACKBONES[key]
@@ -393,18 +395,21 @@ def fig_family_step(entries, floor, out_dir):
             med = float(np.median([r["S0"] for r in group]))
             xs = [min(r["D"] for r in group), max(r["D"] for r in group)]
             ax.plot(xs, [med, med], color=ent.colour, lw=fs.DATA_LW, solid_capstyle="butt", zorder=2)
-            if role == "arena":
-                ends.append((xs[1], med, ent.label, ent.colour))
-    fs.end_labels(ax, ends, gap=0.28, leaders=True)
+        handles.append(Line2D([], [], color=ent.colour, lw=fs.DATA_LW, marker=ent.marker, label=ent.label,
+                              ms=5.2 if big else fs.MARKER_SIZE, mfc="white" if big else ent.colour,
+                              mec=ent.colour if big else "white", mew=0.8 if big else fs.MARKER_EDGE))
+    # a key, not end labels: the three arena medians sit within 0.1 dB and the labels would need a third of the width
+    ax.legend(handles=handles, loc="upper right", frameon=False, fontsize=fs.ANNOT_PT, handlelength=1.6,
+              handletextpad=0.4, labelspacing=0.25, borderaxespad=0.1)
     fs.copy_last_line(ax, where=1.0, align="right")
     top = max(r["S0"] for e in entries.values() for r in e["maps"].values())
     ax.set_xlim(0, max(0.3, max(r["D"] for e in entries.values() for r in e["maps"].values()
                                 if r["D"] is not None) * 1.12))
-    ax.set_ylim(-0.2, top + 0.4)
+    ax.set_ylim(-0.2, top + 0.7)                 # headroom for the band's label above the highest training map
     ax.set_xlabel("frame distance $d$")
-    ax.set_ylabel("zero-shot latent skill (dB)")
+    ax.set_ylabel("zero-shot latent\nskill (dB)")
     fs.panel_letter(ax, "a")
-    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.05))
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
     ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
     return fs.save(fig, out_dir, "fig2d_family_step")
 

@@ -274,7 +274,8 @@ def test_the_cli_writes_every_per_map_number_the_floor_and_the_correlations(tmp_
 
 def test_the_two_panels_are_written_in_the_builders_style(tmp_path):
     _, _, figs = run_cli(tmp_path)
-    for stem, size in (("fig2d_family_step", fs.FAMILY_SIZE), ("fig2e_deficit", fs.DEFICIT_SIZE)):
+    # Figure 3a sits beside 3b in one row: the paper owner's slot, 2.25 x 1.5 in, set without scaling
+    for stem, size in (("fig2d_family_step", (2.25, 1.5)), ("fig2e_deficit", fs.DEFICIT_SIZE)):
         for ext in ("pdf", "png"):
             assert os.path.getsize(figs / f"{stem}.{ext}") > 1000
         pdf = open(figs / f"{stem}.pdf", "rb").read()

@@ -1,6 +1,6 @@
 {
  "generated_by": "tools/family_step.py",
- "generated_at": "2026-09-27T11:40:59-04:00",
+ "generated_at": "2026-09-27T12:07:06-04:00",
  "definitions": {
   "skill": "s_w = -10 log10(latent_mse / copy_latent_mse); duplicates (dup_raw, dup_latent) left out",
   "S0": "mean s_w over a map's windows (arenas: 8 held-out episodes; training maps: home val windows)",
@@ -888,7 +888,7 @@
   },
   {
    "path": "paper/tables/tuned/adapt_summary.json",
-   "sha256": "03b225835519cb631a79a198b3bfb520592f1be6c63f80bff41e7adb4f436e44"
+   "sha256": "7bc8afb5cd98da983dadaf42ba5841345ded8c19d1640edb9be0c08bef525770"
   },
   {
    "path": "results/fresh_rescore/home_unet200k_ema/val/per_window.csv",
