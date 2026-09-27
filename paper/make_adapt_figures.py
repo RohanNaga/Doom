@@ -111,6 +111,7 @@ RECIPE_LABELS = {"lr3e4": "lr 3e-4", "lr5e4": "lr 5e-4", "g8k": "8k grid", "": "
 
 # Printed sizes (in) on the 5.5 in single-column page (FIGURE_STANDARDS section 4); `\figslot` includes at scale 1.
 FIG4_SIZE = (fs.TEXT_WIDTH, 1.6)
+DOTS_SIZE = (fs.TEXT_WIDTH, 1.4)          # Figure 4's body slot, unscaled (paper owner, 2026-09-27)
 CURVES_SIZE = (3.3, 1.6)
 FIG3_SIZE = CURVES_SIZE          # the curves panel's name before the renumbering; its PDF is drawn at this size
 HALF_SIZE = (2.7, 1.6)           # an appendix half-width panel (ladder, profiles, endpoint against skill)
@@ -1335,7 +1336,7 @@ def fig_dots(stats, records, home, out_dir, band=None):
     and 1."""
     d = stats["_draw"]
     steps, point = stats["steps"], d["point"]
-    fig, (ax, bx) = fs.new_figure(FIG4_SIZE, ncols=2, wspace=0.08)
+    fig, (ax, bx) = fs.new_figure(DOTS_SIZE, ncols=2, wspace=0.08)
     z = step_axis(ax, steps)
     xs = [z if s == 0 else s for s in steps]
     for row in point:
@@ -1346,7 +1347,7 @@ def fig_dots(stats, records, home, out_dir, band=None):
     fs.direct_label(ax, xs[-1], med[-1], "median", colour=ADAPTER.colour, dx=3)
     fs.training_line(ax, home, where=0.0, align="left", band=band)
     fs.copy_last_line(ax, where=1.0, align="right")
-    a_axis(ax, 0.0, max(home, point.max()))
+    a_axis(ax, 0.0, max(home, point.max()), label=fs.A_LABEL_SHORT)   # one line overruns a 1 in axis
     fs.panel_letter(ax, "a")
 
     shares = stats["gap_share"]["per_arena"]
@@ -1366,7 +1367,8 @@ def fig_dots(stats, records, home, out_dir, band=None):
         dy = (-12 if lowered else -5) if never else 4
         bx.annotate("never" if never else step_label(step), (i, v), xytext=(0, dy),
                     textcoords="offset points", ha="center", va="top" if never else "bottom", fontsize=fs.MIN_PT,
-                    color=fs.CONTEXT_INK, annotation_clip=False)
+                    color=fs.CONTEXT_INK, annotation_clip=False,
+                    bbox={"boxstyle": "square,pad=0.05", "fc": "white", "ec": "none"})   # break a line the text sits on
     for y, text, style in ((0.0, "zero-shot", "-"), (0.5, "half of the gap", (0, (1, 1.2))),
                            (1.0, "in-distribution", fs.TRAINING_DASH)):
         bx.axhline(y, color=fs.BLACK if y == 0 else (fs.CONTEXT_INK if y == 0.5 else fs.TRAINING_LINE),
@@ -1386,12 +1388,12 @@ def fig_dots(stats, records, home, out_dir, band=None):
                 color=fs.INK if y == 0 else fs.TRAINING_LINE)
     bx.set_xticks(range(len(order)), [str(a) for a in order])
     bx.tick_params(axis="x", length=0)
-    bx.set_xlim(-0.6, len(order) - 0.4)
+    bx.set_xlim(-0.8, len(order) - 0.4)          # room for the first arena's "never" inside the spine
     bx.set_ylim(0, 1.1)
     bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
     bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
     bx.set_xlabel("unseen arena")
-    bx.set_ylabel("share of the gap closed\nat " + step_label(stats["budget"]))
+    bx.set_ylabel("share of gap\nclosed at " + step_label(stats["budget"]))
     fs.panel_letter(bx, "b")
     return fs.save(fig, out_dir, "fig4_dots")
 
