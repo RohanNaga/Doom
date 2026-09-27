@@ -88,7 +88,7 @@ Each caption states the finding first, then how to read the marks, then provenan
 
 ## Figure 1 (method)
 
-File: `figures/fig1_method.pdf`, 5.5 x 2.15 in, included at scale 1 (`\includegraphics{figures/fig1_method.pdf}`); source `figures/fig1_method.tex`, images `figures/assets/fig1_*.png`. Terms follow the Sunday diff's terminology table (section 13 of `paper/diffs/2026-09-27-sunday-adaptation.md`).
+File: `figures/fig1_method.pdf`, 5.5 x 1.8 in, included at scale 1 (`\includegraphics{figures/fig1_method.pdf}`); source `figures/fig1_method.tex`, images `figures/assets/fig1_*.png`. Terms follow the Sunday diff's terminology table (section 13 of `paper/diffs/2026-09-27-sunday-adaptation.md`).
 
 Caption (LaTeX-ready):
 
