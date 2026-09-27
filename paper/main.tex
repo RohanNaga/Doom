@@ -69,8 +69,8 @@ It closes half the gap on 9 of 13 arenas within 4k updates (median budget 1k [25
 
 \begin{figure}[t]
 \centering
-\figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, layout B}
-\caption{Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a ground-truth context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and ground truth.}
+\figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, two rows}
+\caption{Off its training maps the U-Net keeps moving and firing but renders the arena in training-map masonry; eight episodes restore it. Selected windows, 16 tics after the context frame, the row's button held throughout; arena 7 zero-shot and after 4k adapter updates on 8 episodes; fine-tuned decoder, raw ground truth, scene PSNR, persistence under each context frame.}
 \label{fig:teaser}
 \end{figure}
 
@@ -79,13 +79,12 @@ It closes half the gap on 9 of 13 arenas within 4k updates (median budget 1k [25
 \section{Benchmark and recipe}
 \label{sec:bench}
 
-\textbf{Data.} Every episode is ViZDoom~\citep{kempka2016vizdoom} deathmatch on one of the 17 arenas of the Arnold agent's level pack (a Doom WAD file)~\citep{lample2017arnold}: Arnold against 8 bots for 150~s, recorded at every tic (one game step, 35~Hz, 320$\times$240) with the 19 executed buttons.
+\textbf{Data.} Every episode is ViZDoom~\citep{kempka2016vizdoom} deathmatch on one of the 17 arenas of the Arnold agent's level pack (a Doom WAD file)~\citep{lample2017arnold}: Arnold against 8 bots for 150~s, recorded at every tic (35~Hz, 320$\times$240) with the 19 executed buttons.
 Of these, four (2 to 5, 500 episodes each) are the training maps, scored on validation episodes (512 windows); the other thirteen (1, 6 to 17), never trained on, each have 24 new episodes, 16 for adaptation and 8 held out (256 windows).
 
-\textbf{Three backbones, one training recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so they compare pretrained packages.
+\textbf{Three backbones, one training recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so this compares pretrained packages.
 Four tics ahead on the training maps they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k).
-Rollouts stay in latent space, so the decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their ground-truth latents, using MSE plus 0.1~LPIPS, and use it for every pixel number of the U-Net and PixArt; SD~3.5 uses its own.
-MSE alone sharpens the HUD but more than triples scene LPIPS (0.092 to 0.339).
+The decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their ground-truth latents, using MSE plus 0.1~LPIPS (MSE alone triples scene LPIPS, 0.092 to 0.339), and use it for every pixel number of the U-Net and PixArt; SD~3.5 uses its own.
 
 \textbf{What we measure.} With $x$ the ground-truth next frame, $x_\text{last}$ the last context frame, $z$, $z_\text{last}$ their latents, $\hat z$ the prediction and $D$ the decoder, the \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ is the PSNR gain over persistence, a paired difference like Genie's $\Delta$PSNR~\citep{bruce2024genie}.
 The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips} is below zero when the model looks better than copying, the \emph{gap} $G=\mathrm{PSNR}(D(z),x)-\mathrm{PSNR}(D(\hat z),x)$ is the distance to the reconstruction upper bound ($M$ and $G$ are scored against the raw frame), and the \emph{zero-shot latent skill score} $S_0$ is $10\log_{10}$ of persistence's latent MSE over the model's.
@@ -139,7 +138,7 @@ Nor is the perceptual sign reversal the decoder's floor: its own reconstruction 
 \textbf{What orders the arenas.} The frozen model's zero-shot latent skill $S_0$ predicts where an arena ends up, not how much it gains (exploratory Spearman $+0.90$ with $A$ at 4k, $+0.18$ with the gain, $-0.61$ with the budget); a frame distance does not. Before scoring any map we froze $d$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (\appref{app:distance}).
 It places the training maps' held-out episodes inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), but within the 13 arenas it orders nothing (Spearman $-0.22$ with $A$, $-0.35$ with the budget); two registered transition-level distances fail even the separation (\appref{app:distance}).
 
-\textbf{Closed loop.} One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic with stock decoders on the full frame, has a frame under 10~dB in 23 non-EMA and 9 EMA rollouts of 256 (16 windows at 16 checkpoints, 55k to 130k; 11 and 8 without 70k): the EMA removes checkpoint-specific collapses, not the failure mode.
+\textbf{Closed loop.} One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic with stock decoders, has a frame under 10~dB in 23 non-EMA and 9 EMA rollouts of 256 (\appref{app:closedloop}); the EMA removes checkpoint-specific collapses, not the failure mode.
 
 %===============================================================================
 
