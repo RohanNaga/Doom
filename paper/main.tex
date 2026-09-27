@@ -44,9 +44,9 @@ In closed loop, one-tic quality does not guarantee stability, and the EMA reduce
 \label{sec:intro}
 
 A learned game simulator is judged on held-out trajectories of the scenes it trained on~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}, yet it must generalize to a new level before it can plan or train a policy there.
-We score a Doom model trained on four deathmatch arenas on each of the thirteen other arenas of its WAD, then adapt it to each from a few episodes; no published Doom world model is scored on maps it did not train on, and MultiGen does not report one~\citep{po2026multigen}.
-Held-out domains elsewhere are an embodiment~\citep{chen2026xeworld}, a game or environment~\citep{rigter2024avid,gao2025adaworld} or a building~\citep{koh2021pathdreamer}, none scored per scene against persistence; Doom map holdouts have been for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
-Because absolute PSNR ranks how static a recording is, every score here is a paired difference against persistence, the last context frame copied forward.
+We score a Doom model trained on four deathmatch arenas on each of the thirteen other arenas of its WAD, then adapt it to each from a few episodes; no published Doom world model is scored on unseen maps, and MultiGen does not report one~\citep{po2026multigen}.
+Held-out domains elsewhere are an embodiment~\citep{chen2026xeworld}, a game or environment~\citep{rigter2024avid,gao2025adaworld} or a building~\citep{koh2021pathdreamer}, none scored per scene against persistence; Doom map holdouts were for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
+Because absolute PSNR ranks how static a recording is, every score is a paired difference against persistence, the last context frame copied forward.
 Video prediction reports this baseline~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}; game world models dropped it.
 We read every score beside the reconstruction upper bound~\citep{zheng2023occworld,karypidis2024dinoforesight}.
 
@@ -59,7 +59,7 @@ We contribute (0) three action-conditioned latent world models (SD~1.4 U-Net, Pi
 \begin{figure}[t]
 \centering
 \figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, layout B}
-\caption{Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a true context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and true.}
+\caption{Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a ground-truth context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and ground truth.}
 \label{fig:teaser}
 \end{figure}
 
@@ -73,10 +73,10 @@ The models train on arenas 2 to 5 (500 episodes each) and are scored on their va
 
 \textbf{Three backbones, one recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so they compare pretrained packages.
 Four tics ahead on the training maps they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k, its latest four-tic read).
-Rollouts stay in latent space, so the decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their true latents, using MSE plus 0.1~LPIPS, and use it for every pixel number of the U-Net and PixArt; SD~3.5 uses its own.
+Rollouts stay in latent space, so the decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their ground-truth latents, using MSE plus 0.1~LPIPS, and use it for every pixel number of the U-Net and PixArt; SD~3.5 uses its own.
 MSE alone sharpens the HUD but more than triples scene LPIPS (0.092 to 0.339).
 
-\textbf{What we measure.} With $x$ the true next frame, $x_\text{last}$ the last context frame, $z$, $z_\text{last}$ their latents, $\hat z$ the prediction and $D$ the decoder, the \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ is the PSNR gain over persistence, a paired difference like Genie's $\Delta$PSNR~\citep{bruce2024genie}.
+\textbf{What we measure.} With $x$ the ground-truth next frame, $x_\text{last}$ the last context frame, $z$, $z_\text{last}$ their latents, $\hat z$ the prediction and $D$ the decoder, the \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ is the PSNR gain over persistence, a paired difference like Genie's $\Delta$PSNR~\citep{bruce2024genie}.
 The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips} is below zero when the model looks better than copying, the \emph{gap} $G=\mathrm{PSNR}(D(z),x)-\mathrm{PSNR}(D(\hat z),x)$ is the distance to the reconstruction upper bound ($M$ and $G$ are scored against the raw frame), and the \emph{zero-shot latent skill score} $S_0$ is $10\log_{10}$ of persistence's latent MSE over the model's.
 The \emph{directional} score is the fraction of turning windows whose predicted view turns the other way when left and right are swapped in the newest control.
 Pixel scores use the scene rows 0 to 207, since persistence copies the HUD almost exactly; $A_\text{train}$, $A$ on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.38), is the in-distribution reference, not an arena's own upper bound.
@@ -90,7 +90,7 @@ Pixel scores use the scene rows 0 to 207, since persistence copies the HUD almos
 
 \begin{table}[t]
 \centering\footnotesize\setlength{\tabcolsep}{3.2pt}
-\caption{Training maps (pooled means over windows) and unseen arenas (medians over arenas; in parentheses, arenas with $A>0$ or $M<0$), scene rows, one tic. U-Net and PixArt-$\alpha$ through the fine-tuned SD~1 decoder, SD~3.5 through its own (provisional 170k\ifdraftmarks{}, blue\fi). $A$ against the rendered true frame, the rest against the raw frame; directional pooled (true frames 0.885, 0.892).}
+\caption{Training maps (pooled means over windows) and unseen arenas (medians over arenas; in parentheses, arenas with $A>0$ or $M<0$), scene rows, one tic. U-Net and PixArt-$\alpha$ through the fine-tuned SD~1 decoder, SD~3.5 through its own (provisional 170k\ifdraftmarks{}, blue\fi). $A$ against the rendered ground-truth frame, the rest against the raw frame; directional pooled (ground truth 0.885, 0.892).}
 \label{tab:unseen}
 \begin{tabular}{llcccccc}
 \toprule
@@ -113,15 +113,15 @@ SD 3.5 Medium & training & \prov{24.50} & \prov{0.146} & \prov{+3.89} & \prov{$-
 \section{What happens off the training maps}
 \label{sec:shift}
 
-\textbf{Where the deficit sits.} In distribution all three backbones beat persistence and turn the right way; off the training maps the turn response survives, with per-arena reversal rates of 0.73 to 0.86 for the U-Net against 0.79 to 0.91 on the training maps and 0.89 for true frames (Table~\ref{tab:unseen}).
-$A$ stays positive on every arena for all three backbones but falls from 5.06 to a median 2.03~dB, while the decoder's scene reconstruction PSNR is 25.2 to 29.7~dB (28.6 in distribution) and $G$ grows from 3.4 to a median 5.0~dB; the fine-tuned decoder adds 0.2~dB to $A$ zero-shot and 0.7~dB after adaptation.
-Nor is the sign reversal of the perceptual margin the decoder's floor: its own reconstruction LPIPS (0.05 to 0.09) is far below persistence's (0.18 to 0.28), yet the prediction's LPIPS exceeds persistence's on 13 of 13 arenas ($M$ +0.03 to +0.17, median +0.08, against $-$0.08 in distribution; Figure~\ref{fig:shift}b).
+\textbf{Where the deficit sits.} In distribution all three backbones beat persistence and turn the right way; off the training maps the turn response survives, with per-arena reversal rates of 0.73 to 0.86 for the U-Net against 0.79 to 0.91 on the training maps and 0.89 for ground-truth frames (Table~\ref{tab:unseen}).
+$A$ stays positive on every arena for all three backbones but falls from 5.06 to a median 2.03~dB, while the decoder's scene reconstruction PSNR is 25.2 to 29.7~dB and $G$ grows from 3.4 to a median 5.0~dB; the fine-tuned decoder adds 0.2~dB to $A$ zero-shot and 0.7~dB after adaptation.
+Nor is the sign reversal of the perceptual margin the decoder's floor: its own reconstruction LPIPS (0.05 to 0.09) is far below persistence's (0.18 to 0.28), yet the prediction's LPIPS exceeds it on 13 of 13 arenas ($M$ +0.03 to +0.17, median +0.08, against $-$0.08 in distribution; Figure~\ref{fig:shift}b).
 
 \begin{figure}[t]
 \centering
 \figslot{figures/fig2d_family_step.pdf}{2.25in}{1.5in}{Figure 3a: family step}\hfill
 \figslot{figures/tuned/fig3b_zero_shot_absolute.pdf}{3.15in}{1.5in}{Figure 3b: zero-shot absolute}
-\caption{(a) The shift is a gap, not a slope: every unseen arena has lower zero-shot latent skill $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman $-0.05$, $-0.15$, $-0.17$; band: the train-versus-train $d$ range). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Raw true frame, scene rows, one tic, 95\% episode-bootstrap intervals; U-Net and PixArt-$\alpha$ through the fine-tuned SD~1 decoder (filled), SD~3.5 through its own (open, provisional 170k).}
+\caption{(a) The shift is a gap, not a slope: every unseen arena has lower zero-shot latent skill $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman $-0.05$, $-0.15$, $-0.17$; band: the train-versus-train $d$ range). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Raw ground-truth frame, scene rows, one tic, 95\% episode-bootstrap intervals; U-Net and PixArt-$\alpha$ through the fine-tuned SD~1 decoder (filled), SD~3.5 through its own (open, provisional 170k).}
 \label{fig:shift}
 \end{figure}
 
@@ -173,7 +173,7 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 \label{sec:limits}
 
 Our claims cover 13 arenas of one WAD, one agent, one-tic scoring and mostly one seed; persistence is a weak reference where the camera moves fast.
-Off its training maps the U-Net keeps its turn response and part of its advantage but loses its perceptual edge; eight episodes and 1.1 GPU-hours of adapter training per arena close half of the gap on 9 of 13 arenas and the perceptual gap on 11.
+Off its training maps the U-Net keeps its turn response and part of its advantage but loses its perceptual edge; eight episodes and 1.1 GPU-hours of adaptation per arena close half of the gap on 9 of 13 arenas and the perceptual gap on 11.
 \label{body-end}
 
 %===============================================================================

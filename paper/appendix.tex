@@ -25,7 +25,7 @@ Updates per second & 1.78 to 1.83 & about 1.4 & 0.50 to 0.55 \\
 
 \textbf{Recipe notes.} The 1,000-step linear schedule ($\beta$ from $10^{-4}$ to 0.02) is neither backbone's native schedule: 273 of its timesteps are noisier than anything SD~1.4 saw in pretraining, and SD~3.5 was pretrained with rectified flow. Context noise augmentation blends $\sqrt{1-q}\,c+\sqrt{q}\,\epsilon$ with one level $q$ per example drawn below 0.7 and embedded as one of 10 buckets; inference uses clean context and bucket 0. Fused AdamW runs at $5\times10^{-5}$ after 2,000 linear warmup updates, with no weight decay, gradient clipping at 1.0, bf16 autocast over fp32 parameters, seed 0 and no action dropout. The EMA decays at 0.9999 per update, applied as $0.9999^8$ every eighth update, in fp32. Training sees windows from episodes 0 to 1,999 (500 per training map, 9.66M valid windows); 200k updates at batch 32 cover about two thirds of one pass.
 
-\textbf{The decoder.} We fine-tune the SD~1 decoder $D$ on training-map frames from their true latents with the encoder frozen, using MSE plus 0.1~LPIPS (3,486 updates, learning rate $10^{-5}$, batch 24, 4.0 hours on one A6000), validate on episodes 6000 to 6099 and keep the terminal checkpoint; it passed its gate at $+4.33$~dB and LPIPS $-0.039$ on the development set. On 200 validation frames its scene rows go from 26.93~dB and LPIPS 0.092 (stock) to 28.44 and 0.060, and the HUD rows from 17.83 to 30.67~dB. An MSE-only objective, the recipe GameNGen describes, reaches 29.09~dB on the scene but roughly triples the full-frame LPIPS (0.094 to 0.285 by 2,000 updates): it sharpens the HUD and blurs the scene. The stock decoders saw no Doom frame; the SD~3.5 decoder's fine-tune is \tbd{} (Monday), so SD~3.5 is read through its stock decoder.
+\textbf{The decoder.} We fine-tune the SD~1 decoder $D$ on training-map frames from their ground-truth latents with the encoder frozen, using MSE plus 0.1~LPIPS (3,486 updates, learning rate $10^{-5}$, batch 24, 4.0 hours on one A6000), validate on episodes 6000 to 6099 and keep the terminal checkpoint; it passed its gate at $+4.33$~dB and LPIPS $-0.039$ on the development set. On 200 validation frames its scene rows go from 26.93~dB and LPIPS 0.092 (stock) to 28.44 and 0.060, and the HUD rows from 17.83 to 30.67~dB. An MSE-only objective, the recipe GameNGen describes, reaches 29.09~dB on the scene but roughly triples the full-frame LPIPS (0.094 to 0.285 by 2,000 updates): it sharpens the HUD and blurs the scene. The stock decoders saw no Doom frame; the SD~3.5 decoder's fine-tune is \tbd{} (Monday), so SD~3.5 is read through its stock decoder.
 
 \begin{figure}[ht]
 \centering
@@ -41,7 +41,7 @@ Updates per second & 1.78 to 1.83 & about 1.4 & 0.50 to 0.55 \\
 
 \begin{table}[ht]
 \centering\scriptsize\setlength{\tabcolsep}{2.5pt}
-\caption{Per arena, U-Net 200k EMA, one tic, scene rows, 256 held-out windows per arena (the training maps pooled over their 512 validation windows), in arena order. Persistence: scene PSNR of the raw last frame against the raw true frame. Upper bound: the fine-tuned decoder's reconstruction PSNR. $A$ and $M$ through the stock and the fine-tuned decoder; $G$ and the raw gain (the model's scene PSNR minus persistence's, both against the raw frame) through the fine-tuned decoder. Directional: reversal rate on 128 turning windows per map (true frames 0.885 on the training maps, 0.892 on the arenas). $^\dagger$The training maps. $^\ast$On the earlier episode set.}
+\caption{Per arena, U-Net 200k EMA, one tic, scene rows, 256 held-out windows per arena (the training maps pooled over their 512 validation windows), in arena order. Persistence: scene PSNR of the raw last frame against the raw ground-truth frame. Upper bound: the fine-tuned decoder's reconstruction PSNR. $A$ and $M$ through the stock and the fine-tuned decoder; $G$ and the raw gain (the model's scene PSNR minus persistence's, both against the raw frame) through the fine-tuned decoder. Directional: reversal rate on 128 turning windows per map (ground-truth frames 0.885 on the training maps, 0.892 on the arenas). $^\dagger$The training maps. $^\ast$On the earlier episode set.}
 \label{tab:perarena}
 \begin{tabular}{rccccccccc}
 \toprule
@@ -68,7 +68,7 @@ Arena & $d$ & Persistence & Upper bound & $A$, stock / fine-tuned & $M$, stock /
 
 \begin{table}[ht]
 \centering\footnotesize\setlength{\tabcolsep}{3.2pt}
-\caption{The stock-decoder rows of the body's Table~\ref{tab:unseen} (medians over the 13 arenas; in parentheses, arenas with $A>0$ or $M<0$). Scene rows, one tic, raw true frame except for $A$.}
+\caption{The stock-decoder rows of the body's Table~\ref{tab:unseen} (medians over the 13 arenas; in parentheses, arenas with $A>0$ or $M<0$). Scene rows, one tic, raw ground-truth frame except for $A$.}
 \label{tab:stockrows}
 \begin{tabular}{llcccccc}
 \toprule
@@ -133,7 +133,7 @@ EMA & 9 / 256 & 4 / 256 & 4 / 256 & 8 / 240 & 3 / 240 & 4 / 240 \\
 \begin{figure}[ht]
 \centering
 \figslot{figures/sd35_70k_live_vs_ema_rollout_strip.jpg}{\linewidth}{3.2in}{SD 3.5 70k non-EMA versus EMA rollout strip}
-\caption{SD~3.5 at 70k updates, two validation windows (map 2 above, map 5 below); rows are the recorded frames, the non-EMA rollout and the EMA rollout at tics 1 to 256. The non-EMA rollouts flood to flat blue (channel 13 near $-2.6$) or grey (near $-1.4$) while the HUD, weapon and crosshair persist; the EMA rollouts drift from the true trajectory but stay coherent scenes.}
+\caption{SD~3.5 at 70k updates, two validation windows (map 2 above, map 5 below); rows are the recorded frames, the non-EMA rollout and the EMA rollout at tics 1 to 256. The non-EMA rollouts flood to flat blue (channel 13 near $-2.6$) or grey (near $-1.4$) while the HUD, weapon and crosshair persist; the EMA rollouts drift from the ground-truth trajectory but stay coherent scenes.}
 \label{fig:collapse}
 \end{figure}
 
