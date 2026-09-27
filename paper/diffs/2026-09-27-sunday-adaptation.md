@@ -37,7 +37,7 @@ Current:
 > Nor is the perceptual flip the decoder's floor: its own LPIPS (\prov{0.08 to 0.12}) sits below persistence's (\prov{0.15 to 0.23}), and the model, scored against the decoded true frame, still has higher LPIPS than raw persistence (\prov{13 of 13}).
 
 Replace with:
-> The rendering of true latents does not degrade: the reconstruction ceiling is 28.6~dB at home and 25.2 to 29.7~dB unseen, so the loss is in the predicted latents; the gap to the ceiling $G$ is 1.1~dB at home and 1.8 to 6.0~dB unseen (median 3.6). Decoding the same predictions with the stock and the tuned decoder raises $A$ by 0.2~dB zero-shot ($-0.01$ to $+0.51$) but by 0.7~dB after adaptation (0.5 to 1.1), so the tuned decoder renders adapted latents better than the frozen model's off-distribution ones: the decoder carries a share of the off-map deficit, and we report every column under both decoders (\appref{app:decoder}).
+> The rendering of true latents does not degrade: the reconstruction ceiling is 28.6~dB at home and 25.2 to 29.7~dB unseen, so the loss is in the predicted latents; the gap to the ceiling $G$ is 1.1~dB at home and 1.8 to 6.0~dB unseen (median 3.6). Decoding the same predictions with the stock and the tuned decoder raises $A$ by 0.2~dB zero-shot ($-0.01$ to $+0.51$) but by 0.7~dB after adaptation (0.5 to 1.1), so the tuned decoder renders adapted latents better than the frozen model's off-distribution ones: the decoder carries a share of the off-map deficit, and we report every column under both decoders (\appref{app:perarena}).
 > Nor is the perceptual flip the decoder's floor: the decoder's own reconstruction LPIPS (0.05 to 0.09 scene) sits far below persistence's (0.18 to 0.28), and the rendered prediction, scored against the raw true frame like persistence, still has higher LPIPS on 13 of 13 arenas (margin $M$ +0.03 to +0.17, median +0.08; home $-$0.08).
 
 ## 5. Section 3, the distance paragraph (lines 202 to 206)
@@ -123,3 +123,9 @@ Replace with:
 ## Not in this diff (Monday)
 
 Full fine-tune column; forgetting and directional guards at 4k (the overnight scores ran without guards); PixArt and SD 3.5 rows of Table 2 (SD 3.5 provisional read lands this morning, final after the 200k rescore); the sd35 decoder column.
+
+## Appendix additions implied (I will send these as a separate diff once the tuned tables are final)
+
+- `app:perarena`: the per-arena zero-shot table gains a stock/tuned pair of columns for $A$, $M$ and $G$ (source: `results/fresh_rescore/*_tuned/map*/metrics.json`), and one sentence on the two decoders (matched MSE + 0.1 LPIPS, 3,486 steps, gate +4.3 dB / LPIPS $-$0.039; MSE-only GameNGen recipe +5.1 dB / LPIPS +0.19, the blur row).
+- `app:distance`: the coverage and transfer-gap definitions, their family-floor failure and their Spearman rows (`results/transition_distance/compare_fresh_sd1.csv`).
+- `app:perarena-adapt`: the tuned per-arena table (`paper/tables/tuned/adapt_perarena.tex`), the seed spread, the data ladder figure (`fig_adapt_ladder`) and the recipe figure (`fig_adapt_recipe`).
