@@ -36,7 +36,10 @@ anything above `--parity-tol` (default 0, exact) stops the run before it trains.
 
 **What is new.** The LoRA factors and the `--full-parts` train (lr 1e-4 constant after a 100-update warmup,
 no weight decay); everything else is frozen. `--lora-rank 0 --full-parts all` is the full fine-tune reference
-(design decision 5): no adapter, every parameter trained, the same loop, checkpoints and evaluator. An fp32
+(design decision 5): no adapter, every parameter trained, the same loop, checkpoints and evaluator, at 2e-5 by
+default (Rohan, Sep 26): GameNGen's rate for fine-tuning every parameter of the same SD 1.4 U-Net (arXiv
+2408.14837), one order below the LoRA's, as Biderman et al. (TMLR 2024, section 4.7) find full fine-tuning
+needs. An explicit `--lr` always wins; the certificate says which rate was used and why (`resolve_lr`). An fp32
 EMA of exactly the trained tensors (decay `--ema-decay`, 0.999 by default for runs of a few thousand updates)
 lives on the training device, updated every update.
 Windows come only from the first k episodes of the split's adapt list: its step-curve rung (8 by default) or
@@ -82,6 +85,10 @@ DEFAULT_GRID = "0,250,500,1000,2000,4000"       # log-spaced until the curve fla
 # train_wm.py's defaults, for a source whose args predate one of these flags
 OPTIM_POLICY_DEFAULTS = {"clip": 1.0, "wd": 0.0, "skip_grad_norm": 0.0, "skip_grad_after": 0}
 CKPT_PREFIX = "adapter_"
+LORA_LR = 1e-4
+FULL_FT_LR = 2e-5
+LORA_LR_SOURCE = "LoRA default"
+FULL_FT_LR_SOURCE = "full fine-tune default, GameNGen"
 
 
 def parse_grid(spec):
@@ -129,6 +136,21 @@ def source_recipe(src_args):
             "phase_buckets": phase, "action_inject": a.get("action_inject") or "token",
             "action_dropout": float(a.get("action_dropout", 0.1)), "warm_start": a.get("warm_start"),
             "hf_cache": a.get("hf_cache")}
+
+
+def resolve_lr(args):
+    """(learning rate, where it came from): `--lr` when given, else 2e-5 for the full fine-tune
+    (`--lora-rank 0 --full-parts all`), else the LoRA's 1e-4."""
+    if args.lr is not None:
+        return float(args.lr), "explicit"
+    if args.lora_rank == 0 and lora.parse_parts(args.full_parts) == (lora.ALL_PART,):
+        return FULL_FT_LR, FULL_FT_LR_SOURCE
+    return LORA_LR, LORA_LR_SOURCE
+
+
+def lr_field(lr, source):
+    """The certificate line's learning-rate field, `lr=<value>(<source>)`, with no space inside it."""
+    return f"lr={lr:g}(" + source.replace(", ", "_").replace(" ", "_").replace("-", "_") + ")"
 
 
 def optim_policy(src_args, args):
@@ -207,7 +229,7 @@ def certificate_line(c):
               ("split_sha256", c["split"]["sha256"]), ("adapt_episodes", len(c["adapt_episodes"])),
               ("held_out_episodes", len(c["held_out"])), ("held_out_windows", c["held_out_windows"]),
               ("micro_batch", c["micro_batch"]), ("world", c["world"]), ("accum", c["accum"]),
-              ("effective_batch", c["effective_batch"]), ("lr", f"{c['lr']:g}"), ("warmup", c["warmup"]),
+              ("effective_batch", c["effective_batch"]), tuple(lr_field(c["lr"], c["lr_source"]).split("=", 1)), ("warmup", c["warmup"]),
               ("ema_decay", f"{c['ema_decay']:g}"), ("rank", c["rank"]), ("alpha", f"{c['alpha']:g}"),
               ("dropout", f"{c['dropout']:g}"),
               *((k, f"{v['value']:g}({v['from']})") for k, v in c["optim_policy"].items()),
@@ -264,6 +286,7 @@ def main(args):
               "sha256": sha256_file(args.source)}
     source_args = dict(src_ck["args"])
     policy = optim_policy(source_args, args)
+    lr, lr_source = resolve_lr(args)
     clip, wd = policy["clip"]["value"], policy["wd"]["value"]
     skip_norm, skip_after = policy["skip_grad_norm"]["value"], policy["skip_grad_after"]["value"]
     del src_ck
@@ -316,7 +339,7 @@ def main(args):
     named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
     ema = {n: p.detach().float().clone() for n, p in named}
     trainable = [p for _, p in named]
-    opt = torch.optim.AdamW(trainable, lr=args.lr, weight_decay=wd, fused=(device.type == "cuda"))
+    opt = torch.optim.AdamW(trainable, lr=lr, weight_decay=wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
     extra = {"prefetch_factor": args.prefetch_factor} if args.num_workers > 0 else {}
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
@@ -330,7 +353,7 @@ def main(args):
             "source": source, "split": split_rec or {"path": None, "sha256": None},
             "adapt_episodes": train_ids or [], "adapt_episodes_k": len(train_ids or []), "held_out": held_ids or [],
             "held_out_windows": len(val_ds), "micro_batch": args.per_gpu_batch, "world": world, "accum": accum,
-            "effective_batch": args.per_gpu_batch * world * accum, "lr": args.lr, "warmup": args.warmup,
+            "effective_batch": args.per_gpu_batch * world * accum, "lr": lr, "lr_source": lr_source, "warmup": args.warmup,
             "ema_decay": args.ema_decay, "optim_policy": policy, "rank": args.lora_rank, "alpha": args.lora_alpha,
             "dropout": args.lora_dropout, "lora_mlp": bool(args.lora_mlp), "parts": list(parts),
             "trainable": counts["trainable"], "step_grid": grid, "step0_parity_max_abs": parity,
@@ -488,7 +511,9 @@ def build_parser():
     p.add_argument("--full-parts", default=",".join(lora.DEFAULT_PARTS),
                    help="parts trained in full beside the adapter, comma-separated from "
                         f"{','.join(lora.FULL_PARTS)}; 'none' for LoRA only; 'all' for every backbone parameter")
-    p.add_argument("--lr", type=float, default=1e-4, help="constant after the warmup, for the adapter and the parts")
+    p.add_argument("--lr", type=float, default=None,
+                   help="constant after the warmup, for every trained tensor; default 1e-4 for LoRA, 2e-5 for the full "
+                        "fine-tune (--lora-rank 0 --full-parts all, GameNGen's rate); given, it always wins")
     p.add_argument("--warmup", type=int, default=100)
     p.add_argument("--wd", type=float, default=None, help="weight decay; default: the source run's")
     p.add_argument("--clip", type=float, default=None, help="gradient clipping norm (0 = off); default: the source run's")
