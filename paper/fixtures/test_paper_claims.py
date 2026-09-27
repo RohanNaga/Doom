@@ -25,16 +25,39 @@ def read(*parts):
         return f.read()
 
 
+def rendered_sentences(tex):
+    """The sentences of a TeX source with its comments removed (a rough split, enough for these checks)."""
+    body = "\n".join(re.split(r"(?<!\\)%", ln, maxsplit=1)[0] for ln in tex.splitlines())
+    return [s for s in re.split(r"(?<=[.;])\s+", " ".join(body.split())) if s]
+
+
 def test_the_paper_does_not_credit_the_lpips_term_to_gamengen():
+    """Wherever the paper describes GameNGen's decoder tune, it says MSE and never LPIPS (v2 section 3.2.2).
+
+    The Sep 27 joint review reworded the sentence ("Following GameNGen, we ... tune it with MSE"), so the
+    check is on what any such sentence says, not on one fixed wording.
+    """
     tex = read("paper", "main.tex")
     assert not re.search(r"LPIPS,?\s*as in GameNGen", tex), "MSE + LPIPS is our deviation"
-    assert "GameNGen tunes its decoder with MSE alone" in tex
+    about_the_tune = [s for s in rendered_sentences(tex)
+                      if "GameNGen" in s and re.search(r"\btun(e|es|ed|ing)\b", s)]
+    for s in about_the_tune:
+        assert "MSE" in s and "LPIPS" not in s, s
 
 
 def test_the_paper_states_the_gamengen_training_set_correctly():
+    """If the paper states GameNGen's training-set size, it names the version: 70M examples is v2, 900M frames v1.
+
+    The Sep 27 joint review cut the training-budget sentence from the related work (cut c9), so the size may be
+    absent; it may never read "over 900M frames".
+    """
     tex = read("paper", "main.tex")
     assert "over 900M frames" not in tex
-    assert "70M" in tex and "900M" in tex and "v2" in tex
+    rendered = " ".join(rendered_sentences(tex))
+    if "70M" in rendered or "900M" in rendered:
+        assert "70M" in rendered and "v2" in rendered, "the 70M subset is arXiv v2's"
+        if "900M" in rendered:
+            assert "v1" in rendered, "900M generated frames is arXiv v1's statement"
 
 
 def test_the_dossier_quotes_gamengen_table_3():
