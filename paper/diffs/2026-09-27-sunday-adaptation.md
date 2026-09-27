@@ -175,3 +175,13 @@ Counts are occurrences in `main.tex` / `appendix.tex` / this diff. Apply as a gl
 | lands, story | 0 / 1 / 0 | delete | |
 
 Keep as they are (standard or defined game terms): persistence, budget, censored, zero-shot, backbone, EMA, tic (defined once as one game step at 35 Hz), arena and map (defined once: a map of the deathmatch WAD), episode, window, adapter.
+
+## 14. Axis names and references, from the y-axis survey (14:30; `.claude/analyses/opus-metrics-survey-2026-09-27.md`)
+
+- **Name $A$ and $S$ the same way.** Both are $10\log_{10}$ of the persistence baseline's error over the model's, in decoded pixels ($A$) and in latents ($S$): "decoded skill over persistence" and "latent skill over persistence", axes labelled "ΔPSNR vs persistence (dB)" and "latent ΔPSNR vs persistence (dB)". Drop the word "advantage" (a CoRL reader hears the RL advantage). Genie's $\Delta_t$PSNR is the nearest published form (a paired PSNR difference, there against random actions); cite it when $A$ is defined.
+- **The half-line caveat, one sentence wherever the half-gap threshold is drawn:** "half of the in-distribution gap in dB is not half of the error: closing 1.8 dB removes 34 percent of the persistence error, not 28."
+- **$M$'s sign (your decision):** flip to $M = \mathrm{LPIPS}_\text{persistence} - \mathrm{LPIPS}_\text{model}$ so that above zero means "beats persistence" on every $A$ and $M$ axis (today $A$ and $M$ have opposite senses in the same panel). If flipped, every $M$ number in this diff changes sign (zero-shot median $-0.08$, adapters $+0.02$) and the words "lower LPIPS than persistence on 11 of 13" stay true.
+- **Table 2 gains one column of absolute scene PSNR and LPIPS** (model and persistence) beside $A$ and $M$, so readers of the surveyed papers have an anchor (GameNGen reports 29.4 dB / 0.249 teacher-forced against the raw frame; ours are lower-resolution frames and a different reference, say so).
+- **Table 2 footnote on references:** $A$ compares rendered prediction and rendered persistence against the rendered true frame; $M$ and $G$ use the raw true frame; every surveyed paper scores against the raw frame.
+- **Directional row:** print the true-frame reference beside it (0.892 fresh, 0.885 training maps); `main.tex` still prints 0.91.
+- **Appendix candidate, CPU only:** GameNGen's Figure 6 form, PSNR and LPIPS per autoregressive tic to 256 for the three backbones with the copy-seed reference curve (no surveyed paper draws that reference). FVD (`fvd.py` exists) only if a card is free Monday; no human study (only the authors could rate).
