@@ -85,6 +85,10 @@ Each caption states the finding first, then how to read the marks, then provenan
 | `fig:collapse` | SD 3.5 70k live versus EMA rollout strip, two validation windows, tics 1 to 256 | `tools/collapse_strip.py` at `42a4688` | exists: `paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg` |
 | `tab:perarena-adapt` | Per unseen arena: D, step-0 `A`, its half-gap line (A_0 + home)/2, first grid crossing of the half-gap line and the home line, `A` and `M` at 4,000, forgetting, directional | `score_adapt.py` rows and cost | D, step-0 `A` and the half-gap lines provisional; the rest pending |
 | `fig:adapt-margin` (Figure 5) | `M` against LoRA updates, one line per unseen arena coloured by D, with zero and the training maps' margin, censored arenas open, full fine-tune on arena 7 in black | `score_adapt.py score` rows (live weights) | `figures/fig5_adaptation_margin.pdf`; pending with the 13-arena runs |
+| `tab:stockrows` | The stock-decoder rows of body Table 2 (U-Net and PixArt-α, training maps and unseen arenas) | `results/fresh_rescore/{unet200k_ema,pixart200k_ema}` scene keys (paper owner, 2026-09-27) | exists |
+| `fig:training-curves` | Training curves of the three backbones, EMA solid and non-EMA dotted, gain over persistence on the training maps | `tools/training_curves.py` | `figures/figA_training_curves.pdf`; exists (SD 3.5 to 200k Monday) |
+| `fig:adapt-arenas` | Per-arena adaptation curves with episode-bootstrap bands and half-gap thresholds | `paper/make_adapt_figures.py` | `figures/tuned/figA_adapt_arenas.pdf`; exists (8k grid tonight) |
+| `fig:adapt-ladder` | Data ladder: A at 4k against adaptation episodes on arenas 7, 8, 12, 16 (stock decoder) | `paper/make_adapt_figures.py` | `figures/fig_adapt_ladder.pdf`; exists |
 
 ## Numbers in the text that are not in a table
 
