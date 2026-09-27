@@ -976,6 +976,44 @@ def fig_recipe(recipe, base, seeds, records_of, home, out_dir):
     return save(fig, out_dir, "fig_adapt_recipe")
 
 
+def fig_skill(records, home, budget, out_dir):
+    """Figure 2c: the endpoint and the crossing budget against the zero-shot latent skill, one point per arena.
+
+    The skill needs one evaluation pass and no distance; censored arenas sit on the top row of the budget panel
+    as open markers. Arena numbers label every point.
+    """
+    done = [r for r in records if r["S0"] is not None and r["A_budget"] is not None]
+    if not done:
+        return []
+    fig, (ax, ax2) = new_figure((FIG2_SIZE[0] * 2, FIG2_SIZE[1]), ncols=2)
+    cmap, norm = d_colours(records)
+    for r in done:
+        c = colour_of(r, cmap, norm)
+        ax.plot(r["S0"], r["A_budget"], ls="none", marker="o", ms=2.8, mfc=c, mec="white", mew=0.3, zorder=3)
+        ax.annotate(str(r["arena"]), (r["S0"], r["A_budget"]), xytext=(2, 1), textcoords="offset points",
+                    fontsize=4, color=SECONDARY)
+        cost = r["cost_half_gap"] if not r["censored_half_gap"] else 2 * budget
+        ax2.plot(r["S0"], cost, ls="none", marker="o", ms=2.8, mfc="none" if r["censored_half_gap"] else c,
+                 mec=c if r["censored_half_gap"] else "white", mew=0.5 if r["censored_half_gap"] else 0.3, zorder=3)
+        ax2.annotate(str(r["arena"]), (r["S0"], cost), xytext=(2, 1), textcoords="offset points",
+                     fontsize=4, color=SECONDARY)
+    ax.axhline(home, color=SECONDARY, lw=0.7, ls=(0, (3, 2)), zorder=1)
+    ax.text(min(r["S0"] for r in done), home, " home", ha="left", va="bottom", fontsize=5, color=SECONDARY)
+    ax.set_xlabel("zero-shot latent skill $S_0$ (dB)")
+    ax.set_ylabel(f"$A$ at {budget_label(budget)} (dB)")
+    ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
+    steps = sorted({int(s) for r in done for s in r["A"] if int(s) > 0 and int(s) <= budget})
+    ticks = steps + [2 * budget]
+    ax2.set_yscale("log")
+    ax2.yaxis.set_major_locator(ticker.FixedLocator(ticks))
+    ax2.yaxis.set_major_formatter(ticker.FixedFormatter([budget_label(s) for s in steps] + [f">{budget_label(budget)}"]))
+    ax2.yaxis.set_minor_locator(ticker.NullLocator())
+    ax2.set_ylim(steps[0] / 1.5, 2 * budget * 1.5)
+    ax2.set_xlabel("zero-shot latent skill $S_0$ (dB)")
+    ax2.set_ylabel("half-gap budget (updates)")
+    return save(fig, out_dir, "fig2c_outcomes_by_skill")
+
+
 def fig_zero_shot(zero_shot, D, key, out_dir, stem, ylabel, zero=False):
     """Figure 2: one value per arena sorted by D, training maps shaded, a marker per backbone, each home dashed.
 
@@ -1178,6 +1216,7 @@ def main(argv=None):
         written += fig_terciles(drawn, by_name, home, a.budget, a.out_dir)
     else:
         print("note: no arena has a D; Figure 3 and its variants not drawn")
+    written += fig_skill(records, home, a.budget, a.out_dir)
     if seed_summary:
         written += fig_seeds(seed_summary, records, base, seeds, a.decoder, a.budget, a.out_dir)
     if ladder_summary:
