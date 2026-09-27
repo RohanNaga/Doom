@@ -1,0 +1,231 @@
+{
+ "root": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser",
+ "hold_steps": 16,
+ "counts": {
+  "unseen:attack": 420,
+  "unseen:turn left": 5,
+  "unseen:turn right": 46,
+  "unseen:forward": 74,
+  "unseen:strafe left": 6,
+  "unseen:strafe right": 0,
+  "training:attack": 289,
+  "training:turn left": 0,
+  "training:turn right": 67,
+  "training:forward": 116,
+  "training:strafe left": 7,
+  "training:strafe right": 0
+ },
+ "floor": 19.186,
+ "rows": [
+  {
+   "row": "attack",
+   "unseen": [
+    {
+     "window": "unseen_arena07_ep288_s456",
+     "role": "unseen",
+     "action": "attack",
+     "button": "attack",
+     "tic": 77,
+     "depth": 93,
+     "control": "attack + turn left + strafe left",
+     "zero_shot": 13.518,
+     "chroma": 7.93,
+     "edges": 0.1115,
+     "luma": 69.86,
+     "flash": false,
+     "held": 16,
+     "starts": false,
+     "co_held": [],
+     "adapted": 19.954,
+     "story": 6.436
+    },
+    {
+     "window": "unseen_arena07_ep197_s2184",
+     "role": "unseen",
+     "action": "attack",
+     "button": "attack",
+     "tic": 37,
+     "depth": 53,
+     "control": "attack + turn right + strafe left",
+     "zero_shot": 13.422,
+     "chroma": 5.7,
+     "edges": 0.1298,
+     "luma": 69.15,
+     "flash": false,
+     "held": 16,
+     "starts": false,
+     "co_held": [],
+     "adapted": 19.526,
+     "story": 6.104
+    }
+   ],
+   "home": {
+    "window": "train_map02_ep6064_s2312",
+    "role": "training",
+    "action": "attack",
+    "button": "attack",
+    "tic": 177,
+    "depth": 16,
+    "control": "turn right + back",
+    "in_domain": 19.922,
+    "chroma": 0.63,
+    "edges": 0.02,
+    "luma": 51.22,
+    "flash": false,
+    "held": 16,
+    "starts": true,
+    "co_held": [],
+    "near": true,
+    "at_floor": true
+   }
+  },
+  {
+   "row": "turn",
+   "unseen": [
+    {
+     "window": "unseen_arena07_ep158_s1672",
+     "role": "unseen",
+     "action": "turn right",
+     "button": "turn right",
+     "tic": 208,
+     "depth": 224,
+     "control": "turn right + back",
+     "zero_shot": 13.139,
+     "chroma": 7.34,
+     "edges": 0.0977,
+     "luma": 88.26,
+     "flash": false,
+     "held": 16,
+     "starts": false,
+     "co_held": [],
+     "adapted": 18.396,
+     "story": 5.257
+    },
+    {
+     "window": "unseen_arena07_ep158_s1672",
+     "role": "unseen",
+     "action": "turn right",
+     "button": "turn right",
+     "tic": 39,
+     "depth": 55,
+     "control": "attack + forward",
+     "zero_shot": 11.896,
+     "chroma": 6.78,
+     "edges": 0.106,
+     "luma": 99.15,
+     "flash": false,
+     "held": 16,
+     "starts": true,
+     "co_held": [
+      "back"
+     ],
+     "adapted": 16.348,
+     "story": 4.452
+    }
+   ],
+   "home": {
+    "window": "train_map02_ep6008_s712",
+    "role": "training",
+    "action": "turn right",
+    "button": "turn right",
+    "tic": 37,
+    "depth": 16,
+    "control": "attack + strafe left",
+    "in_domain": 20.093,
+    "chroma": 3.18,
+    "edges": 0.1559,
+    "luma": 42.47,
+    "flash": false,
+    "held": 16,
+    "starts": true,
+    "co_held": [
+     "attack"
+    ],
+    "near": true,
+    "at_floor": true
+   }
+  },
+  {
+   "row": "forward",
+   "unseen": [
+    {
+     "window": "unseen_arena07_ep41_s4360",
+     "role": "unseen",
+     "action": "forward",
+     "button": "forward",
+     "tic": 204,
+     "depth": 220,
+     "control": "turn right + back",
+     "zero_shot": 11.998,
+     "chroma": 3.75,
+     "edges": 0.1029,
+     "luma": 65.24,
+     "flash": false,
+     "held": 16,
+     "starts": true,
+     "co_held": [],
+     "adapted": 17.864,
+     "story": 5.866
+    },
+    {
+     "window": "unseen_arena07_ep210_s2888",
+     "role": "unseen",
+     "action": "forward",
+     "button": "forward",
+     "tic": 217,
+     "depth": 233,
+     "control": "turn right + back",
+     "zero_shot": 12.054,
+     "chroma": 6.25,
+     "edges": 0.0741,
+     "luma": 65.66,
+     "flash": false,
+     "held": 16,
+     "starts": true,
+     "co_held": [],
+     "adapted": 17.334,
+     "story": 5.28
+    }
+   ],
+   "home": {
+    "window": "train_map02_ep6024_s4424",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 147,
+    "depth": 16,
+    "control": "attack + forward",
+    "in_domain": 20.228,
+    "chroma": 2.19,
+    "edges": 0.1313,
+    "luma": 42.48,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [
+     "attack"
+    ],
+    "near": true,
+    "at_floor": true
+   }
+  }
+ ],
+ "restart_missing": {
+  "fig_teaser_C_hold16": [
+   "unseen_arena07_ep158_s1672_t208",
+   "unseen_arena07_ep41_s4360_t204",
+   "unseen_arena07_ep288_s456_t77",
+   "train_map02_ep6008_s712_t37",
+   "train_map02_ep6024_s4424_t147",
+   "train_map02_ep6064_s2312_t177"
+  ],
+  "fig_teaser_C_hold16_alt": [
+   "unseen_arena07_ep158_s1672_t39",
+   "unseen_arena07_ep210_s2888_t217",
+   "unseen_arena07_ep197_s2184_t37",
+   "train_map02_ep6008_s712_t37",
+   "train_map02_ep6024_s4424_t147",
+   "train_map02_ep6064_s2312_t177"
+  ]
+ }
+}

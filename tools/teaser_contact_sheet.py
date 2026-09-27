@@ -56,6 +56,7 @@ ACTIONS = (("attack", ("attack",)), ("turn left", ("turn left",)), ("turn right"
 FIGURE_ROWS = (("attack", ("attack",)), ("turn", ("turn left", "turn right")), ("forward", ("forward",)))
 EDGE_THRESHOLD = 0.1
 NEAR_TICS = 20                     # an in-domain start this close in rollout depth counts as matched
+FLASH_CHROMA = 12.0                # mean CIELAB chroma above this is a weapon flash: map 2's stone sits at 2 to 5
 THUMB = (128, 83)                  # px, 0.4 of the 320 x 208 scene crop
 TEXT_W = 318
 PAD = 4
@@ -75,6 +76,20 @@ def moments(controls, last, hold=HOLD, horizon=HORIZON):
             for t in range(2, min(last - horizon, len(names) - hold) + 1):
                 if b in names[t] and b not in names[t - 1] and all(b in names[u] for u in range(t, t + hold)):
                     out.append((action, b, t))
+    return out
+
+
+def held_moments(controls, last, steps):
+    """[(action, button, tic, starts)]: every tic t >= 1 whose button is pressed on each of the next `steps` tics
+    (restart steps 1..steps, teaser tics t+1..t+steps), with t + steps at most `last`; `starts` when the button is
+    not pressed at t itself, so the action begins right after the context frame (a tie-break only)."""
+    names = [set(ct.button_names(c)) for c in controls]
+    out = []
+    for action, buttons in ACTIONS:
+        for b in buttons:
+            for t in range(1, min(last, len(names) - 1) - steps + 1):
+                if all(b in names[u] for u in range(t + 1, t + steps + 1)):
+                    out.append((action, b, t, b not in names[t]))
     return out
 
 
@@ -103,25 +118,34 @@ def luma(img):
     return float((img[..., :3].astype(np.float64) @ np.array([0.299, 0.587, 0.114])).mean())
 
 
-def window_moments(root, name, wdir):
-    """Every scored moment of one window."""
+def window_moments(root, name, wdir, hold_steps=None):
+    """Every scored moment of one window: starts held `HOLD` tics scored at +`HORIZON`, or with `hold_steps` the
+    tics whose button is pressed on every one of the next `hold_steps` steps, scored at +`hold_steps`."""
     man = ct.manifest_of(root, wdir)
     ctrl = ct.controls_of(man)
     unseen = ct.is_unseen(name)
     last = ct.last_tic(os.path.join(wdir, ct.ROWS["truth"]))
     zs = ct.per_tic_scene(man, ct.ROWS["model"])
     ad = ct.per_tic_scene(man, ct.ROWS["adapted"]) if unseen else {}
+    horizon = hold_steps or HORIZON
+    found = (list(held_moments(ctrl, last, hold_steps)) if hold_steps else
+             [(a, b, t, None) for a, b, t in moments(ctrl, last)])
     out = []
-    for action, button, t in moments(ctrl, last):
-        gt = ct.frame(os.path.join(wdir, ct.ROWS["truth"]), t + HORIZON)
+    for action, button, t, starts in found:
+        gt = ct.frame(os.path.join(wdir, ct.ROWS["truth"]), t + horizon)
         context = ct.frame(os.path.join(wdir, ct.ROWS["truth"]), t)
         rec = {"window": name, "role": "unseen" if unseen else "training", "action": action, "button": button,
-               "tic": t, "depth": t + HORIZON, "control": ct.action_text(ctrl[t]),
-               "zero_shot" if unseen else "in_domain": zs.get(t + HORIZON),
+               "tic": t, "depth": t + horizon, "control": ct.action_text(ctrl[t]),
+               "zero_shot" if unseen else "in_domain": zs.get(t + horizon),
                "chroma": round(chroma(gt), 2), "edges": round(edge_density(gt), 4),
-               "luma": round((luma(context) + luma(gt)) / 2, 2)}
+               "luma": round((luma(context) + luma(gt)) / 2, 2),
+               "flash": max(chroma(context), chroma(gt)) > FLASH_CHROMA}
+        if hold_steps:
+            held = [set(ct.button_names(c)) for c in ctrl[t + 1:t + hold_steps + 1]]
+            rec.update({"held": hold_steps, "starts": starts,
+                        "co_held": sorted(set.intersection(*held) - {button})})
         if unseen:
-            rec["adapted"] = ad.get(t + HORIZON)
+            rec["adapted"] = ad.get(t + horizon)
             rec["story"] = (round(rec["adapted"] - rec["zero_shot"], 3)
                             if rec["adapted"] is not None and rec["zero_shot"] is not None else None)
         out.append(rec)
@@ -160,6 +184,8 @@ def pick_home(homes, row, floor, taken=()):
     homes = [h for h in homes if not overlaps(h["window"], h["tic"], taken)]
     if not homes:
         return None, None
+    # a weapon flash lights the frame without showing the map; such a start wins only if nothing else is left
+    homes = [h for h in homes if not h.get("flash")] or homes
     near = [h for h in homes if abs(h["depth"] - row["depth"]) <= NEAR_TICS]
     typical = [h for h in near if h["in_domain"] is not None and h["in_domain"] >= floor]
     if typical:
@@ -296,6 +322,50 @@ def draw_sheet(root, ordered, path, per_line=3):
 # the round
 # ---------------------------------------------------------------------------------------------
 
+def row_picks(found, n=2, steps=HORIZON):
+    """The hold round: per figure row, the top-n unseen moments across every window by story (ties: an action that
+    starts right after the context, then chroma), no two sharing frames, among the buttons some training map also
+    holds; and the row's in-domain moment, a training-map moment of the first pick's button (`pick_home`: the
+    brightest at or above the training maps' median in-domain PSNR; depth does not apply, every restart is `steps`
+    deep), no two rows' in-domain moments sharing frames."""
+    floor = in_domain_floor(found)
+    held_home = {m["button"] for m in found if m["role"] == "training"}
+    rows, taken = [], []
+    for row, buttons in FIGURE_ROWS:
+        options = sorted((m for m in found if m["role"] == "unseen" and m["button"] in buttons
+                          and m["button"] in held_home and m["story"] is not None),
+                         key=lambda m: (-m["story"], not m["starts"], -m["chroma"], m["window"], m["tic"]))
+        unseen = []
+        for m in options:
+            if not any(m["window"] == o["window"] and abs(m["tic"] - o["tic"]) <= steps for o in unseen):
+                unseen.append(m)
+            if len(unseen) == n:
+                break
+        if not unseen:
+            rows.append({"row": row, "unseen": [], "home": None, "missing": "no held moment in an unseen arena"})
+            continue
+        homes = [{**h, "depth": steps} for h in found if h["role"] == "training" and h["button"] == unseen[0]["button"]]
+        home, flags = pick_home(homes, {"depth": steps}, floor, taken) if homes else (None, None)
+        if home is not None:
+            taken.append((home["window"], home["tic"]))
+        rows.append({"row": row, "unseen": unseen, "home": home and {**home, **flags}})
+    return {"floor": round(floor, 3), "rows": rows}
+
+
+def hold_figure_rows(picks, k=0):
+    """Layout C rows from the hold round: the k-th unseen pick of each row with the row's in-domain moment."""
+    out = []
+    for p in picks["rows"]:
+        if p["home"] is None or len(p["unseen"]) <= k:
+            return None
+        m = p["unseen"][k]
+        out.append({"row": p["row"], "window": m["window"], "tic": m["tic"], "button": m["button"],
+                    "control": m["control"], "story": m["story"], "zero_shot": m["zero_shot"],
+                    "adapted": m["adapted"], "depth": m["depth"],
+                    "home": {k2: p["home"][k2] for k2 in ("window", "tic", "button", "control", "in_domain", "luma")}})
+    return out
+
+
 def restart_rows(rows, restart_root, found, floor):
     """A candidate's rows re-pointed at the restart export: each unseen moment must be there as `<window>_t<T>`, and
     its in-domain start becomes a restarted training-map start of the same button (by `pick_home` among those).
@@ -321,11 +391,14 @@ def restart_rows(rows, restart_root, found, floor):
 
 
 def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,),
-        row_order=None):
-    """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record."""
+        row_order=None, hold_steps=None):
+    """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record. With
+    `hold_steps` it runs the hold round instead (`run_hold`)."""
     ws = ct.windows(root)
     if not ws:
         raise SystemExit(f"no window directories <map>_ep<E>_s<S> under {root}")
+    if hold_steps:
+        return run_hold(root, out_dir, review_dir, hold_steps, restart_root, row_order)
     found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir)]
     ordered = sorted(found, key=sort_key)
     starts_on_map2 = {m["action"] for m in found if m["role"] == "training"}
@@ -366,6 +439,43 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
     return rec
 
 
+def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None):
+    """The hold round: every moment whose button is pressed on all `steps` restart steps, counted per button and
+    role; the per-row picks (`row_picks`); layout C of the first and second picks at +`steps` from the continuous
+    rollouts (`fig_teaser_C_hold<steps>[_alt]`) and, when the restart export holds every moment, from it
+    (`..._restart`). Writes `<review-dir>/teaser_hold<steps>.json`."""
+    ws = ct.windows(root)
+    found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir, hold_steps=steps)]
+    buttons = ("attack", "turn left", "turn right", "forward", "strafe left", "strafe right")
+    counts = {f"{role}:{b}": sum(1 for m in found if m["role"] == role and m["button"] == b)
+              for role in ("unseen", "training") for b in buttons}
+    picks = row_picks(found, n=2, steps=steps)
+    order = list(row_order) if row_order else [r for r, _ in FIGURE_ROWS]
+    written = []
+    have = (set(os.listdir(restart_root)) if restart_root and os.path.isdir(restart_root) else set())
+    for k, suffix in ((0, ""), (1, "_alt")):
+        rows = hold_figure_rows(picks, k)
+        if rows is None:
+            continue
+        rows = sorted(rows, key=lambda r: order.index(r["row"]))
+        stem = f"fig_teaser_C_hold{steps}{suffix}"
+        written += ct.layout_c(root, out_dir, rows, stem=stem, horizon=steps)[0]
+        need = [f"{r['window']}_t{r['tic']}" for r in rows] + [f"{r['home']['window']}_t{r['home']['tic']}"
+                                                               for r in rows]
+        if restart_root and all(d in have for d in need):
+            written += ct.layout_c(root, out_dir, rows, stem=stem + "_restart", horizon=steps,
+                                   restart_root=restart_root)[0]
+        elif restart_root:
+            picks.setdefault("restart_missing", {})[stem] = [d for d in need if d not in have]
+    rec = {"root": root, "hold_steps": steps, "counts": counts, **picks}
+    side = os.path.join(review_dir, f"teaser_hold{steps}.json")
+    os.makedirs(review_dir, exist_ok=True)
+    with open(side, "w") as f:
+        json.dump(rec, f, indent=1)
+        f.write("\n")
+    return {"hold": rec, "written": written + [side], "candidates": [], "missing_on_map2": []}
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="The Figure 1 selection round: contact sheet and candidates.")
     p.add_argument("--root", default=os.path.join(REPO, "results", "teaser"))
@@ -375,12 +485,14 @@ def main(argv=None):
     p.add_argument("--restart-root", default=None,
                    help="the steward's restarted rollouts, <window>_t<T>/...: the candidates' +8 frames come from it")
     p.add_argument("--row-order", default=None, help="the rows' order, e.g. turn,forward,attack")
+    p.add_argument("--hold-steps", type=int, default=None,
+                   help="the hold round: moments whose button is pressed on every one of the next N restart steps")
     p.add_argument("--restart-horizon", type=int, nargs="+", default=[HORIZON],
                    help="tics after the context for the restarted redraws (the export holds 16); stems gain the "
                         "number past 8, fig_teaser_C_<n>_restart16")
     a = p.parse_args(argv)
     rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon),
-              tuple(a.row_order.split(",")) if a.row_order else None)
+              tuple(a.row_order.split(",")) if a.row_order else None, a.hold_steps)
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):

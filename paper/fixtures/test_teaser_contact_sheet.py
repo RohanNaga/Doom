@@ -230,6 +230,10 @@ def test_the_in_domain_start_is_the_brightest_near_one_that_reads_at_least_the_m
              {"window": "w", "tic": 40, "depth": 200, "luma": 250.0, "in_domain": 30.0}]  # outside the 20-tic window
     home, flags = tcs.pick_home(homes, row, floor=20.0)
     assert home["tic"] == 2 and flags == {"near": True, "at_floor": True}
+    # a plasma flash on the context or ground-truth frame (map 2 is grey stone, chroma 2 to 5) never wins on brightness
+    flash = {"window": "u", "tic": 5, "depth": 50, "luma": 200.0, "in_domain": 23.0, "flash": True}
+    home, flags = tcs.pick_home(homes + [flash], row, floor=20.0)
+    assert home["tic"] == 2
     home, flags = tcs.pick_home(homes[:1], row, floor=20.0)                   # nothing near reads that well
     assert home["tic"] == 1 and flags == {"near": True, "at_floor": False}
     home, flags = tcs.pick_home(homes[3:], row, floor=20.0)                   # nothing near at all: the closest
@@ -257,3 +261,32 @@ def test_the_rows_follow_the_requested_order(tmp_path):
     plain = tcs.run(root, str(tmp_path / "plain"), str(tmp_path / "plain" / "review"), n_candidates=1)
     homes = {r["row"]: (r["home"]["window"], r["home"]["tic"]) for r in rec["candidates"][0]["rows"]}
     assert homes == {r["row"]: (r["home"]["window"], r["home"]["tic"]) for r in plain["candidates"][0]["rows"]}
+
+
+def test_a_held_moment_has_its_button_pressed_on_every_restart_step():
+    ctrl = [frozenset()] + [frozenset({"attack", "speed"}) if 2 <= t <= 20 else frozenset({"speed"})
+                            for t in range(1, 31)]
+    got = tcs.held_moments(ctrl, 30, steps=16)
+    assert [(b, t, starts) for _, b, t, starts in got] == [("attack", 1, True), ("attack", 2, False),
+                                                           ("attack", 3, False), ("attack", 4, False)]
+
+
+def test_the_hold_round_picks_rows_across_windows_with_a_held_in_domain_start(tmp_path):
+    root = export(tmp_path)
+    out = tmp_path / "out"
+    rec = tcs.run(root, str(out), str(out / "review"), hold_steps=8, row_order=("turn", "forward", "attack"))
+    picks = {p["row"]: p for p in rec["hold"]["rows"]}
+    # every pick holds its button on all 8 steps after its context; turn is turn right, the only turn map 2 holds
+    for p in picks.values():
+        for m in p["unseen"] + [p["home"]]:
+            assert m["held"] == 8
+    assert all(m["button"] == "turn right" for m in picks["turn"]["unseen"] + [picks["turn"]["home"]])
+    # the unseen picks are ranked by story at +8, and the two picks of a row never share frames
+    stories = [m["story"] for m in picks["attack"]["unseen"]]
+    assert stories == sorted(stories, reverse=True)
+    a, b = picks["attack"]["unseen"][:2]
+    assert a["window"] != b["window"] or abs(a["tic"] - b["tic"]) > 8
+    assert rec["hold"]["counts"]["training:turn left"] == 0
+    side = json.load(open(out / "fig_teaser_C_hold8.json"))
+    assert [r["row"] for r in side["rows"]] == ["turn", "forward", "attack"]
+    assert all(r["held"]["unseen"].endswith("8/8") and r["held"]["in-domain"].endswith("8/8") for r in side["rows"])
