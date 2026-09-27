@@ -117,13 +117,25 @@ def test_a_fixed_number_of_windows_from_each_held_out_episode_and_nothing_else(t
     assert len(pairs) == 20 and len({tuple(p) for p in pairs}) == 20
     assert {e for e, _ in pairs} == held
     assert all(sum(1 for e, _ in pairs if e == h) == 5 for h in held)
+    # every window is valid four tics ahead, so the one file serves the one-tic and the four-tic read
+    assert s["meta"]["window_horizon"] == 4
     for e, start in pairs:
         meta = np.load(os.path.join(d, f"ep_{e:05d}_meta.npz"))
-        assert start in set(tic_window_starts(meta, CTX, 1).tolist())
-    ds = TicWindowDataset(d, s["val"], CTX)
-    idx = adapt_split.windows_in_dataset(ds, pairs)
-    back = sorted([int(ds.episodes[ds.locate(i)[0]][0]), ds.locate(i)[1]] for i in idx)
-    assert back == sorted(pairs)
+        assert start in set(tic_window_starts(meta, CTX, 4).tolist())
+    for horizon in (1, 4):
+        ds = TicWindowDataset(d, s["val"], CTX, horizon=horizon, with_horizon=horizon > 1)
+        idx = adapt_split.windows_in_dataset(ds, pairs)
+        back = sorted([int(ds.episodes[ds.locate(i)[0]][0]), ds.locate(i)[1]] for i in idx)
+        assert back == sorted(pairs)
+
+
+def test_an_episode_short_of_four_tic_windows_is_refused_even_with_enough_one_tic_windows(tmp_path):
+    """Episode of 12 rows at context 4: 8 one-tic windows, 5 four-tic windows."""
+    d = str(tmp_path / "lat")
+    write_pertic_episode(d, 3, held_actions([0] * 3))
+    assert len(adapt_split.draw_held_out_windows(d, [3], 8, context_frames=CTX, horizon=1)[0]) == 8
+    with pytest.raises(ValueError, match="fewer than 8 windows valid at 4 tics"):
+        adapt_split.draw_held_out_windows(d, [3], 8, context_frames=CTX)
 
 
 def test_each_episodes_windows_are_its_own(tmp_path):
@@ -133,9 +145,9 @@ def test_each_episodes_windows_are_its_own(tmp_path):
     assert [p for p in both if p[0] == eps[0]] == alone
     other, _ = adapt_split.draw_held_out_windows(d, [eps[0]], 6, seed=3, context_frames=CTX)
     assert other != alone
-    # an episode with fewer valid windows than asked gives all it has
-    few, avail = adapt_split.draw_held_out_windows(d, [eps[1]], 10_000, seed=0, context_frames=CTX)
-    assert len(few) == avail[eps[1]] < 10_000
+    # an episode with fewer valid windows than asked is an error, never a smaller share of the draw
+    with pytest.raises(ValueError, match="fewer than 10000"):
+        adapt_split.draw_held_out_windows(d, [eps[0], eps[1]], 10_000, seed=0, context_frames=CTX)
 
 
 def test_the_legacy_draw_is_the_study_draw_restricted_to_held_out(tmp_path):
@@ -216,13 +228,21 @@ def test_the_cli_writes_one_split_per_map_from_the_manifest_or_the_listing(tmp_p
         assert len(s["val"]) == 8 and len(s["adapt"]) == 16 and len(s["train"]) == 8
         assert len(s[adapt_split.WINDOW_KEY]) == 16 and adapt_split.LEGACY_KEY not in s
         assert all(e % 2 == m - 13 for e in s["val"] + s["adapt"])
-    # the directory listing alone gives the same splits, and a rerun is a no-op
-    before = (out / "split_adapt_arenas13_map13_seed0.json").read_bytes()
-    assert adapt_split.main(["--latents-dir", d, "--map", "13", "--windows-per-episode", "2", "--context-frames",
-                             str(CTX), "--out-dir", str(out)]) == 0
-    assert (out / "split_adapt_arenas13_map13_seed0.json").read_bytes() == before
+    # a rerun of the same command is a no-op
+    first = out / "split_adapt_arenas13_map13_seed0.json"
+    before = first.read_bytes()
+    assert adapt_split.main(argv) == 0 and first.read_bytes() == before
+    # the directory listing alone gives the same lists, but it is another provenance, so it may not
+    # silently stand in for the manifest's file
+    listing = ["--latents-dir", d, "--map", "13", "--windows-per-episode", "2", "--context-frames", str(CTX)]
+    assert adapt_split.main(listing + ["--out", str(tmp_path / "listing.json")]) == 0
+    same = {k: v for k, v in json.loads((tmp_path / "listing.json").read_text()).items() if k != "meta"}
+    assert same == {k: v for k, v in json.loads(before).items() if k != "meta"}
+    with pytest.raises(SystemExit, match="meta.source"):
+        adapt_split.main(listing + ["--out-dir", str(out)])
     with pytest.raises(SystemExit, match="different split"):
-        adapt_split.main(argv[:-2] + ["--seed", "1", "--map", "13", "--out", str(out / "split_adapt_arenas13_map13_seed0.json")])
+        adapt_split.main(argv[:-2] + ["--seed", "1", "--map", "13", "--out", str(first)])
+    assert first.read_bytes() == before
     with pytest.raises(SystemExit, match="not in the source"):
         adapt_split.main(["--latents-dir", d, "--map", "15", "--out-dir", str(out)])
     capsys.readouterr()
