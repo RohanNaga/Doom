@@ -1325,6 +1325,29 @@ def at_risk_row(ax, counts, xs, below_pt=12.5):
 
 
 CENSORED_FILL, CENSORED_EDGE = "#A6A6A6", "#595959"   # grey-filled: open means the stock decoder elsewhere
+HALF_GAP_LABEL = "half gap"        # Table 3's words; "half of the gap" is wider than any free stretch at 8k
+LABEL_PAD = 0.4                    # arena slots: half a budget label's width and a gutter
+
+
+def clears_half_gap(share, never):
+    """True when an arena's dot and its label leave the band just above the 0.5 line free: a crossing dot high
+    enough that its budget sits above the text, or a censored dot under the line with its "never" beneath."""
+    return share < 0.47 if never else share > 0.65
+
+
+def half_gap_x(shares, never, width, pad=LABEL_PAD, lo=-0.8, hi=None):
+    """The x centre (in arena slots) of the half-gap line's label, `width` slots wide, set just above the line:
+    among the placements inside the panel [lo, hi], the one that meets the fewest arenas that do not clear the
+    text (`clears_half_gap`), then the one with the most room to the nearest of them or to the panel's edge."""
+    hi = len(shares) - 0.4 if hi is None else hi
+    blocked = [i for i, (v, n) in enumerate(zip(shares, never)) if not clears_half_gap(v, n)]
+    best = None
+    for c in np.arange(lo + width / 2, hi - width / 2 + 1e-9, 0.05):
+        hits = sum(1 for i in blocked if abs(i - c) <= width / 2 + pad)
+        room = min([abs(i - c) for i in blocked] + [c - lo, hi - c]) - width / 2 - pad
+        if best is None or (hits, -room) < best[0]:
+            best = ((hits, -room), float(c))
+    return best[1] if best else (lo + hi) / 2
 
 
 def fig_dots(stats, records, home, out_dir, band=None):
@@ -1369,18 +1392,21 @@ def fig_dots(stats, records, home, out_dir, band=None):
                     textcoords="offset points", ha="center", va="top" if never else "bottom", fontsize=fs.MIN_PT,
                     color=fs.CONTEXT_INK, annotation_clip=False,
                     bbox={"boxstyle": "square,pad=0.05", "fc": "white", "ec": "none"})   # break a line the text sits on
-    for y, text, style in ((0.0, "zero-shot", "-"), (0.5, "half of the gap", (0, (1, 1.2))),
+    bx.set_xlim(-0.8, len(order) - 0.4)          # room for the first arena's "never" inside the spine
+    bx.set_ylim(0, 1.1)
+    for y, text, style in ((0.0, "zero-shot", "-"), (0.5, HALF_GAP_LABEL, (0, (1, 1.2))),
                            (1.0, "in-distribution", fs.TRAINING_DASH)):
         bx.axhline(y, color=fs.BLACK if y == 0 else (fs.CONTEXT_INK if y == 0.5 else fs.TRAINING_LINE),
                    lw=fs.REF_LW if y != 0.5 else fs.MIN_LW, ls=style, zorder=1.5, gid="ref")
         if y == 0.5:
-            # on the line, centred on the longest run of arenas whose dots clear the text; below it sit the greys
-            above = [i for i, a in enumerate(order) if shares[str(a)] > 0.65]
-            runs, cur = [], []
-            for i in above:
-                cur = cur + [i] if cur and i == cur[-1] + 1 else [i]
-                runs.append(cur)
-            mid = (lambda r: (r[0] + r[-1]) / 2)(max(runs, key=len)) if runs else len(order) / 2
+            # on the line, where no dot or budget label meets the text (`half_gap_x`); its width is measured in
+            # arena slots at the printed size
+            label = bx.text(0, y, text, fontsize=fs.ANNOT_PT)
+            box = label.get_window_extent(fig.canvas.get_renderer())
+            label.remove()
+            inv = bx.transData.inverted()
+            width = inv.transform((box.x1, box.y0))[0] - inv.transform((box.x0, box.y0))[0]
+            mid = half_gap_x([shares[str(a)] for a in order], [crossing.get(str(a)) is None for a in order], width)
             bx.annotate(text, (mid, y), xytext=(0, 1.5), textcoords="offset points", ha="center", va="bottom",
                         fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
             continue
@@ -1388,8 +1414,6 @@ def fig_dots(stats, records, home, out_dir, band=None):
                 color=fs.INK if y == 0 else fs.TRAINING_LINE)
     bx.set_xticks(range(len(order)), [str(a) for a in order])
     bx.tick_params(axis="x", length=0)
-    bx.set_xlim(-0.8, len(order) - 0.4)          # room for the first arena's "never" inside the spine
-    bx.set_ylim(0, 1.1)
     bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
     bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
     bx.set_xlabel("unseen arena")

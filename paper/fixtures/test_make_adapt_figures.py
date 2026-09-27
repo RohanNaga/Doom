@@ -641,3 +641,23 @@ def test_the_dot_variant_of_figure_4_prints_at_the_paper_owners_size(tmp_path):
     assert os.path.getsize(os.path.join(out, "fig4_dots.png")) > 1000
     w, h = mediabox(os.path.join(out, "fig4_dots.pdf"))
     assert (w, h) == (pytest.approx(5.5, abs=0.01), pytest.approx(1.4, abs=0.01))     # the body slot, unscaled
+
+
+# the 8k grid's shares of the gap (tuned decoder), arenas 1 and 6 to 17 in number order; 12 and 16 never cross
+SHARES_8K = [0.505, 0.61, 0.739, 0.514, 1.069, 0.971, 0.752, 0.498, 0.622, 0.566, 0.839, 0.453, 0.673]
+NEVER_8K = [i in (7, 11) for i in range(13)]
+
+
+def test_the_half_gap_label_sits_only_over_arenas_whose_dots_and_budgets_clear_it():
+    # at 8k arena 8 crosses at the last read with 0.51, so its "8k" sits just above the line where the label was
+    blocked = [i for i, (v, n) in enumerate(zip(SHARES_8K, NEVER_8K)) if not maf.clears_half_gap(v, n)]
+    assert blocked == [0, 1, 3, 7, 8, 9]
+    for width in (1.2, 2.0, 3.0):
+        c = maf.half_gap_x(SHARES_8K, NEVER_8K, width)
+        assert not [i for i in blocked if abs(i - c) <= width / 2 + maf.LABEL_PAD]
+        assert -0.8 <= c - width / 2 and c + width / 2 <= 12.6          # inside the panel's x limits
+    # of the free stretches, the label takes the one with the most room (arenas 9 to 11, between 8 and 12)
+    assert maf.half_gap_x(SHARES_8K, NEVER_8K, 2.0) == pytest.approx(5.0, abs=0.05)
+    # a label wider than any free stretch goes where it meets the fewest blocked arenas
+    c = maf.half_gap_x(SHARES_8K, NEVER_8K, 4.0)
+    assert sum(abs(i - c) <= 2.0 + maf.LABEL_PAD for i in blocked) == 1
