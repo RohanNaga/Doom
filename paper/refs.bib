@@ -93,13 +93,16 @@
 }
 
 % arXiv comment names no venue (ICML 2024 per the memos, VERIFY); cited for the delta-PSNR form only.
-@article{bruce2024genie,
+@inproceedings{bruce2024genie,
   title         = {Genie: Generative Interactive Environments},
   author        = {Bruce, Jake and Dennis, Michael and Edwards, Ashley and Parker-Holder, Jack and Shi, Yuge and Hughes, Edward and Lai, Matthew and Mavalankar, Aditi and Steigerwald, Richie and Apps, Chris and Aytar, Yusuf and Bechtle, Sarah and Behbahani, Feryal and Chan, Stephanie and Heess, Nicolas and Gonzalez, Lucy and Osindero, Simon and Ozair, Sherjil and Reed, Scott and Zhang, Jingwei and Zolna, Konrad and Clune, Jeff and de Freitas, Nando and Singh, Satinder and Rockt{\"a}schel, Tim},
-  journal       = {arXiv preprint arXiv:2402.15391},
   year          = {2024},
   eprint        = {2402.15391},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  series = {PMLR},
+  volume = {235},
+  pages = {4603--4623}
 }
 
 % arXiv comment: NeurIPS 2024. Fact used: App. C.3, frozen U-Net with rank-16 LoRA (lit-adapters memo, B).
@@ -145,13 +148,15 @@
 }
 
 % arXiv comment names no venue (ECCV 2024 per the memos, VERIFY). Table 1: reconstruction, Copy&Paste and model rows.
-@article{zheng2023occworld,
+@inproceedings{zheng2023occworld,
   title         = {{OccWorld}: Learning a {3D} Occupancy World Model for Autonomous Driving},
   author        = {Zheng, Wenzhao and Chen, Weiliang and Huang, Yuanhui and Zhang, Borui and Duan, Yueqi and Lu, Jiwen},
-  journal       = {arXiv preprint arXiv:2311.16038},
-  year          = {2023},
+  year          = {2024},
   eprint        = {2311.16038},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  booktitle = {European Conference on Computer Vision (ECCV)},
+  pages = {55--72},
+  doi = {10.1007/978-3-031-72624-8_4}
 }
 
 % arXiv comment: NeurIPS 2025. Table 2: oracle 77.0, copy-last 54.7, prediction 71.8 mIoU.
@@ -190,10 +195,14 @@
 @article{mensink2021factors,
   title         = {Factors of Influence for Transfer Learning across Diverse Appearance Domains and Task Types},
   author        = {Mensink, Thomas and Uijlings, Jasper and Kuznetsova, Alina and Gygli, Michael and Ferrari, Vittorio},
-  journal       = {arXiv preprint arXiv:2103.13318; accepted to IEEE Transactions on Pattern Analysis and Machine Intelligence},
-  year          = {2021},
+  journal       = {IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  year          = {2022},
   eprint        = {2103.13318},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  volume = {44},
+  number = {12},
+  pages = {9298--9314},
+  doi = {10.1109/TPAMI.2021.3129870}
 }
 
 % arXiv comment: accepted to ECCV 2026. Table 2: Wasserstein rho about 0.48 vs latent KL about 0.81.
@@ -266,10 +275,14 @@
 @article{wydmuch2018vizdoom,
   title         = {{ViZDoom} Competitions: Playing {Doom} from Pixels},
   author        = {Wydmuch, Marek and Kempka, Micha{\l} and Ja{\'s}kowski, Wojciech},
-  journal       = {arXiv preprint arXiv:1809.03470},
-  year          = {2018},
+  journal       = {IEEE Transactions on Games},
+  year          = {2019},
   eprint        = {1809.03470},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  volume = {11},
+  number = {3},
+  pages = {248--259},
+  doi = {10.1109/TG.2018.2877047}
 }
 
 % Outside the memos. arXiv journal-ref: Proceedings of IEEE CIG 2016.
@@ -295,23 +308,26 @@
 }
 
 % arXiv comment names no venue (ICLR 2024, VERIFY).
-@article{chen2023pixart,
+@inproceedings{chen2023pixart,
   title         = {{PixArt}-$\alpha$: Fast Training of Diffusion Transformer for Photorealistic Text-to-Image Synthesis},
-  author        = {Chen, Junsong and Yu, Jincheng and Ge, Chongjian and Yao, Lewei and Xie, Enze and Wu, Yue and Wang, Zhongdao and Kwok, James and Luo, Ping and Lu, Huchuan and Li, Zhenguo},
-  journal       = {arXiv preprint arXiv:2310.00426},
-  year          = {2023},
+  author        = {Chen, Junsong and Yu, Jincheng and Ge, Chongjian and Yao, Lewei and Xie, Enze and Wang, Zhongdao and Kwok, James and Luo, Ping and Lu, Huchuan and Li, Zhenguo},
+  year          = {2024},
   eprint        = {2310.00426},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  booktitle = {International Conference on Learning Representations (ICLR)}
 }
 
 % arXiv comment names no venue (ICML 2024, VERIFY). The SD 3 MMDiT family; SD 3.5 Medium is its released successor.
-@article{esser2024sd3,
+@inproceedings{esser2024sd3,
   title         = {Scaling Rectified Flow Transformers for High-Resolution Image Synthesis},
-  author        = {Esser, Patrick and Kulal, Sumith and Blattmann, Andreas and Entezari, Rahim and M{\"u}ller, Jonas and Saini, Harry and Levi, Yam and Lorenz, Dominik and Sauer, Axel and Boesel, Frederic and Podell, Dustin and Dockhorn, Tim and English, Zion and Lacey, Kyle and Goodwin, Alex and Marek, Yannik and Rombach, Robin},
-  journal       = {arXiv preprint arXiv:2403.03206},
+  author        = {Esser, Patrick and Kulal, Sumith and Blattmann, Andreas and Entezari, Rahim and M{\"u}ller, Jonas and Saini, Harry and Levi, Yam and Lorenz, Dominik and Sauer, Axel and Boesel, Frederic and Podell, Dustin and Dockhorn, Tim and English, Zion and Rombach, Robin},
   year          = {2024},
   eprint        = {2403.03206},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  series = {PMLR},
+  volume = {235},
+  pages = {12606--12633}
 }
 
 % arXiv comment: ICLR 2022. The v-prediction target.
