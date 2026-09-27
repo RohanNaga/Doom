@@ -118,6 +118,14 @@ Measured on the submission build (`\withappendixfalse`) with today's placeholder
 | x4 | Section 3 (closed loop) | applied | "where one latent channel's mean is captured and frames go blank" becomes ", one latent channel's mean captured and frames blank" |
 | x5 | Section 5 | applied | "to each of many targets" becomes "to many targets" |
 
+Follow-up cuts (Sep 27, after the coordinator's edits merged at 118f41b: the 29-map directional sentence and two tighter related-work and limitations sentences). A fresh build left the last two lines of the conclusion on page 5. Three prose trims in Sections 2 and 3 fixed it; none touches a results sentence or a caption:
+
+| Cut | Where | Status | Change |
+|---|---|---|---|
+| y1 | Section 2, Data | applied | "scored at every checkpoint" deleted (Section 4 states the scoring grid) |
+| y2 | Section 2, What we measure | applied | "; a decoder-free latent skill is in \appref{app:skill}" deleted (Appendix E keeps the definition) |
+| y3 | Section 3, Where the deficit sits | applied | ", never summed" deleted ("side by side" carries it) |
+
 After the cuts: the submission build is 7 pages (body pages 1 to 4, references 5 to 7) and the appendix build is 12 pages (body 1 to 4, references 5 to 7, appendix 8 to 12). Both have no undefined reference or citation and no overfull box. The submission PDF's text has no match for Rohan, Keerthana, Changliu, CMU, Carnegie, Spiderman, Superman, wandb, huggingface or github, and its PDF author field is "Anonymous Submission".
 
 ## Counts
@@ -137,11 +145,11 @@ After the cuts: the submission build is 7 pages (body pages 1 to 4, references 5
   - applied-with-the-named-wording: 46
   - rejected-by-one-side: 4
   - rejected-for-page-budget: 3
-- **Page cuts:** 15 applied (c1 to c10, x1 to x5), 1 not applied (c11).
+- **Page cuts:** 18 applied (c1 to c10, x1 to x5, y1 to y3), 1 not applied (c11).
 
 ## What the review did not settle
 
-- **Section 3's directional sentence is stale.** It still reads "0.79 to 0.87 per arena so far, against 0.87 at home". The U-Net 200k EMA per-map run is now in on 29 of 30 maps (RESEARCH_CONTEXT 2026-09-26 20:15): unseen arenas 0.641 (arena 1) to 0.938 (arena 9); training maps 0.789 to 0.914 per map, while 0.867 is the pooled validation read. Neither review proposed an edit (F18, the only directional item, was rejected), so the text is unchanged. It needs a fix both sides accept.
+- **Section 3's directional sentence** was stale ("0.79 to 0.87 per arena so far"); the coordinator rewrote it to the 29-map result at b04ab0a and 11f75c5 ("0.64 to 0.94 on unseen arenas (median 0.79) against 0.79 to 0.91 at home"). That edit is outside both review lists.
 - **Limitations power sentence (F23 rejected).** The sentence and its "about 40 percent power at $\rho=0.5$" stay. Astra's objection that the test, alternative and sampling model are unstated is unaddressed.
 - **Pointers read "the supplement".** The OpenReview form has no supplement field (Fable F29's open decision). If there is no supplement channel, the `\else` branch of `\appref` should read "the extended version".
 - **Tests changed with the text.** Cut c9 and item F27 removed the two sentences `paper/fixtures/test_paper_claims.py` pinned verbatim ("GameNGen tunes its decoder with MSE alone"; the 70M/900M/v2 sentence). Those two tests now check the intent instead: any sentence about GameNGen's decoder tune says MSE and not LPIPS, and any stated training-set size names its arXiv version. `paper/fixtures/test_paper_skeleton.py` now builds both versions and checks anonymity, overfull boxes and `\appref`.

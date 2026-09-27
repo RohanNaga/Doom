@@ -111,7 +111,7 @@ We contribute (1) an open 17-arena Doom benchmark (link withheld for review) sco
 % depends: fresh 24-episode recording of the 13 unseen arenas (328 recorded Sep 26, 16 worker-first episodes set aside) and its SD 1 encode (Sep 27); window manifests from adapt_split.py
 \textbf{Data.} Every episode is ViZDoom~\citep{kempka2016vizdoom} deathmatch on one of the 17 arenas of the Arnold agent's WAD~\citep{lample2017arnold} with Freedoom assets: Arnold against 8 bots for 150 game-seconds, recorded losslessly at every tic (35~Hz, 320$\times$240 with the HUD) with the 19-button control the engine executed (\appref{app:protocol}).
 The models train on arenas 2 to 5 (500 episodes each) and are scored there on 25 held-out episodes per map.
-Each unseen arena (1, 6 to 17) has \prov{24} fresh episodes under one pinned protocol, 16 for adaptation and 8 held out, with 32 fixed windows per held-out episode scored at every checkpoint.
+Each unseen arena (1, 6 to 17) has \prov{24} fresh episodes under one pinned protocol, 16 for adaptation and 8 held out, with 32 fixed windows per held-out episode.
 
 % depends: tuned SD 1 decoder (training-map frames only, gated Sep 27); GameNGen facts from arXiv 2408.14837 v2 sec. 3.2.2, read Sep 26
 \textbf{Three backbones, one recipe.} We fine-tune three text-to-image diffusion models into next-tic world models: the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters, 4-channel SD~1.x latents), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT with its own 16-channel latents).
@@ -125,7 +125,7 @@ Rollouts stay in latent space, so the decoder only renders. Following GameNGen, 
 The \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ puts the model and copy-last through the same decoder; it is averaged over windows, then equally over maps.
 It is a paired difference on the same frame, as Genie's $\Delta$PSNR is between inferred and random actions~\citep{bruce2024genie}.
 The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips} is taken against raw persistence; below zero the model looks better than copying.
-The \emph{gap} $G$ is the reconstruction ceiling $\mathrm{PSNR}(D(z),x)$ minus the model's PSNR; a decoder-free latent skill is in \appref{app:skill}.
+The \emph{gap} $G$ is the reconstruction ceiling $\mathrm{PSNR}(D(z),x)$ minus the model's PSNR.
 The \emph{directional} score is the fraction of turning windows whose predicted image shift reverses when left and right are swapped in the newest control (0.91 on true frames).
 Pixel quantities use the scene rows: per window the HUD carries \prov{39 to 68} percent of the stock decoder's squared error (geometric mean over windows) and persistence copies it almost exactly (\prov{88 to 96}~dB). We never rank maps on raw PSNR against persistence, which tracks how static the footage is (Spearman \prov{$-0.77$}).
 
@@ -173,7 +173,7 @@ SD 3.5 Medium & both groups & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\
 % depends: PixArt 200k and SD 3.5 200k final reads for the in-domain ordering; fresh-set rescore (Table 2, Figure 2), paired stock-versus-tuned decoding of the same predictions (Sep 28), U-Net 30-map directional; step-sweep numbers from dossier 4.2 (U-Net 200k live, training-map windows)
 % hypothesis: PixArt and SD 3.5 show the same shrinkage and flip
 \textbf{Where the deficit sits.} In domain all three rows beat persistence at one and four tics, within 0.85~dB of each other, and turn the right way (Table~\ref{tab:indomain}).
-Off the training maps we read three legs side by side, never summed (Table~\ref{tab:unseen}, Figure~\ref{fig:arenas}).
+Off the training maps we read three legs side by side (Table~\ref{tab:unseen}, Figure~\ref{fig:arenas}).
 The turn response survives: per-arena reversal rates are \prov{0.64 to 0.94} on unseen arenas (median \prov{0.79}) against \prov{0.79 to 0.91} at home. % source: U-Net 200k EMA per-map directional, 29 of 30 maps, 64 windows per direction, 2026-09-26 20:15 log; arena 14 flagged (estimator ref 0.79)
 $A$ drops by about 2~dB (\prov{3.60} to \prov{1.51}), stays positive on every arena at one tic, and turns negative at four tics on arenas \prov{6 and 7}.
 The rendering of true latents does not degrade: the ceiling is \prov{23.91}~dB at home and \prov{23.62}~dB unseen, so the loss is not the decoder's floor; decoding the same predictions with the stock and tuned decoders (\tbd{}) tests whether it also renders off-distribution latents worse.
