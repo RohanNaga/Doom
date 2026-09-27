@@ -2,9 +2,14 @@
 
 * **Censoring.** A curve that never reaches a target within the steps scored is right-censored (a flag and
   the last step scored), never "reached at the last step".
-* **One row per (map, step, seed, weights)**, with the decoder-free latent ratio as a column beside PSNR
-  and LPIPS, the gains signed so that positive is better, the guards at the guard steps only, and the
-  step-0 row equal to the frozen model scored on the same held-out windows. A rerun adds nothing.
+* **The outcomes of the cost-target decision**, per window and paired, on the scene crop: A (decoded
+  advantage over copy-last), B (perceptual margin against raw persistence), C (gap to the decoder's best
+  render), under the stock decoder and under every `--decoder`; duplicate windows left out and counted.
+* **One row per (map, step, seed, weights, evaluation)**, with the latent skill and the raw paired gains
+  beside the outcomes, the guards at every grid step by default, and the step-0 row equal to the frozen model
+  scored on the same held-out windows. A rerun adds nothing; a rescore under another configuration writes
+  new evidence and never touches the old.
+* **Cost** defaults to A at half the home value the caller passes, one curve per decoder.
 
     python -m pytest paper/fixtures/test_score_adapt.py -q
 """
@@ -35,6 +40,20 @@ import score_adapt  # noqa: E402
 
 def curve(*pts, metric="heldout_psnr_gain"):
     return [{"step": s, metric: v} for s, v in pts]
+
+
+def test_a_value_that_is_not_finite_is_never_an_observation_and_two_values_at_a_step_are_refused():
+    c = score_adapt.adaptation_cost(curve((0, 0.1), (250, float("inf")), (500, float("nan"))), "heldout_psnr_gain", 0.5)
+    assert c["censored"] and c["last_step_scored"] == 0 and c["nonfinite_steps"] == [250, 500]
+    with pytest.raises(ValueError, match="two values at step 250"):
+        score_adapt.adaptation_cost(curve((0, 0.1), (250, 0.2), (250, 0.3)), "heldout_psnr_gain", 0.5)
+
+
+@pytest.mark.parametrize("metric,lower", [("heldout_A", False), ("heldout_A_tuned", False), ("heldout_A_full_stock", False),
+                                          ("heldout_B_stock", True), ("trainmap_C", True),
+                                          ("heldout_latent_ratio_mean", True), ("heldout_latent_skill", False)])
+def test_the_direction_follows_the_outcome(metric, lower):
+    assert score_adapt.lower_is_better(metric) is lower
 
 
 def test_the_cost_is_the_first_step_that_reaches_the_target():
@@ -120,6 +139,38 @@ def test_the_latent_skill_is_a_geometric_mean_that_static_windows_cannot_dominat
     assert c["heldout_per_window"] == str(src) and c["heldout_paired"] == str(out)
 
 
+def test_the_outcomes_are_scene_only_paired_per_decoder_and_skip_duplicate_windows(tmp_path):
+    import csv
+    keys = ["index", "episode", "map", "start", "dup_raw", "dup_latent", "latent_mse", "copy_latent_mse",
+            "psnr_dec", "copy_psnr_dec", "scene_psnr_dec", "scene_copy_psnr_dec", "scene_psnr_raw", "scene_vae_psnr",
+            "scene_lpips_raw", "scene_persist_lpips_raw", "psnr_dec_tuned", "copy_psnr_dec_tuned",
+            "scene_psnr_dec_tuned", "scene_copy_psnr_dec_tuned", "scene_psnr_raw_tuned", "scene_vae_psnr_tuned",
+            "scene_lpips_raw_tuned"]
+    rows = [dict(zip(keys, v)) for v in (
+        # stock: A = 3 (scene), full-frame A = 1; tuned: A = 5
+        (0, 1, 17, 0, 0, 0, 0.5, 1.0, 21, 20, 23, 20, 22, 24, 0.20, 0.25, 22, 21, 26, 21, 23, 24.5, 0.18),
+        (1, 1, 17, 5, 0, 0, 0.5, 1.0, 20, 20, 21, 20, 20, 23, 0.30, 0.20, 20, 20, 24, 21, 21, 23.5, 0.28),
+        # a duplicate window: its copy-last is exact, so it would dominate; it is counted and left out
+        (2, 3, 17, 0, 1, 1, 0.5, 0.0, 30, 100, 30, 100, 30, 30, 0.05, 0.0, 30, 100, 30, 100, 30, 30, 0.05))]
+    src, out = tmp_path / "per_window.csv", tmp_path / "paired.csv"
+    with open(src, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        w.writerows(rows)
+    c = score_adapt.window_columns("heldout", str(src), str(out))
+    assert c["heldout_decoders"] == ["stock", "tuned"] and c["heldout_dup_excluded"] == 1
+    assert c["heldout_A_stock"] == pytest.approx((3 + 1) / 2)
+    assert c["heldout_A_full_stock"] == pytest.approx((1 + 0) / 2)
+    assert c["heldout_A_tuned"] == pytest.approx((5 + 3) / 2)
+    assert c["heldout_B_stock"] == pytest.approx((-0.05 + 0.10) / 2)
+    assert c["heldout_B_tuned"] == pytest.approx((-0.07 + 0.08) / 2)       # persistence is decoder-free
+    assert c["heldout_C_stock"] == pytest.approx((2 + 3) / 2)
+    assert c["heldout_C_tuned"] == pytest.approx((1.5 + 2.5) / 2)
+    assert c["heldout_outcome_windows_stock"] == 2
+    kept = list(csv.DictReader(open(out)))
+    assert [int(k["dup"]) for k in kept] == [0, 0, 1] and float(kept[0]["A_tuned"]) == 5.0
+
+
 def test_without_raw_frames_the_paired_gains_are_absent_not_zero(tmp_path):
     src = tmp_path / "per_window.csv"
     write_per_window(src, [{"episode": 1, "latent_mse": 0.5, "copy_latent_mse": 1.0}])
@@ -153,7 +204,12 @@ def test_every_checkpoint_is_scored_per_weights_and_step_zero_is_the_frozen_scor
     val = F.map_corpus(tmp_path / "val", episodes=(6000, 6001), map_id=2)
     val_split = tmp_path / "split_val.json"
     val_split.write_text(json.dumps({"val": [6000, 6001]}))
-    argv = ["score", "--run-dir", str(run), "--vae-path", vae, "--directional-windows", "2", "--device", "cpu",
+    tuned = F.tiny_vae(tmp_path / "vae_tuned")
+    # guards run at every grid step unless opted out, so the training-map inputs are required
+    with pytest.raises(SystemExit, match="--no-guards"):
+        score_adapt.main(["score", "--run-dir", str(run), "--vae-path", vae, "--no-wandb"])
+    argv = ["score", "--run-dir", str(run), "--vae-path", vae, "--decoder", f"tuned={tuned}",
+            "--directional-windows", "2", "--device", "cpu",
             "--trainmap-latents-dir", val, "--trainmap-split", str(val_split), "--trainmap-windows", "6",
             "--guard-steps", "last", "--steps", "2", "--batch-size", "4", "--no-wandb"]
     assert score_adapt.main(argv) == 0
@@ -174,6 +230,12 @@ def test_every_checkpoint_is_scored_per_weights_and_step_zero_is_the_frozen_scor
         ratios = [float(p["latent_mse"]) / float(p["copy_latent_mse"]) for p in per]
         assert r["heldout_latent_skill"] == pytest.approx(-10 * sum(math.log10(x) for x in ratios) / 12)
         assert r["heldout_latent_ratio_mean"] == pytest.approx(r["heldout_latent_mse_ratio"], rel=1e-5)
+        # outcome A under both decoders, from the scene columns of the same windows
+        for dec_name, sfx in (("stock", ""), ("tuned", "_tuned")):
+            a = [float(p[f"scene_psnr_dec{sfx}"]) - float(p[f"scene_copy_psnr_dec{sfx}"]) for p in per]
+            assert r[f"heldout_A_{dec_name}"] == pytest.approx(sum(a) / len(a))
+        assert r["heldout_A_stock"] != r["heldout_A_tuned"]
+        assert r["decoders"]["tuned"]["identity"].startswith("sha256:") and r["eval_fingerprint"]
     # at step 0 the live adapter and its EMA are the same tensors: scored once, copied, and said so
     assert by[(0, "ema")]["same_tensors_as"] == "live"
     assert by[(0, "ema")]["heldout_psnr_dec"] == r0["heldout_psnr_dec"]
@@ -200,3 +262,26 @@ def test_every_checkpoint_is_scored_per_weights_and_step_zero_is_the_frozen_scor
                       "--target", "1000"])
     lines = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x.startswith("{")]
     assert len(lines) == 2 and all(c["censored"] and c["step"] is None and c["last_step_scored"] == 2 for c in lines)
+    # the default cost: outcome A, one curve per decoder and weights, at half the home value of each decoder
+    with pytest.raises(SystemExit, match="home-value"):
+        score_adapt.main(["cost", "--scores", str(run / "scores.jsonl")])
+    with pytest.raises(SystemExit, match="bare --home-value"):
+        score_adapt.main(["cost", "--scores", str(run / "scores.jsonl"), "--home-value", "3.6"])
+    capsys.readouterr()
+    score_adapt.main(["cost", "--scores", str(run / "scores.jsonl"), "--home-value", "stock=-1000",
+                      "--home-value", "tuned=1000", "--fractions", "0.25,0.5,1"])
+    lines = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x.startswith("{")]
+    assert len(lines) == 2 * 2 * 3 and {c["metric"] for c in lines} == {"heldout_A_stock", "heldout_A_tuned"}
+    assert all(c["step"] == 0 for c in lines if c["decoder"] == "stock")          # a line far below the curve
+    assert all(c["censored"] for c in lines if c["decoder"] == "tuned")            # a line far above it
+    assert {c["target"] for c in lines if c["decoder"] == "tuned"} == {250.0, 500.0, 1000.0}
+    # a rescore under another configuration writes new evidence beside the old and never touches it
+    old = {r["heldout_per_window"]: open(r["heldout_per_window"]).read() for r in score_adapt.read_rows(str(run / "scores.jsonl"))}
+    assert score_adapt.main([x if x != "2" else "3" for x in argv[:-5]] + ["--steps", "3", "--batch-size", "4", "--no-wandb"]) == 0
+    rows = score_adapt.read_rows(str(run / "scores.jsonl"))
+    assert len(rows) == 8 and len({r["eval_fingerprint"] for r in rows}) == 2
+    assert all(open(p).read() == text for p, text in old.items())
+    capsys.readouterr()
+    score_adapt.main(["cost", "--scores", str(run / "scores.jsonl"), "--decoder", "stock", "--target", "-1000"])
+    lines = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x.startswith("{")]
+    assert len(lines) == 2 * 2 and len({c["eval_fingerprint"] for c in lines}) == 2      # never pooled
