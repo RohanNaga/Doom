@@ -40,7 +40,7 @@ World models have become capable simulators, but they are tested primarily in th
 A small domain shift, a new arena of the same game, makes their outputs drift and lose realism, though the physics is unchanged and only the situation differs.
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift: one Doom level pack has 17 arenas; we train three pretrained diffusion backbones on four and score each of the other thirteen zero-shot for all three and after adaptation for the U-Net.
 On the unseen arenas the U-Net's scene PSNR falls from 25.2~dB in distribution to a median 22.3~dB and its LPIPS rises from 0.158 to 0.303, while its turn response survives; the other two backbones lose the same way.
-Rank-16 adapters trained on eight episodes raise the median scene PSNR to \tbd{}~dB and lower LPIPS to \tbd{} within 8k updates, and close half of the gap that the shift opened to the reconstruction upper bound on \tbd{} of 13 arenas.
+Rank-16 adapters trained on eight episodes raise the median scene PSNR to 23.7~dB and lower LPIPS to 0.204 within 8k updates, and by 4k every arena has closed at least half of the gap that the shift opened to the reconstruction upper bound.
 \end{abstract}
 
 \keywords{World models, Domain shift, Few-shot adaptation}
@@ -64,8 +64,8 @@ We contribute:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item \textbf{DoomShift}, the benchmark and its dataset: every-tic recordings of \prov{6,000} episodes on the four training maps and 24 on each of the 13 unseen arenas (this paper trains on 2,000 of them), with the three trained models, the decoder fine-tune and the adapter path released (Figure~\ref{fig:method}; link withheld for review).
 \item A post-training recipe that adapts a frozen model to a new arena from eight episodes with a small adapter, and the per-arena protocol that scores the budget it needs.
-\item The finding that it generalizes without heavy retraining: within 8k updates the median scene PSNR on the unseen arenas rises from 22.3 to \tbd{}~dB and LPIPS falls from 0.303 to \tbd{}, with half of the excess gap over the in-distribution gap closed on \tbd{} of 13 arenas (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{}).
-\item The measured shift: on unseen arenas all three backbones lose scene PSNR and LPIPS in the same way while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift}), and the model's own zero-shot skill score is the best predictor we found of where an arena ends up.
+\item The finding that it generalizes without heavy retraining: within 8k updates the median scene PSNR on the unseen arenas rises from 22.3 to 23.7~dB and LPIPS falls from 0.303 to 0.204, and all 13 arenas close half of the excess gap over the in-distribution gap by 4k (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{}).
+\item The measured shift: on unseen arenas all three backbones lose scene PSNR and LPIPS in the same way while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift}).
 \end{itemize}
 
 \begin{figure}[t]
@@ -160,7 +160,7 @@ We report what a model loses zero-shot, what post-training recovers and with wha
 The appearance does not: the U-Net's scene PSNR falls from 25.2~dB on the training maps to a median 22.3~dB (20.5 to 24.7 per arena), its LPIPS rises from 0.158 to 0.303 (0.229 to 0.401), and its gap to the reconstruction upper bound grows from 3.4 to a median 5.0~dB (3.7 to 6.9).
 The decoder is not the limit: it reconstructs the unseen arenas nearly as well as the training maps (median 27.3 against 28.6~dB, LPIPS 0.05 to 0.09).
 The three backbones lose the same things (Table~\ref{tab:unseen}, Figure~\ref{fig:shift}): the shift looks like a property of the task, not of the architecture or the scale.
-It is a step, not a slope: every unseen arena has a lower zero-shot skill score $S_0$ than every training map for all three backbones (\appref{app:distance}).
+It is a step, not a slope: every unseen arena has a lower zero-shot skill score $S_0$ and a worse LPIPS than every training map for all three backbones (\appref{app:distance}).
 What the model keeps is how actions act on the world: zero-shot on arena 7 the weapon fires and the view advances as in the ground truth (Figure~\ref{fig:teaser}) and the turn response holds; the loss sits in the scene, whose rows fall 2.9~dB (25.2 to a median 22.3) while the map-independent HUD rows fall 0.2~dB (29.7 to 29.5).
 
 \begin{figure}[t]
@@ -172,13 +172,13 @@ What the model keeps is how actions act on the world: zero-shot on arena 7 the w
 \end{figure}
 
 \textbf{Post-training: what it takes.} We next adapt a small subset of the U-Net's parameters on each unseen arena and ask what it takes to recover what was lost.
-Eight episodes and 8k updates raise the median scene PSNR from 22.3 to \tbd{}~dB and lower the median LPIPS from 0.303 to \tbd{}, and the median gap to the reconstruction upper bound falls from 5.0 to \tbd{}~dB against 3.4 in distribution (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
-\tbd{} of 13 arenas close half of their excess gap over the in-distribution gap, with a median budget of \tbd{} updates; most of each arena's gain comes within \tbd{} updates.
+Eight episodes and 8k updates raise the median scene PSNR from 22.3 to 23.7~dB and lower the median LPIPS from 0.303 to 0.204, and the median gap to the reconstruction upper bound falls from 5.0 to 3.4~dB, the in-distribution level (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
+Most of the PSNR still missing against the training maps (1.5~dB) reflects the arenas' lower upper bound (27.3 against 28.6~dB), not the model.
+All 13 arenas close half of their excess gap over the in-distribution gap by 4k, the first budget scored against the raw frame (budgets below 4k \tbd{}), and on average 96 percent of each arena's 8k gain is in place by 4k.
 Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 The adapters trade some in-distribution skill for it: the training maps' scene PSNR falls on \tbd{} of 13 arenas (median \tbd{}~dB), while the directional score rises from 0.81 to 0.84.
 
-\textbf{What predicts the outcome.} The frozen model's zero-shot skill score $S_0$ tracks where an arena ends up, not how much it gains (exploratory Spearman \tbd{} with the 8k gap to the reconstruction upper bound, \tbd{} with the gain, \tbd{} with the budget).
-A frame distance $d$ between an arena's recordings and the nearest training map, registered before any scoring, separates the training maps from every unseen arena but orders none of the 13 (\appref{app:distance}).
+\textbf{What predicts the outcome.} Neither the zero-shot skill score nor a registered distance orders how far an arena gets in raw terms: $S_0$ correlates only weakly with the 8k gap to the reconstruction upper bound ($+0.38$, $p=0.20$) and with the PSNR gain ($+0.43$, $p=0.14$), and a frame distance $d$ between an arena's recordings and the nearest training map, registered before any scoring, separates the training maps from every unseen arena but orders none of the 13 (Spearman $-0.07$ with the zero-shot PSNR; \appref{app:distance}).
 
 \begin{figure}[t]
 \centering
@@ -188,22 +188,10 @@ A frame distance $d$ between an arena's recordings and the nearest training map,
 \end{figure}
 
 \begin{table}[tb]
-\centering\footnotesize\setlength{\tabcolsep}{2pt}
-\caption{What closing the gap takes, by group of unseen arenas ordered by their zero-shot gap to the reconstruction upper bound (hard: arenas 7, 11, 15, 14; medium: 17, 8, 9, 10, 13; easy: 1, 6, 12, 16). Medians over arenas; U-Net, non-EMA adapter weights, fine-tuned decoder, scene rows against the raw frame; budget: first grid point at which an arena closes half of its excess gap over the in-distribution gap (${>}$8k: censored).}
+\centering\footnotesize
+\caption{What closing the gap takes, by group of unseen arenas ordered by their zero-shot gap to the reconstruction upper bound. Medians over each group's arenas; U-Net, non-EMA adapter weights, fine-tuned decoder, scene rows against the raw frame; budget: the first grid point at which an arena closes half of its excess gap over the in-distribution gap (${>}$8k: censored); full fine-tune on the arenas in parentheses.}
 \label{tab:cost}
-\begin{tabular}{lcccccc}
-\toprule
- & \multicolumn{2}{c}{PSNR (dB)} & Upper bound & \multicolumn{2}{c}{LPIPS} & Budget \\
-Arenas & zero-shot & 8k & (dB) & zero-shot & 8k & (updates) \\
-\midrule
-Hard (4) & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} \\
-Medium (5) & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} \\
-Easy (4) & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} \\
-All 13 & 22.30 & \tbd{} & 27.32 & 0.303 & \tbd{} & \tbd{} \\
-\midrule
-Full fine-tune, arena 7 & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} \\
-\bottomrule
-\end{tabular}
+{\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/tuned/adapt_groups.tex}}
 \end{table}
 
 %===============================================================================
@@ -211,7 +199,7 @@ Full fine-tune, arena 7 & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} & \tbd{} \\
 \section{Future work}
 \label{sec:limits}
 
-On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and at most 8k adapter updates raise its median scene PSNR from 22.3 to \tbd{}~dB and lower its LPIPS from 0.303 to \tbd{}, closing half of the excess gap over the in-distribution gap on \tbd{} of 13 arenas.
+On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and at most 8k adapter updates raise its median scene PSNR from 22.3 to 23.7~dB and lower its LPIPS from 0.303 to 0.204, closing half of the excess gap over the in-distribution gap on all 13 arenas by 4k.
 The claims cover 13 arenas of one level pack, one agent, one-tic scoring and mostly one seed.
 One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic on the full frame with stock decoders, collapses in 23 non-EMA and 9 EMA rollouts of 256, and the EMA removes checkpoint-specific collapses, not the failure mode (\appref{app:closedloop}).
 Next are other level packs and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot skill score so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
