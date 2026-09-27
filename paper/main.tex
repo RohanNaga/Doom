@@ -39,7 +39,7 @@ World models have become capable simulators, but they are tested primarily in th
 A small domain shift, a new arena of the same game, makes their outputs drift and lose realism, though the physics is unchanged and only the situation differs.
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift: one Doom level pack has 17 arenas; we train three pretrained diffusion backbones on four and score each of the other thirteen against persistence (the last frame copied forward), zero-shot for all three and after adaptation for the U-Net.
 Off the training maps the U-Net still beats persistence on every arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13, while its turn response survives.
-Rank-16 adapters trained on eight episodes close half of an arena's gap to the in-distribution advantage within 4k updates on 9 of 13 arenas, recover a median 1.8~dB and beat persistence perceptually on 11 of 13.
+Rank-16 adapters trained on eight episodes close half of an arena's gap to the in-distribution advantage within 8k updates on 11 of 13 arenas (9 within 4k), recover a median 1.8~dB and beat persistence perceptually on 11 of 13 at 4k.
 \end{abstract}
 
 \keywords{World models, Domain shift, Few-shot adaptation}
@@ -63,7 +63,7 @@ We contribute:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item \textbf{DoomShift}, the benchmark and its dataset: every-tic recordings of \prov{6,000} episodes on the four training maps and 24 on each of the 13 unseen arenas (this paper trains on 2,000 of them), with the three trained models, the decoder fine-tune and the adapter path released (Figure~\ref{fig:method}; link withheld for review).
 \item A post-training recipe that adapts a frozen model to a new arena from eight episodes with a small adapter, and the per-arena protocol that scores the budget it needs.
-\item The finding that it generalizes without heavy retraining: half of the gap to the training maps closed on 9 of 13 unseen arenas within 4k updates, most of it within 250, and a perceptual advantage over persistence (the last frame copied forward) restored on 11 of 13 (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{}).
+\item The finding that it generalizes without heavy retraining: half of the gap to the training maps closed on 11 of 13 unseen arenas within 8k updates (9 within 4k), most of the gain within 250, and a perceptual advantage over persistence (the last frame copied forward) restored on 11 of 13 at 4k (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{}).
 \item The measured shift and what predicts it: on unseen arenas the PSNR advantage over persistence shrinks and the perceptual margin changes sign for all three backbones while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift}); the model's own zero-shot skill score is the best predictor we found of where an arena ends up, while the registered distances between recordings order nothing.
 \end{itemize}
 
@@ -123,7 +123,7 @@ Four tics ahead they reach 21.33, 21.29 and \prov{21.59}~dB against persistence'
 
 \textbf{Post-training recipe.} To move a trained model to a new arena we keep its weights frozen and train a small adapter on a few episodes of that arena, then score the adapted model on held-out episodes at each update budget.
 For each unseen arena we adapt the U-Net 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent)~\citep{xie2023difffit}.
-We train on 8 adaptation episodes (1.1 A4000 GPU-hours per arena for 4k updates) and score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates; forgetting ($A$ on the training maps), the directional check and a full fine-tune comparator at $2\times10^{-5}$ are in progress (\tbd{}).
+We train on 8 adaptation episodes (1.1 A4000 GPU-hours per arena for 4k updates) and score the non-EMA weights at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates, with the control checks (forgetting, $A$ on the training maps, and the directional check) at 0 and 8k; a full fine-tune comparator at $2\times10^{-5}$ is in progress (\tbd{}).
 An arena's budget is the first grid point at which $A$ reaches $\tfrac12(A_0+A_\text{train})$, half of its gap from its zero-shot $A_0$; arenas that do not by the final budget of the grid are right-censored~\citep{taylor2009transfer}.
 Half of the gap in dB is not half of the error: the median gain of 1.8~dB removes 34 percent of the model's starting squared error (geometric mean over windows).
 
@@ -176,33 +176,35 @@ What the model keeps is how actions act on the world: zero-shot on arena 7 the w
 \end{figure}
 
 \textbf{Post-training: what it takes.} We next adapt a small subset of the U-Net's parameters on each unseen arena and ask what it takes to recover what was lost.
-Eight episodes and 4k updates raise the median $A$ from 2.04 to 3.80~dB, and on average 69 percent of each arena's gain comes within 250 updates (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
-9 of 13 arenas close half of their gap, with a median budget of 1k updates [250, ${>}$4k] and 5 arenas within 500; one reaches $A_\text{train}$.
+Eight episodes and 8k updates raise the median $A$ from 2.04 to 3.94~dB, and on average 66 percent of each arena's gain comes within 250 updates; the last 4k updates add 0.10~dB, on every arena (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
+11 of 13 arenas close half of their gap (9 by 4k; arenas 1 and 8 cross at the 8k read by under 0.05~dB), with a median budget of 1k updates [250, 8k] and 5 arenas within 500; one reaches $A_\text{train}$.
 Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
-At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
+At 4k, the last budget scored against the raw frame, the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
+The adapters trade some in-distribution skill for it: $A$ on the training maps falls on every arena (median $-0.59$~dB, $-0.28$ to $-1.65$; stock decoder), while the directional score rises from 0.81 to 0.84.
 
-\textbf{What predicts the outcome.} The frozen model's zero-shot skill score $S_0$ tracks where an arena ends up, not how much it gains (exploratory Spearman $+0.90$ with $A$ at 4k, $+0.18$ with the gain, $-0.61$ with the budget); a frame distance does not. Before scoring any map we froze $d$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (\appref{app:distance}).
-It places the training maps' held-out episodes inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), but within the 13 arenas it orders nothing (Spearman $-0.22$ with $A$, $-0.35$ with the budget); two registered transition-level distances fail even the separation (\appref{app:distance}).
+\textbf{What predicts the outcome.} The frozen model's zero-shot skill score $S_0$ tracks where an arena ends up, not how much it gains (exploratory Spearman $+0.88$ with $A$ at 8k, $+0.25$ with the gain, $-0.59$ with the budget); a frame distance does not. Before scoring any map we froze $d$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (\appref{app:distance}).
+It places the training maps' held-out episodes inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), but within the 13 arenas it orders nothing (Spearman $-0.22$ with $A_0$, $-0.33$ with the budget); two registered transition-level distances fail even the separation (\appref{app:distance}).
 
 \begin{figure}[t]
 \centering
 \figslot{figures/tuned/fig4_dots.pdf}{\linewidth}{1.4in}{Figure 4: adaptation}
-\caption{Eight episodes and 4k updates lift the median $A$ from 2.04 to 3.80~dB, most of it by 250 updates (a); 9 of 13 arenas close half of their gap to $A_\text{train}$ (b; budgets above dots; grey: censored).}
+\caption{Eight episodes and 8k updates lift the median $A$ from 2.04 to 3.94~dB, most of it by 250 updates (a); 11 of 13 arenas close half of their gap to $A_\text{train}$ (b; budgets above dots; grey: censored).}
 \label{fig:adapt}
 \end{figure}
 
 \begin{table}[tb]
 \centering\footnotesize\setlength{\tabcolsep}{2pt}
-\caption{What closing the gap takes (non-EMA weights, fine-tuned decoder; brackets: 95\% arena-bootstrap intervals; ${>}$4k: censored; arena 7 is the highest-distance arena).}
+\caption{What closing the gap takes (non-EMA weights, fine-tuned decoder; brackets: 95\% arena-bootstrap intervals; ${>}$8k: censored; $^\ast$stock decoder; arena 7 is the highest-distance arena).}
 \label{tab:cost}
 \begin{tabular}{lccc}
 \toprule
  & LoRA, 13 arenas, median & LoRA, arena 7 & Full fine-tune \\
 \midrule
-Arenas past half gap / $A_\text{train}$ by 4k & 9 [6, 12] / 1 of 13 & -- & \tbd{} \\
-Budget to half gap / $A_\text{train}$ (updates) & 1k [250, ${>}$4k] / ${>}$4k & 250 / ${>}$4k & \tbd{} / \tbd{} \\
-$A$ (dB) / $M$ / $G$ (dB) at 4k & 3.80 [3.45, 4.39] / $-$0.021 / 3.44 & 3.86 / $-$0.026 / 4.65 & \tbd{} \\
-Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{} \\
+Arenas past half gap / $A_\text{train}$ by 8k & 11 [8, 13] / 1 of 13 & -- & \tbd{} \\
+Share of the gap closed at 8k & 0.62 [0.52, 0.78] & 0.74 & \tbd{} \\
+Budget to half gap / $A_\text{train}$ (updates) & 1k [250, 8k] / ${>}$8k & 150 / ${>}$8k & \tbd{} / \tbd{} \\
+$A$ (dB) at 8k; $M$ / $G$ (dB) at 4k & 3.94 [3.56, 4.47]; $-$0.021 / 3.44 & 4.02; $-$0.026 / 4.65 & \tbd{} \\
+Forgetting (dB) / directional at 8k$^\ast$ & $-$0.59 / 0.84 & $-$1.65 / 0.84 & \tbd{} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -212,7 +214,7 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 \section{Future work}
 \label{sec:limits}
 
-On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and a few hundred adapter updates recover more than half of its deficit on most arenas and restore a perceptual advantage over persistence on 11 of 13.
+On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and at most 8k adapter updates close half of its deficit on 11 of 13 arenas, most of each arena's gain arriving in the first 250, and restore a perceptual advantage over persistence on 11 of 13.
 The claims cover 13 arenas of one level pack, one agent, one-tic scoring and mostly one seed, and persistence is a weak reference where the camera moves fast.
 One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic on the full frame with stock decoders, collapses in 23 non-EMA and 9 EMA rollouts of 256, and the EMA removes checkpoint-specific collapses, not the failure mode (\appref{app:closedloop}).
 Next are other level packs and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot skill score so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
