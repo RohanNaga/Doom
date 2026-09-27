@@ -1,0 +1,1055 @@
+{
+ "generated_by": "tools/family_step.py",
+ "generated_at": "2026-09-27T09:33:53-04:00",
+ "definitions": {
+  "skill": "s_w = -10 log10(latent_mse / copy_latent_mse); duplicates (dup_raw, dup_latent) left out",
+  "S0": "mean s_w over a map's windows (arenas: 8 held-out episodes; training maps: home val windows)",
+  "episode_map_rule": "map = (2, 3, 4, 5)[episode % 4] (doom_data.dense_episode_map), checked per window",
+  "delta": "mean over a map's windows of (reference mean skill in the window's copy_latent_mse 10-quantile bin) - s_w; reference = all training maps' home windows for an arena, the other three training maps for a training map (the floor)",
+  "delta_lomo_mean": "an arena's delta averaged over the four three-training-map references",
+  "D": "arenas: primary D of --distances; training maps: val/<map> D of --training-distances",
+  "D_floor": "floor.<primary arm> of --distances: [min, max]",
+  "cost_rank": "half-gap cost with a censored arena tied at twice the budget",
+  "fraction_closed": "gain / (home - A0) of the tuned-decoder adaptation summary"
+ },
+ "bins": 10,
+ "primary_backbone": "unet200k_ema",
+ "D_floor": {
+  "arm": "motion",
+  "n": 40,
+  "min": 0.022325065787288417,
+  "max": 0.09337349802877508,
+  "mean": 0.044386421011759644,
+  "p2.5": 0.02429019176733417,
+  "p97.5": 0.09261415810818734
+ },
+ "D_training": {
+  "2": 0.06485798628825476,
+  "3": 0.0336755487048344,
+  "4": 0.06931636179487749,
+  "5": 0.02603867851160626
+ },
+ "D_step": {
+  "holds": true,
+  "margin": 0.024513357322898832,
+  "training_min": 0.02603867851160626,
+  "training_max": 0.09337349802877508,
+  "arena_min": 0.11788685535167391,
+  "arena_max": 0.2702537790745706,
+  "arenas_on_training_side": []
+ },
+ "adaptation": {
+  "source": "paper/tables/tuned/adapt_summary.json",
+  "decoder": "tuned",
+  "weights": "live",
+  "home": 5.0592508260160685,
+  "budget": 4000,
+  "cost_censored_as": 8000,
+  "n_arenas": 13
+ },
+ "backbones": {
+  "unet200k_ema": {
+   "label": "U-Net",
+   "home": "results/fresh_rescore/home_unet200k_ema/val/per_window.csv",
+   "home_dropped_duplicates": 0,
+   "home_dropped_undefined": 0,
+   "maps": {
+    "2": {
+     "role": "training",
+     "D": 0.06485798628825476,
+     "S0": 2.9878363832989048,
+     "n": 123,
+     "episodes": 25,
+     "delta": 0.15514929275093578,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 0
+    },
+    "3": {
+     "role": "training",
+     "D": 0.0336755487048344,
+     "S0": 2.5523258985033612,
+     "n": 137,
+     "episodes": 24,
+     "delta": -0.041135807304987844,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 8
+    },
+    "4": {
+     "role": "training",
+     "D": 0.06931636179487749,
+     "S0": 3.5620230611843517,
+     "n": 134,
+     "episodes": 25,
+     "delta": -0.6156844591943227,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 0
+    },
+    "5": {
+     "role": "training",
+     "D": 0.02603867851160626,
+     "S0": 2.705439565267528,
+     "n": 118,
+     "episodes": 25,
+     "delta": 0.4633903370309365,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 5
+    },
+    "1": {
+     "role": "arena",
+     "D": 0.1716580750267614,
+     "S0": 1.3054866843686745,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.8621763323876785,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.8643038776622778,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "6": {
+     "role": "arena",
+     "D": 0.19799332433933442,
+     "S0": 1.136153914959634,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.8637165631479822,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.863303144128074,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "7": {
+     "role": "arena",
+     "D": 0.2702537790745706,
+     "S0": 1.4234158176553082,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.531768905746819,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.5072032904872477,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "8": {
+     "role": "arena",
+     "D": 0.11788685535167391,
+     "S0": 1.3608180248870412,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.551919642200438,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.5246877519046265,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "9": {
+     "role": "arena",
+     "D": 0.18363665623403014,
+     "S0": 1.8569036141261757,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.1480271124014771,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.1163493666865658,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "10": {
+     "role": "arena",
+     "D": 0.15497229872153936,
+     "S0": 1.7328407746902665,
+     "n": 256,
+     "episodes": 8,
+     "delta": 0.9242762548172174,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 0.8908842824361201,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "11": {
+     "role": "arena",
+     "D": 0.15599316784118852,
+     "S0": 1.8033481467206482,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.216749159297607,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.2063620346917407,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "12": {
+     "role": "arena",
+     "D": 0.13759359951270747,
+     "S0": 1.2060843914252453,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.8569229126404072,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.8301070171272544,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "13": {
+     "role": "arena",
+     "D": 0.1535985226971703,
+     "S0": 1.4219319631578182,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.5381676662201131,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.5408179735140397,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "14": {
+     "role": "arena",
+     "D": 0.14672580235748658,
+     "S0": 1.251485640727364,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.7815138329769988,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.7679909303472128,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "15": {
+     "role": "arena",
+     "D": 0.1268088966284467,
+     "S0": 1.9623085032644396,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.1322164509117876,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.126163832603472,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "16": {
+     "role": "arena",
+     "D": 0.17080395683483,
+     "S0": 1.677201361556637,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.4287046476412173,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.4187885304582974,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "17": {
+     "role": "arena",
+     "D": 0.12987513995592131,
+     "S0": 1.5190013639782722,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.5710817525243326,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.552308969024991,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    }
+   },
+   "step": {
+    "holds": true,
+    "margin": 0.5900173952389216,
+    "training_min": 2.5523258985033612,
+    "training_max": 3.5620230611843517,
+    "arena_min": 1.136153914959634,
+    "arena_max": 1.9623085032644396,
+    "arenas_on_training_side": []
+   },
+   "spearman_D_vs_S0_arenas": {
+    "rho": -0.049450549450549455,
+    "p": 0.8725444288811492,
+    "n": 13
+   },
+   "delta_floor_range": [
+    -0.6156844591943227,
+    0.4633903370309365
+   ],
+   "delta_arena_range": [
+    0.9242762548172174,
+    1.8637165631479822
+   ],
+   "delta_lomo_arena_range": [
+    0.8908842824361201,
+    1.8643038776622778
+   ],
+   "delta_passes_floor": true
+  },
+  "pixart200k_ema": {
+   "label": "PixArt",
+   "home": "results/fresh_rescore/home_pixart200k_ema/val/per_window.csv",
+   "home_dropped_duplicates": 0,
+   "home_dropped_undefined": 0,
+   "maps": {
+    "2": {
+     "role": "training",
+     "D": 0.06485798628825476,
+     "S0": 2.928422776208719,
+     "n": 123,
+     "episodes": 25,
+     "delta": 0.14501611058179664,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 0
+    },
+    "3": {
+     "role": "training",
+     "D": 0.0336755487048344,
+     "S0": 2.442624318097752,
+     "n": 137,
+     "episodes": 24,
+     "delta": 0.07819420923285265,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 8
+    },
+    "4": {
+     "role": "training",
+     "D": 0.06931636179487749,
+     "S0": 3.4663988894344677,
+     "n": 134,
+     "episodes": 25,
+     "delta": -0.5747407058017209,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 0
+    },
+    "5": {
+     "role": "training",
+     "D": 0.02603867851160626,
+     "S0": 2.7235527316787667,
+     "n": 118,
+     "episodes": 25,
+     "delta": 0.34609855080159896,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 5
+    },
+    "1": {
+     "role": "arena",
+     "D": 0.1716580750267614,
+     "S0": 1.3989071749873396,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.6957228674352427,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.6982583344114301,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "6": {
+     "role": "arena",
+     "D": 0.19799332433933442,
+     "S0": 1.276517364049561,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.6471501474946693,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.6564477542952365,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "7": {
+     "role": "arena",
+     "D": 0.2702537790745706,
+     "S0": 1.4959337219810882,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.3848489851514012,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.36629462415465,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "8": {
+     "role": "arena",
+     "D": 0.11788685535167391,
+     "S0": 1.514358862438462,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.3262350539076013,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.3098206776199102,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "9": {
+     "role": "arena",
+     "D": 0.18363665623403014,
+     "S0": 1.9667882192851822,
+     "n": 256,
+     "episodes": 8,
+     "delta": 0.9674275264806769,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 0.9404556643846405,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "10": {
+     "role": "arena",
+     "D": 0.15497229872153936,
+     "S0": 1.8354310052647396,
+     "n": 256,
+     "episodes": 8,
+     "delta": 0.7549781928400876,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 0.7336389034515636,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "11": {
+     "role": "arena",
+     "D": 0.15599316784118852,
+     "S0": 1.9089392108619392,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.047807922055476,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.0405744473824061,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "12": {
+     "role": "arena",
+     "D": 0.13759359951270747,
+     "S0": 1.328129397237304,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.6642799904724135,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.6425701219754356,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "13": {
+     "role": "arena",
+     "D": 0.1535985226971703,
+     "S0": 1.4527851329459436,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.445360673673298,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.4454567242931595,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "14": {
+     "role": "arena",
+     "D": 0.14672580235748658,
+     "S0": 1.307952743832049,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.6591170259538472,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.645426291109523,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "15": {
+     "role": "arena",
+     "D": 0.1268088966284467,
+     "S0": 2.2074121218291944,
+     "n": 256,
+     "episodes": 8,
+     "delta": 0.8235904830428893,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 0.8188989610645985,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "16": {
+     "role": "arena",
+     "D": 0.17080395683483,
+     "S0": 1.8056725200281332,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.231892672477564,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.2176218487132169,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "17": {
+     "role": "arena",
+     "D": 0.12987513995592131,
+     "S0": 1.7309352561375455,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.3079066951046783,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.2861478466611074,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    }
+   },
+   "step": {
+    "holds": true,
+    "margin": 0.2352121962685576,
+    "training_min": 2.442624318097752,
+    "training_max": 3.4663988894344677,
+    "arena_min": 1.276517364049561,
+    "arena_max": 2.2074121218291944,
+    "arenas_on_training_side": []
+   },
+   "spearman_D_vs_S0_arenas": {
+    "rho": -0.14835164835164835,
+    "p": 0.6286094178894163,
+    "n": 13
+   },
+   "delta_floor_range": [
+    -0.5747407058017209,
+    0.34609855080159896
+   ],
+   "delta_arena_range": [
+    0.7549781928400876,
+    1.6957228674352427
+   ],
+   "delta_lomo_arena_range": [
+    0.7336389034515636,
+    1.6982583344114301
+   ],
+   "delta_passes_floor": true
+  },
+  "sd35_170000": {
+   "label": "SD 3.5 (170k, provisional)",
+   "home": "results/fresh_rescore/home_sd35_170000/val/per_window.csv",
+   "home_dropped_duplicates": 0,
+   "home_dropped_undefined": 0,
+   "maps": {
+    "2": {
+     "role": "training",
+     "D": 0.06485798628825476,
+     "S0": 3.8104361106184106,
+     "n": 123,
+     "episodes": 25,
+     "delta": 0.2066928535530404,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 0
+    },
+    "3": {
+     "role": "training",
+     "D": 0.0336755487048344,
+     "S0": 3.1037672609063414,
+     "n": 137,
+     "episodes": 24,
+     "delta": 0.5464388108850989,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 8
+    },
+    "4": {
+     "role": "training",
+     "D": 0.06931636179487749,
+     "S0": 4.577003988355846,
+     "n": 134,
+     "episodes": 25,
+     "delta": -0.7576381000524314,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 2
+    },
+    "5": {
+     "role": "training",
+     "D": 0.02603867851160626,
+     "S0": 3.865123570029687,
+     "n": 118,
+     "episodes": 25,
+     "delta": 0.13919624072523362,
+     "delta_reference": "the other three training maps",
+     "outside_reference": 0
+    },
+    "1": {
+     "role": "arena",
+     "D": 0.1716580750267614,
+     "S0": 1.3991576674886028,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.6715560781037846,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.6399811138852334,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "6": {
+     "role": "arena",
+     "D": 0.19799332433933442,
+     "S0": 0.9185038006736089,
+     "n": 256,
+     "episodes": 8,
+     "delta": 3.036637581766949,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 3.0095880417827066,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "7": {
+     "role": "arena",
+     "D": 0.2702537790745706,
+     "S0": 1.329568455945507,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.5293002818666883,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.514897148574893,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "8": {
+     "role": "arena",
+     "D": 0.11788685535167391,
+     "S0": 1.4110432803290425,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.32643586198114,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.319747286592339,
+     "outside_reference": 2,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "9": {
+     "role": "arena",
+     "D": 0.18363665623403014,
+     "S0": 2.471396814659232,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.5265753476545756,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.5131288810612717,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "10": {
+     "role": "arena",
+     "D": 0.15497229872153936,
+     "S0": 2.061679271876221,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.3135605498704936,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.3241043082639954,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "11": {
+     "role": "arena",
+     "D": 0.15599316784118852,
+     "S0": 2.0213723288004344,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.950131205991095,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.9199514405652653,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "12": {
+     "role": "arena",
+     "D": 0.13759359951270747,
+     "S0": 1.5117903033629774,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.3547599962282915,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.338962300617987,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "13": {
+     "role": "arena",
+     "D": 0.1535985226971703,
+     "S0": 1.2751889123344924,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.619051792343355,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.6155932892420415,
+     "outside_reference": 3,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "14": {
+     "role": "arena",
+     "D": 0.14672580235748658,
+     "S0": 1.1621393485952827,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.7958832170575,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.792890153120391,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "15": {
+     "role": "arena",
+     "D": 0.1268088966284467,
+     "S0": 2.210700248782657,
+     "n": 256,
+     "episodes": 8,
+     "delta": 1.9526354611188783,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 1.9128385901814817,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "16": {
+     "role": "arena",
+     "D": 0.17080395683483,
+     "S0": 1.847041932210395,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.2855384739045244,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.2781936737561788,
+     "outside_reference": 1,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    },
+    "17": {
+     "role": "arena",
+     "D": 0.12987513995592131,
+     "S0": 1.4639309731650216,
+     "n": 256,
+     "episodes": 8,
+     "delta": 2.5700573933719593,
+     "delta_reference": "all four training maps",
+     "delta_lomo_mean": 2.5372757708064126,
+     "outside_reference": 0,
+     "dropped_duplicates": 0,
+     "dropped_undefined": 0
+    }
+   },
+   "step": {
+    "holds": true,
+    "margin": 0.6323704462471094,
+    "training_min": 3.1037672609063414,
+    "training_max": 4.577003988355846,
+    "arena_min": 0.9185038006736089,
+    "arena_max": 2.471396814659232,
+    "arenas_on_training_side": []
+   },
+   "spearman_D_vs_S0_arenas": {
+    "rho": -0.17032967032967034,
+    "p": 0.5779754288392673,
+    "n": 13
+   },
+   "delta_floor_range": [
+    -0.7576381000524314,
+    0.5464388108850989
+   ],
+   "delta_arena_range": [
+    1.3135605498704936,
+    3.036637581766949
+   ],
+   "delta_lomo_arena_range": [
+    1.3241043082639954,
+    3.0095880417827066
+   ],
+   "delta_passes_floor": true
+  }
+ },
+ "correlations": {
+  "n_arenas": 13,
+  "arenas": [
+   1,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17
+  ],
+  "backbone": "unet200k_ema",
+  "delta_vs_A_budget": {
+   "rho": -0.8956043956043955,
+   "p": 3.480972994482089e-05,
+   "n": 13
+  },
+  "delta_vs_cost_half_gap": {
+   "rho": 0.6206980342644352,
+   "p": 0.023590575498522656,
+   "n": 13
+  },
+  "delta_vs_fraction_closed": {
+   "rho": -0.6208791208791209,
+   "p": 0.023538167096433065,
+   "n": 13
+  },
+  "delta_vs_D": {
+   "rho": 0.049450549450549455,
+   "p": 0.8725444288811492,
+   "n": 13
+  },
+  "delta_vs_S0": {
+   "rho": -0.9175824175824175,
+   "p": 9.906225317564688e-06,
+   "n": 13
+  },
+  "delta_lomo_mean_vs_A_budget": {
+   "rho": -0.8956043956043955,
+   "p": 3.480972994482089e-05,
+   "n": 13
+  },
+  "delta_lomo_mean_vs_cost_half_gap": {
+   "rho": 0.646206172658864,
+   "p": 0.017018870713129026,
+   "n": 13
+  },
+  "delta_lomo_mean_vs_fraction_closed": {
+   "rho": -0.6263736263736264,
+   "p": 0.021988602409889667,
+   "n": 13
+  },
+  "delta_lomo_mean_vs_D": {
+   "rho": 0.016483516483516484,
+   "p": 0.9573761750901848,
+   "n": 13
+  },
+  "delta_lomo_mean_vs_S0": {
+   "rho": -0.8901098901098902,
+   "p": 4.5654374407447036e-05,
+   "n": 13
+  },
+  "S0_vs_A_budget": {
+   "rho": 0.8956043956043955,
+   "p": 3.480972994482089e-05,
+   "n": 13
+  },
+  "S0_vs_cost_half_gap": {
+   "rho": -0.6065268462675303,
+   "p": 0.027966357787419082,
+   "n": 13
+  },
+  "delta_unet200k_ema_vs_pixart200k_ema": {
+   "rho": 0.9175824175824175,
+   "p": 9.906225317564688e-06,
+   "n": 13
+  },
+  "delta_unet200k_ema_vs_sd35_170000": {
+   "rho": 0.8791208791208791,
+   "p": 7.54456235935913e-05,
+   "n": 13
+  }
+ },
+ "inputs": [
+  {
+   "path": "results/distance_v2/distances_sd1.json",
+   "sha256": "f44399e268d6c11de67189d57f3474f9383648e39af8f2a7f90b62ca4ad90197"
+  },
+  {
+   "path": "results/distance_study/figure_unet_h1/stats.json",
+   "sha256": "a8d184d460f80909ded29919101c383719ca08143ca6025534953d67f3f65a9c"
+  },
+  {
+   "path": "paper/tables/tuned/adapt_summary.json",
+   "sha256": "697ee13ed8a3f7506708499f9a0493aabcd3ca3c1dc39d671c24594a4d762560"
+  },
+  {
+   "path": "results/fresh_rescore/home_unet200k_ema/val/per_window.csv",
+   "sha256": "7e6758df6620d05d6659ea39824d2df07ad03374145c731a9b655ec37217e94f"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map01/per_window.csv",
+   "sha256": "306a10586b95e5aca7fc8ef43d8558657ed8d7627f69383e81fa0872da19ace9"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map06/per_window.csv",
+   "sha256": "bc8eee2361598cf5fc6e17dd0b7608aad4b0c719496f2b514f204e5aed77182b"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map07/per_window.csv",
+   "sha256": "0c57d356bbb843b7f910cd7a00f1805b79bed88f6d2dfc3d88ec086528df62b2"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map08/per_window.csv",
+   "sha256": "53b41938a730e7d1713ea8d4420578b44f53d80c46caaea3d7defa58373fdf3d"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map09/per_window.csv",
+   "sha256": "727d7f0c7d3cc47da991e27c591851ec86629587110938c61eac694bbdd5937c"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map10/per_window.csv",
+   "sha256": "915f05932f11cf7cd722ae5b1daf371a88b57a9b8a2837e683bfd01a4b5fdea9"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map11/per_window.csv",
+   "sha256": "5291135e654a03ebadfc320fd377163b6051c2a5ff02cc27414e950e6a690aad"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map12/per_window.csv",
+   "sha256": "5c6d4b61e043ede9ff9c64aa748bf3c0d540f8535ae5d52b37f1a76f50e363ed"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map13/per_window.csv",
+   "sha256": "4e0d9fcce60e128c5dcf4b9c987d719a0eb7b6c4edd04137032dec42a2513e1c"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map14/per_window.csv",
+   "sha256": "634843fc9fa20f61fbcc7e5f29617ced099624f4573fce9a7ccce1d0b2991aa9"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map15/per_window.csv",
+   "sha256": "e49cac6f1c3800c678b6cc420530e2a1885da3531e60f776766864d6ea9b2118"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map16/per_window.csv",
+   "sha256": "cb12a16c57376a7d3b12a393e00f51c45a975f281ffa99577f29341c14ec1683"
+  },
+  {
+   "path": "results/fresh_rescore/unet200k_ema/map17/per_window.csv",
+   "sha256": "bc6ae9ca269e27038ec5215d8500f6649c247255955f0e20f655791f82b280d5"
+  },
+  {
+   "path": "results/fresh_rescore/home_pixart200k_ema/val/per_window.csv",
+   "sha256": "e8f6077fb3f6151958014314319e76a41873bbe4c430a32b33d717cfce6d0107"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map01/per_window.csv",
+   "sha256": "b3736195e2d69b0fe6aeb38793528575be562985956939ffed6ee7b6422e64eb"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map06/per_window.csv",
+   "sha256": "83d75efc64483d2daba4de30306db72d60d6b3a625ea4234218f96a7f6f3487c"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map07/per_window.csv",
+   "sha256": "df1ecaa02d56338acf3be82e1efcdf27dcf4f707068753ba574497e5f306f57c"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map08/per_window.csv",
+   "sha256": "d131471c1d82ef68b588ec0487d45b42674d91ee7262aad7cb88ef1715578e55"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map09/per_window.csv",
+   "sha256": "266e1d15b53d305aed40dca320f1ff5d835c631beff3f616126a9d340de541be"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map10/per_window.csv",
+   "sha256": "d8e62a93e24dac214888b55f401713049fccd7556304bc35aac04c59b08e94bf"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map11/per_window.csv",
+   "sha256": "0891de1eb5345d07b7942085a9a8543312e53260c1bc830abece271a50db62e6"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map12/per_window.csv",
+   "sha256": "7a3a5cc5d91fc748dc57929c4764df4b901d3a6fa9188dc4e486da2339851d5f"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map13/per_window.csv",
+   "sha256": "892821b0723e38b6653c76a111c1bba31b5089014d63e6cc5c14509e3812955e"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map14/per_window.csv",
+   "sha256": "5452f937ae5e6e1a026bf3d81816593b7c2556bf43625cc6c4d1af2265a93aaf"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map15/per_window.csv",
+   "sha256": "059eab2dfce866a6192218ac8c15a1fc779274ff5b748cdfe1be28fab7965eb3"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map16/per_window.csv",
+   "sha256": "fc5c8a63af787eba1a00aea1b0e63f5fef406178c2c8af9809e256d09ef37e67"
+  },
+  {
+   "path": "results/fresh_rescore/pixart200k_ema/map17/per_window.csv",
+   "sha256": "4cd6c88fc1b7d58a86a0d6c3e2b8015beab930848a61718dfa4903724c9572d3"
+  },
+  {
+   "path": "results/fresh_rescore/home_sd35_170000/val/per_window.csv",
+   "sha256": "f0aa4c75e886d5103fe967ec2934784d6a72a22dd81159abb92b9d8d7cff3797"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map01/per_window.csv",
+   "sha256": "e5efa4ac2f0ec0dfc54f6cac9e2c0f88023a0cbc109ee3977b6b12384394c5fe"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map06/per_window.csv",
+   "sha256": "2a2b5b7205d55eee83493da25b67c20d942fc33d2ea7fdb98725c2d14d64535b"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map07/per_window.csv",
+   "sha256": "9c64fe7a407300688842bc545ef7ad119f5ad135b63c5e33d80692a102a43814"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map08/per_window.csv",
+   "sha256": "cd84a539d144391c5774b68b95ff5aa8295ed8665d493152376220eff0db1d4a"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map09/per_window.csv",
+   "sha256": "ea9951996356c6c2864ab74b2d50c5ae50eb794301633eb257b4c4f899fb521a"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map10/per_window.csv",
+   "sha256": "859ac8fc0b5473c7f91e0f5fefd38f46a33a956f98590ba524439ea90b06e777"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map11/per_window.csv",
+   "sha256": "13d96180fd9903ec53760d612571bfe26d6952c387ef15fc649ef3d5e752075c"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map12/per_window.csv",
+   "sha256": "ee900f4a376142e6bb2b9de5bcecabbba7b2c56d07c220ff76fe793d7dcb596e"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map13/per_window.csv",
+   "sha256": "d0455ae2982abfd7985b8d8f8f1fc0ad1a25044df83e11da05a4471c72f4b494"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map14/per_window.csv",
+   "sha256": "a3b4cac4e5cd8bf5bbb94fdcc9eba56cf9693c421cbccfcc85ef03909ec658a9"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map15/per_window.csv",
+   "sha256": "4d9106def246c29ddd3ebbd1a7558a647abc344f11ca8f93ddb3679fbf88f6f8"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map16/per_window.csv",
+   "sha256": "3d4f7dfb8e60c8deeccd2336b610347fa4510633e22ac6115843d58692e990c1"
+  },
+  {
+   "path": "results/fresh_rescore/sd35_170000/map17/per_window.csv",
+   "sha256": "7fcd5c464d96a8c0d4a18d33238634209fa96a79a36783e21a742313a467527e"
+  }
+ ]
+}
