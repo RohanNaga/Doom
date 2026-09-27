@@ -36,7 +36,7 @@ No p below 0.15 in the first four rows; skill0 against A4000 p = 5e-5, against c
 
 - D: every training map's frozen D (max 0.093) lies below every unseen arena's fresh D (min 0.118, arena 8). Passes.
 - Coverage: training maps' validation episodes 0.524 to 0.609; unseen arenas 0.526 to 0.613. Fails: a held-out episode of a training map is as uncovered by the training transitions as an arena the model never saw.
-- G: training 0.005 to 0.012; unseen 0.009 to 0.038. Fails (arenas 13, 14, 11, 17 sit inside the training range).
+- G: training 0.005 to 0.012; unseen 0.009 to 0.038. Fails (arenas 13 and 14 sit inside the training range; 11 and 17 are above it by less than one bootstrap sd).
 - Coverage and G disagree with each other on the unseen arenas (Spearman -0.53) and with D (+0.37, +0.36).
 
 ## What it says
