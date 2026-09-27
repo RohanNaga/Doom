@@ -418,16 +418,18 @@ def restart_rows(rows, restart_root, found, floor):
 
 
 def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,),
-        row_order=None, hold_steps=None, hold_rows=None, max_height=2.05):
+        row_order=None, hold_steps=None, hold_rows=None, max_height=2.05, persistence=True):
     """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record. With
     `hold_steps` it runs the hold round instead (`run_hold`)."""
     ws = ct.windows(root)
     if not ws:
         raise SystemExit(f"no window directories <map>_ep<E>_s<S> under {root}")
     if hold_steps:
-        return run_hold(root, out_dir, review_dir, hold_steps, restart_root, row_order, hold_rows, max_height)
+        return run_hold(root, out_dir, review_dir, hold_steps, restart_root, row_order, hold_rows, max_height,
+                        persistence)
     found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir)]
     ordered = sorted(found, key=sort_key)
+    tail = "" if persistence else "_nopersistence"     # the default figures stay as they are
     starts_on_map2 = {m["action"] for m in found if m["role"] == "training"}
     missing = sorted(a for a, _ in ACTIONS if a not in starts_on_map2)
     picks = candidates(found, n_candidates)
@@ -440,16 +442,17 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
     written = [sheet]
     floor = in_domain_floor(found)
     for i, pick in enumerate(picks, 1):
-        paths, _ = ct.layout_c(root, out_dir, in_order(pick["rows"]), stem=f"fig_teaser_C_{i}")
+        paths, _ = ct.layout_c(root, out_dir, in_order(pick["rows"]), stem=f"fig_teaser_C_{i}{tail}",
+                               persistence=persistence)
         pick["files"] = [os.path.basename(p) for p in paths]
         written += paths
         if restart_root:
             rows, skipped = restart_rows(pick["rows"], restart_root, found, floor)
             pick["restart"] = {"skipped": skipped}
             for h in restart_horizons if rows else ():
-                stem = f"fig_teaser_C_{i}_restart" + ("" if h == HORIZON else str(h))
+                stem = f"fig_teaser_C_{i}_restart" + ("" if h == HORIZON else str(h)) + tail
                 paths, side = ct.layout_c(root, out_dir, in_order(rows), stem=stem, restart_root=restart_root,
-                                          horizon=h)
+                                          horizon=h, persistence=persistence)
                 shown = [r["story_shown"] for r in side["rows"] if r["story_shown"] is not None]
                 pick["restart"][str(h)] = {"files": [os.path.basename(p) for p in paths], "rows": side["rows"],
                                            "score_shown": round(float(np.mean(shown)), 3) if shown else None}
@@ -467,7 +470,7 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
 
 
 def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None, hold_rows=None,
-             max_height=2.05):
+             max_height=2.05, persistence=True):
     """The hold round: every moment whose button is pressed on all `steps` restart steps, counted per button and
     role; the per-row picks (`row_picks`); layout C of the first and second picks at +`steps` from the continuous
     rollouts (`fig_teaser_C_hold<steps>[_alt]`) and, when the restart export holds every moment, from it
@@ -503,13 +506,15 @@ def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None
         if not subset:
             rows = sorted(rows, key=lambda r: order.index(r["row"]))
         stem = f"fig_teaser_C_hold{steps}{suffix}"
+        tail = "" if persistence else "_nopersistence"      # the default figures stay as they are
         height = max_height if subset else 2.05
-        written += ct.layout_c(root, out_dir, rows, stem=stem, horizon=steps, max_height=height)[0]
+        written += ct.layout_c(root, out_dir, rows, stem=stem + tail, horizon=steps, max_height=height,
+                               persistence=persistence)[0]
         need = [f"{r['window']}_t{r['tic']}" for r in rows] + [f"{r['home']['window']}_t{r['home']['tic']}"
                                                                for r in rows]
         if restart_root and all(d in have for d in need):
-            written += ct.layout_c(root, out_dir, rows, stem=stem + "_restart", horizon=steps,
-                                   restart_root=restart_root, max_height=height)[0]
+            written += ct.layout_c(root, out_dir, rows, stem=stem + "_restart" + tail, horizon=steps,
+                                   restart_root=restart_root, max_height=height, persistence=persistence)[0]
         elif restart_root:
             picks.setdefault("restart_missing", {})[stem] = [d for d in need if d not in have]
     rec = {"root": root, "hold_steps": steps, "counts": counts, **picks}
@@ -535,13 +540,15 @@ def main(argv=None):
     p.add_argument("--hold-rows", default=None,
                    help="the hold round's chosen figure: row:pick pairs in order, e.g. forward:2,attack:1")
     p.add_argument("--max-height", type=float, default=2.05, help="the chosen figure's page height at most (in)")
+    p.add_argument("--no-persistence", action="store_true",
+                   help="leave persistence off the context frames; writes <stem>_nopersistence beside the defaults")
     p.add_argument("--restart-horizon", type=int, nargs="+", default=[HORIZON],
                    help="tics after the context for the restarted redraws (the export holds 16); stems gain the "
                         "number past 8, fig_teaser_C_<n>_restart16")
     a = p.parse_args(argv)
     rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon),
               tuple(a.row_order.split(",")) if a.row_order else None, a.hold_steps,
-              tuple(a.hold_rows.split(",")) if a.hold_rows else None, a.max_height)
+              tuple(a.hold_rows.split(",")) if a.hold_rows else None, a.max_height, not a.no_persistence)
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):

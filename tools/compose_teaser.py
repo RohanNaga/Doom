@@ -429,7 +429,8 @@ def moment_steps(manifest, first, count):
 
 
 def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 episodes, 4k updates)",
-             horizon=HORIZON_B, width=fs.TEXT_WIDTH, max_height=2.05, stem="fig_teaser_C", restart_root=None):
+             horizon=HORIZON_B, width=fs.TEXT_WIDTH, max_height=2.05, stem="fig_teaser_C", restart_root=None,
+             persistence=True):
     """Layout C (the selection round's form); returns the written paths and the sidecar record. One row per entry
     of `rows` ({"row", "window", "tic", "button", "home": {"window", "tic"}}), in the order given, seven frames: the
     in-domain block (a start of the same button on a training map: its ground-truth context, the U-Net `horizon`
@@ -441,7 +442,8 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     With `restart_root` (the steward's `<window>_t<T>/{truth_raw,unet_tuned,adapter_tuned}/tic_00..16` export, 32
     ground-truth tics ending at T as context) every frame is `horizon` tics after the context shown, and a missing
     moment stops the build. Without it the frames come from the one closed-loop rollout per window, so the note
-    says "rollout tic t+8" and each context frame carries its rollout tic."""
+    says "rollout tic t+8" and each context frame carries its rollout tic. `persistence=False` leaves the
+    persistence numbers off the context frames (they stay in the sidecar) for a caption that states them once."""
     ws = windows(root)
     fs.style()
     restart = restart_root is not None
@@ -509,17 +511,18 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
         psnr = {"zero-shot": per_tic_scene(uman, ROWS["model"]).get(u8),
                 "adapted": per_tic_scene(uman, ROWS["adapted"]).get(u8),
                 "in-domain": per_tic_scene(hman, ROWS["model"]).get(h8)}
-        persistence = {"in-domain": copy_last(hman, h8), "unseen": copy_last(uman, u8)}
+        copy_scores = {"in-domain": copy_last(hman, h8), "unseen": copy_last(uman, u8)}
+        notes = {"in-domain": context_note(copy_scores["in-domain"] if persistence else None, row["home"]["tic"],
+                                           restart),
+                 "unseen": context_note(copy_scores["unseen"] if persistence else None, row["tic"], restart)}
         held = {}
         for key, man, first in (("in-domain", hman, hc + 1), ("unseen", uman, uc + 1)):
             steps = moment_steps(man, first, horizon)
             held[key] = held_note(steps, row["button"]) if steps else None
-        cells = [("in-domain context", os.path.join(hd, ROWS["truth"]), hc,
-                  context_note(persistence["in-domain"], row["home"]["tic"], restart)),
+        cells = [("in-domain context", os.path.join(hd, ROWS["truth"]), hc, notes["in-domain"]),
                  ("in-domain", os.path.join(hd, ROWS["model"]), h8, psnr["in-domain"]),
                  ("in-domain ground truth", os.path.join(hd, ROWS["truth"]), h8, held["in-domain"]),
-                 ("context", os.path.join(ud, ROWS["truth"]), uc,
-                  context_note(persistence["unseen"], row["tic"], restart)),
+                 ("context", os.path.join(ud, ROWS["truth"]), uc, notes["unseen"]),
                  ("zero-shot", os.path.join(ud, ROWS["model"]), u8, psnr["zero-shot"]),
                  ("adapted", os.path.join(ud, ROWS["adapted"]), u8, psnr["adapted"]),
                  ("ground truth", os.path.join(ud, ROWS["truth"]), u8, held["unseen"])]
@@ -538,8 +541,8 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
               fontsize=fs.ANNOT_PT, style="italic")
         shown = (round(psnr["adapted"] - psnr["zero-shot"], 3)
                  if psnr["adapted"] is not None and psnr["zero-shot"] is not None else None)
-        record["rows"].append({**row, "scene_psnr": psnr, "persistence": persistence, "held": held,
-                               "story_shown": shown, "sources": sources})
+        record["rows"].append({**row, "scene_psnr": psnr, "persistence": copy_scores, "context_notes": notes,
+                               "held": held, "story_shown": shown, "sources": sources})
     paths = fs.save(fig, out_dir, stem)
     return paths + [_sidecar(out_dir, stem, record)], record
 

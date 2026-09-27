@@ -220,6 +220,12 @@ def test_with_a_restart_export_the_candidates_are_redrawn_from_it_and_rescored(t
     # persistence under both context frames, from each moment's copy-last series at +8
     row = side["rows"][0]
     assert row["persistence"] == {"in-domain": 18.0, "unseen": 18.0}
+    assert row["context_notes"] == {"in-domain": "persistence 18.0", "unseen": "persistence 18.0"}
+    # without persistence the context frames carry no number (the values stay in the sidecar)
+    paths, bare = tcs.ct.layout_c(root, str(tmp_path / "c"), r["rows"], restart_root=restart, persistence=False,
+                                  stem="bare")
+    assert bare["rows"][0]["context_notes"] == {"in-domain": None, "unseen": None}
+    assert bare["rows"][0]["persistence"] == {"in-domain": 18.0, "unseen": 18.0} and bare["size_in"] == side["size_in"]
 
 
 def test_the_in_domain_start_is_the_brightest_near_one_that_reads_at_least_the_map_2_median():
@@ -328,3 +334,14 @@ def test_with_restarts_the_in_domain_moment_is_the_one_that_beats_persistence_mo
     home = tcs.restart_home(homes, str(root), 16, taken=[("m_ep2_s1", 12)])
     assert (home["window"], home["tic"]) == ("m_ep1_s1", 10)
     assert tcs.restart_home(homes[3:], str(root), 16, taken=[("m_ep3_s1", 10)]) is None
+
+
+def test_the_no_persistence_flag_writes_its_own_figures_beside_the_default_ones(tmp_path):
+    root = export(tmp_path)
+    out = tmp_path / "out"
+    tcs.main(["--root", root, "--out-dir", str(out), "--review-dir", str(out / "review"), "--hold-steps", "8",
+              "--hold-rows", "forward:1,attack:1", "--max-height", "1.5", "--no-persistence"])
+    side = json.load(open(out / "fig_teaser_C_hold8_pick_nopersistence.json"))
+    assert all(r["context_notes"]["unseen"] in (None,) or r["context_notes"]["unseen"].startswith("rollout tic")
+               for r in side["rows"])
+    assert not (out / "fig_teaser_C_hold8_pick.json").exists()      # the default figure is left as it was
