@@ -26,9 +26,12 @@ its role and scene PSNR, beside each row the window, tic, control and scores; `t
 moment and the candidates. **Candidates** are whole unseen windows (one rollout per figure, as the direction asks):
 for rows attack, a turn (left or right) and forward, each window's best-story start of that action whose +8 span
 does not overlap another row's (so no two rows show the same moment); windows ranked by the three rows' mean
-story; each row paired with a real start of the same button on a training map, the one whose rollout depth is
-closest (ties: the higher in-domain PSNR). The top `--candidates` are composed as
-`<out-dir>/fig_teaser_C_<n>.pdf`. Actions that never start on a training map are reported.
+story; each row paired with a real start of the same button on a training map: among those within `NEAR_TICS` = 20
+rollout tics of the row and reading at least the training maps' median in-domain PSNR, the one with the brighter
+ground truth (mean luma of its context and +8 frames; map 2 is dark); see `pick_home` for the fallbacks, which the
+sidecar flags (`near`, `at_floor`). The top `--candidates` are composed as
+`<out-dir>/fig_teaser_C_<n>.pdf` (`compose_teaser.layout_c`); with `--restart-root` their +8 frames come from the
+steward's rollouts restarted at each moment. Actions that never start on a training map are reported.
 """
 import argparse
 import json
@@ -50,6 +53,7 @@ ACTIONS = (("attack", ("attack",)), ("turn left", ("turn left",)), ("turn right"
            ("strafe", ("strafe left", "strafe right", "move left", "move right")))
 FIGURE_ROWS = (("attack", ("attack",)), ("turn", ("turn left", "turn right")), ("forward", ("forward",)))
 EDGE_THRESHOLD = 0.1
+NEAR_TICS = 20                     # an in-domain start this close in rollout depth counts as matched
 THUMB = (128, 83)                  # px, 0.4 of the 320 x 208 scene crop
 TEXT_W = 318
 PAD = 4
@@ -92,6 +96,11 @@ def edge_density(img, threshold=EDGE_THRESHOLD):
     return float((np.hypot(gx, gy) / 4.0 > threshold).mean())
 
 
+def luma(img):
+    """Mean Rec. 601 luma (0 to 255) of an RGB image."""
+    return float((img[..., :3].astype(np.float64) @ np.array([0.299, 0.587, 0.114])).mean())
+
+
 def window_moments(root, name, wdir):
     """Every scored moment of one window."""
     man = ct.manifest_of(root, wdir)
@@ -103,10 +112,12 @@ def window_moments(root, name, wdir):
     out = []
     for action, button, t in moments(ctrl, last):
         gt = ct.frame(os.path.join(wdir, ct.ROWS["truth"]), t + HORIZON)
+        context = ct.frame(os.path.join(wdir, ct.ROWS["truth"]), t)
         rec = {"window": name, "role": "unseen" if unseen else "training", "action": action, "button": button,
                "tic": t, "depth": t + HORIZON, "control": ct.action_text(ctrl[t]),
                "zero_shot" if unseen else "in_domain": zs.get(t + HORIZON),
-               "chroma": round(chroma(gt), 2), "edges": round(edge_density(gt), 4)}
+               "chroma": round(chroma(gt), 2), "edges": round(edge_density(gt), 4),
+               "luma": round((luma(context) + luma(gt)) / 2, 2)}
         if unseen:
             rec["adapted"] = ad.get(t + HORIZON)
             rec["story"] = (round(rec["adapted"] - rec["zero_shot"], 3)
@@ -127,15 +138,33 @@ def sort_key(m):
 # candidates
 # ---------------------------------------------------------------------------------------------
 
-def row_label(control, button):
-    """The executed control, one button per line, the row's own button first."""
-    names = [n for n in control.split(" + ") if n != "no input"]
-    return "\n".join([button] + [n for n in names if n != button])
+def in_domain_floor(all_moments):
+    """The training-map moments' median in-domain scene PSNR at +8."""
+    return float(np.median([m["in_domain"] for m in all_moments
+                            if m["role"] == "training" and m["in_domain"] is not None]))
+
+
+def pick_home(homes, row, floor):
+    """The in-domain start for one figure row, and how it was found. Among the starts within `NEAR_TICS` rollout
+    tics of the row whose in-domain scene PSNR reaches `floor` (the training-map median: a typical read, not a
+    failure such as a weapon flash the model misses), the brightest ground truth wins, since map 2 is dark; with
+    none reaching the floor, the near start that reads best; with none near, the closest start."""
+    near = [h for h in homes if abs(h["depth"] - row["depth"]) <= NEAR_TICS]
+    typical = [h for h in near if h["in_domain"] is not None and h["in_domain"] >= floor]
+    if typical:
+        return max(typical, key=lambda h: (h["luma"], -abs(h["depth"] - row["depth"]))), {"near": True,
+                                                                                          "at_floor": True}
+    if near:
+        best = max(near, key=lambda h: (h["in_domain"] if h["in_domain"] is not None else -1e9))
+        return best, {"near": True, "at_floor": False}
+    home = min(homes, key=lambda h: (abs(h["depth"] - row["depth"]), -(h["in_domain"] or -1e9)))
+    return home, {"near": False, "at_floor": home["in_domain"] is not None and home["in_domain"] >= floor}
 
 
 def candidates(all_moments, n):
     """The top-n whole unseen windows for the figure rows, each row paired with its closest-depth training start."""
     training = [m for m in all_moments if m["role"] == "training"]
+    floor = in_domain_floor(all_moments)
     picks = []
     for window in sorted({m["window"] for m in all_moments if m["role"] == "unseen"}):
         mine = [m for m in all_moments if m["window"] == window and m["story"] is not None]
@@ -152,13 +181,14 @@ def candidates(all_moments, n):
             if not options or not homes:
                 rows = None
                 break
-            home = min(homes, key=lambda h: (abs(h["depth"] - m["depth"]), -(h["in_domain"] or -1e9)))
+            home, flags = pick_home(homes, m, floor)
             used.add(m["tic"])
             rows.append({"row": row, "window": window, "tic": m["tic"], "button": m["button"],
-                         "control": m["control"], "label": row_label(m["control"], m["button"]),
+                         "control": m["control"],
                          "story": m["story"], "zero_shot": m["zero_shot"], "adapted": m["adapted"],
                          "chroma": m["chroma"], "edges": m["edges"], "depth": m["depth"],
-                         "home": {k: home[k] for k in ("window", "tic", "button", "control", "depth", "in_domain")}})
+                         "home": {**{k: home[k] for k in ("window", "tic", "button", "control", "depth",
+                                                          "in_domain", "luma")}, **flags}})
         if rows:
             score = float(np.mean([r["story"] for r in rows]))
             picks.append({"window": window, "score": round(score, 3), "rows": rows})
@@ -254,7 +284,28 @@ def draw_sheet(root, ordered, path, per_line=3):
 # the round
 # ---------------------------------------------------------------------------------------------
 
-def run(root, out_dir, review_dir, n_candidates=3):
+def restart_rows(rows, restart_root, found, floor):
+    """A candidate's rows re-pointed at the restart export: each unseen moment must be there as `<window>_t<T>`, and
+    its in-domain start becomes a restarted training-map start of the same button (by `pick_home` among those).
+    Returns (rows, None), or (None, the first missing piece)."""
+    have = {d for d in os.listdir(restart_root) if os.path.isdir(os.path.join(restart_root, d))}
+    out = []
+    for row in rows:
+        name = f"{row['window']}_t{row['tic']}"
+        if name not in have:
+            return None, name
+        homes = [m for m in found if m["role"] == "training" and m["button"] == row["button"]
+                 and f"{m['window']}_t{m['tic']}" in have]
+        if not homes:
+            return None, f"no restarted {row['button']} start on a training map"
+        # every restarted rollout is HORIZON tics deep, so depth no longer separates the starts
+        home, flags = pick_home([{**h, "depth": HORIZON} for h in homes], {**row, "depth": HORIZON}, floor)
+        keep = ("window", "tic", "button", "control", "depth", "in_domain", "luma")
+        out.append({**row, "home": {**{k: home[k] for k in keep}, **flags}})
+    return out, None
+
+
+def run(root, out_dir, review_dir, n_candidates=3, restart_root=None):
     """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record."""
     ws = ct.windows(root)
     if not ws:
@@ -266,10 +317,21 @@ def run(root, out_dir, review_dir, n_candidates=3):
     picks = candidates(found, n_candidates)
     sheet = draw_sheet(root, ordered, os.path.join(review_dir, "teaser_contacts.png"))
     written = [sheet]
+    floor = in_domain_floor(found)
     for i, pick in enumerate(picks, 1):
         paths, _ = ct.layout_c(root, out_dir, pick["rows"], stem=f"fig_teaser_C_{i}")
         pick["files"] = [os.path.basename(p) for p in paths]
         written += paths
+        if restart_root:
+            rows, skipped = restart_rows(pick["rows"], restart_root, found, floor)
+            pick["restart"] = {"skipped": skipped}
+            if rows:
+                paths, side = ct.layout_c(root, out_dir, rows, stem=f"fig_teaser_C_{i}_restart",
+                                          restart_root=restart_root)
+                shown = [r["story_shown"] for r in side["rows"] if r["story_shown"] is not None]
+                pick["restart"].update({"files": [os.path.basename(p) for p in paths], "rows": side["rows"],
+                                        "score_shown": round(float(np.mean(shown)), 3) if shown else None})
+                written += paths
     rec = {"root": root, "hold": HOLD, "horizon": HORIZON, "edge_threshold": EDGE_THRESHOLD,
            "counts": {f"{role}:{a}": sum(1 for m in found if m["role"] == role and m["action"] == a)
                       for role in ("unseen", "training") for a, _ in ACTIONS},
@@ -288,8 +350,10 @@ def main(argv=None):
     p.add_argument("--out-dir", default=os.path.join(REPO, "paper", "figures"))
     p.add_argument("--review-dir", default=os.path.join(REPO, "paper", "figures", "review"))
     p.add_argument("--candidates", type=int, default=3)
+    p.add_argument("--restart-root", default=None,
+                   help="the steward's restarted rollouts, <window>_t<T>/...: the candidates' +8 frames come from it")
     a = p.parse_args(argv)
-    rec = run(a.root, a.out_dir, a.review_dir, a.candidates)
+    rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root)
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):
