@@ -25,7 +25,7 @@
      "tic_00_game_tic": 2239,
      "rows": {
       "truth_raw": {
-       "label": "true",
+       "label": "ground truth",
        "scene_psnr": {},
        "tic0": "truth_raw"
       },
@@ -48,7 +48,7 @@
      "tic_00_game_tic": 300,
      "rows": {
       "truth_raw": {
-       "label": "true",
+       "label": "ground truth",
        "scene_psnr": {},
        "tic0": "truth_raw"
       },
@@ -86,7 +86,7 @@
      "tic_00_game_tic": 4593,
      "rows": {
       "truth_raw": {
-       "label": "true",
+       "label": "ground truth",
        "scene_psnr": {},
        "tic0": "truth_raw"
       },
@@ -109,7 +109,7 @@
      "tic_00_game_tic": 240,
      "rows": {
       "truth_raw": {
-       "label": "true",
+       "label": "ground truth",
        "scene_psnr": {},
        "tic0": "truth_raw"
       },

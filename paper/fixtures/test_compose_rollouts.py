@@ -94,8 +94,9 @@ def test_the_composer_draws_both_controls_and_both_maps_at_full_width(tmp_path):
     expected = {"1": 24.8, "2": 24.5, "4": 24.0, "8": 23.0, "16": 21.0, "32": 17.0}
     assert arena["rows"]["unet_tuned"]["scene_psnr"] == expected
     assert arena["rows"]["adapter_tuned"]["label"] == "LoRA 4k"
-    assert arena["rows"]["truth_raw"]["scene_psnr"] == {}                  # true rows get no numbers
-    # each map has its own true row
+    assert arena["rows"]["truth_raw"]["scene_psnr"] == {}                  # ground-truth rows get no numbers
+    assert arena["rows"]["truth_raw"]["label"] == "ground truth"            # the field's term, never "true"
+    # each map has its own ground-truth row
     assert set(side["blocks"][0]["windows"]["train_map02"]["rows"]) == {"truth_raw", "unet_tuned"}
 
 

@@ -16,8 +16,9 @@ its `map`, `control`, `episode`, `start_row`, `dir` and `per_tic: {row: {psnr: [
 
 **Figure** (`paper/FIGURE_STANDARDS.md`, Figure 2): the full 5.5 in width; two column blocks, one per held control,
 each a tic-0 context column (copy-last's prediction at every tic, so copy-last needs no row) and tics 1, 2, 4, 8, 16
-and 32; rows in two groups, map 2 (true, U-Net) and arena 7 (true, zero-shot, the adapter after 4k updates), each
-map with its own true row; the scene crop; the tuned decoder for every model row and the raw frame for true rows;
+and 32; rows in two groups, map 2 (ground truth, U-Net) and arena 7 (ground truth, zero-shot, the adapter after 4k
+updates), each map with its own ground-truth row; the scene crop; the tuned decoder for every model row and the raw
+frame for ground-truth rows;
 2 pt white gutters; each model row's per-tic scene PSNR in small grey numbers beneath it. Row labels sit at the
 left, group labels left of them, tic numbers above the first row and the held control above each block.
 
@@ -47,9 +48,11 @@ CONTROL_LABELS = {"turn_left": "held turn left", "turn_right": "held turn right"
                   "strafe": "held strafe", "fight": "fight"}
 # (window map, group label, [(row label, row directory stem)]); the decoder suffix is added per row
 ADAPTED_LABEL = "LoRA 4k"      # round 2 (Astra 1): the episodes and budget go in the caption
-GROUPS = (("train_map02", "map 2\n(training)", (("true", "truth"), ("U-Net", "unet"))),
+# the field's term (Rohan, 2026-09-27), on two lines so the label column stays as wide as "zero-shot"
+TRUTH_LABEL = "ground\ntruth"
+GROUPS = (("train_map02", "map 2\n(training)", ((TRUTH_LABEL, "truth"), ("U-Net", "unet"))),
           ("unseen_arena07", "arena 7\n(unseen)",
-           (("true", "truth"), ("zero-shot", "unet"), (ADAPTED_LABEL, "adapter"))))
+           ((TRUTH_LABEL, "truth"), ("zero-shot", "unet"), (ADAPTED_LABEL, "adapter"))))
 SCENE_ROWS = 208                  # rows 0 to 207 of the frame are the scored scene; the HUD lies below
 GUTTER = 2 / 72                   # in, between frames
 CONTEXT_GAP = 4 / 72              # in, after the tic-0 column
@@ -189,7 +192,7 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
     fs.style()
     import matplotlib.pyplot as plt
 
-    # the frames' aspect from the first true frame
+    # the frames' aspect from the first ground-truth frame
     sample = frame(os.path.join(blocks[0][2][groups[0][0]], groups[0][2][0][1]), tics[0])
     aspect = sample.shape[0] / sample.shape[1]
     measure = plt.figure(figsize=(width, 1))
@@ -294,7 +297,8 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
                             fig_text(x + fw / 2, y + fh + 0.5 / 72, f"{series[tic]:.1f}", ha="center", va="top",
                                      fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
                 tic0 = os.path.basename(context_dir if os.path.isdir(context_dir) else row_dir)
-                entry["windows"][gmap]["rows"][row] = {"label": label, "scene_psnr": shown, "tic0": tic0}
+                entry["windows"][gmap]["rows"][row] = {"label": " ".join(label.split()), "scene_psnr": shown,
+                                                       "tic0": tic0}
                 y += fh + (PSNR_LINE if model else 0.0) + ROW_GAP
             y += GROUP_GAP - ROW_GAP
             if b == 0 or stack:
@@ -317,7 +321,7 @@ def main(argv=None):
     p.add_argument("--controls", nargs="+", default=list(CONTROLS))
     p.add_argument("--tics", nargs="+", type=int, default=list(TICS))
     p.add_argument("--decoder", default="tuned", help="the model rows' decoder (row directory suffix)")
-    p.add_argument("--truth", default="raw", help="the true rows' source (raw, stock or tuned)")
+    p.add_argument("--truth", default="raw", help="the ground-truth rows' source (raw, stock or tuned)")
     p.add_argument("--stack", action="store_true", help="stack the control blocks instead of side by side")
     p.add_argument("--stem", default="fig2_rollouts")
     p.add_argument("--map-control", action="append", default=[], metavar="MAP[:BLOCK]=WINDOW_CONTROL",

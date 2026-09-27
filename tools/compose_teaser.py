@@ -1,6 +1,7 @@
 """
 The teaser: one rollout on an unseen arena at the moments the control changes, zero-shot against after adaptation,
-with the true frames beneath and the same action on a training map for reference (GameNGen's Figure 1 in role).
+with the ground-truth frames beneath and the same action on a training map for reference (GameNGen's Figure 1 in
+role).
 
     python tools/compose_teaser.py                                # layout A from results/teaser, best-ranked window
     python tools/compose_teaser.py --layout B                     # three or four actions, +8 tics, side by side
@@ -15,7 +16,8 @@ to the scene rows 0 to 207 unless a `tic_NNN_scene.png` is beside them.
 
 **Layout A** (`fig_teaser`, full width): columns are the moments of the unseen-arena rollout where the executed
 control changes (`--moments` of them, spread over the rollout; a manifest `moments` list wins), each headed by the
-executed action in italics and its tic; rows are "zero-shot" (the U-Net) and the adapted model, with the true frames
+executed action in italics and its tic; rows are "zero-shot" (the U-Net) and the adapted model, with the ground-truth
+frames
 beneath as a strip about a third of the frame height; a small first column shows the same model on a training map
 at a moment with the first column's action, its truth beneath, as the in-distribution reference.
 
@@ -49,6 +51,7 @@ UNSEEN_HINTS = ("unseen", "arena")
 GUTTER = 2 / 72
 ROWS = {"model": "unet_tuned", "adapted": "adapter_tuned", "truth": "truth_raw"}
 DEFAULT_ADAPTED_LABEL = "after 8 episodes"
+TRUTH_LABEL = "ground truth"          # the field's term (Rohan, 2026-09-27)
 HORIZON_B = 8
 
 
@@ -252,7 +255,7 @@ def layout_a(root, out_dir, window=None, home=None, moments=7, adapted_label=DEF
     fs.style()
     sample = frame(rows["model"], picks[0])
     aspect = sample.shape[0] / sample.shape[1]
-    label_w = max(text_width(t) for t in ("zero-shot", adapted_label, "true")) + 5 / 72
+    label_w = max(text_width(t) for t in ("zero-shot", adapted_label, TRUTH_LABEL)) + 5 / 72
     ref_w = 0.0 if home_name is None else 0.62
     gap_ref = 0.0 if home_name is None else 6 / 72
     fw = (width - label_w - ref_w - gap_ref - (len(picks) - 1) * GUTTER - 0.02) / len(picks)
@@ -278,7 +281,7 @@ def layout_a(root, out_dir, window=None, home=None, moments=7, adapted_label=DEF
         record["columns"].append({"tic": t, "action": act, "scene_psnr": {k: ps[k].get(t) for k in ("model",
                                                                                                     "adapted")}})
     for y, text in ((head + fh / 2, "zero-shot"), (head + fh + GUTTER + fh / 2, adapted_label),
-                    (head + 2 * fh + GUTTER + 2 / 72 + th / 2, "true")):
+                    (head + 2 * fh + GUTTER + 2 / 72 + th / 2, TRUTH_LABEL)):
         _text(fig, width, height, label_w - 3 / 72, y, text, ha="right", va="center", fontsize=fs.ANNOT_PT)
     if home_name is not None:
         hman = manifest_of(root, ws[home_name])
@@ -340,7 +343,7 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
         late = [n for n in pick if n not in names]
         raise SystemExit(f"{unseen}: {', '.join(late)} never starts with {horizon} tics after it")
     fs.style()
-    cols = ["context"] + (["training map"] if reference else []) + ["zero-shot", adapted_label, "true"]
+    cols = ["context"] + (["training map"] if reference else []) + ["zero-shot", adapted_label, TRUTH_LABEL]
     sample = frame(rows["model"], chosen[0])
     aspect = sample.shape[0] / sample.shape[1]
     label_w = max(text_width(n, style="italic") for n in names) + 5 / 72
