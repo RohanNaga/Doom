@@ -35,8 +35,8 @@
 %===============================================================================
 
 \begin{abstract}
-World models have become capable simulators, but they are tested almost only in the domain they were trained on.
-A small shift, a new arena of the same game, makes their outputs drift toward the training appearance and lose realism, though the physics is unchanged and only the situation differs.
+World models have become capable simulators, but they are tested primarily in the domain they were trained on.
+A small domain shift, a new arena of the same game, makes their outputs drift and lose realism, though the physics is unchanged and only the situation differs.
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift: one Doom level pack has 17 arenas; we train three pretrained diffusion backbones on four and score each of the other thirteen against persistence (the last frame copied forward), zero-shot for all three and after adaptation for the U-Net.
 Off the training maps the U-Net still beats persistence on every arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13, while its turn response survives.
 Rank-16 adapters trained on eight episodes close half of an arena's gap to the in-distribution advantage within 4k updates on 9 of 13 arenas, recover a median 1.8~dB and beat persistence perceptually on 11 of 13.
