@@ -607,6 +607,33 @@ def test_figure_3b_pairs_the_decoders_per_backbone_in_zero_shot_skill_order(tmp_
         assert (w, h) == (pytest.approx(size[0], abs=0.01), pytest.approx(size[1], abs=0.01)), stem
 
 
+def test_m_and_g_at_the_budget_come_from_the_adapter_rows_raw_frame_read(tmp_path):
+    # the adaptation rows carry A only; the adapters were rescored against the raw frames at the budget (500)
+    distances = tree(tmp_path, tuned=True)
+    fresh = tmp_path / "fresh"
+    for arena in (6, 9):
+        write_paired(fresh, "unet200k_ema", arena, 1.0, 1.3, 0.05, 0.03)             # the zero-shot backbone row
+    for row, reads in (("adapt500_live_tuned", {6: (-0.02, 3.0), 9: (0.01, 4.0)}),
+                       ("adapt500g8k_live_tuned", {6: (0.5, 9.0), 9: (0.5, 9.0)})):   # not the budget's row name
+        for arena, (m, g) in reads.items():
+            d = fresh / row / f"map{arena:02d}"
+            os.makedirs(d)
+            with open(d / "metrics.json", "w") as f:
+                json.dump({"scene_psnr_dec_tuned": {"mean": 23.0}, "scene_copy_psnr_dec_tuned": {"mean": 20.0},
+                           "scene_lpips_raw_tuned": {"mean": 0.2 + m}, "scene_persist_lpips_raw": {"mean": 0.2},
+                           "scene_vae_psnr_tuned": {"mean": 25.0 + g}, "scene_psnr_raw_tuned": {"mean": 25.0}}, f)
+    out, tables = cli(tmp_path, distances, "--decoder", "tuned", "--fresh-root", str(fresh))
+    s = summary(tables)
+    per = {r["arena"]: r for r in s["per_arena"]}
+    assert (per[6]["M_budget"], per[9]["M_budget"]) == (pytest.approx(-0.02), pytest.approx(0.01))
+    assert (per[6]["G_budget"], per[9]["G_budget"]) == (pytest.approx(3.0), pytest.approx(4.0))
+    assert s["medians"]["G_budget"] == pytest.approx(3.5)
+    assert s["crossings"]["margin_lower_by_budget"] == 1
+    assert any("G at 500" in n and "adapt500_live_tuned" in n for n in s["notes"])
+    row = next(line for line in open(os.path.join(tables, "adapt_table3.tex")) if line.startswith("$A$ (dB) / $M$"))
+    assert row.split("&")[1].strip().endswith("/ 3.50")                  # the median G, no longer \tbd
+
+
 def test_the_crossing_rug_puts_every_arena_at_a_measured_budget_one_tick_each():
     import matplotlib.pyplot as plt
     maf.fs.style()

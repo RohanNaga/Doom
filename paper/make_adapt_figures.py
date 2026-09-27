@@ -21,7 +21,8 @@ Zero-shot reads of other backbones are directories of `eval_tf.py` reads keyed b
 **Quantities**, `score_adapt.py`'s outcomes on the scene crop under `--decoder`: A = `heldout_A_<decoder>`
 (decoded advantage over copy-last, dB); M = `heldout_B_<decoder>` (perceptual margin against raw persistence,
 present when the raw frames were scored; otherwise read from the adapter's zero-shot row at the budget, noted);
-G = `heldout_C_<decoder>`; S = `heldout_latent_skill` (no decoder); LPIPS = `heldout_lpips_dec`; forgetting = the
+G = `heldout_C_<decoder>` (likewise from the adapter's raw-frame read `adapt<budget>_...` when the rows lack it);
+S = `heldout_latent_skill` (no decoder); LPIPS = `heldout_lpips_dec`; forgetting = the
 change of `trainmap_A_<decoder>` from step 0; directional = `directional_correct_frac`. Per-arena intervals are
 95% percentile bootstraps over held-out episodes from the per-window files the rows name (found beside the run when
 the recorded path is a server path), with the windows `eval_tf.py` flags as duplicates left out as
@@ -401,6 +402,7 @@ def load_zero_shot_row(row_dir, decoder, draws=0, seed=0):
             metrics = json.load(f)
         n = (metrics.get("scene_psnr_dec_nodup") or metrics.get("scene_psnr_dec") or {})
         rec = {"A": metrics_outcome(metrics, "A", decoder), "M": metrics_outcome(metrics, "B", decoder),
+               "G": metrics_outcome(metrics, "C", decoder),
                "n": n.get("n") if isinstance(n, dict) else None, "A_ci": None, "M_ci": None, "path": found[0]}
         pw = os.path.join(os.path.dirname(found[0]), "per_window.csv")
         if draws and os.path.exists(pw):
@@ -1996,23 +1998,28 @@ def zero_shot_rows(a, records, home, draws, notes):
 
 
 def margins_from_adapter_row(records, zero_shot, budget, notes):
-    """Fill each record's M at the budget from the adapter's zero-shot row at that step when the rows lack it."""
-    if any(r["M_budget"] is not None for r in records):
-        return
-    for name, row in zero_shot.items():
-        m = ADAPTER_ROW_RE.match(name)
-        if not m or int(m["step"]) != budget:
+    """Fill each record's M and G at the budget from the adapter's raw-frame read at that step
+    (`adapt<budget>_...`) when the adaptation rows carry neither (`heldout_B`, `heldout_C`); each is filled
+    independently, and only when no record has it."""
+    for key, column in (("M", "heldout_B"), ("G", "heldout_C")):
+        if any(r[f"{key}_budget"] is not None for r in records):
             continue
-        filled = 0
-        for r in records:
-            e = row["maps"].get(r["arena"])
-            if e and e.get("M") is not None:
-                r["M_budget"], r["M_budget_ci"] = e["M"], e.get("M_ci")
-                filled += 1
-        if filled:
-            notes.append(f"M at {budget}: the adapter rows carry no heldout_B; read from {row['source']} "
-                         f"({filled} arenas)")
-        return
+        for name, row in zero_shot.items():
+            m = ADAPTER_ROW_RE.match(name)
+            if not m or int(m["step"]) != budget:
+                continue
+            filled = 0
+            for r in records:
+                e = row["maps"].get(r["arena"])
+                if e and e.get(key) is not None:
+                    r[f"{key}_budget"] = e[key]
+                    if key == "M":
+                        r["M_budget_ci"] = e.get("M_ci")
+                    filled += 1
+            if filled:
+                notes.append(f"{key} at {budget}: the adapter rows carry no {column}; read from {row['source']} "
+                             f"({filled} arenas)")
+            break
 
 
 def without_paths(maps):
