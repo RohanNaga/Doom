@@ -1724,21 +1724,24 @@ def fig_skill(records, home, budget, out_dir, band=None, x="S0", xlabel="zero-sh
     return fs.save(fig, out_dir, stem)
 
 
-ABSOLUTE_SIZE = (fs.TEXT_WIDTH, 2.1)
-ABSOLUTE_OFFSETS = {"unet": -0.22, "pixart": 0.0, "sd35": 0.22}
+ABSOLUTE_SIZE = (3.15, 1.5)                  # beside 3a in one row, set unscaled (paper owner, 2026-09-27)
+ABSOLUTE_WIDE_SIZE = (fs.TEXT_WIDTH, 2.1)     # the appendix's stock twin
+ABSOLUTE_OFFSETS = {"unet": -0.3, "pixart": 0.0, "sd35": 0.3}    # 3.75 pt marks stay apart in a 0.19 in column
 PERSISTENCE_INK = "#8C8C8C"
 COLUMN_TINT = "#F4F4F4"
 
 
-def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig3b_zero_shot_absolute"):
+def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig3b_zero_shot_absolute",
+                           size=ABSOLUTE_SIZE, letter=None):
     """Figure 3b, absolute form: per unseen arena (arena-number order) scene PSNR (top, higher is better) and scene
     LPIPS (bottom, lower is better) against the raw true frame, five marks per arena: persistence as a grey bar
     across the column, the U-Net, PixArt-alpha and SD 3.5 (zero-shot) and the U-Net after 4k adapter updates; the
     training maps' pooled read in the first column under the grey band. `decoder` picks the decoder of the U-Net,
     PixArt and adapter marks (filled for the fine-tuned decoder, open for stock); SD 3.5 is always through its own
-    stock decoder (open). Alternate columns are tinted so each arena's marks read as one group."""
+    stock decoder (open). Alternate columns are tinted so each arena's marks read as one group. The arrows in the
+    y labels say which way is better, since a 0.5 in panel has no room for a note."""
     from matplotlib.lines import Line2D
-    fig, (ax, lx) = fs.new_figure(ABSOLUTE_SIZE, nrows=2, sharex=True, h_pad=0.01, hspace=0.02)
+    fig, (ax, lx) = fs.new_figure(size, nrows=2, sharex=True, h_pad=0.01, hspace=0.02)
     cols = ["train"] + list(arenas)
     train_w = 1.6
     xpos = {"train": train_w / 2}
@@ -1778,13 +1781,9 @@ def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig
                            solid_capstyle="butt", zorder=2.5)
                 persistence_shown = True
         panel.tick_params(axis="x", length=0)
-    ax.set_ylabel("scene PSNR (dB)")
-    lx.set_ylabel("scene LPIPS")
-    ax.text(0.995, 0.97, "higher is better", transform=ax.transAxes, ha="right", va="top", fontsize=fs.ANNOT_PT,
-            color=fs.CONTEXT_INK)
-    lx.text(0.995, 0.03, "lower is better", transform=lx.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
-            color=fs.CONTEXT_INK)
-    ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
+    ax.set_ylabel("PSNR \u2191" if size[1] < 1.8 else "PSNR (dB) \u2191")     # dB in the caption at 0.5 in
+    lx.set_ylabel("LPIPS \u2193")
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(2 if size[1] > 1.8 else 3))
     lx.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
     lx.set_xticks([xpos[c] for c in cols], ["training\nmaps"] + [str(a) for a in arenas])
     for t in lx.xaxis.get_ticklabels()[:1]:
@@ -1799,10 +1798,12 @@ def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig
                color=fs.BACKBONES[b].colour)
         for b in ("unet", "pixart", "sd35") if b in absolute]
     labels = (["persistence"] if persistence_shown else []) + [
-        {"unet": "U-Net", "pixart": "PixArt-\u03b1", "sd35": "SD 3.5 (own decoder, open)"}[b]
+        {"unet": "U-Net", "pixart": "PixArt-\u03b1", "sd35": "SD 3.5"}[b]      # open: its own decoder (caption)
         for b in ("unet", "pixart", "sd35") if b in absolute]
     fig.legend(handles, labels, loc="outside upper center", ncol=len(labels), handlelength=1.4, columnspacing=1.1,
                handletextpad=0.4, borderaxespad=0.1)
+    if letter:      # in the legend's row at the figure's top left, level with 3a's letter, not a row of its own
+        fig.text(0.0, 1.0, letter, ha="left", va="top", fontsize=fs.LETTER_PT, fontweight="bold")
     return fs.save(fig, out_dir, stem)
 
 
@@ -2179,9 +2180,10 @@ def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors
     numbered = sorted({m for e in (absolute or {}).values() for d in e.values() for m in d["maps"]} -
                       set(TRAINING_MAPS))
     if numbered:
-        written += attempt(fig_zero_shot_absolute, absolute, numbered, a.out_dir, "tuned", "fig3b_zero_shot_absolute")
+        written += attempt(fig_zero_shot_absolute, absolute, numbered, a.out_dir, "tuned", "fig3b_zero_shot_absolute",
+                           ABSOLUTE_SIZE, "b")
         written += attempt(fig_zero_shot_absolute, absolute, numbered, a.out_dir, STOCK,
-                           "fig3b_zero_shot_absolute_stock")
+                           "fig3b_zero_shot_absolute_stock", ABSOLUTE_WIDE_SIZE)
     if zero_shot:
         order = [m for m in TRAINING_MAPS if any(m in v["maps"] for v in zero_shot.values())] + list(s0_order)
         written += attempt(fig_zero_shot, zero_shot, order, "A", a.out_dir, "fig2a_advantage_by_distance",

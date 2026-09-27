@@ -600,8 +600,11 @@ def test_figure_3b_pairs_the_decoders_per_backbone_in_zero_shot_skill_order(tmp_
     assert ab["unet"]["stock"]["maps"]["6"]["persist_psnr"] == pytest.approx(19.0)
     assert ab["pixart"]["tuned"]["maps"]["9"]["lpips"] == pytest.approx(0.2 + 0.03)
     assert ab["unet"]["tuned"]["home"]["psnr"] == pytest.approx(24.0)
-    for stem in ("fig3b_zero_shot_absolute", "fig3b_zero_shot_absolute_stock"):
+    # the primary sits beside 3a in the paper owner's 3.15 x 1.5 in slot; the appendix's stock twin stays full width
+    for stem, size in (("fig3b_zero_shot_absolute", (3.15, 1.5)), ("fig3b_zero_shot_absolute_stock", (5.5, 2.1))):
         assert os.path.getsize(os.path.join(out, f"{stem}.png")) > 1000, stem
+        w, h = mediabox(os.path.join(out, f"{stem}.pdf"))
+        assert (w, h) == (pytest.approx(size[0], abs=0.01), pytest.approx(size[1], abs=0.01)), stem
 
 
 def test_the_crossing_rug_puts_every_arena_at_a_measured_budget_one_tick_each():
