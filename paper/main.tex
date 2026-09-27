@@ -6,7 +6,7 @@
 
 \newif\ifdraftmarks \draftmarkstrue
 \newif\ifwithappendix \withappendixfalse % submission: body plus references; \withappendixtrue for the camera-ready or an anonymous supplement
-\newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplement\fi}
+\newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplementary material\fi}
 \newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[tbd]}\else[tbd]\fi}
 \newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[#1]}\else[#1]\fi}
 \newcommand{\prov}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{#1}\else#1\fi}
@@ -129,7 +129,7 @@ Nor is the sign reversal of the perceptual margin the decoder's floor: its own r
 It places the training maps' held-out episodes inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), but within the 13 arenas it orders nothing (Spearman $-0.22$ with $A$, $-0.35$ with the budget, none below $p=0.2$); two registered transition-level distances fail even the separation, and a pre-registered 30-map test failed its validation gate.
 The frozen model's zero-shot latent skill $S_0$ does order the arenas: it predicts where an arena ends up, not how much it gains (exploratory Spearman $+0.90$ with $A$ at 4k, $+0.18$ with the gain, $-0.61$ with the budget).
 
-\textbf{Closed loop.} Good one-tic scores do not guarantee stable rollouts: SD~3.5 has the best one-tic numbers with stock decoders on the full frame, yet a frame under 10~dB occurs in 23 non-EMA and 9 EMA rollouts of 256 reads (16 windows at 16 checkpoints from 55k to 130k; 11 and 8 without 70k), so the EMA removes checkpoint-specific collapses, not the failure mode.
+\textbf{Closed loop.} Good one-tic scores do not guarantee stable rollouts: SD~3.5 has the best one-tic numbers with stock decoders on the full frame, yet a frame under 10~dB occurs in 23 non-EMA and 9 EMA rollouts of 256 evaluations (16 windows at 16 checkpoints from 55k to 130k; 11 and 8 without 70k), so the EMA removes checkpoint-specific collapses, not the failure mode.
 
 %===============================================================================
 
@@ -141,7 +141,7 @@ We train on 8 adaptation episodes, score the non-EMA weights at 0, 250, 500, 1k,
 An arena's budget is the first grid point at which $A$ reaches $\tfrac12(A_0+A_\text{train})$, half of its gap from its zero-shot $A_0$; arenas that do not by the final budget of the grid are right-censored~\citep{taylor2009transfer}.
 Half of the gap in dB is not half of the error: raising $A$ by 1.8~dB reduces the model's prediction error by 34 percent relative to its starting value.
 
-\textbf{What it takes.} 9 of 13 arenas close half of their gap within 4k updates (5 within 500), one reaches $A_\text{train}$, and the median $A$ rises from 2.04 to 3.80~dB; on average 69 percent of each arena's gain lands by 250 updates (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
+\textbf{What it takes.} 9 of 13 arenas close half of their gap within 4k updates (5 within 500), one reaches $A_\text{train}$, and the median $A$ rises from 2.04 to 3.80~dB; 69 percent of the gain, on average, by 250 updates (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
 At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
 
 \begin{figure}[t]
@@ -173,7 +173,7 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 \label{sec:limits}
 
 Our claims cover 13 arenas of one WAD, one agent, one-tic scoring and mostly one seed; persistence is a weak reference where the camera moves fast.
-Off its training maps the U-Net keeps its turn response and part of its advantage but loses its perceptual edge; eight episodes and 1.1 GPU-hours of adaptation per arena close half of the gap on 9 of 13 arenas and the perceptual gap on 11.
+Off its training maps the U-Net keeps its turn response and part of its advantage but loses its perceptual edge; eight episodes of adaptation close half of the gap on 9 of 13 arenas and the perceptual gap on 11.
 \label{body-end}
 
 %===============================================================================
