@@ -31,3 +31,14 @@ Versions reviewed: `paper/figures/tuned/fig4_adaptation.png` (commit feabfb7), `
 
 17. **Small multiples**: fine; add the arena's D and S0 in each title so the reader can link to Figure 3.
 18. **Profiles**: draw the in-distribution reference as a vertical band on the threshold axis.
+
+## On Astra's list (`review_figures_round1_astra.md`, thread 01a0e34f-3fc1-7400-afaf-f3e4ddfa7a3f)
+
+Figure 4: 1 AGREE (a real bug: the censored markers sit at 5,280 updates, a budget that does not exist). 2 AGREE. 3 AGREE. 4 AGREE. 5 AGREE. 6 AGREE. 7 AGREE (caption for the paper owner; the lead drafts it in `paper/FIGURES.md`).
+Method figure: 8 AGREE WITH CHANGE: keep (a) at the full 5.5 in width (at 3.9 in its text falls under 6 pt); (b) becomes a 1.5 in panel on its own row beneath if the height budget allows, else an appendix figure. 9 DISAGREE: the standard's font rule is the paper's text font, which is Times in the CoRL style; the figure matches it. 10 AGREE. 11 AGREE. 12 AGREE (real thumbnails from the steward's raw-frame export, scene crop). 13 AGREE. 14 AGREE. 15 AGREE. 16 AGREE. 17 AGREE (caption for the paper owner).
+Training curves: 18 AGREE (and it settles my item 16: gain over persistence, per the standard). 19 AGREE. 20 AGREE. 21 AGREE. 22 AGREE WITH CHANGE: 1.5 in wide only if it shares Figure 1's row; otherwise full width in the appendix. 23 AGREE WITH CHANGE: disclose that the reads are means without intervals now; the per-window files exist on Spiderman and can be fetched Monday if the panel stays in the body. 24 AGREE. 25 AGREE (a real bug: the curve tool imports names the builder no longer defines).
+Appendix panels: 26 AGREE. 27 AGREE. 28 AGREE. 29 AGREE. 30 AGREE. 31 AGREE.
+
+## Agreed set for the lead (both reviewers)
+
+Fable 1 (as Astra's change), 2 (separate rug lanes), 3, 5, 6, 8 (separate stock decoder input), 9 (thumbnails), 10, 11 (two thumbnail stacks), 12, 13 (disclose the clipping), 14, 15; Fable 4, 7, 16, 17, 18 withdrawn. Astra 1 to 7, 10 to 21, 24 to 31 as written; Astra 8, 22, 23 with the changes above; Astra 9 not applied.
