@@ -25,7 +25,7 @@ Training and evaluation run on **Superman** (`rohan@128.2.204.116`, 8× RTX A400
 
 - 16 GB VRAM budget drove everything: bf16, fused AdamW, CPU-resident VAE, mmap dataset with low `num_workers`, per-segment sampling, `empty_cache()` after sampling, weights moved to CPU before the bf16 cast on save.
 - EMA math must be fp32 (bf16 `add_` with alpha 1e-4 underflows and freezes the EMA). Reported samples use the live model, not EMA.
-- Latents are (4, 15, 20); height is padded to 16 for patch-2 and stripped with `[:, :, :15, :]` before every decode.
+- The April pipeline's latents were (4, 15, 20) from 160x120 frames (height padded to 16 for patch-2 and stripped with `[:, :, :15, :]` before every decode). The Sep 2026 next-tic rows (`encode_parquet.py --every-tic`) use 320x240 frames padded to 320x256 and latents C x 32 x 40 with C = 4 (SD 1.x, PixArt) or 16 (SD 3.5); the scene crop is latent rows 0 to 25 (pixel rows 0 to 207).
 - Only the most recent action conditions the model ("Design A"); the stored 5-action window is otherwise unused.
 - The U-Net baseline code and checkpoints are **not in this repo** and were wiped from Superman. `encode_episodes.py` (frame-to-latent) and `eval_metrics.py` (PSNR/LPIPS) are the Sep 2026 rebuilds; `doom_data.py` replaces the consolidated arrays with per-episode indexing and holds the episode split.
 - Sampling everywhere in this repo is *respaced ancestral DDPM* via `p_sample_loop` (learned sigma), not DDIM, even where comments say DDIM. `ddim_sample_loop` exists and is exposed as `--sampler ddim` in the new harness.

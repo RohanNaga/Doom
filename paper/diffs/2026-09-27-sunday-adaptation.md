@@ -131,3 +131,14 @@ Full fine-tune column; forgetting and directional guards at 4k (the overnight sc
 - `app:perarena`: the per-arena zero-shot table gains a stock/tuned pair of columns for $A$, $M$ and $G$ (source: `results/fresh_rescore/*_tuned/map*/metrics.json`), and one sentence on the two decoders (matched MSE + 0.1 LPIPS, 3,486 steps, gate +4.3 dB / LPIPS $-$0.039; MSE-only GameNGen recipe +5.1 dB / LPIPS +0.19, the blur row).
 - `app:distance`: the coverage and transfer-gap definitions, their family-floor failure and their Spearman rows (`results/transition_distance/compare_fresh_sd1.csv`).
 - `app:perarena-adapt`: the tuned per-arena table (`paper/tables/tuned/adapt_perarena.tex`), the seed spread, the data ladder figure (`fig_adapt_ladder`) and the recipe figure (`fig_adapt_recipe`).
+
+## 11. Section 2, the decoder sentence (line 121), and the appendix
+
+Current:
+> Rollouts stay in latent space, so the decoder only renders. Following GameNGen, we plan to tune it with MSE on training-map frames, then freeze it.
+
+Replace with:
+> Rollouts stay in latent space, so the decoder only renders. We fine-tune the SD~1 decoder on training-map frames from their true latents with the encoder frozen, using MSE plus 0.1~LPIPS (GameNGen's MSE-only recipe sharpens the HUD but triples scene LPIPS; \appref{app:perarena}), then freeze it; every pixel number in Sections 3 and 4 uses this decoder unless marked stock.
+
+The appendix's decoder paragraph (appendix.tex line 35) changes the same way; the launcher is `scripts/spiderman/decoder_mse_lpips.sh` (3,486 steps, lr 1e-5, batch 24, 4.0 h on an A6000; gate +4.33 dB, LPIPS $-$0.039 on the dev set).
+

@@ -16,6 +16,7 @@ Machine-oriented project brief. Dense facts only. For the narrative version see 
 
 - DiT-XL/2: depth 28, hidden 1152, heads 16, patch 2 → 673,869,344 params.
 - Latent space: SD-VAE-ft-mse (`stabilityai/sd-vae-ft-mse`), scale 0.18215. Frame 160×120 RGB → latent (4, 15, 20). Height padded 15→16 → `input_size=(16,20)` → 80 tokens (patch 2). Strip pad with `[:, :, :15, :]` before every decode.
+- (Sep 2026 next-tic rows) Frames 320×240 padded to 320×256 → latents C×32×40, C = 4 for SD 1.x and PixArt, 16 for SD 3.5 (`encode_parquet.py`); the April shape above applies only to the DiT-XL/2 pipeline.
 - Conditioning:
   - Context: 4 past-frame latents channel-concatenated → 16 ch + 4 noisy target ch = `in_channels=20`. Model predicts 4 ch (`pred_channels=4`; `learn_sigma=True` → 8 out ch).
   - Action: single most-recent action `actions[idx][-1]` ("Design A"; dataset stores 5-action window, 4 unused), `num_classes=18` (VizDoom full action set), fed through repurposed `LabelEmbedder`; `c = t_emb + y_emb` → adaLN-Zero. 10% dropout retained; CFG available (`forward_with_cfg`) but unused in results.
