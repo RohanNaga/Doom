@@ -190,3 +190,52 @@ I viewed each figure as a rendered page of the arXiv PDF, not as a summary. The 
 - The Genie 2 and Genie 3 visuals (read through a fetched summary).
 - The DreamerV3 Nature volume and the Genie ICML venue.
 - Comment 50 is an observation from the image, not a confirmed bug.
+
+
+## Lead's response (figure design lead, Opus 5.5, 2026-09-27)
+
+Each entry answers the comment of the same number: "applied" names where, otherwise one line says why not. The shared style is `paper/figstyle.py` (the encoding table, sizes, `refuse_degenerate`); the builder is `paper/make_adapt_figures.py`. Comments 15 to 24 and 46 to 53 are answered in the entries added by the Figure 3b and rollout-composer commits.
+
+1. Applied: `figstyle.style()` sets labels 7 pt, ticks and annotations 6.5 pt; `refuse_degenerate` stops any figure with text under 6 pt, so the 4 and 4.5 pt labels cannot come back.
+2. Applied: `figstyle.BACKBONES` is keyed by entity (U-Net `#0072B2` circle, PixArt `#D55E00` square, SD 3.5 `#009E73` triangle, adapter a darker U-Net blue diamond); `SERIES` and `MARKERS` are gone.
+3. Applied in the builder (every figure is drawn at its printed size on the 5.5 in page: Figure 4 full width by 1.6 in, appendix panels full or half width); the `main.tex` minipage float belongs to the paper owner, who swaps in `fig4_adaptation.pdf` at `\linewidth` by 1.6 in.
+4. Applied: arenas in the seeds, ladder and recipe figures are dark grey lines with the arena number at the right end; no arena uses a backbone colour or marker.
+5. Applied: nothing maps D to colour; the per-arena curves use the adapter's blue ramp keyed to the zero-shot skill S0 (the lead's brief; S0 is the quantity the text says orders the arenas), and every other panel is one colour.
+6. Applied, and extended by Rohan's direction: the reference reads "training maps (in-distribution)" everywhere, drawn as its 95% episode-bootstrap band (5.06 [4.75, 5.38] dB tuned, 99 episodes, 512 windows) with the dashed point line inside; tables say "training-maps line".
+7. Applied: A axes tick every 1 dB from 0, M axes every 0.05.
+8. Applied: interval lines are drawn above the markers (zorder 4) and the small multiples carry episode bands.
+9. Applied: direct labels at line ends everywhere except the recipe figure, whose five curves lie within 0.1 dB of each other, so it keeps one frameless legend.
+10. Applied: no legend or label carries provenance; `ROW_NAMES` is removed.
+11. Applied: the M axis reads "M, LPIPS difference (lower is better)" with the zero line labelled "copy-last".
+12. Applied: `figstyle.save` refuses an empty panel, a curve at a single x value, a legend entry matching no drawn series and sub-6 pt text; the builder also stops drawing seed, ladder and recipe figures whose runs lack the decoder's rows, and the stale tuned seeds, ladder, recipe and tercile files are deleted.
+13. Applied: `pdf.fonttype` 42 stays in `style()`, and the tests assert no Type 3 font in any figure; the TikZ family is the method-figure worker's, checked when that commit reaches main.
+14. Partly applied: the builder writes `fig4_adaptation`, and the new figures are `fig3b_zero_shot_paired` and `fig2_rollouts`; renaming the `\figslot` files and labels in `main.tex` is the paper owner's edit.
+25. Applied: every arena number is 6.5 pt with a hand offset table for the colliding pairs (7/13, 1/12/14).
+26. Applied: one marker and colour (the adapter's diamond) with each arena's episode interval; no D colouring.
+27. Not applied here: the lead's brief keeps S0 on this appendix panel; the Δ version is the family-step worker's `fig2e_deficit`.
+28. Applied: the budget panel is dropped; the attainment curve in Figure 4b replaces it.
+29. Applied with 28: the phrase no longer appears on an axis.
+30. Applied: the ramp is keyed to S0 (light is high skill) and arenas 7, 9 and 12 are labelled at their right ends.
+31. Applied: the 13 half-gap lines are gone from the curves panel; each arena's line appears only in its own small multiple.
+32. Applied: the crossing and censoring markers are gone from the curves panel; crossings are ticks in the small multiples and on Figure 4b.
+33. Applied: the colour bar is deleted.
+34. Partly applied: the grid follows the rows, so `--headline-variant g8k` switches the headline set and the budget to the 8k grid (ticks 0, 50, 250, 1k, 8k, minor ticks at every other grid step); the full fine-tune line waits for its runs (Monday).
+35. Applied: step 0 sits on its own spine segment left of a gap (`figstyle.step_axis`), not under a glyph.
+36. Applied: A runs from 0 (copy-last) with ticks at 0, 1, 2, 3, 4, 5 dB.
+37. Applied: the tercile figure is no longer built and its files are deleted; the D null belongs in the caption as the Spearman with its interval.
+38. Applied: under the tuned decoder no seed-1 rows exist, so no seeds figure is drawn; the stock seeds figure draws only arenas with two scored seeds.
+39. Applied: the differences are points only with the zero line; the seed spread at the budget is two dotted lines at plus and minus 0.058 dB, not a grey band, because the grey band means the training maps in the encoding table.
+40. Applied: arenas are dark grey, seed 0 solid and seed 1 dashed, labelled at the right ends.
+41. Applied: a ladder needs two rungs with the decoder's rows; the tuned ladder is not drawn.
+42. Applied: the axis reads "adaptation episodes (log scale)", "step 0" is labelled once, and arena labels are 6.5 pt at the line ends.
+43. Applied: the tuned recipe figure is not drawn; the legend check refuses a listed series with no line.
+44. Applied: the panels share y, the titles are gone (panel letters a and b, "arena 12" as a small label inside the panel), and D is not shown.
+45. Applied: the axis says "(log scale)" and every grid step has a tick, labelled at 0, 50, 250, 1k and 8k.
+54. Not mine: `\prov` is the paper's macro in `main.tex`; the generated tables use it only under `--prov`, so the submission build omits the flag.
+55. Not mine: Table 1 is hand-set in `main.tex`; for the paper owner.
+56. Not mine: Table 1, as above.
+57. Not mine: Table 2 is hand-set in `main.tex`; for the paper owner.
+58. Not mine: Table 2, as above.
+59. Applied to the generated tables: every numeric column is right-aligned (`adapt_cost.tex`, `adapt_perarena.tex`, and `adapt_table3.tex` from the Figure 4 commit).
+60. Deferred: the method figure is the other worker's; I check it against section 5 when its commit reaches main.
+61. Deferred: the training-curve panel is the other worker's (`tools/training_curves.py`); same check.

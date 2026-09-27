@@ -293,7 +293,7 @@ def mediabox(path):
 
 def test_the_figures_are_written_as_pdf_and_png_at_the_slot_size_without_type3_fonts(tmp_path):
     out, _ = cli(tmp_path, tree(tmp_path))
-    for stem in ("fig3_adaptation_curves", "fig3_adaptation_skill", "fig3_adaptation_terciles",
+    for stem in ("fig3_adaptation_curves", "fig3_adaptation_skill",
                  "fig2a_advantage_by_distance"):
         for ext in ("pdf", "png"):
             p = os.path.join(out, f"{stem}.{ext}")
@@ -301,8 +301,9 @@ def test_the_figures_are_written_as_pdf_and_png_at_the_slot_size_without_type3_f
         assert b"/Type3" not in open(os.path.join(out, f"{stem}.pdf"), "rb").read()
     w, h = mediabox(os.path.join(out, "fig3_adaptation_curves.pdf"))
     assert w == pytest.approx(maf.FIG3_SIZE[0], abs=0.01) and h == pytest.approx(maf.FIG3_SIZE[1], abs=0.01)
-    # nothing to draw yet: no seed, ladder or recipe runs, no raw columns
-    for stem in ("fig3_adaptation_seeds", "fig_adapt_ladder", "fig_adapt_recipe", "fig2b_margin_by_distance"):
+    # nothing to draw yet: no seed, ladder or recipe runs, no raw columns; the D terciles are no longer drawn
+    for stem in ("fig3_adaptation_seeds", "fig_adapt_ladder", "fig_adapt_recipe", "fig2b_margin_by_distance",
+                 "fig3_adaptation_terciles"):
         assert not os.path.exists(os.path.join(out, f"{stem}.pdf")), stem
 
 
@@ -434,3 +435,34 @@ def test_the_configuration_that_carries_the_decoder_is_read_and_the_choice_noted
 def test_a_decoder_no_row_carries_stops_with_a_message(tmp_path):
     with pytest.raises(SystemExit, match="heldout_A_tuned"):
         cli(tmp_path, tree(tmp_path), "--decoder", "tuned", "--home", "4.6")
+
+
+def test_runs_without_the_decoders_rows_draw_no_seed_ladder_or_recipe_figure(tmp_path):
+    distances = tree(tmp_path, tuned=True)
+    write_run(tmp_path, 6, (1.0, 2.4, 3.2), seed=1)                   # stock only: nothing to draw under tuned
+    write_run(tmp_path, 6, (1.0, 1.8, 2.2), k=2)
+    write_run(tmp_path, 6, (1.0, 2.9, 3.6), variant="lr5e4")
+    out, tables = cli(tmp_path, distances, "--decoder", "tuned", "--home", "4.6")
+    for stem in ("fig3_adaptation_seeds", "fig_adapt_ladder", "fig_adapt_recipe"):
+        assert not os.path.exists(os.path.join(out, f"{stem}.pdf")), stem
+    s = summary(tables)
+    assert s["seeds"] == [] and s["ladder"] == {} and s["recipe"] == []
+
+
+def test_the_headline_variant_flag_promotes_the_8k_grid_and_its_budget(tmp_path):
+    distances = tree(tmp_path)
+    steps8 = (0, 50, 250, 500, 1000)
+    write_run(tmp_path, 6, (1.0, 2.0, 2.6, 3.0, 3.2), variant="g8k", steps=steps8)
+    write_run(tmp_path, 9, (2.0, 2.2, 2.5, 2.9, 3.1), variant="g8k", steps=steps8)
+    argv = ["--runs-glob", str(tmp_path / "results" / "adapt" / "*" / "scores.jsonl"), "--distances", distances,
+            "--out-dir", str(tmp_path / "f"), "--tables-dir", str(tmp_path / "t"), "--home", str(HOME),
+            "--fresh-root", str(tmp_path / "none"), "--bootstrap", "100",
+            "--headline-variant", "g8k"]
+    assert maf.main(argv) == 0
+    s = summary(tmp_path / "t")
+    assert s["budget"] == 1000 and s["headline_variant"] == "g8k"          # the grid's last step, automatically
+    assert all(r["run"].endswith("_g8k") for r in s["per_arena"])
+    per = {r["arena"]: r for r in s["per_arena"]}
+    assert per[6]["cost_half_gap"] == 250 and per[9]["cost_half_gap"] == 1000
+    assert s["recipe"] == []                  # the base-recipe runs anchor the recipe tests; they are not tests
+    assert os.path.getsize(tmp_path / "f" / "fig3_adaptation_curves.pdf") > 1000

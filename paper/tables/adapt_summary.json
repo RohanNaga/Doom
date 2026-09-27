@@ -1,10 +1,20 @@
 {
  "generated_by": "paper/make_adapt_figures.py",
- "generated_at": "2026-09-27T09:12:28-04:00",
+ "generated_at": "2026-09-27T10:31:33-04:00",
  "decoder": "stock",
- "home": 4.138,
- "home_source": "default: stock decoder, scene crop, training maps' 512 validation windows (2026-09-27)",
+ "home": 4.1384338941425085,
+ "home_ci": {
+  "ci": [
+   3.862284555565353,
+   4.432236012673344
+  ],
+  "episodes": 99,
+  "windows": 512,
+  "source": "results/fresh_rescore/home_unet200k_ema/val/per_window.csv"
+ },
+ "home_source": "results/fresh_rescore/home_unet200k_ema/val/metrics.json",
  "budget": 4000,
+ "headline_variant": "",
  "weights": "live",
  "n_arenas": 13,
  "n_complete": 13,
@@ -20,8 +30,10 @@
    "4000": 9
   },
   "home_by_budget": 1,
+  "fixed_by_budget": 4,
   "above_home_at_budget": 1,
-  "margin_ties_by_budget": null,
+  "margin_lower_by_budget": 4,
+  "margin_within_001_by_budget": 3,
   "crossed_arenas": [
    6,
    7,
@@ -48,13 +60,14 @@
   "A0": 1.7948405370116234,
   "A_budget": 3.1358015835285187,
   "gain": 1.3610521480441093,
-  "half_gap_line": 2.9664202685058116,
+  "gap_share_budget": 0.5608447726717077,
+  "half_gap_line": 2.966637215577066,
   "auc": 2.9216397890122607,
   "S0": 1.4232416525394926,
   "S_budget": 2.363014597464318,
   "lpips0": 0.2494289429159835,
   "lpips_budget": 0.16788999311393127,
-  "M_budget": null,
+  "M_budget": 0.006888449668622343,
   "G_budget": null,
   "forgetting_budget": -1.1582126915454865,
   "directional_budget": 0.84765625,
@@ -138,12 +151,15 @@
    },
    "A_budget": 2.8548634834587574,
    "gain": 1.010562725365162,
-   "half_gap_line": 2.9911503790467977,
+   "half_gap_line": 2.991367326118052,
+   "gap_share_budget": 0.44049872672412144,
    "cost_half_gap": null,
    "censored_half_gap": true,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": null,
    "last_step": 4000,
    "A_last": 2.8548634834587574,
@@ -161,7 +177,11 @@
    "lpips0": 0.22913860829430632,
    "lpips_budget": 0.17120324503048323,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.011004510100974585,
+   "M_budget_ci": [
+    -0.0034469648301637787,
+    0.02423035420360975
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -175,6 +195,32 @@
     3.016688894480467
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.68299650400877,
+     1.9930468620732427
+    ],
+    "250": [
+     2.3177398215979337,
+     2.629129367880523
+    ],
+    "500": [
+     2.332721685804427,
+     2.6119666116312144
+    ],
+    "1000": [
+     2.427405774407089,
+     2.712742231786251
+    ],
+    "2000": [
+     2.654021545499563,
+     2.9653737602755426
+    ],
+    "4000": [
+     2.6727790866978465,
+     3.016688894480467
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 2.036097891628742,
@@ -201,12 +247,15 @@
    },
    "A_budget": 3.8982585184276104,
    "gain": 1.2662621885538101,
-   "half_gap_line": 3.3849981649369,
+   "half_gap_line": 3.3852151120081544,
+   "gap_share_budget": 0.8405673215992261,
    "cost_half_gap": 500,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": 500,
+   "censored_fixed": false,
    "cost_half_gap_full_curve": 500,
    "last_step": 4000,
    "A_last": 3.8982585184276104,
@@ -224,7 +273,11 @@
    "lpips0": 0.28120508952997625,
    "lpips_budget": 0.16788999311393127,
    "M0": null,
-   "M_budget": null,
+   "M_budget": -0.021618180107907392,
+   "M_budget_ci": [
+    -0.028190305834868923,
+    -0.014871985966237844
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -238,6 +291,32 @@
     4.013845508731902
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     2.4523804490454495,
+     2.8058414570987225
+    ],
+    "250": [
+     3.1772628389298916,
+     3.429241983499378
+    ],
+    "500": [
+     3.5146572944708168,
+     3.725766055192798
+    ],
+    "1000": [
+     3.507748685590923,
+     3.7243063096888362
+    ],
+    "2000": [
+     3.697004827670753,
+     3.9241578184999524
+    ],
+    "4000": [
+     3.7921305873431264,
+     4.013845508731902
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 2.8785769753158092,
@@ -264,12 +343,15 @@
    },
    "A_budget": 3.1358015835285187,
    "gain": 1.5425353981554508,
-   "half_gap_line": 2.865633092686534,
+   "half_gap_line": 2.865850039757788,
+   "gap_share_budget": 0.6060643441454194,
    "cost_half_gap": 2000,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": 2000,
    "last_step": 4000,
    "A_last": 3.1358015835285187,
@@ -287,7 +369,11 @@
    "lpips0": 0.33321423101006076,
    "lpips_budget": 0.17687663179822266,
    "M0": null,
-   "M_budget": null,
+   "M_budget": -0.014002110532601364,
+   "M_budget_ci": [
+    -0.024763566341425756,
+    -0.004683833715898801
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -301,6 +387,32 @@
     3.361677270941436
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.4020486771129073,
+     1.7529047114774583
+    ],
+    "250": [
+     2.427850924804807,
+     2.8123242524452507
+    ],
+    "500": [
+     2.514411957282573,
+     2.915005448646843
+    ],
+    "1000": [
+     2.6019436942413448,
+     3.022160542942583
+    ],
+    "2000": [
+     2.8101662236265836,
+     3.2522372650913893
+    ],
+    "4000": [
+     2.901451051235199,
+     3.361677270941436
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 1.645927906036377,
@@ -327,12 +439,15 @@
    },
    "A_budget": 2.508146785199642,
    "gain": 0.9485076516866684,
-   "half_gap_line": 2.848819566756487,
+   "half_gap_line": 2.849036513827741,
+   "gap_share_budget": 0.36781044624703635,
    "cost_half_gap": null,
    "censored_half_gap": true,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": null,
    "last_step": 4000,
    "A_last": 2.508146785199642,
@@ -350,7 +465,11 @@
    "lpips0": 0.22763059195131063,
    "lpips_budget": 0.15358759771334007,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.010597651562420651,
+   "M_budget_ci": [
+    0.005541973423532909,
+    0.01553056317497976
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -364,6 +483,32 @@
     2.6388385348021983
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.4320465358905494,
+     1.6978822507895528
+    ],
+    "250": [
+     2.1268511758185924,
+     2.3467746413312853
+    ],
+    "500": [
+     2.3000974778085945,
+     2.496922429651022
+    ],
+    "1000": [
+     2.316796751692891,
+     2.501447506248951
+    ],
+    "2000": [
+     2.346771962940693,
+     2.5771853706799446
+    ],
+    "4000": [
+     2.394489813409746,
+     2.6388385348021983
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 1.7893540859222412,
@@ -390,12 +535,15 @@
    },
    "A_budget": 2.990591064095497,
    "gain": 1.3610521480441093,
-   "half_gap_line": 2.883769458025694,
+   "half_gap_line": 2.883986405096948,
+   "gap_share_budget": 0.5424906821247889,
    "cost_half_gap": 2000,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": 2000,
    "last_step": 4000,
    "A_last": 2.990591064095497,
@@ -413,7 +561,11 @@
    "lpips0": 0.257921540964162,
    "lpips_budget": 0.17752480234776158,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.02286239690693037,
+   "M_budget_ci": [
+    0.014608741598976849,
+    0.030969206152985863
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -427,6 +579,32 @@
     3.332186130899936
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.3072032518684864,
+     1.8919202849268912
+    ],
+    "250": [
+     2.2204309292137623,
+     2.83169557871297
+    ],
+    "500": [
+     2.32999904891476,
+     2.9679840396158395
+    ],
+    "1000": [
+     2.4426491601392626,
+     3.110448908060789
+    ],
+    "2000": [
+     2.5685326759703457,
+     3.2468952304683616
+    ],
+    "4000": [
+     2.5903461487963795,
+     3.332186130899936
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 1.8517136983573437,
@@ -453,12 +631,15 @@
    },
    "A_budget": 3.1789142675697803,
    "gain": 1.2254017107188702,
-   "half_gap_line": 3.045756278425455,
+   "half_gap_line": 3.0459732254967093,
+   "gap_share_budget": 0.5608447726717077,
    "cost_half_gap": 2000,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": 2000,
    "last_step": 4000,
    "A_last": 3.1789142675697803,
@@ -476,7 +657,11 @@
    "lpips0": 0.295540795836132,
    "lpips_budget": 0.19592502497835085,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.006888449668622343,
+   "M_budget_ci": [
+    -0.006617454758452368,
+    0.01628161246080708
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -490,6 +675,32 @@
     3.3255827516317367
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.794065800216049,
+     2.123488150630146
+    ],
+    "250": [
+     2.5380344436503948,
+     2.8615360137075183
+    ],
+    "500": [
+     2.702818644512445,
+     3.031371407397091
+    ],
+    "1000": [
+     2.7963762225583197,
+     3.12018823903054
+    ],
+    "2000": [
+     2.9184964459389446,
+     3.2327399543486535
+    ],
+    "4000": [
+     3.0338348783552647,
+     3.3255827516317367
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 2.121122594922781,
@@ -516,12 +727,15 @@
    },
    "A_budget": 3.7169874757528305,
    "gain": 1.9221469387412071,
-   "half_gap_line": 2.9664202685058116,
+   "half_gap_line": 2.966637215577066,
+   "gap_share_budget": 0.8201708427328755,
    "cost_half_gap": 250,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": 500,
+   "censored_fixed": false,
    "cost_half_gap_full_curve": 250,
    "last_step": 4000,
    "A_last": 3.7169874757528305,
@@ -539,7 +753,11 @@
    "lpips0": 0.1814428260549903,
    "lpips_budget": 0.12667217446141876,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.014799473865423352,
+   "M_budget_ci": [
+    0.006030338827258674,
+    0.022903231291638803
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -553,6 +771,32 @@
     4.012539941817522
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.5726443405263126,
+     2.0252263097092507
+    ],
+    "250": [
+     3.1938925348222256,
+     3.7471126642078154
+    ],
+    "500": [
+     3.274291995819658,
+     3.8381127280183134
+    ],
+    "1000": [
+     3.3097535450011493,
+     3.8596843370236456
+    ],
+    "2000": [
+     3.4000558320432903,
+     3.952560681849718
+    ],
+    "4000": [
+     3.4755563106387855,
+     4.012539941817522
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 2.307948589324951,
@@ -579,12 +823,15 @@
    },
    "A_budget": 3.7490554712712765,
    "gain": 1.7431721203029156,
-   "half_gap_line": 3.0719416754841804,
+   "half_gap_line": 3.0721586225554347,
+   "gap_share_budget": 0.8174118666882003,
    "cost_half_gap": 250,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": 1000,
+   "censored_fixed": false,
    "cost_half_gap_full_curve": 250,
    "last_step": 4000,
    "A_last": 3.7490554712712765,
@@ -602,7 +849,11 @@
    "lpips0": 0.22789464870584197,
    "lpips_budget": 0.1401957984198816,
    "M0": null,
-   "M_budget": null,
+   "M_budget": -0.025647400878369808,
+   "M_budget_ci": [
+    -0.0395628260448575,
+    -0.014177818004100125
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -616,6 +867,32 @@
     3.946519686002284
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.7848684819415213,
+     2.2274185810238123
+    ],
+    "250": [
+     3.035297244787216,
+     3.4375586024485525
+    ],
+    "500": [
+     3.201839725486934,
+     3.606891665048897
+    ],
+    "1000": [
+     3.340350501425564,
+     3.7303782762028277
+    ],
+    "2000": [
+     3.428910329937935,
+     3.797493071015924
+    ],
+    "4000": [
+     3.5716881286352873,
+     3.946519686002284
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 2.276899054646492,
@@ -642,12 +919,15 @@
    },
    "A_budget": 2.9680568277835846,
    "gain": 0.7160810455679893,
-   "half_gap_line": 3.1949878911077976,
+   "half_gap_line": 3.195204838179052,
+   "gap_share_budget": 0.3795902177952692,
    "cost_half_gap": null,
    "censored_half_gap": true,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": null,
    "last_step": 4000,
    "A_last": 2.9680568277835846,
@@ -665,7 +945,11 @@
    "lpips0": 0.3341291318065487,
    "lpips_budget": 0.16971000947523862,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.003729757634573616,
+   "M_budget_ci": [
+    -0.007782130667328601,
+    0.012522292353969533
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -679,6 +963,32 @@
     3.0521513782441616
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     2.13820281913504,
+     2.3485513268969953
+    ],
+    "250": [
+     2.651450304314494,
+     2.827333737164736
+    ],
+    "500": [
+     2.7919828094542027,
+     2.9204903542995453
+    ],
+    "1000": [
+     2.7670686265919358,
+     2.941239166073501
+    ],
+    "2000": [
+     2.7839177532121537,
+     2.9373998418450356
+    ],
+    "4000": [
+     2.862181030400097,
+     3.0521513782441616
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 2.5265442188829184,
@@ -705,12 +1015,15 @@
    },
    "A_budget": 2.711841069161892,
    "gain": 1.0511154793202877,
-   "half_gap_line": 2.899362794920802,
+   "half_gap_line": 2.8995797419920564,
+   "gap_share_budget": 0.42422890438544353,
    "cost_half_gap": null,
    "censored_half_gap": true,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": null,
    "last_step": 4000,
    "A_last": 2.711841069161892,
@@ -728,7 +1041,11 @@
    "lpips0": 0.32421842898475006,
    "lpips_budget": 0.2294888033065945,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.04894137966039125,
+   "M_budget_ci": [
+    0.03955152870294114,
+    0.05806803611849317
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -742,6 +1059,32 @@
     2.861973323300481
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     1.5456594003364443,
+     1.7755940604954956
+    ],
+    "250": [
+     2.150203062500805,
+     2.3995937554165723
+    ],
+    "500": [
+     2.2945935290306805,
+     2.5488812966272234
+    ],
+    "1000": [
+     2.384710348956287,
+     2.6778475800529122
+    ],
+    "2000": [
+     2.4802323319017887,
+     2.748274691402912
+    ],
+    "4000": [
+     2.5557875983417033,
+     2.861973323300481
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 1.8385154083371162,
@@ -768,12 +1111,15 @@
    },
    "A_budget": 4.202517420053482,
    "gain": 1.7686059176921844,
-   "half_gap_line": 3.2859557511806488,
+   "half_gap_line": 3.286172698251903,
+   "gap_share_budget": 1.0375961772165438,
    "cost_half_gap": 250,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": 4000,
    "censored_home": false,
+   "cost_fixed": 250,
+   "censored_fixed": false,
    "cost_half_gap_full_curve": 250,
    "last_step": 4000,
    "A_last": 4.202517420053482,
@@ -791,7 +1137,11 @@
    "lpips0": 0.20348593301605433,
    "lpips_budget": 0.13796299265231937,
    "M0": null,
-   "M_budget": null,
+   "M_budget": -0.01849573853542097,
+   "M_budget_ci": [
+    -0.02509712371538626,
+    -0.011245457160111993
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -805,6 +1155,32 @@
     4.357539710775018
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     2.2276615738868712,
+     2.6489316150546074
+    ],
+    "250": [
+     3.55427709389478,
+     3.900869703106582
+    ],
+    "500": [
+     3.713485836982727,
+     4.0807946138083935
+    ],
+    "1000": [
+     3.836552755627781,
+     4.172306038439274
+    ],
+    "2000": [
+     3.8202377607114615,
+     4.17959576966241
+    ],
+    "4000": [
+     4.021945185959339,
+     4.357539710775018
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 2.8779164142906666,
@@ -831,12 +1207,15 @@
    },
    "A_budget": 2.6133661791682243,
    "gain": 1.5332607701420784,
-   "half_gap_line": 2.609052704513073,
+   "half_gap_line": 2.609269651584327,
+   "gap_share_budget": 0.501339466183516,
    "cost_half_gap": 4000,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": 4000,
    "last_step": 4000,
    "A_last": 2.6133661791682243,
@@ -854,7 +1233,11 @@
    "lpips0": 0.2494289429159835,
    "lpips_budget": 0.15811840718379244,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.03848677067071549,
+   "M_budget_ci": [
+    0.030840306550089736,
+    0.04659710714722677
+   ],
    "G_budget": null,
    "forgetting_budget": null,
    "directional_budget": null,
@@ -868,6 +1251,32 @@
     2.7333766285330054
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     0.9652029170654715,
+     1.1809255927801132
+    ],
+    "250": [
+     2.1277674078941344,
+     2.4574673753231764
+    ],
+    "500": [
+     2.1776630592532458,
+     2.4978836899623276
+    ],
+    "1000": [
+     2.2755119654349985,
+     2.5524449866265058
+    ],
+    "2000": [
+     2.372493392508477,
+     2.6440928047522902
+    ],
+    "4000": [
+     2.472002198919654,
+     2.7333766285330054
+    ]
+   },
    "other_decoders": {
     "tuned": {
      "A0": 1.068928960710764,
@@ -894,12 +1303,15 @@
    },
    "A_budget": 3.366153083741665,
    "gain": 2.387490574270487,
-   "half_gap_line": 2.558331254735589,
+   "half_gap_line": 2.5585482018068433,
+   "gap_share_budget": 0.7555896562177475,
    "cost_half_gap": 250,
    "censored_half_gap": false,
    "incomplete": false,
    "cost_home": null,
    "censored_home": true,
+   "cost_fixed": null,
+   "censored_fixed": true,
    "cost_half_gap_full_curve": 250,
    "last_step": 4000,
    "A_last": 3.366153083741665,
@@ -917,7 +1329,11 @@
    "lpips0": 0.23413066993816756,
    "lpips_budget": 0.15795174130471423,
    "M0": null,
-   "M_budget": null,
+   "M_budget": 0.001189572474686429,
+   "M_budget_ci": [
+    -0.007052431202464504,
+    0.008592291962850135
+   ],
    "G_budget": null,
    "forgetting_budget": -1.1582126915454865,
    "directional_budget": 0.84765625,
@@ -931,6 +1347,32 @@
     3.5099183432757854
    ],
    "M0_ci": null,
+   "A_ci": {
+    "0": [
+     0.7742985873483121,
+     1.1854738593101501
+    ],
+    "250": [
+     2.7814965583384037,
+     3.0966653786599636
+    ],
+    "500": [
+     2.9145986872725187,
+     3.2462790347635746
+    ],
+    "1000": [
+     3.0062198529951276,
+     3.3150425809435546
+    ],
+    "2000": [
+     3.1324978349730372,
+     3.440365970134735
+    ],
+    "4000": [
+     3.224461158271879,
+     3.5099183432757854
+    ]
+   },
    "other_decoders": {},
    "decoder": "stock"
   }
@@ -943,6 +1385,7 @@
     0,
     1
    ],
+   "at_step": 4000,
    "A_budget": {
     "0": 2.6133661791682243,
     "1": 2.581983268260956
@@ -988,6 +1431,7 @@
     0,
     1
    ],
+   "at_step": 4000,
    "A_budget": {
     "0": 3.366153083741665,
     "1": 3.34668904915452
@@ -1033,6 +1477,7 @@
     0,
     1
    ],
+   "at_step": 4000,
    "A_budget": {
     "0": 2.8548634834587574,
     "1": 2.9123363569378853
@@ -1078,6 +1523,7 @@
     0,
     1
    ],
+   "at_step": 4000,
    "A_budget": {
     "0": 2.9680568277835846,
     "1": 2.9169578924775124
@@ -1155,6 +1601,7 @@
    "run": "unet200k_arenas13_map12_r16_k8_s0_lr3e4",
    "A_budget": 2.5394460447132587,
    "delta_vs_base": 0.03129925951361656,
+   "delta_at": null,
    "A_last": 2.5394460447132587,
    "last_step": 4000,
    "cost_half_gap": null,
@@ -1168,6 +1615,7 @@
    "run": "unet200k_arenas13_map12_r16_k8_s0_lr5e4",
    "A_budget": 2.560967545956373,
    "delta_vs_base": 0.05282076075673103,
+   "delta_at": null,
    "A_last": 2.560967545956373,
    "last_step": 4000,
    "cost_half_gap": null,
@@ -1181,6 +1629,7 @@
    "run": "unet200k_arenas13_map12_r16_k8_s0_g8k",
    "A_budget": 2.5634680278599262,
    "delta_vs_base": 0.05532124266028404,
+   "delta_at": null,
    "A_last": 2.5605165362358093,
    "last_step": 8000,
    "cost_half_gap": null,
@@ -1194,6 +1643,7 @@
    "run": "unet200k_arenas13_map16_r16_k8_s0_lr3e4",
    "A_budget": 2.971804730594158,
    "delta_vs_base": 0.003747902810573578,
+   "delta_at": null,
    "A_last": 2.971804730594158,
    "last_step": 4000,
    "cost_half_gap": null,
@@ -1207,6 +1657,7 @@
    "run": "unet200k_arenas13_map16_r16_k8_s0_lr5e4",
    "A_budget": 2.977931821718812,
    "delta_vs_base": 0.009874993935227394,
+   "delta_at": null,
    "A_last": 2.977931821718812,
    "last_step": 4000,
    "cost_half_gap": null,
@@ -1220,6 +1671,7 @@
    "run": "unet200k_arenas13_map16_r16_k8_s0_g8k",
    "A_budget": 2.9865116961300373,
    "delta_vs_base": 0.018454868346452713,
+   "delta_at": null,
    "A_last": 2.9756809938699007,
    "last_step": 8000,
    "cost_half_gap": null,
@@ -1758,7 +2210,7 @@
   },
   "unet200k_ema": {
    "source": "results/fresh_rescore/unet200k_ema",
-   "home": 4.138,
+   "home": 4.1384338941425085,
    "home_M": null,
    "maps": {
     "1": {
@@ -2109,6 +2561,7 @@
   "unet200k_arenas13_map14_r16_k8_s0: 2 evaluation configurations; read f7c601ad0eb3c4843a05e2611450c197efc136d0c526362c1381f40516b2384d (6 rows)",
   "unet200k_arenas13_map15_r16_k8_s0: 2 evaluation configurations; read a118e26e8151694923c8861b83b7f19178d18c57fbb8610aa8a677b964b4e341 (6 rows)",
   "unet200k_arenas13_map16_r16_k8_s0: 2 evaluation configurations; read 4ca28881b1a534fe5999b987a92e7fe66b8f99497f2072b2a3aadb50a6424623 (6 rows)",
-  "unet200k_arenas13_map17_r16_k8_s0: 2 evaluation configurations; read 27458c00cb4fb5d572c33ff22eb2fdb5e1fc5a0a87964982b72405562670e252 (6 rows)"
+  "unet200k_arenas13_map17_r16_k8_s0: 2 evaluation configurations; read 27458c00cb4fb5d572c33ff22eb2fdb5e1fc5a0a87964982b72405562670e252 (6 rows)",
+  "M at 4000: the adapter rows carry no heldout_B; read from results/fresh_rescore/adapt4000_live (13 arenas)"
  ]
 }

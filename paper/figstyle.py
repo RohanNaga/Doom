@@ -64,6 +64,7 @@ FAINT = "#BDBDBD"                 # per-arena context lines behind an aggregate
 TRAINING_BAND = "#E8E8E8"         # grey band behind the training maps' points
 TRAINING_LINE = "#707070"         # the training maps' reference line, dashed
 TRAINING_DASH = (0, (3, 2))
+TRAINING_LABEL = "training maps (in-distribution)"   # never "home" (Rohan, 2026-09-27)
 FULL_FT_DASH = (0, (3, 2))        # the full fine-tune: black, dashed, 1.0 pt
 SPARE = {"sky": "#56B4E9", "orange": "#E69F00", "yellow": "#F0E442", "purple": "#CC79A7"}  # unused by rule
 
@@ -162,6 +163,35 @@ def direct_label(ax, x, y, text, colour=INK, ha="left", va="center", dx=2.0, dy=
                        fontsize=ANNOT_PT, color=colour, annotation_clip=False, **kw)
 
 
+def declutter(values, gap):
+    """Label heights for values that must sit at least `gap` apart, in the values' order, each as near its value as
+    the others allow (labels pushed apart symmetrically around their cluster's centre)."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ys = [float(values[i]) for i in order]
+    for _ in range(len(ys) * 4):
+        moved = False
+        for k in range(1, len(ys)):
+            overlap = gap - (ys[k] - ys[k - 1])
+            if overlap > 1e-12:
+                ys[k - 1] -= overlap / 2
+                ys[k] += overlap / 2
+                moved = True
+        if not moved:
+            break
+    out = [0.0] * len(values)
+    for i, y in zip(order, ys):
+        out[i] = y
+    return out
+
+
+def end_labels(ax, points, gap, colour=CONTEXT_INK, dx=3.0):
+    """Direct labels at the right ends of lines: `points` is [(x, y, text)]; heights decluttered by `gap` (data)."""
+    ys = declutter([y for _, y, _ in points], gap)
+    for (x, _, text), y in zip(points, ys):
+        ax.annotate(text, (x, y), xytext=(dx, 0), textcoords="offset points", ha="left", va="center",
+                    fontsize=ANNOT_PT, color=colour, annotation_clip=False)
+
+
 def copy_last_line(ax, orientation="h", label=True, where=1.0, align="right"):
     """The zero line: copy-last (persistence), 0.6 pt black, labelled 'copy-last' at its end once."""
     if orientation == "h":
@@ -176,19 +206,24 @@ def copy_last_line(ax, orientation="h", label=True, where=1.0, align="right"):
                     va="top" if where >= 0.5 else "bottom", fontsize=ANNOT_PT, color=INK, gid="decor")
 
 
-def training_line(ax, value, label="training maps", orientation="h", where=0.0, align="left", colour=TRAINING_LINE):
-    """The training maps' reference: 0.6 pt dashed grey at `value`, labelled at one end."""
+def training_line(ax, value, label=TRAINING_LABEL, orientation="h", where=0.0, align="left", colour=TRAINING_LINE,
+                  band=None):
+    """The training maps' in-distribution reference: its 95% episode interval `band` as a thin grey band, the point
+    value as a 0.6 pt dashed grey line inside it, labelled at one end (no label when `label` is None)."""
+    span, line = (ax.axhspan, ax.axhline) if orientation == "h" else (ax.axvspan, ax.axvline)
+    if band is not None and all(b is not None for b in band):
+        span(band[0], band[1], color=TRAINING_BAND, lw=0, zorder=1.3, gid="ref")
+    line(value, color=colour, lw=REF_LW, ls=TRAINING_DASH, zorder=1.4, gid="ref")
+    if not label:
+        return
     if orientation == "h":
-        ax.axhline(value, color=colour, lw=REF_LW, ls=TRAINING_DASH, zorder=1.4, gid="ref")
-        if label:
-            ax.text(where, value, (" " if align == "left" else "") + label + (" " if align == "right" else ""),
-                    transform=ax.get_yaxis_transform(), ha=align, va="bottom", fontsize=ANNOT_PT,
-                    color=TRAINING_LINE, gid="decor")
+        top = band[1] if band is not None and band[1] is not None else value
+        ax.text(where, top, (" " if align == "left" else "") + label + (" " if align == "right" else ""),
+                transform=ax.get_yaxis_transform(), ha=align, va="bottom", fontsize=ANNOT_PT, color=TRAINING_LINE,
+                gid="decor")
     else:
-        ax.axvline(value, color=colour, lw=REF_LW, ls=TRAINING_DASH, zorder=1.4, gid="ref")
-        if label:
-            ax.text(value, where, label, transform=ax.get_xaxis_transform(), ha=align, va="bottom",
-                    fontsize=ANNOT_PT, color=TRAINING_LINE, rotation=0, gid="decor")
+        ax.text(value, where, label, transform=ax.get_xaxis_transform(), ha=align, va="bottom", fontsize=ANNOT_PT,
+                color=TRAINING_LINE, gid="decor")
 
 
 def training_band(ax, lo, hi, orientation="v"):
