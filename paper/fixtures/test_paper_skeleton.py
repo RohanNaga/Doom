@@ -47,6 +47,13 @@ IDENTIFYING = re.compile(r"rohan|keerthana|changliu|nagabhirava|chirumamilla|car
 DEFINITION = re.compile(r"^\s*\\(newcommand|renewcommand|providecommand|def)\b")
 
 
+def draft_phase():
+    """True while main.tex loads corl_2026 with the [preprint] option, the draft phase in which the real author
+    block is shown (Rohan, Sep 27). The anonymity gates skip then and return as hard failures once the option is
+    removed for submission."""
+    return re.search(r"\\usepackage\[preprint\]\{corl_2026\}", read("main.tex")) is not None
+
+
 def read(name):
     with open(os.path.join(PAPER, name)) as f:
         return f.read()
@@ -84,7 +91,8 @@ def test_the_template_is_used_as_shipped():
     tex = read("main.tex")
     body = "\n".join(strip_comment(ln) for ln in tex.splitlines())
     assert re.search(r"\\documentclass\{article\}", body)
-    assert re.search(r"\\usepackage\{corl_2026\}", body), "the submission build loads corl_2026 with no option"
+    if not draft_phase():
+        assert re.search(r"\\usepackage\{corl_2026\}", body), "the submission build loads corl_2026 without options"
     for forbidden in ("fullpage", "geometry", "times", "natbib"):
         assert not re.search(r"\\usepackage(\[[^\]]*\])?\{[^}]*\b%s\b" % forbidden, body), forbidden
     assert r"\keywords{" in body
@@ -103,7 +111,8 @@ def test_every_citation_resolves_to_a_verified_bib_entry():
         assert re.search(r"(eprint|url|howpublished)\s*=", body), f"{key} names no arXiv id or URL"
 
 
-@pytest.mark.skip(reason="provenance of placeholders moved to FIGURES.md and RESEARCH_CONTEXT; the paper sources carry no process comments")
+@pytest.mark.skip(reason="provenance of placeholders moved to FIGURES.md and RESEARCH_CONTEXT; "
+                  "the paper sources carry no process comments")
 def test_every_placeholder_names_what_it_depends_on():
     for name in SOURCES:
         for block in paragraphs(read(name)):
@@ -149,6 +158,8 @@ def test_the_submission_build_leaves_the_appendix_out_and_points_through_appref(
 
 
 def test_the_sources_carry_identifying_strings_only_in_camera_ready_comments():
+    if draft_phase():
+        pytest.skip("draft phase: [preprint] shows the authors; swap the blocks and drop the option before submission")
     for name in SOURCES:
         for n, line in enumerate(read(name).splitlines(), 1):
             if IDENTIFYING.search(line):
@@ -195,6 +206,8 @@ NEEDS_LATEX = pytest.mark.skipif(shutil.which("pdflatex") is None or shutil.whic
 
 @NEEDS_LATEX
 def test_the_submission_build_is_clean_anonymous_and_fits_four_pages(tmp_path):
+    if draft_phase():
+        pytest.skip("draft phase: [preprint] shows the authors; swap the blocks and drop the option before submission")
     work = build(tmp_path, with_appendix=False)
     check_clean(work)
     if shutil.which("pdftotext"):
