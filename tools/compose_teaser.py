@@ -27,6 +27,10 @@ rollout, or the ones `--pick` names, in that order): the context frame at the ti
 the page height for a slot: the frames shrink to fit it and the block is centred across the width. `--no-reference`
 drops the training-map column (and needs no training-map window).
 
+**Layout C** (`layout_c`, driven by `tools/teaser_contact_sheet.py`): one row per chosen action, the unseen
+context, an in-domain pair (the same control starting on a training map, context and +8), then zero-shot, adapted
+and ground truth +8, scene PSNR under every model frame.
+
 Row labels carry at most one number (`--adapted-label`, default "after 8 episodes"); the budget and GPU-hours go in
 the caption. Output: `<out-dir>/<stem>.pdf/.png` through `figstyle.save` and `<stem>.json` with the windows, tics,
 actions and per-tic scene PSNR drawn.
@@ -380,6 +384,77 @@ def layout_b(root, out_dir, window=None, home=None, actions=4, adapted_label=DEF
         _text(fig, width, height, x0 + label_w - 3 / 72, y + fh / 2, name, ha="right", va="center",
               fontsize=fs.ANNOT_PT, style="italic")
         record["rows"].append(row)
+    paths = fs.save(fig, out_dir, stem)
+    return paths + [_sidecar(out_dir, stem, record)], record
+
+
+def layout_c(root, out_dir, rows, adapted_label=DEFAULT_ADAPTED_LABEL, horizon=HORIZON_B, width=fs.TEXT_WIDTH,
+             max_height=2.2, stem="fig_teaser_C"):
+    """Layout C (the selection round's form); returns the written paths and the sidecar record. One row per entry
+    of `rows` ({"window", "tic", "control", "home": {"window", "tic"}}): the unseen arena's ground-truth frame at
+    the tic the control starts; the in-domain pair, a real start of the same control on a training map, its
+    ground-truth frame and the U-Net `horizon` tics later; then zero-shot, adapted and ground truth `horizon` tics
+    after the unseen start. Model frames carry their scene PSNR beneath and the two context frames their tic in the
+    closed-loop rollout (the +8 frames are that tic + 8 of one rollout from tic 0, not a rollout restarted at the
+    context). The page is `width` wide and as tall as the
+    frames need, at most `max_height`. Rows are labelled with the whole executed control, the named action first."""
+    ws = windows(root)
+    fs.style()
+    labels = [r["label"] for r in rows]
+    label_w = max(text_width(line, style="italic") for lab in labels for line in lab.split("\n")) + 5 / 72
+    group_gap = 5 / 72
+    ncols = 6
+    fixed = label_w + (ncols - 1) * GUTTER + 2 * group_gap + 0.02
+    head = 2 * 8 / 72
+    psnr_line = 7 / 72
+    n = len(rows)
+    sample = frame(os.path.join(ws[rows[0]["window"]], ROWS["truth"]), rows[0]["tic"])
+    aspect = sample.shape[0] / sample.shape[1]
+    fw = (width - fixed) / ncols
+    fw = min(fw, (max_height - head - n * psnr_line - (n - 1) * GUTTER - 0.02) / n / aspect)
+    fh = fw * aspect
+    height = head + n * (fh + psnr_line) + (n - 1) * GUTTER + 0.02
+    used = fixed - 0.02 + ncols * fw
+    x0 = max(0.0, (width - used) / 2)
+    xs, x = [], x0 + label_w
+    for i in range(ncols):
+        xs.append(x)
+        x += fw + (group_gap if i in (0, 2) else GUTTER)
+    fig = _figure(width, height)
+    top = {0: "context", 3: "zero-shot", 4: adapted_label, 5: TRUTH_LABEL}
+    for i, text in top.items():
+        _text(fig, width, height, xs[i] + fw / 2, 0.0, text, ha="center", va="top", fontsize=fs.ANNOT_PT)
+    _text(fig, width, height, (xs[1] + xs[2] + fw) / 2, 0.0, "training map (in-domain)", ha="center", va="top",
+          fontsize=fs.ANNOT_PT)
+    sub = {0: "unseen arena", 1: "context", 2: f"+{horizon} tics", 3: f"+{horizon} tics", 4: f"+{horizon} tics",
+           5: f"+{horizon} tics"}
+    for i, text in sub.items():
+        _text(fig, width, height, xs[i] + fw / 2, 8 / 72, text, ha="center", va="top", fontsize=fs.MIN_PT,
+              color=fs.CONTEXT_INK)
+    record = {"layout": "C", "horizon": horizon, "size_in": [width, round(height, 4)], "rows": []}
+    for r, row in enumerate(rows):
+        y = head + r * (fh + psnr_line + GUTTER)
+        wd, hd = ws[row["window"]], ws[row["home"]["window"]]
+        man, hman = manifest_of(root, wd), manifest_of(root, hd)
+        t, th = row["tic"], row["home"]["tic"]
+        psnr = {"zero-shot": per_tic_scene(man, ROWS["model"]).get(t + horizon),
+                "adapted": per_tic_scene(man, ROWS["adapted"]).get(t + horizon),
+                "in-domain": per_tic_scene(hman, ROWS["model"]).get(th + horizon)}
+        cells = [(frame(os.path.join(wd, ROWS["truth"]), t), f"rollout tic {t}"),
+                 (frame(os.path.join(hd, ROWS["truth"]), th), f"rollout tic {th}"),
+                 (frame(os.path.join(hd, ROWS["model"]), th + horizon), psnr["in-domain"]),
+                 (frame(os.path.join(wd, ROWS["model"]), t + horizon), psnr["zero-shot"]),
+                 (frame(os.path.join(wd, ROWS["adapted"]), t + horizon), psnr["adapted"]),
+                 (frame(os.path.join(wd, ROWS["truth"]), t + horizon), None)]
+        for xi, (img, value) in zip(xs, cells):
+            _place(fig, width, height, xi, y, fw, fh, img)
+            if value is not None:
+                _text(fig, width, height, xi + fw / 2, y + fh + 0.5 / 72,
+                      value if isinstance(value, str) else f"{value:.1f} dB", ha="center", va="top",
+                      fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
+        _text(fig, width, height, x0 + label_w - 3 / 72, y + fh / 2, row["label"], ha="right", va="center",
+              fontsize=fs.ANNOT_PT, style="italic", linespacing=1.0)
+        record["rows"].append({**row, "scene_psnr": psnr})
     paths = fs.save(fig, out_dir, stem)
     return paths + [_sidecar(out_dir, stem, record)], record
 

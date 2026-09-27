@@ -1,0 +1,91 @@
+{
+ "layout": "C",
+ "horizon": 8,
+ "size_in": [
+  5.5,
+  2.1195
+ ],
+ "rows": [
+  {
+   "row": "attack",
+   "window": "unseen_arena07_ep158_s1672",
+   "tic": 92,
+   "button": "attack",
+   "control": "attack + turn right + strafe right",
+   "label": "attack\nturn right\nstrafe right",
+   "story": 4.622,
+   "zero_shot": 12.413,
+   "adapted": 17.035,
+   "chroma": 8.11,
+   "edges": 0.1276,
+   "depth": 100,
+   "home": {
+    "window": "train_map02_ep6024_s2568",
+    "tic": 85,
+    "button": "attack",
+    "control": "attack + turn right",
+    "depth": 93,
+    "in_domain": 18.238
+   },
+   "scene_psnr": {
+    "zero-shot": 12.413,
+    "adapted": 17.035,
+    "in-domain": 18.238
+   }
+  },
+  {
+   "row": "turn",
+   "window": "unseen_arena07_ep158_s1672",
+   "tic": 104,
+   "button": "turn left",
+   "control": "attack + turn left + back",
+   "label": "turn left\nattack\nback",
+   "story": 4.698,
+   "zero_shot": 12.634,
+   "adapted": 17.332,
+   "chroma": 7.03,
+   "edges": 0.1228,
+   "depth": 112,
+   "home": {
+    "window": "train_map02_ep6064_s2312",
+    "tic": 102,
+    "button": "turn left",
+    "control": "attack + turn left + strafe left",
+    "depth": 110,
+    "in_domain": 17.166
+   },
+   "scene_psnr": {
+    "zero-shot": 12.634,
+    "adapted": 17.332,
+    "in-domain": 17.166
+   }
+  },
+  {
+   "row": "forward",
+   "window": "unseen_arena07_ep158_s1672",
+   "tic": 228,
+   "button": "forward",
+   "control": "turn right + forward",
+   "label": "forward\nturn right",
+   "story": 4.888,
+   "zero_shot": 11.956,
+   "adapted": 16.844,
+   "chroma": 5.62,
+   "edges": 0.1386,
+   "depth": 236,
+   "home": {
+    "window": "train_map02_ep6024_s4424",
+    "tic": 219,
+    "button": "forward",
+    "control": "turn right + forward",
+    "depth": 227,
+    "in_domain": 15.901
+   },
+   "scene_psnr": {
+    "zero-shot": 11.956,
+    "adapted": 16.844,
+    "in-domain": 15.901
+   }
+  }
+ ]
+}
