@@ -10,6 +10,10 @@
 % sampler, objective, metric, engine) that the memos did not cover; they were verified the same way.
 % Keys follow firstauthorYYYYshortword, reusing the Sep 16 keys where the paper is the same.
 
+% Bibliography typesetting only: no hyphenation inside reference entries. GPTZero's PDF parser split
+% titles at line-end hyphens ("syn-thesis", "Matrix-game") and then matched them only partially.
+@preamble{"\providecommand{\bibfont}{}\renewcommand{\bibfont}{\hyphenpenalty=10000\exhyphenpenalty=10000}"}
+
 % ---- Game and interactive world models ----
 
 % arXiv comment: ICLR 2025. Facts used: v2 sec. 4.2 (70M-example subset, 700k updates, batch 128), v1 sec. 4.2 (900M generated frames), sec. 3.2.2 (decoder tuned with MSE alone); read 2026-09-26.
@@ -19,7 +23,8 @@
   booktitle     = {International Conference on Learning Representations (ICLR)},
   year          = {2025},
   eprint        = {2408.14837},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.2408.14837}
 }
 
 % arXiv comment: NeurIPS 2024 (Spotlight).
@@ -29,17 +34,19 @@
   booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
   year          = {2024},
   eprint        = {2405.12399},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.52202/079017-1873}
 }
 
 % arXiv only. The Sep 16 entry's author list was wrong (second author onward); corrected from the abs page.
 @article{he2025matrixgame2,
-  title         = {Matrix-Game 2.0: An Open-Source, Real-Time, and Streaming Interactive World Model},
+  title         = {{Matrix-Game} 2.0: An Open-Source, Real-Time, and Streaming Interactive World Model},
   author        = {He, Xianglong and Peng, Chunli and Liu, Zexiang and Wang, Boyang and Zhang, Yifan and Cui, Qi and Kang, Fei and Jiang, Biao and An, Mengyin and Ren, Yangyang and Xu, Baixin and Guo, Hao-Xiang and Gong, Kaixiong and Wu, Size and Li, Wei and Song, Xuchen and Liu, Yang and Li, Yangguang and Zhou, Yahui},
   journal       = {arXiv preprint arXiv:2508.13009},
   year          = {2025},
   eprint        = {2508.13009},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.2508.13009}
 }
 
 % arXiv only; whether its test maps are held out is not stated (lit-scene-generalization memo, D).
@@ -49,7 +56,8 @@
   journal       = {arXiv preprint arXiv:2603.06679},
   year          = {2026},
   eprint        = {2603.06679},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.2603.06679}
 }
 
 % arXiv only (venue VERIFY). Facts used: sec. 5.3 to 5.4 (appearance distance r = 0.812; full fine-tuning on 25 to 75 episodes; seen-robot forgetting), verified by main against the arXiv HTML (related-work map).
@@ -59,27 +67,35 @@
   journal       = {arXiv preprint arXiv:2608.05799},
   year          = {2026},
   eprint        = {2608.05799},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.2608.05799}
 }
 
-% Venue: RLC 2025, from the RLJ PDF (lit-adapters memo, B); the ICLR 2025 listing remains VERIFY.
-@inproceedings{rigter2024avid,
+% Reinforcement Learning Journal 6:737-764, presented at RLC 2025 (rlj.cs.umass.edu/2025/papers/Paper64.html, read 2026-09-27).
+@article{rigter2024avid,
   title         = {{AVID}: Adapting Video Diffusion Models to World Models},
   author        = {Rigter, Marc and Gupta, Tarun and Hilmkil, Agrin and Ma, Chao},
-  booktitle     = {Reinforcement Learning Conference (RLC)},
   year          = {2025},
   eprint        = {2410.12822},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  url           = {https://rlj.cs.umass.edu/2025/papers/Paper64.html},
+  journal       = {Reinforcement Learning Journal},
+  volume        = {6},
+  pages         = {737--764}
 }
 
-% arXiv comment: ICML 2025.
+% ICML 2025, PMLR 267:18744-18771; booktitle, series and pages copied from the PMLR page's BibTeX (2026-09-27).
 @inproceedings{gao2025adaworld,
   title         = {{AdaWorld}: Learning Adaptable World Models with Latent Actions},
   author        = {Gao, Shenyuan and Zhou, Siyuan and Du, Yilun and Zhang, Jun and Gan, Chuang},
-  booktitle     = {International Conference on Machine Learning (ICML)},
+  booktitle     = {Proceedings of the 42nd International Conference on Machine Learning},
   year          = {2025},
   eprint        = {2503.18938},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  url           = {https://proceedings.mlr.press/v267/gao25u.html},
+  series        = {Proceedings of Machine Learning Research},
+  volume        = {267},
+  pages         = {18744--18771}
 }
 
 % arXiv comment: ICCV 2021.
@@ -89,20 +105,22 @@
   booktitle     = {IEEE/CVF International Conference on Computer Vision (ICCV)},
   year          = {2021},
   eprint        = {2105.08756},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.1109/ICCV48922.2021.01447}
 }
 
-% arXiv comment names no venue (ICML 2024 per the memos, VERIFY); cited for the delta-PSNR form only.
+% ICML 2024, PMLR 235:4603-4623; booktitle, series and the author name forms follow the PMLR page (2026-09-27). Cited for the delta-PSNR form only.
 @inproceedings{bruce2024genie,
   title         = {Genie: Generative Interactive Environments},
-  author        = {Bruce, Jake and Dennis, Michael and Edwards, Ashley and Parker-Holder, Jack and Shi, Yuge and Hughes, Edward and Lai, Matthew and Mavalankar, Aditi and Steigerwald, Richie and Apps, Chris and Aytar, Yusuf and Bechtle, Sarah and Behbahani, Feryal and Chan, Stephanie and Heess, Nicolas and Gonzalez, Lucy and Osindero, Simon and Ozair, Sherjil and Reed, Scott and Zhang, Jingwei and Zolna, Konrad and Clune, Jeff and de Freitas, Nando and Singh, Satinder and Rockt{\"a}schel, Tim},
+  author        = {Bruce, Jake and Dennis, Michael D. and Edwards, Ashley and Parker-Holder, Jack and Shi, Yuge and Hughes, Edward and Lai, Matthew and Mavalankar, Aditi and Steigerwald, Richie and Apps, Chris and Aytar, Yusuf and Bechtle, Sarah Maria Elisabeth and Behbahani, Feryal and Chan, Stephanie C. Y. and Heess, Nicolas and Gonzalez, Lucy and Osindero, Simon and Ozair, Sherjil and Reed, Scott and Zhang, Jingwei and Zolna, Konrad and Clune, Jeff and {De Freitas}, Nando and Singh, Satinder and Rockt{\"a}schel, Tim},
   year          = {2024},
   eprint        = {2402.15391},
   archiveprefix = {arXiv},
-  booktitle = {International Conference on Machine Learning (ICML)},
-  series = {PMLR},
-  volume = {235},
-  pages = {4603--4623}
+  booktitle     = {Proceedings of the 41st International Conference on Machine Learning},
+  series        = {Proceedings of Machine Learning Research},
+  volume        = {235},
+  pages         = {4603--4623},
+  url           = {https://proceedings.mlr.press/v235/bruce24a.html}
 }
 
 % arXiv comment: NeurIPS 2024. Fact used: App. C.3, frozen U-Net with rank-16 LoRA (lit-adapters memo, B).
@@ -112,7 +130,8 @@
   booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
   year          = {2024},
   eprint        = {2405.17398},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.52202/079017-2906}
 }
 
 % ---- Persistence references and forecasting tables ----
@@ -124,7 +143,8 @@
   booktitle     = {International Conference on Learning Representations (ICLR)},
   year          = {2017},
   eprint        = {1605.08104},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.1605.08104}
 }
 
 % arXiv comment: NeurIPS 2019. Copy-last beats every model on Human3.6M (App. Figs. 8 to 10).
@@ -134,7 +154,8 @@
   booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
   year          = {2019},
   eprint        = {1911.01655},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.1911.01655}
 }
 
 % Venue ICLR 2016 (distance-study literature memo, Q4). "Last input" baseline, moving-area evaluation.
@@ -144,19 +165,20 @@
   booktitle     = {International Conference on Learning Representations (ICLR)},
   year          = {2016},
   eprint        = {1511.05440},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.1511.05440}
 }
 
-% arXiv comment names no venue (ECCV 2024 per the memos, VERIFY). Table 1: reconstruction, Copy&Paste and model rows.
+% ECCV 2024, LNCS pp. 55-72 (Crossref). The DOI is given as a url: in the OT1 font the doi macro drops the underscore from the PDF text layer. Table 1: reconstruction, Copy&Paste and model rows.
 @inproceedings{zheng2023occworld,
   title         = {{OccWorld}: Learning a {3D} Occupancy World Model for Autonomous Driving},
   author        = {Zheng, Wenzhao and Chen, Weiliang and Huang, Yuanhui and Zhang, Borui and Duan, Yueqi and Lu, Jiwen},
   year          = {2024},
   eprint        = {2311.16038},
   archiveprefix = {arXiv},
-  booktitle = {European Conference on Computer Vision (ECCV)},
-  pages = {55--72},
-  doi = {10.1007/978-3-031-72624-8_4}
+  booktitle     = {European Conference on Computer Vision (ECCV)},
+  pages         = {55--72},
+  url           = {https://doi.org/10.1007/978-3-031-72624-8_4}
 }
 
 % arXiv comment: NeurIPS 2025. Table 2: oracle 77.0, copy-last 54.7, prediction 71.8 mIoU.
@@ -166,7 +188,8 @@
   booktitle     = {Advances in Neural Information Processing Systems (NeurIPS)},
   year          = {2025},
   eprint        = {2412.11673},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.52202/085713-5466}
 }
 
 % ---- Distances and transfer ----
@@ -199,10 +222,10 @@
   year          = {2022},
   eprint        = {2103.13318},
   archiveprefix = {arXiv},
-  volume = {44},
+  volume        = {44},
   number = {12},
-  pages = {9298--9314},
-  doi = {10.1109/TPAMI.2021.3129870}
+  pages         = {9298--9314},
+  doi           = {10.1109/TPAMI.2021.3129870}
 }
 
 % arXiv comment: accepted to ECCV 2026. Table 2: Wasserstein rho about 0.48 vs latent KL about 0.81.
@@ -236,7 +259,8 @@
   booktitle     = {International Conference on Learning Representations (ICLR)},
   year          = {2022},
   eprint        = {2106.09685},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.2106.09685}
 }
 
 % Venue ICCV 2023 (CVF open access, lit-adapters memo, A). Table 1: LoRA-R16 mean FID 81.31 vs full fine-tune 16.59, verified by main against the arXiv HTML.
@@ -246,7 +270,8 @@
   booktitle     = {IEEE/CVF International Conference on Computer Vision (ICCV)},
   year          = {2023},
   eprint        = {2304.06648},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.1109/ICCV51070.2023.00390}
 }
 
 % arXiv comment: TMLR, August 2024.
@@ -268,10 +293,11 @@
   booktitle     = {AAAI Conference on Artificial Intelligence},
   year          = {2017},
   eprint        = {1609.05521},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.1609/aaai.v31i1.10827}
 }
 
-% arXiv only (IEEE Transactions on Games per the memos, VERIFY). Unseen-map tracks for agents.
+% IEEE Transactions on Games 11(3):248-259, 2019 (Crossref). Unseen-map tracks for agents.
 @article{wydmuch2018vizdoom,
   title         = {{ViZDoom} Competitions: Playing {Doom} from Pixels},
   author        = {Wydmuch, Marek and Kempka, Micha{\l} and Ja{\'s}kowski, Wojciech},
@@ -279,10 +305,10 @@
   year          = {2019},
   eprint        = {1809.03470},
   archiveprefix = {arXiv},
-  volume = {11},
+  volume        = {11},
   number = {3},
-  pages = {248--259},
-  doi = {10.1109/TG.2018.2877047}
+  pages         = {248--259},
+  doi           = {10.1109/TG.2018.2877047}
 }
 
 % Outside the memos. arXiv journal-ref: Proceedings of IEEE CIG 2016.
@@ -292,7 +318,8 @@
   booktitle     = {IEEE Conference on Computational Intelligence and Games (CIG)},
   year          = {2016},
   eprint        = {1605.02097},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.1109/CIG.2016.7860433}
 }
 
 % ---- Backbones, objective, sampler, metric (outside the memos) ----
@@ -304,30 +331,34 @@
   booktitle     = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
   year          = {2022},
   eprint        = {2112.10752},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.1109/CVPR52688.2022.01042}
 }
 
-% arXiv comment names no venue (ICLR 2024, VERIFY).
+% ICLR 2024. Eleven authors, as printed on the ICLR camera-ready PDF (proceedings.iclr.cc, read 2026-09-27) and on arXiv;
+% the proceedings.iclr.cc metadata page drops Yue Wu, so the arXiv DOI (same 11 authors) is the identifier.
 @inproceedings{chen2023pixart,
   title         = {{PixArt}-$\alpha$: Fast Training of Diffusion Transformer for Photorealistic Text-to-Image Synthesis},
-  author        = {Chen, Junsong and Yu, Jincheng and Ge, Chongjian and Yao, Lewei and Xie, Enze and Wang, Zhongdao and Kwok, James and Luo, Ping and Lu, Huchuan and Li, Zhenguo},
+  author        = {Chen, Junsong and Yu, Jincheng and Ge, Chongjian and Yao, Lewei and Xie, Enze and Wu, Yue and Wang, Zhongdao and Kwok, James and Luo, Ping and Lu, Huchuan and Li, Zhenguo},
   year          = {2024},
   eprint        = {2310.00426},
   archiveprefix = {arXiv},
-  booktitle = {International Conference on Learning Representations (ICLR)}
+  booktitle     = {International Conference on Learning Representations (ICLR)},
+  doi           = {10.48550/arXiv.2310.00426}
 }
 
-% arXiv comment names no venue (ICML 2024, VERIFY). The SD 3 MMDiT family; SD 3.5 Medium is its released successor.
+% ICML 2024, PMLR 235:12606-12633; the 14-author list matches the PMLR page (arXiv v1 lists 17). The SD 3 MMDiT family; SD 3.5 Medium is its released successor.
 @inproceedings{esser2024sd3,
   title         = {Scaling Rectified Flow Transformers for High-Resolution Image Synthesis},
   author        = {Esser, Patrick and Kulal, Sumith and Blattmann, Andreas and Entezari, Rahim and M{\"u}ller, Jonas and Saini, Harry and Levi, Yam and Lorenz, Dominik and Sauer, Axel and Boesel, Frederic and Podell, Dustin and Dockhorn, Tim and English, Zion and Rombach, Robin},
   year          = {2024},
   eprint        = {2403.03206},
   archiveprefix = {arXiv},
-  booktitle = {International Conference on Machine Learning (ICML)},
-  series = {PMLR},
-  volume = {235},
-  pages = {12606--12633}
+  booktitle     = {Proceedings of the 41st International Conference on Machine Learning},
+  series        = {Proceedings of Machine Learning Research},
+  volume        = {235},
+  pages         = {12606--12633},
+  url           = {https://proceedings.mlr.press/v235/esser24a.html}
 }
 
 % arXiv comment: ICLR 2022. The v-prediction target.
@@ -337,7 +368,8 @@
   booktitle     = {International Conference on Learning Representations (ICLR)},
   year          = {2022},
   eprint        = {2202.00512},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.2202.00512}
 }
 
 % arXiv comment: ICLR 2021.
@@ -347,7 +379,8 @@
   booktitle     = {International Conference on Learning Representations (ICLR)},
   year          = {2021},
   eprint        = {2010.02502},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.48550/arXiv.2010.02502}
 }
 
 % arXiv comment: CVPR 2018.
@@ -357,7 +390,8 @@
   booktitle     = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
   year          = {2018},
   eprint        = {1801.03924},
-  archiveprefix = {arXiv}
+  archiveprefix = {arXiv},
+  doi           = {10.1109/CVPR.2018.00068}
 }
 
 % arXiv comment names no venue (CVPR 2024 per the adaptation memo, VERIFY). EMA length sets image quality (sec. 3).
