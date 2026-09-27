@@ -15,9 +15,16 @@ adaptation curve is scored on the same held-out windows (`score_adapt.py`).
 SOURCE snapshot's own args, never from this command line: the backbone and its graph, the 32-tic context,
 the executed-control history, the objective, the context-noise augmentation level and its buckets, the action
 dropout. The loop is the pretraining loop's (`train_wm.py`): the same `noise_augment` call, the same
-`VDiffusion.training_loss`, bf16 autocast, gradient clipping at `--clip`, the same non-finite skip, the same
-linear warmup through `LambdaLR`, fused AdamW, and the same `SeededCorruption` validation read. It is a
+`VDiffusion.training_loss`, bf16 autocast, the same gradient clipping, non-finite skip and spike guard, the
+same linear warmup through `LambdaLR`, fused AdamW, and the same `SeededCorruption` validation read. It is a
 separate script so that `train_wm.py`, which the finished rows were certified against, stays byte-identical.
+
+**The optimization policy is the source's too.** Gradient clipping (`clip`), weight decay (`wd`) and the spike
+guard (`skip_grad_norm`, active from update `skip_grad_after`) are read from the source run's args unless the
+command line gives them explicitly, and fall back to `train_wm.py`'s defaults only for a source that predates
+a flag (`optim_policy`). The certificate records each value and where it came from: `source`, `cli` or
+`default`. `skip_grad_after` counts adaptation updates, so a source guard that waited 3,000 updates waits
+3,000 adaptation updates too; pass `--skip-grad-after` to change that deliberately.
 
 **The source weights.** `--source-weights ema` (the default) loads the snapshot's EMA tensors INTO THE MODEL
 with `doomdit_utils.load_world_model_state`, the loader every zero-shot score was produced with, so the
@@ -72,6 +79,8 @@ from train_wm import SeededCorruption, SyntheticWindows, save_checkpoint, unpack
 from wandb_log import DEFAULT_PROJECT, RunLogger
 
 DEFAULT_GRID = "0,250,500,1000,2000,4000"       # log-spaced until the curve flattens
+# train_wm.py's defaults, for a source whose args predate one of these flags
+OPTIM_POLICY_DEFAULTS = {"clip": 1.0, "wd": 0.0, "skip_grad_norm": 0.0, "skip_grad_after": 0}
 CKPT_PREFIX = "adapter_"
 
 
@@ -120,6 +129,24 @@ def source_recipe(src_args):
             "phase_buckets": phase, "action_inject": a.get("action_inject") or "token",
             "action_dropout": float(a.get("action_dropout", 0.1)), "warm_start": a.get("warm_start"),
             "hf_cache": a.get("hf_cache")}
+
+
+def optim_policy(src_args, args):
+    """{clip, wd, skip_grad_norm, skip_grad_after: {"value", "from"}}: explicit flag, else source, else default.
+
+    The adapter is trained under the source run's own clipping, weight decay and spike guard unless the
+    command line says otherwise, so a difference between the two is always a stated choice.
+    """
+    out = {}
+    for key, default in OPTIM_POLICY_DEFAULTS.items():
+        given, recorded = getattr(args, key, None), (src_args or {}).get(key)
+        if given is not None:
+            out[key] = {"value": type(default)(given), "from": "cli"}
+        elif recorded is not None:
+            out[key] = {"value": type(default)(recorded), "from": "source"}
+        else:
+            out[key] = {"value": default, "from": "default"}
+    return out
 
 
 def build_source_model(recipe, grad_ckpt=False, warm_start=None, hf_cache=None):
@@ -182,7 +209,9 @@ def certificate_line(c):
               ("micro_batch", c["micro_batch"]), ("world", c["world"]), ("accum", c["accum"]),
               ("effective_batch", c["effective_batch"]), ("lr", f"{c['lr']:g}"), ("warmup", c["warmup"]),
               ("ema_decay", f"{c['ema_decay']:g}"), ("rank", c["rank"]), ("alpha", f"{c['alpha']:g}"),
-              ("dropout", f"{c['dropout']:g}"), ("lora_mlp", int(c["lora_mlp"])),
+              ("dropout", f"{c['dropout']:g}"),
+              *((k, f"{v['value']:g}({v['from']})") for k, v in c["optim_policy"].items()),
+              ("lora_mlp", int(c["lora_mlp"])),
               ("parts", ",".join(c["parts"]) or "none"), ("trainable", c["trainable"]),
               ("grid", ",".join(str(s) for s in c["step_grid"])),
               ("step0_parity_max_abs", f"{c['step0_parity_max_abs']:.3g}"),
@@ -234,6 +263,9 @@ def main(args):
     source = {"path": os.path.abspath(args.source), "weights": args.source_weights, "step": src_ck.get("step"),
               "sha256": sha256_file(args.source)}
     source_args = dict(src_ck["args"])
+    policy = optim_policy(source_args, args)
+    clip, wd = policy["clip"]["value"], policy["wd"]["value"]
+    skip_norm, skip_after = policy["skip_grad_norm"]["value"], policy["skip_grad_after"]["value"]
     del src_ck
     diffusion = VDiffusion(device=device, objective=recipe["objective"])
 
@@ -284,7 +316,7 @@ def main(args):
     named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
     ema = {n: p.detach().float().clone() for n, p in named}
     trainable = [p for _, p in named]
-    opt = torch.optim.AdamW(trainable, lr=args.lr, weight_decay=args.wd, fused=(device.type == "cuda"))
+    opt = torch.optim.AdamW(trainable, lr=args.lr, weight_decay=wd, fused=(device.type == "cuda"))
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1.0, (s + 1) / args.warmup))
     extra = {"prefetch_factor": args.prefetch_factor} if args.num_workers > 0 else {}
     loader = DataLoader(train_ds, batch_size=args.per_gpu_batch, shuffle=True, num_workers=args.num_workers,
@@ -299,7 +331,7 @@ def main(args):
             "adapt_episodes": train_ids or [], "adapt_episodes_k": len(train_ids or []), "held_out": held_ids or [],
             "held_out_windows": len(val_ds), "micro_batch": args.per_gpu_batch, "world": world, "accum": accum,
             "effective_batch": args.per_gpu_batch * world * accum, "lr": args.lr, "warmup": args.warmup,
-            "ema_decay": args.ema_decay, "rank": args.lora_rank, "alpha": args.lora_alpha,
+            "ema_decay": args.ema_decay, "optim_policy": policy, "rank": args.lora_rank, "alpha": args.lora_alpha,
             "dropout": args.lora_dropout, "lora_mlp": bool(args.lora_mlp), "parts": list(parts),
             "trainable": counts["trainable"], "step_grid": grid, "step0_parity_max_abs": parity,
             "step0_parity_windows": len(parity_batch[0]), "recipe": recipe, "counts": counts, "args": vars(args)}
@@ -386,13 +418,18 @@ def main(args):
             running.append(loss.item() * accum)
             if micro % accum != 0:
                 continue
-            gn = acc.clip_grad_norm_(trainable, args.clip if args.clip > 0 else float("inf"))
+            gn = acc.clip_grad_norm_(trainable, clip if clip > 0 else float("inf"))
             grad_norms.append(float(gn))
-            if not math.isfinite(float(gn)):
+            # train_wm.py's rule: a non-finite norm, or past `skip_after` a pre-clip norm above the source's
+            # spike guard, skips the update without advancing the schedule or the EMA
+            spike = skip_norm > 0 and step >= skip_after and float(gn) > skip_norm
+            if not math.isfinite(float(gn)) or spike:
                 opt.zero_grad(set_to_none=True); skipped += 1
-                log(event="skipped_update", step=step, micro=micro, grad_norm=float(gn), skipped_total=skipped)
+                log(event="skipped_update", step=step, micro=micro, grad_norm=float(gn), threshold=skip_norm,
+                    skipped_total=skipped)
                 if skipped > 20:
-                    raise RuntimeError(f"{skipped} non-finite gradient updates; stopping before Adam state is corrupted")
+                    raise RuntimeError(f"{skipped} skipped gradient updates (non-finite or above the spike guard "
+                                       f"{skip_norm:g}); stopping before Adam state is corrupted")
                 continue
             opt.step(); sched.step(); opt.zero_grad(set_to_none=True)
             step += 1
@@ -404,7 +441,7 @@ def main(args):
                 log(event="train", step=step, loss=float(np.mean(running)), lr=sched.get_last_lr()[0],
                     steps_per_s=step / dt, peak_mem_gb=round(mem, 2), peak_reserved_gb=round(res, 2),
                     grad_norm=float(np.mean(grad_norms)), grad_norm_max=float(np.max(grad_norms)),
-                    clip_frac=float(np.mean([g > args.clip for g in grad_norms])) if args.clip > 0 else 0.0,
+                    clip_frac=float(np.mean([g > clip for g in grad_norms])) if clip > 0 else 0.0,
                     nonfinite_loss=int(sum(not np.isfinite(x) for x in running)), skipped_updates=skipped)
                 running, grad_norms = [], []
             if not args.fit_check and (step in grid or (args.val_every and step % args.val_every == 0)):
@@ -453,8 +490,13 @@ def build_parser():
                         f"{','.join(lora.FULL_PARTS)}; 'none' for LoRA only; 'all' for every backbone parameter")
     p.add_argument("--lr", type=float, default=1e-4, help="constant after the warmup, for the adapter and the parts")
     p.add_argument("--warmup", type=int, default=100)
-    p.add_argument("--wd", type=float, default=0.0)
-    p.add_argument("--clip", type=float, default=1.0)
+    p.add_argument("--wd", type=float, default=None, help="weight decay; default: the source run's")
+    p.add_argument("--clip", type=float, default=None, help="gradient clipping norm (0 = off); default: the source run's")
+    p.add_argument("--skip-grad-norm", type=float, default=None,
+                   help="spike guard: skip an update whose pre-clip gradient norm exceeds this (0 = off); default: "
+                        "the source run's")
+    p.add_argument("--skip-grad-after", type=int, default=None,
+                   help="the spike guard is inactive before this many adaptation updates; default: the source run's")
     p.add_argument("--ema-decay", type=float, default=0.999, help="per update; the EMA is fp32 on the training device")
     p.add_argument("--step-grid", default=DEFAULT_GRID,
                    help="update counts at which the adapter is saved and validated; the last is the run length")

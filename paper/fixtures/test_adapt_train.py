@@ -102,6 +102,38 @@ def test_the_defaults_are_the_designs():
     assert adapt_wm.parse_grid(a.step_grid) == [0, 250, 500, 1000, 2000, 4000] and a.wandb is True
 
 
+def test_clipping_weight_decay_and_the_spike_guard_come_from_the_source_unless_given():
+    parse = adapt_wm.build_parser().parse_args
+    src = {"clip": 0.5, "wd": 0.01, "skip_grad_norm": 5.0, "skip_grad_after": 3000}
+    p = adapt_wm.optim_policy(src, parse(["--source", "s.pt", "--results-dir", "r"]))
+    assert {k: (v["value"], v["from"]) for k, v in p.items()} == {
+        "clip": (0.5, "source"), "wd": (0.01, "source"), "skip_grad_norm": (5.0, "source"),
+        "skip_grad_after": (3000, "source")}
+    p = adapt_wm.optim_policy(src, parse(["--source", "s.pt", "--results-dir", "r", "--clip", "2", "--wd", "0"]))
+    assert p["clip"] == {"value": 2.0, "from": "cli"} and p["wd"] == {"value": 0.0, "from": "cli"}
+    assert p["skip_grad_norm"] == {"value": 5.0, "from": "source"}
+    # a source that predates a flag gets train_wm.py's default for it, and says so
+    p = adapt_wm.optim_policy({}, parse(["--source", "s.pt", "--results-dir", "r"]))
+    assert {k: v["from"] for k, v in p.items()} == dict.fromkeys(p, "default")
+    assert (p["clip"]["value"], p["wd"]["value"], p["skip_grad_norm"]["value"]) == (1.0, 0.0, 0.0)
+
+
+def test_the_run_records_its_optimization_policy_and_applies_the_sources_spike_guard(tiny, setup):
+    src = F.write_source_snapshot(setup["tmp"] / "guarded" / "snap_0200000.pt",
+                                  args={"clip": 0.25, "wd": 0.0, "skip_grad_norm": 1e-12, "skip_grad_after": 0})
+    s = {**setup, "src": src}
+    with pytest.raises(RuntimeError, match="skipped"):
+        train(s, "guarded")                      # every gradient is a "spike" under a 1e-12 guard
+    events = [json.loads(ln) for ln in open(setup["tmp"] / "guarded" / "log.jsonl")]
+    skips = [e for e in events if e["event"] == "skipped_update"]
+    assert len(skips) == 21 and all(e["threshold"] == 1e-12 and e["step"] == 0 for e in skips)
+    cert = [e for e in events if e["event"] == "certificate"][0]["line"]
+    assert "clip=0.25(source)" in cert and "skip_grad_norm=1e-12(source)" in cert and "wd=0(source)" in cert
+    out, _ = train({**setup, "src": src}, "unguarded", ["--skip-grad-norm", "0"])
+    c = load(out / "adapter_0000003.pt")["certificate"]["optim_policy"]
+    assert c["skip_grad_norm"] == {"value": 0.0, "from": "cli"} and c["clip"] == {"value": 0.25, "from": "source"}
+
+
 def test_the_recipe_is_the_sources_own():
     r = adapt_wm.source_recipe(F.source_args(noise_aug_max=0.5, noise_buckets=7))
     assert (r["noise_aug_max"], r["noise_buckets"], r["context_frames"]) == (0.5, 7, F.CTX)

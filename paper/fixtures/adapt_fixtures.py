@@ -82,14 +82,17 @@ def tiny_source_model(seed=0):
                                       transformer=PixArtTransformer2DModel(**TINY_PIXART))
 
 
-def write_source_snapshot(path, seed=0, ema_shift=0.05, step=200000):
-    """A `snap_*.pt`-shaped source: bf16 live weights, bf16 EMA weights that differ from them, args."""
+def write_source_snapshot(path, seed=0, ema_shift=0.05, step=200000, args=None):
+    """A `snap_*.pt`-shaped source: bf16 live weights, bf16 EMA weights that differ from them, args.
+
+    `args` overrides entries of the recorded run args (`source_args`), e.g. its clip or spike guard.
+    """
     m = tiny_source_model(seed)
     g = torch.Generator().manual_seed(seed + 1)
     ema = {n: (p.detach() + ema_shift * torch.randn(p.shape, generator=g)).to(torch.bfloat16)
            for n, p in m.named_parameters()}
     ck = {"model": {k: v.detach().to(torch.bfloat16) for k, v in m.state_dict().items()}, "ema": ema,
-          "step": step, "val_loss": 0.1, "args": source_args()}
+          "step": step, "val_loss": 0.1, "args": source_args(**(args or {}))}
     os.makedirs(os.path.dirname(str(path)), exist_ok=True)
     torch.save(ck, str(path))
     return str(path)
