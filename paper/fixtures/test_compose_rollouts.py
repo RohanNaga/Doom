@@ -136,3 +136,20 @@ def test_per_tic_series_are_read_in_every_known_shape():
     assert cr.per_tic(m, "unet_tuned") == {0: 9.0, 1: 8.0, 2: 7.0}
     assert cr.per_tic({"unet_tuned_scene_psnr": {"1": 5.0}}, "unet_tuned") == {1: 5.0}
     assert cr.per_tic({}, "unet_tuned") == {}
+
+
+def test_the_stewards_manifest_shape_a_root_list_of_windows_with_per_tic_series(tmp_path):
+    root = write_export(tmp_path / "export", manifest_at_root=True)
+    side = json.load(open(os.path.join(root, "manifest.json")))
+    windows = []
+    for name, m in side["windows"].items():
+        windows.append({"map": m["map"], "control": m["control"], "episode": m["episode"], "start_row": 837,
+                        "dir": f"/sata2/export_v2/figure2_rollouts/{name}", "rows": list(m["rows"]),
+                        "per_tic": {**m["rows"], **{k: v for k, v in m.items() if k.startswith("copylast_")}}})
+    with open(os.path.join(root, "manifest.json"), "w") as f:
+        json.dump({"what": "synthetic", "windows": windows}, f)
+    cr.compose(root, str(tmp_path / "out"))
+    out = json.load(open(tmp_path / "out" / "fig2_rollouts.json"))
+    arena = out["blocks"][0]["windows"]["unseen_arena07"]
+    assert arena["start_row"] == 837 and arena["episode"] == 41
+    assert arena["rows"]["adapter_tuned"]["scene_psnr"]["1"] == pytest.approx(22.8)

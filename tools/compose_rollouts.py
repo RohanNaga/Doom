@@ -11,7 +11,8 @@ directory per row, `<row>_<decoder>/` (`truth_raw`, `truth_stock`, `truth_tuned`
 last context frame: raw for `truth_raw`, the last context latent decoded for the decoder rows) to 32 and the scene
 crop `tic_NN_scene.png` (rows 0 to 207) beside every frame; and a `manifest.json` (in the window directory, or one
 at the root keyed by window) with each row's per-tic full-frame and scene PSNR and copy-last's as
-`copylast_{raw,stock,tuned}`.
+`copylast_{raw,stock,tuned}` (the steward's shape: a root `manifest.json` whose `windows` list holds per window
+its `map`, `control`, `episode`, `start_row`, `dir` and `per_tic: {row: {psnr: [tic 0..32], scene_psnr: [...]}}`).
 
 **Figure** (`paper/FIGURE_STANDARDS.md`, Figure 2): the full 5.5 in width; two column blocks, one per held control,
 each a tic-0 context column (copy-last's prediction at every tic, so copy-last needs no row) and tics 1, 2, 4, 8, 16
@@ -77,11 +78,13 @@ def load_manifest(root, window_dir):
         with open(p) as f:
             js = json.load(f)
         name = os.path.basename(window_dir)
-        if isinstance(js, dict):
-            windows = js["windows"] if isinstance(js.get("windows"), dict) else js
+        windows = js.get("windows", js) if isinstance(js, dict) else js
+        if isinstance(windows, dict):
             return windows.get(name, {})
-        if isinstance(js, list):
-            return next((e for e in js if e.get("window") == name or e.get("dir") == name), {})
+        if isinstance(windows, list):
+            return next((e for e in windows if isinstance(e, dict) and name in (
+                e.get("window"), os.path.basename(str(e.get("dir", "")).rstrip("/")),
+                f"{e.get('map')}_{e.get('control')}")), {})
     return {}
 
 
@@ -104,7 +107,7 @@ def as_tic_series(v):
 def per_tic(manifest, row, kind="scene_psnr"):
     """A row's per-tic series of `kind` from the manifest, in whichever of the known shapes it is stored."""
     places = []
-    for container in (manifest.get("rows"), manifest.get("series"), manifest):
+    for container in (manifest.get("per_tic"), manifest.get("rows"), manifest.get("series"), manifest):
         if isinstance(container, dict) and isinstance(container.get(row), dict):
             places.append(container[row])
     for place in places:
@@ -207,8 +210,9 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
             wdir = found[gmap]
             manifest = load_manifest(root, wdir)
             entry["windows"][gmap] = {"dir": os.path.basename(wdir),
-                                      **{k: manifest.get(k) for k in ("episode", "start", "start_tic", "seed")
-                                         if k in manifest}, "rows": {}}
+                                      **{k: manifest.get(k) for k in ("episode", "start", "start_tic", "start_row",
+                                                                      "tic_00_game_tic", "seed") if k in manifest},
+                                      "rows": {}}
             gy = y
             for label, row, model in rows:
                 row_dir = os.path.join(wdir, row)

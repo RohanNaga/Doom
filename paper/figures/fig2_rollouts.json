@@ -1,0 +1,145 @@
+{
+ "root": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/figure2_rollouts",
+ "decoder": "tuned",
+ "truth": "raw",
+ "tics": [
+  0,
+  1,
+  2,
+  4,
+  8,
+  16,
+  32
+ ],
+ "frame_in": [
+  0.3087,
+  0.2007
+ ],
+ "blocks": [
+  {
+   "control": "turn_left",
+   "windows": {
+    "train_map02": {
+     "dir": "train_map02_turn_left",
+     "episode": 6000,
+     "start_row": 837,
+     "tic_00_game_tic": 868,
+     "rows": {
+      "truth_raw": {
+       "label": "true",
+       "scene_psnr": {}
+      },
+      "unet_tuned": {
+       "label": "U-Net",
+       "scene_psnr": {
+        "1": 28.9,
+        "2": 28.0,
+        "4": 25.0,
+        "8": 25.0,
+        "16": 25.0,
+        "32": 21.9
+       }
+      }
+     }
+    },
+    "unseen_arena07": {
+     "dir": "unseen_arena07_turn_left",
+     "episode": 41,
+     "start_row": 269,
+     "tic_00_game_tic": 300,
+     "rows": {
+      "truth_raw": {
+       "label": "true",
+       "scene_psnr": {}
+      },
+      "unet_tuned": {
+       "label": "zero-shot",
+       "scene_psnr": {
+        "1": 21.4,
+        "2": 19.3,
+        "4": 18.4,
+        "8": 14.6,
+        "16": 14.5,
+        "32": 14.5
+       }
+      },
+      "adapter_tuned": {
+       "label": "LoRA 4k",
+       "scene_psnr": {
+        "1": 25.9,
+        "2": 23.6,
+        "4": 23.3,
+        "8": 18.0,
+        "16": 17.5,
+        "32": 13.0
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "control": "forward",
+   "windows": {
+    "train_map02": {
+     "dir": "train_map02_forward",
+     "episode": 6000,
+     "start_row": 225,
+     "tic_00_game_tic": 256,
+     "rows": {
+      "truth_raw": {
+       "label": "true",
+       "scene_psnr": {}
+      },
+      "unet_tuned": {
+       "label": "U-Net",
+       "scene_psnr": {
+        "1": 27.9,
+        "2": 25.4,
+        "4": 22.7,
+        "8": 22.5,
+        "16": 21.6,
+        "32": 21.8
+       }
+      }
+     }
+    },
+    "unseen_arena07": {
+     "dir": "unseen_arena07_forward",
+     "episode": 41,
+     "start_row": 209,
+     "tic_00_game_tic": 240,
+     "rows": {
+      "truth_raw": {
+       "label": "true",
+       "scene_psnr": {}
+      },
+      "unet_tuned": {
+       "label": "zero-shot",
+       "scene_psnr": {
+        "1": 20.6,
+        "2": 18.9,
+        "4": 17.1,
+        "8": 16.5,
+        "16": 12.3,
+        "32": 13.6
+       }
+      },
+      "adapter_tuned": {
+       "label": "LoRA 4k",
+       "scene_psnr": {
+        "1": 22.2,
+        "2": 20.7,
+        "4": 19.7,
+        "8": 24.0,
+        "16": 19.0,
+        "32": 20.1
+       }
+      }
+     }
+    }
+   }
+  }
+ ],
+ "notes": []
+}
