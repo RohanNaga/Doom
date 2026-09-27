@@ -28,7 +28,7 @@ details{margin:8px 0} summary{cursor:pointer;font-weight:600}
 svg text{font-family:"IBM Plex Sans",sans-serif}
 </style></head><body><main>
 <h1>Doom paper figures, Sunday morning state</h1>
-<p class="lead">Updated 11:50 (real clock): version-3 set added (simple Figure 4, absolute 3b, stacked Figure 2, both teaser layouts); teaser candidates added; version-2 set from the design lead added (Figure 2 composed, Figure 4 v2, 3b, 3a, deficit, curves); family-step and deficit drafts added; Figure 4 redesigned by the design lead; the method overview and the training curves are in. Every figure the paper and appendix draw today from the 4k set (13 arenas, seed 0, live weights), the tuned decoder as the headline with the stock version underneath, the tables they feed, and mocks of the figures that only exist after the 8k rerun (about 16:00 today) and Monday's full fine-tune comparator. Tags: <span class="tag paper">paper</span> goes in the 4-page body, <span class="tag appx">appendix</span> in the supplement, <span class="tag mockt">mock</span> is a sketch of a figure that does not exist yet.</p>
+<p class="lead">Updated 11:55: version-4 set (round 2 applied) added; version-3 set added (simple Figure 4, absolute 3b, stacked Figure 2, both teaser layouts); teaser candidates added; version-2 set from the design lead added (Figure 2 composed, Figure 4 v2, 3b, 3a, deficit, curves); family-step and deficit drafts added; Figure 4 redesigned by the design lead; the method overview and the training curves are in. Every figure the paper and appendix draw today from the 4k set (13 arenas, seed 0, live weights), the tuned decoder as the headline with the stock version underneath, the tables they feed, and mocks of the figures that only exist after the 8k rerun (about 16:00 today) and Monday's full fine-tune comparator. Tags: <span class="tag paper">paper</span> goes in the 4-page body, <span class="tag appx">appendix</span> in the supplement, <span class="tag mockt">mock</span> is a sketch of a figure that does not exist yet.</p>
 
 <h2>Status board (written at 10:50, times on it ran ahead of the clock; superseded by the version-3 section above)</h2>
 <div class="wrap"><table><thead><tr><th>figure</th><th>version on this page</th><th>in progress, with whom</th><th>next version</th></tr></thead><tbody>
@@ -44,6 +44,19 @@ svg text{font-family:"IBM Plex Sans",sans-serif}
 <tr><td>Tables 1 to 3</td><td>Table 3 generated (11:45)</td><td>Table 3 gains the terminology and the 8k set; Tables 1 and 2 are hand-set in Overleaf from the brief</td><td>Table 3 v2 about 17:00</td></tr>
 </tbody></table></div>
 <p class="note">Review round 2 (Fable and Astra, numbered comments, agreed items only) runs on the 15:30 to 16:30 versions; the full pass for you is at about 17:00, with the 8k set in Figure 4 and Table 3. The y-axis survey (names and units of A, M, G, S against what the reference papers report) lands about 15:00 and may rename axis labels once more.</p>
+
+<h2>Version 4 set (11:55 EDT) · round 2 applied; the set the 12:15 draft uses</h2>
+<p>All round-2 items applied by the lead (both bugs fixed: the tic-0 column shows the raw context frame in every row; arena 9's label sits at its true endpoint). These files go into the paper draft at 12:15. Two small changes still landing: Figure 4b in arena-number order to match 3b, and grey-filled dots for the censored arenas.</p>
+<figure><img src="img/v4_fig4_dots.png" alt="figure 4 v4"><figcaption><b>Figure 4 (primary).</b> Left: the thirteen curves in dB, the median, the in-distribution band, the persistence zero line. Right: share of the gap closed at 4k per arena, crossing budget above each dot; censored arenas at 0.43 to 0.47.</figcaption></figure>
+<figure><img src="img/v4_fig3b_zero_shot_absolute.png" alt="3b v4"><figcaption><b>Figure 3b (primary).</b> Absolute scene PSNR and LPIPS per arena in number order, persistence bar, three zero-shot models through the fine-tuned decoder, one legend line; the adapter now lives in Figure 4b.</figcaption></figure>
+<div class="grid">
+<figure><img src="img/v4_fig2d_family_step.png" alt="3a v4"><figcaption><b>Figure 3a.</b> "zero-shot latent skill (dB)" on y, d on x, PixArt as a larger open square behind the U-Net circle where they coincide.</figcaption></figure>
+<figure><img src="img/v4_fig2e_deficit.png" alt="deficit v4"><figcaption><b>Deficit panel (appendix).</b> Separate labels with leaders for 7, 13, 17 and 1, 6, 12; rho in the caption.</figcaption></figure>
+</div>
+<div class="grid">
+<figure><img src="img/v4_fig4_adaptation.png" alt="figure 4 attainment v4"><figcaption><b>Figure 4, the attainment form (appendix).</b> Kept at 1.6 in with the fixes for the record.</figcaption></figure>
+<figure><img src="img/v4_fig1_curves.png" alt="curves v4"><figcaption><b>Curve panel.</b> "ΔPSNR vs raw persistence (dB)", zero line "persistence", alternating markers, panel letter b.</figcaption></figure>
+</div>
 
 <h2>Version 3 set (11:50 EDT, real clock) · your requests drawn: the simple Figure 4, the absolute 3b, the stacked Figure 2, the two teaser layouts</h2>
 <p class="note">Clock note: the times on this page before this section ran three to four hours ahead of the wall clock; the version-2 set was 10:45 to 11:15, round 2 closed 11:28, and this set landed 11:17 to 11:41.</p>
