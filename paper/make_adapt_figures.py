@@ -110,7 +110,7 @@ DECODER_NAMES = {"stock": "stock decoder", "tuned": "fine-tuned decoder"}   # pr
 RECIPE_LABELS = {"lr3e4": "lr 3e-4", "lr5e4": "lr 5e-4", "g8k": "8k grid", "": "base"}
 
 # Printed sizes (in) on the 5.5 in single-column page (FIGURE_STANDARDS section 4); `\figslot` includes at scale 1.
-FIG4_SIZE = (fs.TEXT_WIDTH, 1.75)   # 0.15 in over the standard's ceiling: the crossing rug's lanes
+FIG4_SIZE = (fs.TEXT_WIDTH, 1.6)
 CURVES_SIZE = (3.3, 1.6)
 FIG3_SIZE = CURVES_SIZE          # the curves panel's name before the renumbering; its PDF is drawn at this size
 HALF_SIZE = (2.7, 1.6)           # an appendix half-width panel (ladder, profiles, endpoint against skill)
@@ -1197,9 +1197,12 @@ def fig_adaptation(stats, records, home, budget, out_dir, fixed=FIXED_THRESHOLD,
     half-gap line (solid, band), the fixed threshold as a dashed curve with its own thin bounds, one tick per arena
     at its crossing in lanes above the curves (open at the last grid step: censored there), and the arenas at risk
     before each read under the labelled budgets."""
-    fig, (ax, bx) = fs.new_figure(FIG4_SIZE, ncols=2, wspace=0.08)
+    fig, (ax, bx) = fs.new_figure(FIG4_SIZE, ncols=2, wspace=0.08, h_pad=0.01)
     iqm_panel(ax, stats, home, band)
     attainment_panel(bx, stats, fixed)
+    for a in (ax, bx):                      # one shared update label under both panels
+        a.set_xlabel("")
+    fig.supxlabel("adapter updates (log scale)", fontsize=fs.LABEL_PT)
     return fs.save(fig, out_dir, "fig4_adaptation")
 
 
@@ -1215,8 +1218,8 @@ def iqm_panel(ax, stats, home, band, letter="a"):
     ax.fill_between(xs, ci[:, 0], ci[:, 1], color=ADAPTER.colour, alpha=0.18, lw=0, zorder=2.5)
     ax.plot(xs, val, color=ADAPTER.colour, lw=fs.DATA_LW, marker=ADAPTER.marker, ms=fs.MARKER_SIZE, mec="white",
             mew=fs.MARKER_EDGE, zorder=4)
-    # an end within 0.15 dB of the training maps' dashed line is labelled just above it
-    ends = [(xs[-1], row[-1] if abs(row[-1] - home) >= 0.15 else home + 0.22, str(a), fs.CONTEXT_INK)
+    # an end within 0.15 dB of the training maps' dashed line keeps its leader on the data; only its text moves up
+    ends = [(xs[-1], row[-1], str(a), fs.CONTEXT_INK, None if abs(row[-1] - home) >= 0.15 else home + 0.22)
             for a, row in zip(stats["arenas"], point) if a in NAMED_ARENAS]
     fs.end_labels(ax, ends + [(xs[-1], val[-1], "IQM", ADAPTER.colour)], gap=0.4, leaders=True)
     fs.training_line(ax, home, where=0.0, align="left", band=band)
@@ -1225,8 +1228,8 @@ def iqm_panel(ax, stats, home, band, letter="a"):
     fs.panel_letter(ax, letter)
 
 
-RUG_LANE = 0.13           # data units of the attainment axis per rug lane
-RUG_BASE = 1.08           # the lowest rug lane sits just above the fraction 1
+RUG_LANE = 0.125          # data units of the attainment axis per rug lane (about 6.5 pt at 1.6 in)
+RUG_BASE = 1.06           # the lowest rug lane sits just above the fraction 1
 
 
 def attainment_panel(bx, stats, fixed, letter="b"):
@@ -1239,16 +1242,17 @@ def attainment_panel(bx, stats, fixed, letter="b"):
     bx.fill_between(xs, att_ci[:, 0], att_ci[:, 1], step="post", color=ADAPTER.colour, alpha=0.18, lw=0,
                     zorder=2.5)
     for k in (0, 1):
-        bx.step(xs, fatt_ci[:, k], where="post", color=ADAPTER.colour, lw=fs.MIN_LW, ls=(0, (1, 1.5)), zorder=3)
+        bx.step(xs, fatt_ci[:, k], where="post", color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.5)), zorder=3)
     bx.step(xs, att, where="post", color=ADAPTER.colour, lw=fs.DATA_LW, zorder=4)
-    bx.step(xs, fatt, where="post", color=ADAPTER.colour, lw=0.8, ls=(0, (3, 1.5)), zorder=3.5)
+    # the fixed threshold: neutral dark dashes above the blue curve, so the stretches they share stay visible
+    bx.step(xs, fatt, where="post", color=fs.INK, lw=0.8, ls=(0, (3, 2)), zorder=4.5)
     label_attainment(bx, xs, att, fatt, fixed)
     lanes = crossing_rug(bx, stats, z, steps)
     bx.set_ylim(-0.03, RUG_BASE + RUG_LANE * lanes)
     bx.spines["left"].set_bounds(0, 1)
     bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.25, 0.5, 0.75, 1.0]))
     bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "", "0.5", "", "1"]))
-    bx.set_ylabel("fraction of arenas crossed")
+    bx.set_ylabel("fraction reaching\nthreshold")
     at_risk_row(bx, stats["attainment_half_gap"]["at_risk"], xs)
     fs.panel_letter(bx, letter)
 
@@ -1259,16 +1263,18 @@ def label_attainment(ax, xs, att, fatt, fixed):
     half-gap label when the two curves coincide)."""
     rise = next((i for i, v in enumerate(att) if v > 0), None)
     if rise is not None:
-        fs.direct_label(ax, xs[rise], att[rise], "half-gap line", colour=ADAPTER.colour, dx=-3, ha="right")
+        # under the first flat stretch after the rise: the space left of the riser is the y axis's
+        fs.direct_label(ax, xs[rise], att[rise], "half-gap threshold", colour=ADAPTER.colour, dx=2.5, dy=-1.5,
+                        ha="left", va="top")
     name = f"$A\\geq{fixed:g}$ dB"
     apart = [i for i in range(len(xs) - 1) if abs(att[i] - fatt[i]) > 1e-9]
     if apart:
         i = max(apart, key=lambda i: xs[i + 1] / xs[i])
         below = fatt[i] < att[i]
-        fs.direct_label(ax, xs[i], fatt[i], name, colour=ADAPTER.colour, dx=2.5, dy=-1.5 if below else 1.5,
+        fs.direct_label(ax, xs[i], fatt[i], name, colour=fs.INK, dx=2.5, dy=-1.5 if below else 1.5,
                         ha="left", va="top" if below else "bottom")
     elif rise is not None:
-        fs.direct_label(ax, xs[rise], att[rise], "and " + name, colour=ADAPTER.colour, dx=-3, dy=-8, ha="right")
+        fs.direct_label(ax, xs[rise], att[rise], "and " + name, colour=fs.INK, dx=-3, dy=-8, ha="right")
 
 
 OPEN_TICK = Path([(-0.18, -0.5), (0.18, -0.5), (0.18, 0.5), (-0.18, 0.5), (-0.18, -0.5)],
@@ -1392,7 +1398,7 @@ def fig_gapshare(stats, home, out_dir):
             mew=fs.MARKER_EDGE, zorder=4)
     fs.direct_label(ax, xs[-1], val[-1], "IQM", colour=ADAPTER.colour, dx=3)
     ax.axhline(0.5, color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2)), zorder=1.4, gid="ref")
-    ax.text(0.0, 0.5, " half-gap line", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
+    ax.text(0.0, 0.5, " half of in-distribution gap", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
             fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
     fs.training_line(ax, 1.0, where=0.0)
     ax.axhline(0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref")
@@ -1682,8 +1688,8 @@ def fig_skill(records, home, budget, out_dir, band=None, x="S0", xlabel="zero-sh
         ci = r.get("A_budget_ci")
         if ci:
             ax.plot([r[x], r[x]], ci, color=ADAPTER.colour, lw=fs.MIN_LW, zorder=3.5)
-        ax.plot(r[x], r["A_budget"], ls="none", marker=ADAPTER.marker, ms=3.2, mfc=ADAPTER.colour, mec="white",
-                mew=fs.MARKER_EDGE, zorder=3)
+        ax.plot(r[x], r["A_budget"], ls="none", marker=ADAPTER.marker, ms=fs.MARKER_SIZE, mfc=ADAPTER.colour,
+                mec="white", mew=fs.MARKER_EDGE, color=ADAPTER.colour, zorder=3)
     fs.training_line(ax, home, where=0.0, band=band)
     ax.set_xlabel(xlabel)
     lo = min(r["A_budget"] for r in done)
@@ -1693,12 +1699,13 @@ def fig_skill(records, home, budget, out_dir, band=None, x="S0", xlabel="zero-sh
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
     ax.xaxis.set_major_locator(ticker.MaxNLocator(5, steps=[1, 2, 2.5, 5, 10]))
     ax.margins(x=0.08)
-    fs.label_points(ax, [(r[x], r["A_budget"], str(r["arena"])) for r in done])
+    # nearby arenas are unequal observations: each keeps its own number, with a leader when it had to move
+    fs.label_points(ax, [(r[x], r["A_budget"], str(r["arena"])) for r in done], merge=False, leaders=True)
     return fs.save(fig, out_dir, stem)
 
 
 ABSOLUTE_SIZE = (fs.TEXT_WIDTH, 2.1)
-ABSOLUTE_OFFSETS = {"unet": -0.27, "pixart": -0.09, "sd35": 0.09, "adapter": 0.27}
+ABSOLUTE_OFFSETS = {"unet": -0.22, "pixart": 0.0, "sd35": 0.22}
 PERSISTENCE_INK = "#8C8C8C"
 COLUMN_TINT = "#F4F4F4"
 
@@ -1727,6 +1734,8 @@ def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig
             half = (train_w / 2 if col == "train" else 0.5) - 0.08
             persist = None
             for backbone, entry in absolute.items():
+                if backbone not in ABSOLUTE_OFFSETS:     # the adapter's endpoint lives in Figure 4 (round 2)
+                    continue
                 d = STOCK if backbone == "sd35" else decoder
                 src = entry.get(d) or (entry.get(STOCK) if backbone == "sd35" else None)
                 if not src or (backbone == "adapter" and col == "train"):
@@ -1742,7 +1751,7 @@ def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig
                 if ci:
                     panel.plot([x, x], ci, color=ent.colour, lw=fs.MIN_LW, zorder=4, solid_capstyle="butt")
                 filled = d != STOCK
-                panel.plot([x], [e[key]], ls="none", marker=ent.marker, ms=3.4, mew=0.6, mec=ent.colour,
+                panel.plot([x], [e[key]], ls="none", marker=ent.marker, ms=fs.MARKER_SIZE, mew=0.6, mec=ent.colour,
                            mfc=ent.colour if filled else "white", color=ent.colour, zorder=3)
             if persist is not None:
                 panel.plot([xpos[col] - half, xpos[col] + half], [persist, persist], color=PERSISTENCE_INK, lw=1.3,
@@ -1765,12 +1774,13 @@ def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig
     lx.set_xlabel("unseen arena")
     fill = decoder != STOCK
     handles = ([Line2D([], [], color=PERSISTENCE_INK, lw=1.3)] if persistence_shown else []) + [
-        Line2D([], [], ls="none", marker=fs.BACKBONES[b].marker, ms=3.4, mew=0.6, mec=fs.BACKBONES[b].colour,
-               mfc=fs.BACKBONES[b].colour if (fill and b != "sd35") else "white", color=fs.BACKBONES[b].colour)
-        for b in ("unet", "pixart", "sd35", "adapter") if b in absolute]
+        Line2D([], [], ls="none", marker=fs.BACKBONES[b].marker, ms=fs.MARKER_SIZE, mew=0.6,
+               mec=fs.BACKBONES[b].colour, mfc=fs.BACKBONES[b].colour if (fill and b != "sd35") else "white",
+               color=fs.BACKBONES[b].colour)
+        for b in ("unet", "pixart", "sd35") if b in absolute]
     labels = (["persistence"] if persistence_shown else []) + [
-        {"unet": "U-Net", "pixart": "PixArt-\u03b1", "sd35": "SD 3.5", "adapter": "U-Net, 4k adapter updates"}[b]
-        for b in ("unet", "pixart", "sd35", "adapter") if b in absolute]
+        {"unet": "U-Net", "pixart": "PixArt-\u03b1", "sd35": "SD 3.5 (own decoder, open)"}[b]
+        for b in ("unet", "pixart", "sd35") if b in absolute]
     fig.legend(handles, labels, loc="outside upper center", ncol=len(labels), handlelength=1.4, columnspacing=1.1,
                handletextpad=0.4, borderaxespad=0.1)
     return fs.save(fig, out_dir, stem)
@@ -1794,7 +1804,7 @@ def fig_zero_shot_paired(paired, order, out_dir):
     for panel, key in ((ax, "A"), (mx, "M")):
         fs.training_band(panel, 0.0, train_w)
         for backbone, entry in paired.items():
-            if backbone == "adapter" and key == "M":
+            if backbone == "adapter":          # the adapter's endpoint lives in Figure 4 (round 2, Astra 13)
                 continue
             ent = fs.BACKBONES[backbone]
             off = PAIRED_OFFSETS[backbone] * (1.6 if backbone != "adapter" else 1.0)
@@ -1819,8 +1829,8 @@ def fig_zero_shot_paired(paired, order, out_dir):
                 for d, (v, ci) in vals.items():
                     if ci:
                         panel.plot([x, x], ci, color=ent.colour, lw=fs.MIN_LW, zorder=4, solid_capstyle="butt")
-                    panel.plot([x], [v], ls="none", marker=ent.marker, ms=3.0, mew=0.6, mec=ent.colour,
-                               mfc=ent.colour if d == "tuned" else "white", zorder=3)
+                    panel.plot([x], [v], ls="none", marker=ent.marker, ms=fs.MARKER_SIZE, mew=0.6, mec=ent.colour,
+                               mfc=ent.colour if d == "tuned" else "white", color=ent.colour, zorder=3)
                     drawn[key].append(v)
         fs.copy_last_line(panel, where=0.0, align="left")
         panel.tick_params(axis="x", length=0)

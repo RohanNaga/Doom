@@ -376,10 +376,16 @@ def fig_family_step(entries, floor, out_dir):
             ha="center", va="bottom", fontsize=fs.ANNOT_PT, color=fs.TRAINING_LINE)
     ends = []
     for name, e in entries.items():
-        ent = fs.BACKBONES[fs.backbone_of(name)]
+        key = fs.backbone_of(name)
+        ent = fs.BACKBONES[key]
         rows = [r for r in e["maps"].values() if r["D"] is not None]
-        ax.plot([r["D"] for r in rows], [r["S0"] for r in rows], ls="none", marker=ent.marker, ms=fs.MARKER_SIZE,
-                mfc=ent.colour, mec="white", mew=fs.MARKER_EDGE, zorder=3)
+        # PixArt-alpha and the U-Net often land on the same point: PixArt is a larger open square behind the U-Net's
+        # filled circle, so both stay visible at their exact coordinates (no jitter; not a decoder state here)
+        big = key == "pixart"
+        ax.plot([r["D"] for r in rows], [r["S0"] for r in rows], ls="none", marker=ent.marker,
+                ms=5.2 if big else fs.MARKER_SIZE, mfc="white" if big else ent.colour,
+                mec=ent.colour if big else "white", mew=0.8 if big else fs.MARKER_EDGE, color=ent.colour,
+                zorder=2.8 if big else 3)
         for role in ("training", "arena"):
             group = [r for r in rows if r["role"] == role]
             if not group:
@@ -396,7 +402,8 @@ def fig_family_step(entries, floor, out_dir):
                                 if r["D"] is not None) * 1.12))
     ax.set_ylim(-0.2, top + 0.4)
     ax.set_xlabel("frame distance $d$")
-    ax.set_ylabel("zero-shot latent skill $S_0$ (dB)")
+    ax.set_ylabel("zero-shot latent skill (dB)")
+    fs.panel_letter(ax, "a")
     ax.xaxis.set_major_locator(ticker.MultipleLocator(0.05))
     ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
     return fs.save(fig, out_dir, "fig2d_family_step")

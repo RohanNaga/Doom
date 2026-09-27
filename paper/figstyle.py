@@ -212,10 +212,11 @@ def declutter(values, gap):
 
 
 def end_labels(ax, points, gap, colour=CONTEXT_INK, dx=3.0, leaders=False, min_shift=None):
-    """Direct labels at the right ends of lines: `points` is [(x, y, text)] or [(x, y, text, colour)]; heights
-    decluttered by `gap` (data units). With `leaders`, a label moved more than `min_shift` (default a third of the
-    gap) from its line's end is joined to it by a thin leader."""
-    ys = declutter([p[1] for p in points], gap)
+    """Direct labels at the right ends of lines: `points` is [(x, y, text)], [(x, y, text, colour)] or
+    [(x, y, text, colour, label_y)], the leader anchored at (x, y) and the label placed near `label_y` (default y);
+    heights decluttered by `gap` (data units). With `leaders`, a label moved more than `min_shift` (default a third
+    of the gap) from its line's end is joined to it by a thin leader."""
+    ys = declutter([p[4] if len(p) > 4 and p[4] is not None else p[1] for p in points], gap)
     shifted = transforms.offset_copy(ax.transData, fig=ax.figure, x=dx + (4.0 if leaders else 0.0), y=0,
                                      units="points")
     limit = gap / 3 if min_shift is None else min_shift
@@ -234,10 +235,17 @@ def end_labels(ax, points, gap, colour=CONTEXT_INK, dx=3.0, leaders=False, min_s
 LABEL_OFFSETS = ((3, 1), (3, -7), (-3, 1), (-3, -7), (0, 4), (0, -10), (3, 7), (-3, 7), (3, -13), (-3, -13))
 
 
-def label_points(ax, points, fontsize=ANNOT_PT, colour=CONTEXT_INK, marker_radius=1.9):
+# with leaders the labels may stand farther off, a thin line back to their marker
+LEADER_OFFSETS = ((9, 7), (9, -9), (-9, 7), (-9, -9), (13, 13), (-13, 13), (13, -15), (-13, -15), (0, 13),
+                  (0, -15), (18, 2), (-18, 2), (18, -12), (-18, -12))
+
+
+def label_points(ax, points, fontsize=ANNOT_PT, colour=CONTEXT_INK, marker_radius=1.9, merge=True, leaders=False):
     """Label each (x, y, text) beside its marker at the first offset whose text stays inside the axes and clears
-    the texts already on the axes and every other marker; with no clear offset, the first one. Markers drawn on
-    top of each other (centres closer than a diameter) share one label, their texts joined in numeric order.
+    the texts already on the axes and every other marker; with no clear offset, the first one. With `merge`,
+    markers drawn on top of each other (centres closer than a diameter) share one label, their texts joined in
+    numeric order; without it every point keeps its own label, and with `leaders` a label may stand farther off
+    with a thin leader to its marker (for nearby but unequal observations).
 
     Call it after the axes' scales and limits are final: it draws the figure once so the constrained layout
     settles, then measures the labels in display space. (Ported from the family-step worker's 404d577.)
@@ -252,9 +260,11 @@ def label_points(ax, points, fontsize=ANNOT_PT, colour=CONTEXT_INK, marker_radiu
     groups, seen = [], set()
     for i in range(len(points)):
         if i not in seen:
-            members = [j for j in range(len(points)) if j not in seen and math.dist(marks[i], marks[j]) < 2 * r]
+            members = [j for j in range(len(points)) if j not in seen and
+                       (j == i or (merge and math.dist(marks[i], marks[j]) < 2 * r))]
             seen.update(members)
             groups.append(members)
+    arrow = {"arrowstyle": "-", "lw": MIN_LW, "color": colour, "shrinkA": 0.5, "shrinkB": 2.0}
 
     def clear(bb, members):
         inside = frame.x0 <= bb.x0 and bb.x1 <= frame.x1 and frame.y0 <= bb.y0 and bb.y1 <= frame.y1
@@ -263,13 +273,49 @@ def label_points(ax, points, fontsize=ANNOT_PT, colour=CONTEXT_INK, marker_radiu
         return inside and not hits and not any(bb.overlaps(o) for o in taken)
 
     placed = []
+    if leaders and not merge:
+        # clusters of markers closer than two diameters: their labels stack beside the cluster, one line each in
+        # the markers' vertical order, each with a leader to its own marker
+        clusters, done = [], set()
+        for i in range(len(points)):
+            if i in done:
+                continue
+            members, grow = {i}, [i]
+            while grow:
+                k = grow.pop()
+                for j in range(len(points)):
+                    if j not in members and math.dist(marks[k], marks[j]) < 4 * r:
+                        members.add(j)
+                        grow.append(j)
+            done |= members
+            if len(members) > 1:
+                clusters.append(sorted(members, key=lambda j: -marks[j][1]))
+        line = fontsize * 1.15 * fig.dpi / 72
+        for members in clusters:
+            cx = sum(marks[j][0] for j in members) / len(members)
+            cy = sum(marks[j][1] for j in members) / len(members)
+            side = -1 if cx > frame.x0 + 0.72 * frame.width else 1
+            for n, j in enumerate(members):
+                ty = cy + (len(members) - 1) / 2 * line - n * line
+                tx = cx + side * 14 * fig.dpi / 72
+                t = ax.annotate(points[j][2], tuple(points[j][:2]),
+                                xytext=(tx / fig.bbox.width, ty / fig.bbox.height), textcoords="figure fraction",
+                                fontsize=fontsize, color=colour, ha="left" if side > 0 else "right", va="center",
+                                arrowprops=arrow, annotation_clip=False)
+                taken.append(t.get_window_extent(renderer))
+                placed.append(points[j][2])
+        stacked = {j for c in clusters for j in c}
+        groups = [g for g in groups if not set(g) & stacked]
     for members in groups:
         px, py = points[members[0]][:2]
+        offsets = LABEL_OFFSETS + (LEADER_OFFSETS if leaders else ())
         text = ", ".join(sorted((points[j][2] for j in members), key=lambda t: (not t.isdigit(), len(t), t)))
         chosen = None
-        for dx, dy in LABEL_OFFSETS:
+        for dx, dy in offsets:
+            far = leaders and (dx, dy) in LEADER_OFFSETS
             t = ax.annotate(text, (px, py), xytext=(dx, dy), textcoords="offset points", fontsize=fontsize,
-                            color=colour, ha="left" if dx > 0 else "right" if dx < 0 else "center")
+                            color=colour, ha="left" if dx > 0 else "right" if dx < 0 else "center",
+                            va="center" if far else "baseline", arrowprops=arrow if far else None)
             if clear(t.get_window_extent(renderer), members):
                 chosen = t
                 break
