@@ -98,7 +98,8 @@ def restart_export(tmp_path, entries):
                 Image.fromarray(img(90 + k, t)).save(d / row / f"tic_{t:02d}.png")
         series = {"unet_tuned": [30.0 - t for t in range(17)]}
         if unseen:
-            series["adapter_tuned"] = [31.0 - t + (2.0 if "ep41" in name else 0.0) for t in range(17)]
+            series["adapter_tuned"] = [31.0 - t + (2.0 if "ep41" in name else 0.0) + (0.5 if t == 16 else 0.0)
+                                       for t in range(17)]
         with open(d / "manifest.json", "w") as f:
             json.dump({"scene_psnr_vs_truth_raw": series, "copylast_scene_psnr": [99.0] + [18.0] * 16}, f)
     return str(root)
@@ -192,10 +193,14 @@ def test_with_a_restart_export_the_candidates_are_redrawn_from_it_and_rescored(t
             ("train_map02_ep6008_s712_t24", False)]
     restart = restart_export(tmp_path, a_rows + home)
     out = tmp_path / "out"
-    rec = tcs.run(root, str(out), str(out / "review"), n_candidates=2, restart_root=restart)
+    rec = tcs.run(root, str(out), str(out / "review"), n_candidates=2, restart_root=restart,
+                  restart_horizons=(8, 16))
     first, second = rec["candidates"]
-    r = first["restart"]
+    r = first["restart"]["8"]
     assert r["files"][0] == "fig_teaser_C_1_restart.pdf" and r["score_shown"] == pytest.approx(3.0)
+    r16 = first["restart"]["16"]                                     # the +16 variant, rescored at +16
+    assert r16["files"][0] == "fig_teaser_C_1_restart16.pdf" and r16["score_shown"] == pytest.approx(3.5)
+    assert json.load(open(out / "fig_teaser_C_1_restart16.json"))["columns"][4]["sub"] == "+16 tics"
     # the in-domain start is the restarted one of the same button (turn right at 20, not the unexported 5)
     homes = {row["row"]: (row["home"]["window"], row["home"]["tic"]) for row in r["rows"]}
     assert homes == {"attack": ("train_map02_ep6008_s712", 2), "turn": ("train_map02_ep6008_s712", 20),

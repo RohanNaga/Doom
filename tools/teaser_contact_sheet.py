@@ -31,7 +31,9 @@ rollout tics of the row and reading at least the training maps' median in-domain
 ground truth (mean luma of its context and +8 frames; map 2 is dark); see `pick_home` for the fallbacks, which the
 sidecar flags (`near`, `at_floor`). The top `--candidates` are composed as
 `<out-dir>/fig_teaser_C_<n>.pdf` (`compose_teaser.layout_c`); with `--restart-root` their +8 frames come from the
-steward's rollouts restarted at each moment. Actions that never start on a training map are reported.
+steward's rollouts restarted at each moment, and `--restart-horizon 8 16` adds the +16 redraw
+(`fig_teaser_C_<n>_restart16`), each rescored from the frames it shows. Actions that never start on a training
+map are reported.
 """
 import argparse
 import json
@@ -305,7 +307,7 @@ def restart_rows(rows, restart_root, found, floor):
     return out, None
 
 
-def run(root, out_dir, review_dir, n_candidates=3, restart_root=None):
+def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,)):
     """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record."""
     ws = ct.windows(root)
     if not ws:
@@ -325,12 +327,12 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None):
         if restart_root:
             rows, skipped = restart_rows(pick["rows"], restart_root, found, floor)
             pick["restart"] = {"skipped": skipped}
-            if rows:
-                paths, side = ct.layout_c(root, out_dir, rows, stem=f"fig_teaser_C_{i}_restart",
-                                          restart_root=restart_root)
+            for h in restart_horizons if rows else ():
+                stem = f"fig_teaser_C_{i}_restart" + ("" if h == HORIZON else str(h))
+                paths, side = ct.layout_c(root, out_dir, rows, stem=stem, restart_root=restart_root, horizon=h)
                 shown = [r["story_shown"] for r in side["rows"] if r["story_shown"] is not None]
-                pick["restart"].update({"files": [os.path.basename(p) for p in paths], "rows": side["rows"],
-                                        "score_shown": round(float(np.mean(shown)), 3) if shown else None})
+                pick["restart"][str(h)] = {"files": [os.path.basename(p) for p in paths], "rows": side["rows"],
+                                           "score_shown": round(float(np.mean(shown)), 3) if shown else None}
                 written += paths
     rec = {"root": root, "hold": HOLD, "horizon": HORIZON, "edge_threshold": EDGE_THRESHOLD,
            "counts": {f"{role}:{a}": sum(1 for m in found if m["role"] == role and m["action"] == a)
@@ -352,8 +354,11 @@ def main(argv=None):
     p.add_argument("--candidates", type=int, default=3)
     p.add_argument("--restart-root", default=None,
                    help="the steward's restarted rollouts, <window>_t<T>/...: the candidates' +8 frames come from it")
+    p.add_argument("--restart-horizon", type=int, nargs="+", default=[HORIZON],
+                   help="tics after the context for the restarted redraws (the export holds 16); stems gain the "
+                        "number past 8, fig_teaser_C_<n>_restart16")
     a = p.parse_args(argv)
-    rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root)
+    rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon))
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):
