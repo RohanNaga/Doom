@@ -640,3 +640,309 @@ Build check: every current-text block matched its source exactly once. Applying 
 Primary-source passages checked: [XEWorld](https://arxiv.org/html/2608.05799), [Genie](https://arxiv.org/html/2402.15391), [DIAMOND](https://arxiv.org/html/2405.12399), [AVID](https://arxiv.org/html/2410.12822), [AdaWorld](https://arxiv.org/html/2503.18938), [OccWorld](https://arxiv.org/html/2311.16038), [Vista](https://arxiv.org/html/2405.17398), [DiffFit](https://arxiv.org/html/2304.06648), [Biderman](https://arxiv.org/html/2405.09673), and [Westny](https://arxiv.org/html/2606.30777). All cited arXiv abstract metadata resolved. XEWorld says its held-out embodiments are reported separately and never averaged; Genie contrasts inferred-action and random-action generations; OccWorld includes reconstruction and Copy&Paste; DiffFit concerns image generation; Biderman concerns language-model adaptation. These scope boundaries govern the proposed wording.
 
 Additional checks: [PredNet PDF](https://arxiv.org/pdf/1605.08104) confirms the unseen-dataset test and Copy Last Frame baseline; its HTML endpoint was unavailable, but the PDF was readable. [Hu et al.](https://arxiv.org/html/2106.09685) confirms the LoRA method; [Taylor and Stone](https://www.jmlr.org/papers/v10/taylor09a.html) confirms the survey identity. Venue assignments beyond these source checks remain unaudited rather than silently endorsed.
+
+
+## On the other list
+
+Round 2: I read all 27 Fable proposals (including every multi-part replacement) and all seven unresolved problems. The decisions below supersede conflicting round-1 recommendations without changing that earlier text. Each numbered line corresponds to Fable's proposal number, not an Astra proposal number. For whole-paragraph alternatives, apply the winning paragraph once; do not also apply a conflicting substring edit. Proposal 32 below controls appendix references in every accepted wording.
+
+1. **AGREE WITH CHANGE** — Astra 7 wins for the whole abstract: it limits the unseen results to the U-Net, keeps the metric explicit and does not assert the pending adaptation result. Exact replacement of the abstract prose: ``We evaluate Doom world models on 17 arenas against copy-last persistence and autoencoder reconstruction. We compare three pretrained backbones on four training arenas; unseen-map results currently cover the U-Net. Its decoded advantage falls from \prov{3.2--4.3}~dB on training arenas to \prov{0.7--2.7}~dB unseen, with worse LPIPS than persistence on \prov{13 of 13} unseen arenas. Frame distance separates training from unseen arenas, but has no clear association with advantage within the unseen group. We plan to measure adapter cost by the updates needed to close half of each arena's zero-shot gap to the training-map advantage. Good one-step scores can coexist with closed-loop collapse, which exponential moving average weights reduce without eliminating.``.
+
+2. **AGREE WITH CHANGE** — Astra 8 wins for the whole contribution paragraph, avoiding repeated edits to the same sentence. Exact replacement: ``We contribute a per-arena Doom evaluation against persistence and autoencoder reconstruction, with directional checks and closed-loop rollouts. The U-Net's decoded advantage shrinks on unseen arenas and its LPIPS margin changes sign; replication with the other backbones is pending. Frame distance has no clear association with advantage within unseen arenas, and good one-step scores can coexist with collapse. The adapter cost curves and full fine-tune comparison remain planned experiments.``.
+
+3. **AGREE WITH CHANGE** — Astra 16 wins on the decoder claim: similar reconstruction scores do not establish an invariant rendering floor or identify the whole loss. Exact replacement of Fable's current sentence: ``Reconstruction PSNR changes less: \prov{23.91}~dB on training arenas versus \prov{23.62}~dB unseen. This is consistent with a prediction deficit, but $A$ still depends on the decoder; the latent-skill and paired-decoder checks remain pending.``.
+
+4. **AGREE** — Fable's wording wins over the first two sentences of Astra 16; it names decoded A and exposes both group means. Exact replacement: ``$A$ drops by about 2~dB (\prov{3.60} to \prov{1.51}), stays positive on every arena at one tic, and turns negative at four tics on arenas \prov{6 and 7}.``.
+
+5. **DISAGREE** — The stated 13/13 comparison mixes model LPIPS against a decoded target with persistence LPIPS against a raw target; `copy_lpips_dec` is missing. Astra 16's narrower wording wins: ``The perceptual loss is not forced by reconstruction quality alone: reconstruction LPIPS is below raw persistence LPIPS on every arena.``.
+
+6. **AGREE WITH CHANGE** — Astra 24 wins: MultiGen's training-map count should not be described as its evaluation-map count. Exact replacement: ``GameNGen evaluates held-out Doom trajectories~\citep{valevski2024gamengen}, while DIAMOND's CS:GO study uses one map~\citep{alonso2024diamond}. MultiGen does not clearly state whether its evaluated Doom maps were held out from training~\citep{po2026multigen}.``.
+
+7. **AGREE WITH CHANGE** — Use this merged wording instead of either original: Fable's two milestones and printed per-arena thresholds win; Astra's fixed decoder/crop/windows and nonpositive-gap rule stay. I withdraw the quarter-gap milestone from Astra 1–4 and 29–30. Exact replacement of both Cost sentences: ``\textbf{Cost.} We freeze the training-map mean $A_\text{home}$ and each arena's zero-shot $A_0$ before reading adapted scores, using the same decoder, crop and windows throughout. For $A_0<A_\text{home}$, cost is the first grid budget reaching $\tfrac12(A_0+A_\text{home})$; the second crossing is $A_\text{home}$. We also report the value at 4k and area under the curve~\citep{taylor2009transfer}; non-crossers are right-censored at 4k. An arena already at or above home has zero home-crossing cost and no half-gap cost. Provisionally, $A_\text{home}=\prov{3.60}$~dB and arenas \prov{9, 11, 13, 15 and 16} already exceed half of it.``.
+
+8. **AGREE WITH CHANGE** — Use the merged caption, retaining Astra's censoring and forgetting conventions: ``\caption{Adaptation cost (U-Net 200k EMA initialization, 8 episodes, live weights). Half gap: $\tfrac12(A_0+A_\text{home})$; home: $A_\text{home}$. Costs are first grid crossings; ${>}$4k means censored, including the median if fewer than half cross. Forgetting: change in training-map $A$ (negative means loss). Per arena: Appendix~\ref{app:perarena-adapt}.}`` Fable's two milestone rows win verbatim over Astra 3: ``Arenas past half gap / home line by 4k & \tbd{} / \tbd{} of 13 & -- & -- \\ Cost to half gap / home line (updates) & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{} / \tbd{} \\``.
+
+9. **AGREE** — Fable's explicit half-gap column wins over Astra 4; every displayed threshold matches recomputation using unrounded home mean 3.5984045336954296 dB, not the printed 3.60. Exact winning caption: ``\caption{Per unseen arena, sorted by $D$: step-0 decoded advantage $A_0$, the half-gap line $\tfrac12(A_0+A_\text{home})$ with $A_\text{home}=\prov{3.60}$~dB, the first grid budget at which $A$ crosses the half-gap line and the home line (${>}$4k: censored), $A$ and $M$ at 4,000 updates, forgetting (change in the training maps' $A$) and the directional score at 4,000.}`` Exact winning header and rows: ``Arena & $D$ & $A_0$ & Half-gap line & Half gap & Home line & $A$ at 4k & $M$ at 4k & Forgetting & Directional \\ \midrule 8 & \prov{0.115} & \prov{+1.29} & \prov{2.44} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 15 & \prov{0.127} & \prov{+2.68} & \prov{3.14} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 12 & \prov{0.128} & \prov{+1.07} & \prov{2.33} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 17 & \prov{0.130} & \prov{+1.30} & \prov{2.45} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 14 & \prov{0.146} & \prov{+1.33} & \prov{2.46} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 11 & \prov{0.150} & \prov{+1.80} & \prov{2.70} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 13 & \prov{0.156} & \prov{+1.80} & \prov{2.70} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 10 & \prov{0.162} & \prov{+1.67} & \prov{2.63} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 16 & \prov{0.164} & \prov{+1.92} & \prov{2.76} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 1 & \prov{0.179} & \prov{+1.09} & \prov{2.35} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 9 & \prov{0.180} & \prov{+2.05} & \prov{2.82} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 6 & \prov{0.188} & \prov{+0.72} & \prov{2.16} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\ 7 & \prov{0.282} & \prov{+0.88} & \prov{2.24} & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd \\``.
+
+10. **AGREE WITH CHANGE** — Use Astra 5's explicit marker semantics with Fable's notation; the comparator stays planned. Exact Figure 3 replacement: ``\caption{$A$ against adapter updates; colour: frame distance $D$. Dashed: $A_\text{home}$; ticks: each arena's $\tfrac12(A_0+A_\text{home})$. Markers: first grid crossings; open endpoints: censored. Black: planned full fine-tune.}`` Fable's Figure 2 deletion wins verbatim: ``(a) $A$; dashed: the training maps' mean. (b) $M$.``.
+
+11. **AGREE WITH CHANGE** — Astra 7's planned-study sentence wins over a claim of measured recovery. Exact replacement: ``We plan to measure adapter cost by the updates needed to close half of each arena's zero-shot gap to the training-map advantage.`` This is already included in item 1; apply it once.
+
+12. **AGREE WITH CHANGE** — Astra 8 wins for the whole contribution paragraph, as in item 2; a placeholder count does not make an asserted adaptation result hypothetical. Exact winning replacement: ``We contribute a per-arena Doom evaluation against persistence and autoencoder reconstruction, with directional checks and closed-loop rollouts. The U-Net's decoded advantage shrinks on unseen arenas and its LPIPS margin changes sign; replication with the other backbones is pending. Frame distance has no clear association with advantage within unseen arenas, and good one-step scores can coexist with collapse. The adapter cost curves and full fine-tune comparison remain planned experiments.`` Apply the paragraph once.
+
+13. **AGREE WITH CHANGE** — Astra 9 wins for the whole What-it-takes paragraph, including the later unmeasured preservation and correlation claims. Exact replacement: ``\textbf{What it takes.} Adaptation results are pending (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}). Less forgetting with LoRA is a hypothesis motivated by language-model results~\citep{biderman2024lora}; the full fine-tune comparison is pending. Associations of cost with zero-shot advantage or either distance will be exploratory.``.
+
+14. **AGREE WITH CHANGE** — Astra 10 wins for the whole concluding sentence because recovery remains unmeasured: ``On unseen arenas, the U-Net retains a positive one-tic decoded advantage over copying but loses its LPIPS advantage. Whether adapters close the gap to the training maps remains an open empirical question.`` Astra 6 wins for the entire FIGURES.md `fig:adapt` row, with the agreed notation and a linear axis retaining zero: ``| `fig:adapt` (Figure 3) | Adaptation curves, one line per unseen arena coloured by D: `A` against LoRA updates (linear axis including step 0) with the frozen training-map line A_home and arena-specific halfway targets (A_0+A_home)/2; first evaluated crossings marked, non-crossers open at the final budget, the planned full fine-tune on arena 7 in black. One panel, as Rohan specified; the `M` curves the cost decision called a second panel are Figure 5 in the appendix. Shares one float row with Figure 2 (one third of the width) | `score_adapt.py score` rows (`scores.jsonl`, live weights) from the 13-arena U-Net LoRA runs (`adapt_wm.py`), A_home and each A_0 frozen from step-0 predictions through the tuned SD 1 decoder | `figures/fig3_adaptation_curves.pdf` | pending (runs launch Sep 27 evening; arenas 8, 16, 6, 7 first as the fallback set) |``.
+
+15. **AGREE WITH CHANGE** — Use this shorter first-person wording; neither the original nor Fable's long revision wins: ``We need a world model to generalize to unseen levels before using it to plan or train a policy there.`` The original has a main verb; clarity, not a missing verb, is the issue.
+
+16. **AGREE WITH CHANGE** — Astra 12 wins because merely splitting the sentence preserves the false all-scores claim and the misleading Genie attribution. Exact replacement: ``Following video prediction~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}, we report model quality beside copy-last persistence and paired differences on the same windows. We also report autoencoder reconstruction, following occupancy and feature forecasting~\citep{zheng2023occworld,karypidis2024dinoforesight}.``.
+
+17. **AGREE** — The sentence split is accurate and requires no extra claim; accept Fable's replacement verbatim.
+
+18. **DISAGREE** — Agreement of image motion with recorded controls is an empirical sanity check, not a mathematical bound on a different, swapped-control score; the 0.91 also needs matched-run provenance.
+
+19. **AGREE WITH CHANGE** — Astra 17's uncertainty language wins over a categorical null and an unspecified significance cutoff. Exact replacement of Fable's quoted clause: ``but within the 13 unseen arenas we do not establish an association between $D$ and $A$ (Spearman \prov{$-0.23$}).`` If Astra 17 is applied as a block, its existing equivalent sentence takes precedence; do not duplicate it.
+
+20. **AGREE WITH CHANGE** — Astra 22 wins: preserve the trained position table and treat DiffFit as image-generation motivation. Exact replacement: ``\textbf{Protocol.} We plan rank-16, $\alpha=16$ attention LoRA initialized from the U-Net's 200k EMA~\citep{hu2022lora,gao2024vista}. We also train the control MLP and its position table, input projection and noise-bucket embedding; other backbone weights stay frozen. DiffFit motivates testing these additional parameters, based on image-generation experiments~\citep{xie2023difffit}.``.
+
+21. **AGREE** — The current adapt_split.py defaults confirm the step curve uses 8 of the 16 adaptation episodes; accept Fable's replacement verbatim.
+
+22. **AGREE WITH CHANGE** — Astra 26 wins because splitting the sentence does not fix the conflation of nearest-source coverage with Gaussian latent KL. Exact replacement: ``Dataset distances have been studied as predictors of transfer outcomes~\citep{alvarezmelis2020otdd,nguyen2025sotdd}. Nearest-source coverage~\citep{mensink2021factors} and latent-distribution KL divergence~\citep{westny2026latent} motivate alternative distance measures; neither validates our proposed transition distance.``.
+
+23. **DISAGREE** — The proposed 'so' falsely derives a power estimate from the concentration of distance range; power requires a specified test, alternative and sampling model.
+
+24. **AGREE** — The sign conventions and colour-independent provenance are correct; accept Fable's replacement verbatim.
+
+25. **AGREE WITH CHANGE** — Keep provenance visible when colour is disabled. Exact Table 1 replacement: ``Provisional rows: PixArt and SD~3.5\ifdraftmarks{} (blue)\fi; $^\dagger$150k.}`` Exact appendix per-arena-caption replacement: ``Pre-fresh-set episodes\ifdraftmarks{} (blue)\fi. $^\ast$pooled over the four training maps.}``.
+
+26. **AGREE WITH CHANGE** — Shorten without claiming that sampling identifies a mechanism or pointing to an omitted submission appendix. Exact replacement: ``Blur under uncertainty is one possible explanation for the PSNR--LPIPS tradeoff; the mechanism remains untested.``.
+
+27. **AGREE WITH CHANGE** — Keep the short explanation but identify the decoder tune as planned until its checkpoint and scores exist. Exact replacement: ``Rollouts stay in latent space, so the decoder only renders. Following GameNGen, we plan to tune it with MSE on training-map frames, then freeze it.``.
+
+**HUD wording resolution (Fable's opening audit, not a numbered proposal).** Astra 14–15 and 28 win: the arithmetic matches, but the reported statistic is a geometric mean of per-window error fractions, not an aggregate MSE share. Exact appendix wording: ``From the mean full-frame and HUD reconstruction PSNRs, the geometric mean of the per-window HUD error fraction is \prov{39--68}\% across arenas. This is not the fraction of total squared error aggregated over windows; that quantity requires per-window MSEs.`` The main-text replacement remains Astra 14 exactly: ``The provisional pixel scores use full frames and the stock decoder; the planned rescore will report scene-only scores beside them. We separate the HUD because persistence nearly reproduces it while the stock decoder reconstructs it poorly. Across unseen arenas, raw PSNR gain correlates with persistence PSNR (Spearman \prov{$-0.77$}), so we report it with the reference scores rather than interpret its sign alone as map transfer.``.
+
+**Cost documentation resolution.** Fable's two milestones replace the quarter-gap milestone everywhere: Astra 29's FIGURES.md description should read `arenas closing half of their zero-shot-to-home gap or reaching home, first evaluated costs to half gap and home`; Astra 30's description should read `step-0 A, the per-arena half-gap threshold, and first evaluated costs to half gap and home`. The producer must use unrounded step-zero means. The numerical rows accepted in Fable 9 remain provisional until the fresh-set rescore freezes the actual thresholds. Report arenas already at or above home separately from the half-gap denominator.
+
+**Fable's seven unresolved problems.** P1: venue verification remains incomplete, and metadata verification does not establish every claim's usage. P2: resolved in the winning U-Net-specific abstract and contribution text. P3: the full fine-tune stays explicitly pending, with no fabricated score. P4: final figure readability and page fit still need checking after the agreed set is applied. P5: distinguish the earlier pre-registration set from the arena-only result tables, while retaining the failed-gate disclosure. P6: the directional scores still need matched-artifact provenance. P7: Astra 21 removes the unobserved result from the pending Figure 1 caption.
+
+Counts over the 27 numbered Fable proposals: **5 AGREE, 19 AGREE WITH CHANGE, 3 DISAGREE**. Disagreements: **5** (mixed LPIPS targets), **18** (empirical estimator check is not a bound), **23** (unsupported causal derivation of power).
+
+## Additional required proposals
+
+31. **Anonymise identifying source annotations and retain the style's hidden author block.**
+
+Files: `paper/main.tex`, `paper/appendix.tex`.
+
+I searched both complete files with `rg -n -i` for personal names, account/URL patterns, Hugging Face, W&B, GitHub, university/lab names, host names, source commit identifiers, and self-attribution. There are **no Hugging Face account strings, W&B URLs, GitHub usernames/URLs, or author-affiliation names in the rendered body or appendix**. Do not invent replacements for absent strings. The following are all identifying source annotations found, including host paths and source revisions; preserve each exact original in its requested `% camera-ready:` comment. These comments do not render in the PDF.
+
+File: `paper/main.tex`
+
+Current:
+
+```tex
+% Template: corl_2026.sty and corlabbrvnat.bst exactly as Rohan's Overleaf download ships them (f0500f9);
+```
+
+Replacement:
+
+```tex
+% Template: corl_2026.sty and corlabbrvnat.bst exactly as [anonymous authors’] Overleaf download ships them ([anonymous revision]);
+% camera-ready: % Template: corl_2026.sty and corlabbrvnat.bst exactly as Rohan's Overleaf download ships them (f0500f9);
+```
+
+File: `paper/main.tex`
+
+Current:
+
+```tex
+% body-plus-references submission build if Rohan rules that the appendix may not ride along.
+```
+
+Replacement:
+
+```tex
+% Default submission: body plus references; appendix reserved for camera-ready or an anonymous supplement by [anonymous authors].
+% camera-ready: % body-plus-references submission build if Rohan rules that the appendix may not ride along.
+```
+
+File: `paper/main.tex`
+
+Current:
+
+```tex
+% depends: PixArt 200k final read (Sep 26 night) and SD 3.5 200k (about Sep 28 00:30) replace the provisional rows; tuned-decoder and scene-only columns from scripts/spiderman/rescore_tuned_decoder.sh
+```
+
+Replacement:
+
+```tex
+% depends: PixArt 200k final read (Sep 26 night) and SD 3.5 200k (about Sep 28 00:30) replace the provisional rows; tuned-decoder and scene-only columns from scripts/[anonymous-host]/rescore_tuned_decoder.sh
+% camera-ready: % depends: PixArt 200k final read (Sep 26 night) and SD 3.5 200k (about Sep 28 00:30) replace the provisional rows; tuned-decoder and scene-only columns from scripts/spiderman/rescore_tuned_decoder.sh
+```
+
+File: `paper/main.tex`
+
+Current:
+
+```tex
+% Figures 2 and 3 share one float row to fit the page budget; Figure 3 is the single panel Rohan specified (advantage against updates), and the perceptual-margin curves the cost decision called a second panel are Figure 5 in Appendix F.
+```
+
+Replacement:
+
+```tex
+% Figures 2 and 3 share one float row to fit the page budget; Figure 3 is the single panel [anonymous authors] specified (advantage against updates), and the perceptual-margin curves the cost decision called a second panel are Figure 5 in Appendix F.
+% camera-ready: % Figures 2 and 3 share one float row to fit the page budget; Figure 3 is the single panel Rohan specified (advantage against updates), and the perceptual-margin curves the cost decision called a second panel are Figure 5 in Appendix F.
+```
+
+File: `paper/main.tex`
+
+Current:
+
+```tex
+% adapter facts: lora.py and adapt_wm.py at eaf565a; U-Net trained total 4.21M = 0.49 percent (RESEARCH_CONTEXT 2026-09-26 20:10); the design also trains the control MLP's position table
+```
+
+Replacement:
+
+```tex
+% adapter facts: lora.py and adapt_wm.py at [anonymous revision]; U-Net trained total 4.21M = 0.49 percent (RESEARCH_CONTEXT 2026-09-26 20:10); the design also trains the control MLP's position table
+% camera-ready: % adapter facts: lora.py and adapt_wm.py at eaf565a; U-Net trained total 4.21M = 0.49 percent (RESEARCH_CONTEXT 2026-09-26 20:10); the design also trains the control MLP's position table
+```
+
+File: `paper/appendix.tex`
+
+Current:
+
+```tex
+% appendix; the OpenReview form takes one PDF. Whether this rides along in the submission PDF is Rohan's call.
+```
+
+Replacement:
+
+```tex
+% appendix; retained for camera-ready or an anonymous supplement prepared by [anonymous authors].
+% camera-ready: % appendix; the OpenReview form takes one PDF. Whether this rides along in the submission PDF is Rohan's call.
+```
+
+File: `paper/appendix.tex`
+
+Current:
+
+```tex
+% depends: the Spiderman rerun of the structural controls with the per-window files (the local amended CIs resampled without them); the within-unseen partial is recomputed on the fresh set
+```
+
+Replacement:
+
+```tex
+% depends: the [anonymous host] rerun of the structural controls with the per-window files (the local amended CIs resampled without them); the within-unseen partial is recomputed on the fresh set
+% camera-ready: % depends: the Spiderman rerun of the structural controls with the per-window files (the local amended CIs resampled without them); the within-unseen partial is recomputed on the fresh set
+```
+
+File: `paper/appendix.tex`
+
+Current:
+
+```tex
+% exists: paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg (tools/collapse_strip.py at 42a4688)
+```
+
+Replacement:
+
+```tex
+% exists: paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg (tools/collapse_strip.py at [anonymous revision])
+% camera-ready: % exists: paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg (tools/collapse_strip.py at 42a4688)
+```
+
+The author block is already excluded from the rendered submission by `\usepackage{corl_2026}` with neither `final` nor `preprint`. Its exact identifying lines are listed here as the explicit exception requested by the user, with no replacement proposed:
+
+```tex
+  Rohan Nagabhirava \quad Keerthana Chirumamilla \quad Changliu Liu\\
+  Carnegie Mellon University\\
+  Pittsburgh, PA, United States
+```
+
+The existing `(link withheld for review)` is already anonymous. First-person `we`/`our` describes the present work and does not identify its authors. Arnold, ViZDoom, Freedoom, Stiegler and Taketani identify cited third-party resources, so those names remain. The generic Hugging Face mention is not an account identifier. Use the anonymous PDF for a supplement: the requested camera-ready comments deliberately retain identities in the private TeX source.
+
+Reason: remove author/host attribution from active annotations without erasing evidence provenance or misidentifying third-party citations as author disclosures; preserve the submission style's existing PDF anonymisation.
+
+32. **Default to body plus references, and suppress references to the omitted appendix.**
+
+File: `paper/main.tex`.
+
+Current:
+
+```tex
+\newif\ifwithappendix \withappendixtrue
+```
+
+Replacement:
+
+```tex
+\newif\ifwithappendix \withappendixfalse
+% camera-ready: \withappendixtrue includes appendix.tex after the bibliography.
+% Submission PDF: body and references only. Keep appendix.tex for camera-ready
+% or a separately built anonymous supplement; do not enable final/preprint for that supplement.
+```
+
+Keep the existing `\ifwithappendix ... \input{appendix} ... \fi` block after the bibliography. The user has now decided the submission packaging; this supersedes the earlier unresolved-permission note. Turning the flag off alone would create undefined references. Apply the following exact substring replacements to the present source; the protocol-parenthesis pattern occurs twice and the others once. Apply the same guards to surviving equivalent references in the agreed review edits. A false branch removes only the appendix pointer, not its surrounding scientific statement.
+
+Current:
+
+```tex
+ (Appendix~\ref{app:protocol})
+```
+
+Replacement:
+
+```tex
+\ifwithappendix{} (Appendix~\ref{app:protocol})\fi
+```
+
+Current:
+
+```tex
+ (Appendix~\ref{app:distance})
+```
+
+Replacement:
+
+```tex
+\ifwithappendix{} (Appendix~\ref{app:distance})\fi
+```
+
+Current:
+
+```tex
+ (Appendix~\ref{app:closedloop})
+```
+
+Replacement:
+
+```tex
+\ifwithappendix{} (Appendix~\ref{app:closedloop})\fi
+```
+
+Current:
+
+```tex
+; a decoder-free latent skill is in Appendix~\ref{app:skill}
+```
+
+Replacement:
+
+```tex
+\ifwithappendix; a decoder-free latent skill is in Appendix~\ref{app:skill}\fi
+```
+
+Current:
+
+```tex
+ ($M$ curves: Appendix~\ref{app:perarena-adapt})
+```
+
+Replacement:
+
+```tex
+\ifwithappendix{} ($M$ curves: Appendix~\ref{app:perarena-adapt})\fi
+```
+
+Current:
+
+```tex
+ Per arena: Appendix~\ref{app:perarena-adapt}.
+```
+
+Replacement:
+
+```tex
+\ifwithappendix{} Per arena: Appendix~\ref{app:perarena-adapt}.\fi
+```
+
+The parenthesized distance guard also covers the additional failed-gate pointer introduced by Astra 17; the caption guard covers the agreed cost caption in Fable item 8 above. Fable item 26's changed wording has no appendix pointer. No synthetic appendix labels or frozen page numbers are introduced. Keep the appendix file and its labels intact for the builds that include it. A separate supplement needs its own anonymous PDF build if one is actually submitted; this proposal does not create or promise such a submission.
+
+Reason: enforce the requested body-plus-references submission while retaining a usable appendix source and eliminating dangling cross-references.
+
+Validation of proposals 31–32: all current-text matches were checked; a temporary submission build contains body plus references, keeps `body-end` on page 4, and has no undefined references, overfull boxes, or rendered author names. Re-enabling the guarded appendix in a fresh temporary build also resolves all references. This validates the new packaging edits against the present manuscript, not the still-unapplied merged set of both reviews. The final combined wording and real figures require a fresh page-budget check. No manuscript, template, bibliography or other review file was changed.

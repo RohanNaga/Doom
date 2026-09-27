@@ -400,3 +400,195 @@ Reason: the same facts in fewer words.
 5. **The 30-map test under the single-dataset rule.** Section 0 says the campaign maps stay out of the paper, but Section 3 and Appendix C report the pre-registered 30-map partial Spearman and the five checks on the 30-map set. Reporting a pre-registered result is right; the body should say in one clause that the 30-map set is the pre-registration set and that the paper's tables use the 17 arenas only. Appendix C says it; the body does not.
 6. **Directional numbers in Table 1.** The U-Net's 0.867 is the 2026-09-25 02:10 read; RESEARCH_CONTEXT section 0 item 2 says 0.85 for the U-Net 200k EMA and 0.86 for PixArt 155k, and I could not find the read that gives SD 3.5 140k's 0.852 (the 130k read is EMA 0.844, live 0.867). The three values need one provenance line in FIGURES.md.
 7. **Figure 1's last caption sentence** ("On the unseen arena the model follows the control but loses texture first") is written before any frames were chosen; it is marked as a hypothesis in a comment and must be rewritten from the frames the seeded rule picks.
+
+## On the other list
+
+Read against `paper/review_astra.md` in full, 2026-09-26 night. Before marking anything I rechecked the facts Astra's items turn on: `lpips_dec` is the decoded prediction against the decoded truth (`eval_tf.py` line 149) and exceeds raw persistence's LPIPS on 13 of 13 unseen arenas, while `copy_lpips_dec` is indeed absent from the legacy h1 files, as Astra says; persistence's HUD PSNR is finite, 87.8 to 96.2 dB across the 17 arenas, so "copies it exactly" needs "almost"; the HUD share as computed from the mean PSNRs is the geometric mean over windows of the per-window share (39.2 to 67.8 percent), as Astra says; `lora.py`'s `control` part is `control_history` plus `action_embedder`, so the position table is inside what the paper calls the control MLP; the lit-transferability memo (Table 10 of Mensink, Table 2 of Westny) confirms that Westny's directed measure is a Gaussian latent KL, not coverage; XEWorld §3.1 says of its two held-out robots "we report their results separately and never average them" (fetched tonight). Counts: AGREE 1, AGREE WITH CHANGE 28, DISAGREE 1.
+
+Where an Astra item and one of mine address the same passage, the winner is stated on the line. Summary of the five shared passages: the half-gap cost rule takes my items 7 to 14 (compact, no $C_m(t)$ notation, no four-decimal $H$) plus Astra's censored-median clause and "negative is loss"; the abstract keeps its six sentences with my items 1 and 11 and the verb of Astra's 18; the decoded-advantage passage takes my items 3, 4 and 5 with item 5 amended to name the comparison the files support; XEWorld takes Astra's fact with a shorter sentence that keeps the rarity claim; the HUD share takes Astra's statistic with the numbers kept in both places.
+
+**A1.** AGREE WITH CHANGE: same rule, my item 7 wording wins (three sentences, no per-arena function notation, no "Provisionally, $H=3.5984$" or "The revised halfway target is" review prose in the paper; the "arena already at $H$" clause has no case today, every arena starts below). Quarter-gap milestone dropped, see A3.
+
+**A2.** AGREE WITH CHANGE: my item 8 caption plus Astra's censored-median rule and sign convention, exactly:
+```
+\caption{What crossing costs (U-Net 200k from its EMA weights, 8 episodes, live weights scored; ${>}$4k: censored, and a median over the 13 arenas is censored when fewer than 7 cross). Half gap, home line: $A$ closes half of the arena's step-0 gap to the training maps' advantage, or reaches it. Forgetting: change in the training maps' $A$, negative is loss. Per arena: Appendix~\ref{app:perarena-adapt}.}
+```
+
+**A3.** AGREE WITH CHANGE: my item 8 rows win (25 percent dropped everywhere, since a percent-of-gap ladder needs no quarter step and the appendix column is better spent on each arena's half-gap line); if Astra wants 25 percent kept, keep it in both tables by adding a column to Table 8 rather than replacing the half-gap line.
+
+**A4.** AGREE WITH CHANGE: my item 9 caption, header and rows win (they print the per-arena threshold), with Astra's sign convention folded in: `forgetting (change in the training maps' $A$, negative is loss)` replaces `forgetting (change in the training maps' $A$)` in my item 9 caption.
+
+**A5.** AGREE WITH CHANGE: my item 10 plus Astra's "markers: first crossings"; "planned" is not caption prose. Exactly:
+```
+\caption{$A$ against LoRA updates per unseen arena, coloured by $D$; dashed: home advantage; a tick on each curve: its half-gap line; markers: first crossings; open: censored. Black: full fine-tune.}
+```
+
+**A6.** AGREE WITH CHANGE: the axis stays logarithmic with step 0 drawn as the first labelled tick (symlog or a broken axis), because the grid 250, 500, 1k, 2k, 4k doubles and a linear axis crushes the first three points into a tenth of the width; the rest of Astra's row stands. Exactly:
+```
+| `fig:adapt` (Figure 3) | Adaptation curves, one line per unseen arena coloured by D: `A` against LoRA updates (log axis with step 0 as the first labelled tick, grid 0 to 4,000) with the frozen training-map line and each arena's half-gap line (A_0 + home)/2 as a tick on its curve; first crossings marked, non-crossers open at the final budget, the full fine-tune on arena 7 in black. One panel, as Rohan specified; the `M` curves the cost decision called a second panel are Figure 5 in the appendix. Shares one float row with Figure 2 (one third of the width) | `score_adapt.py score` rows (`scores.jsonl`, live weights) from the 13-arena U-Net LoRA runs (`adapt_wm.py`), the home line and each arena's A_0 frozen from step-0 predictions through the tuned SD 1 decoder | `figures/fig3_adaptation_curves.pdf` | pending (runs launch Sep 27 evening; arenas 8, 16, 6, 7 first as the fallback set) |
+```
+
+**A7.** AGREE WITH CHANGE: the abstract keeps its six sentences; sentence 3 takes my item 1 (U-Net named), sentence 5 takes my item 11 (half of each arena's gap), sentence 6 takes the verb of A18: `In closed loop, good one-step scores do not guarantee stability, and the EMA reduces collapses without removing them.`; sentences 1, 2 and 4 stay. Astra's sentences 2 and 5 ("currently cover", "We plan to measure") are status reports, and the skeleton's convention holds pending status in `\tbd` and the `% hypothesis:` comments and rewrites the sentence from the numbers when they land (Sep 28), in either direction.
+
+**A8.** AGREE WITH CHANGE: my items 2 and 12 win (they mark the replication and the adaptation result as pending inside the printed text without dropping the numbers that exist); contribution (4) takes A18's verb: `one-step quality does not guarantee closed-loop stability`.
+
+**A9.** DISAGREE: every clause carries `\tbd` and the paragraph's `% hypothesis:` comment, by the writing brief's convention, and is rewritten from `score_adapt.py cost` on Sep 28 whichever way the numbers fall; "Adaptation results are pending" is not submission prose either and would be rewritten just the same, and the fallback if the runs slip is my problem 3, not a rewrite now.
+
+**A10.** AGREE WITH CHANGE: my item 14 plus the U-Net named (my item 1), exactly:
+```
+Off its training maps the U-Net keeps its turn response and part of its advantage over copying, loses its perceptual advantage, and closes half of its gap to the home advantage within \tbd{} adapter updates.
+```
+
+**A11.** AGREE WITH CHANGE: Astra's fact wins ("pooled" is wrong for XEWorld, verified tonight), but the replacement drops the rarity sentence and the Doom absence claim and duplicates Section 5; the shorter fix, exactly:
+```
+The measurement is rare. Held-out domains in world-model papers are an embodiment, a game, an environment or a building~\citep{chen2026xeworld,rigter2024avid,gao2025adaworld,koh2021pathdreamer}, and we found no Doom world model scored on maps it did not train on.
+```
+
+**A12.** AGREE WITH CHANGE: my item 16's split wins, with Astra's two corrections folded in ("every score" overclaims because Table 1 prints absolute PSNR; the Genie citation moves to the definition, A13). Exactly:
+```
+Video prediction reported a copy-last baseline~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}; game world models dropped it.
+We make persistence, defined on every map without training, the zero line: each transfer score is a paired difference against it on the same windows, read beside the reconstruction ceiling~\citep{zheng2023occworld,karypidis2024dinoforesight}.
+```
+
+**A13.** AGREE WITH CHANGE: the aggregation belongs here and Genie's $\Delta$PSNR is between inferred and random actions, so cite it as the paired form, not as the same metric. Exactly:
+```
+The \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ puts the model and copy-last through the same decoder; it is averaged over windows, then equally over maps.
+It is a paired difference on the same frame, as Genie's $\Delta$PSNR is between inferred and random actions~\citep{bruce2024genie}.
+```
+
+**A14.** AGREE WITH CHANGE: the paper states the final protocol (scene rows) and `\prov` covers today's full-frame numbers, so the first clause stays; Astra is right on "exactly" (persistence's HUD PSNR is 88 to 96 dB, finite) and on the statistic (a geometric mean over windows). My wording wins for the sentence, Astra's statistic wins for the number. Exactly:
+```
+Pixel quantities use the scene rows: per window the HUD carries \prov{39 to 68} percent of the stock decoder's squared error (geometric mean over windows) and persistence copies it almost exactly (\prov{88 to 96}~dB). We never rank maps on raw PSNR against persistence, which tracks how static the footage is (Spearman \prov{$-0.77$}).
+```
+
+**A15.** AGREE WITH CHANGE: the mechanism sentence is hedged rather than deleted ("however good the latent prediction is" was the overclaim), the HUD statistic is stated as what it is, and Astra's last sentence ("This is not the fraction ... requires per-window MSEs") is a reviewer's note, not paper text. Exactly:
+```
+\textbf{What the variation between arenas follows.} Across the 13 unseen arenas, raw gain over persistence tracks persistence PSNR (Spearman \prov{$-0.77$}) and the model's absolute PSNR tracks it at \prov{0.95}, while $A$ does not (\prov{$-0.05$}), consistent with a floor on the model's pixel error, from the decoder and from blur, that raw persistence lacks. The gap $G$ tracks persistence too (\prov{$-0.80$}), which is why it is a table column and not a cost axis. The 32 HUD rows, which the stock decoder renders at about 18~dB and persistence copies almost exactly (\prov{88 to 96}~dB), carry \prov{39 to 68} percent of the ceiling's squared error per window (geometric mean over windows, from the mean PSNRs) on the 17 arenas.
+```
+
+**A16.** AGREE WITH CHANGE: my items 4, 3 and 5 win for the three sentences (they name the measured quantity and its two means, keep the pending paired decoding as the test, and state the flat ceiling rather than "changes less"; "2.09 dB" is over-precise for a provisional mean); Astra is right that `copy_lpips_dec` is not in the files, so item 5 is amended to name the comparison they do support, exactly:
+```
+Nor is the perceptual flip the decoder's floor: its own LPIPS (\prov{0.08 to 0.12}) sits below persistence's (\prov{0.15 to 0.23}), and the model, scored against the decoded true frame, still has higher LPIPS than raw persistence (\prov{13 of 13}).
+```
+
+**A17.** AGREE WITH CHANGE: the heading and the floor-band sentence stay (the family separation is the cohesion decision's headline and the floor band is the evidence for it), the within-arena clause takes my item 19, and the 30-map sentence changes to state the failed gate first and the amended verdict in its own words. Exactly, replacing the third sentence:
+```
+The pre-registered 30-map test, which also held campaign maps of another WAD, failed its validation gate (Appendix~\ref{app:distance}).
+Its partial Spearman of $-0.73$ [$-0.84$, $-0.32$] falls to \prov{$-0.42$} with family indicators as covariates, so we read it as qualified evidence of a pooled association, not of an ordering.
+```
+
+**A18.** AGREE WITH CHANGE: the verb is right (one checkpoint pair shows coexistence, not the absence of association) but the specifics stay. Exactly:
+```
+\textbf{Closed loop.} Good one-step scores do not guarantee stable rollouts: SD~3.5 has the best one-tic numbers, yet at 50k and 70k its live weights fall into an absorbing state where one latent channel's mean is captured and frames go blank (Appendix~\ref{app:closedloop}).
+```
+The abstract's sentence 6 and contribution (4) take the same verb (A7, A8).
+
+**A19.** AGREE WITH CHANGE: one sentence, stating the sampler as the held factor without denying an interaction. Exactly:
+```
+Both share the sampler, so the few-step sampling DIAMOND blames for drift~\citep{alonso2024diamond} is not what differs between them.
+```
+
+**A20.** AGREE.
+
+**A21.** AGREE WITH CHANGE: same problem as my problem 7; drop the hypothesis sentence and keep it a caption rather than a plan. Exactly:
+```
+\caption{Rollouts under held controls (turn left, forward, strafe right) on training arena \tbd{} (left) and unseen arena \tbd{} (right), windows chosen by a seeded rule. Rows: truth, U-Net 200k EMA, copy-last; tics 1, 4, 8, 16, 32.}
+```
+
+**A22.** AGREE WITH CHANGE: my item 20 wins ("We plan" is not submission prose, and DiffFit's Table 1 is the stated reason for the design choice, which is what "because" says), with the position table added, since `lora.py`'s `control` part trains it. Second sentence exactly:
+```
+The control MLP with its position table, the input projection and the noise-bucket embedding train in full (4.2M parameters, 0.49 percent), because on DiT-XL/2 LoRA alone falls far short of full fine-tuning~\citep{xie2023difffit}.
+```
+
+**A23.** AGREE WITH CHANGE: same as my problem 3; the skeleton marks a pending decision with `\todo`, not with "this run is pending". Exactly:
+```
+A full fine-tune of arena 7, the farthest, is the comparator\todo{conditional: Monday if a card idles, else drop this sentence, Table 3's third column and the Appendix E clause, and state it as a limitation}.
+```
+
+**A24.** AGREE WITH CHANGE: my item 6 wins; it cuts the same training-budget aside but keeps the sentence Section 5 exists to make ("scored on held-out trajectories of their training scenes").
+
+**A25.** AGREE WITH CHANGE: the verified specifics stay (appearance distance, 25 to 75 episodes, forgetting a seen robot); "None scores per scene against persistence" is a claim about these four papers, which were read, not a broad absence claim, and Astra's own reading of XEWorld (per embodiment, not per scene, not against persistence) supports it. The one change, in the first clause: `XEWorld holds out two robot embodiments, scored separately, finds held-out error tracking an appearance distance, ...` with the rest of both sentences unchanged.
+
+**A26.** AGREE WITH CHANGE: my item 22 split wins, with Astra's correction that the two directed measures differ (memo: Mensink's nearest-source coverage against EMD, Westny's Gaussian latent KL against Wasserstein); the sentence stays a comparison, which is what the two tables show, not a causal claim. Exactly:
+```
+Dataset distances predict fine-tuned outcomes~\citep{alvarezmelis2020otdd,nguyen2025sotdd}; in two studies a directed measure, nearest-source coverage~\citep{mensink2021factors} or latent KL~\citep{westny2026latent}, predicted transfer better than a symmetric transport distance.
+We found no measurement of the cost of crossing from one world model to each of many targets, nor of EMA against live weights in closed loop.
+```
+
+**A27.** AGREE WITH CHANGE: one sentence naming the two measures; Astra's second sentence repeats what the `\todo` before it already lists (the validation of the chosen distance). Exactly:
+```
+In two studies a directed measure predicted transfer better than a symmetric transport distance: nearest-source coverage against EMD~\citep{mensink2021factors} and Gaussian latent KL against Wasserstein~\citep{westny2026latent}.
+```
+
+**A28.** AGREE WITH CHANGE: the row also covers the appendix use and records the persistence HUD PSNR the "almost exactly" wording rests on. Exactly:
+```
+| Section 2, Appendix B | HUD share of the ceiling's squared error per window, geometric mean over windows, 39 to 68 %; persistence HUD PSNR 88 to 96 dB | (32/240) × 10^((mean `vae_psnr` − mean `hud_vae_psnr`)/10) per arena, and `persist_hud_psnr_raw`, from the 17 h1 `metrics.json` | provisional |
+```
+
+**A29.** AGREE WITH CHANGE: with the naming of A3 (25 percent dropped) and Astra's median rule kept. Exactly:
+```
+| `tab:cost` (Table 3) | What crossing costs: LoRA over 13 arenas (median), LoRA on arena 7, full fine-tune on arena 7; trained parameters and GPU-hours, arenas past the half-gap line and the home line by 4k, cost to each (first grid crossing), `A`, `M`, `G` at 4,000, forgetting and directional | `score_adapt.py cost` after implementing the per-arena half-gap line (A_0 + home)/2 (right-censored; a median over 13 arenas is censored when fewer than 7 cross, never a median over crossers alone) and the guard rows; parameter counts from `lora.parameter_counts` | table in `main.tex` | trained-parameter row exists; everything else pending (full fine-tune: Monday if a card idles and arena 7's LoRA curve is flat, else October) |
+```
+
+**A30.** AGREE WITH CHANGE: same naming. Exactly:
+```
+| `tab:perarena-adapt` | Per unseen arena: D, step-0 `A`, its half-gap line (A_0 + home)/2, first grid crossing of the half-gap line and the home line, `A` and `M` at 4,000, forgetting, directional | `score_adapt.py` rows and cost | D, step-0 `A` and the half-gap lines provisional; the rest pending |
+```
+
+## New proposals (round 2)
+
+**28. Anonymisation for the double-blind submission.** What I checked: `corl_2026.sty` without `[final]` prints "Anonymous Author(s)" (line 430) and sets `pdfauthor={Anonymous Submission}` (line 117); a grep of `main.tex` and `appendix.tex` for Hugging Face, W&B, GitHub, author, university, lab and city strings finds only the author block (lines 45 to 49); the benchmark link already reads "link withheld for review"; `refs.bib` cites no work of the authors; source comments (Rohan, Overleaf, Spiderman paths) never render and the form takes only the PDF. The one rendered risk is a `[final]` build by mistake, so the block itself is replaced and the original kept in a `% camera-ready:` comment.
+Current (`main.tex`):
+```
+\author{
+  Rohan Nagabhirava \quad Keerthana Chirumamilla \quad Changliu Liu\\
+  Carnegie Mellon University\\
+  Pittsburgh, PA, United States
+}
+```
+Replacement:
+```
+% camera-ready: \author{Rohan Nagabhirava \quad Keerthana Chirumamilla \quad Changliu Liu\\ Carnegie Mellon University\\ Pittsburgh, PA, United States}
+\author{
+  Anonymous Author(s)\\
+  Anonymous Institution\\
+  Anonymous City, Country
+}
+```
+Rule for everything still to come: figure PDFs carry no W&B run names, server paths (`/sata2/data/rnagabhi`, Superman, Spiderman) or account names in titles or legends; before the upload, `pdftotext main.pdf - | grep -inE 'nagabhirava|chirumamilla|carnegie|cmu|pittsburgh|rnagabhi|sata2|wandb|huggingface|github'` must return nothing, and the same grep on the two `.tex` files must return only `% camera-ready:` lines. If any identifying string appears later in the text, the same pattern applies: anonymous placeholder in the text, original in a `% camera-ready:` comment on the line above.
+
+**29. The submission build is body plus references.** `\withappendixfalse` becomes the default and the seven body references to the appendix (lines 106, 113, 120, 192, 199, 217, 228, plus any added by A17 and my item 26) go through a macro, so the body-only build has no undefined reference (Astra's packaging note). Reason: the call allows four pages excluding references and says nothing about an appendix, and the OpenReview form takes one PDF; the appendix is kept for the camera-ready (`\withappendixtrue`) or an anonymous supplement.
+Current (`main.tex`, line 36):
+```
+\newif\ifwithappendix \withappendixtrue
+```
+Replacement:
+```
+\newif\ifwithappendix \withappendixfalse % submission: body plus references; \withappendixtrue for the camera-ready or an anonymous supplement
+\newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplement\fi}
+```
+And each `Appendix~\ref{app:X}` in the body becomes `\appref{app:X}`, for example `(\appref{app:protocol})` at line 106 and `Per arena: \appref{app:perarena-adapt}.` in the Table 3 caption. The header comment (lines 6 to 9) changes its last clause to `set \withappendixtrue for the camera-ready or the supplement build`. The fixture `paper/fixtures/test_paper_skeleton.py` needs no change: the appendix still follows the bibliography and the clean-build test now runs on the submission build. Open decision for Rohan: if the workshop offers no supplement channel, the `\else` branch should read `the extended version` and the appendix becomes the arXiv version's.
+
+## Page budget of the union (measured, round 2)
+
+I built a scratch copy with the union of both lists as marked above (my 27 items, Astra's 30 with the changes given, proposals 28 and 29). It compiles clean through pdflatex, bibtex, pdflatex, pdflatex: no undefined citation or reference, no overfull box, PDF author "Anonymous Submission", no identifying string in the PDF text, the seven body references print "the supplement". But `body-end` lands on page 5: the Astra-derived additions (A2, A13, A14, A16, A17, A23, A26, about one line each) push three lines of Section 3 onto page 4 and Section 6 onto page 5. Note that the style sets `\widowpenalty` and `\clubpenalty` to 10000, so Section 6 (a heading and a five-line paragraph) needs about four free lines before any of it returns to page 4, which is why small cuts do nothing until a threshold. The cuts below are exact, were applied cumulatively and compile; after c1 to c9 the overrun is three lines; c10 and c11 do not yet cross the threshold. The remaining lines come from the figure heights once the PDFs exist (my problem 4), or from a paragraph-level decision by the main session.
+
+**c1.** A23's `\todo{}` disappears when the comparator decision lands (1 line).
+**c2.** Table 2 caption: delete ` The PixArt and SD~3.5 rows take the U-Net's two-row form.` (the table shows it).
+**c3.** A2 caption shortened; this supersedes the A2 text above:
+```
+\caption{What crossing costs (U-Net 200k from EMA weights, 8 episodes, live weights; ${>}$4k: censored, medians too when fewer than 7 cross). Half gap, home line: $A$ closes half of its step-0 gap to the home advantage, or reaches it. Forgetting: change in the training maps' $A$, negative is loss. Per arena: \appref{app:perarena-adapt}.}
+```
+**c4 (with c9).** A11 in its short form, which also removes the intro's duplication of Section 5 that Astra noted; this supersedes the A11 text above:
+```
+The measurement is rare: we found no Doom world model scored on maps it did not train on (MultiGen does not say~\citep{po2026multigen}), and other held-out domains are an embodiment, a game, an environment or a building (Section~\ref{sec:related}).
+```
+**c5.** Section 5, XEWorld: `, and fine-tunes on 25 to 75 episodes, forgetting a seen robot~\citep{chen2026xeworld}` becomes `, and fine-tunes on 25 to 75 episodes~\citep{chen2026xeworld}`.
+**c6.** Section 4, Protocol: `with the decoder frozen so that rendering repair cannot count as adaptation, and` becomes `with the decoder frozen, and`.
+**c7.** Section 3, first sentence: `In domain all three rows beat persistence at one and four tics, within 0.85~dB of each other, and turn the right way (Table~\ref{tab:indomain}).`
+**c8.** Section 2, Data: `The models train on arenas 2 to 5 (500 episodes each) and are scored there on 25 held-out episodes per map.`
+**c9.** Section 5: delete its first sentence (GameNGen, DIAMOND, MultiGen); the intro's first sentence already cites GameNGen and DIAMOND for trajectory holdout, and MultiGen moves into c4. This supersedes my item 6 and A24 (2 lines).
+**c10 (candidate).** Contribution (2) without the numbers the abstract already prints: `(2) the measurement, on the U-Net row (replication in PixArt and SD~3.5: \tbd{}), that the decoded advantage shrinks off the training maps and flips perceptually while the ceiling stays flat and the turn response survives (Figure~\ref{fig:strips});`
+**c11 (candidate).** Section 5: `None scores per scene against persistence~\citep{lample2017arnold,wydmuch2018vizdoom}.` (the Doom-agent clause goes; the citations stay).
+
+Filled tables make it worse before better: Table 2's PixArt and SD 3.5 rows add two lines each when they land, and Figure 2 needs more than 1.15 inches for 17 labelled arenas with intervals. The main session should plan the body at 4 pages against those, not against today's placeholders.
