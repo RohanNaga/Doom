@@ -146,3 +146,32 @@ The appendix's decoder paragraph (appendix.tex line 35) changes the same way; th
 ## 12. The two symbols (Rohan, 14:00)
 
 The decoder keeps its short form $D$ (the method figure's boxes use it; the evaluation box reads "decoder $D$", never "same decoder $D$"), and the frame distance becomes lowercase $d$ everywhere: section 3's distance paragraph, the appendix's distance section, Figure 3a's axis label, Table 3 and the per-arena tables' "$D$" column, and every "$D$" in the sentences of this diff that means the distance (items 3, 5 and 8). The caption of the method figure says once that prediction, truth and copy-last are all rendered by the one fine-tuned decoder.
+
+## 13. Terminology: colloquial words to replace with the field's terms (Rohan, 14:05)
+
+Counts are occurrences in `main.tex` / `appendix.tex` / this diff. Apply as a global pass after the content edits; define each retained term once at first use.
+
+| ours | occurrences | replace with | note |
+|---|---|---|---|
+| home, home line, $A_\text{home}$ | 16 / 5 / 29 | in-distribution (the training maps); "the in-distribution reference"; $A_\text{ID}$ | never "home" |
+| half-gap line, half of its gap, crossing, cost | 1+7+7+16 / 3+1+0+2 / 2+10+9+13 | "the budget to close half of the in-distribution gap" (time-to-threshold, Taylor and Stone 2009); "reaches the threshold"; "budget" in updates, never "cost" | keep "half of the gap" as the threshold's definition |
+| advantage over copy-last, $A$ | 18 / 2 / 25 | keep $A$, defined once as the PSNR difference between the rendered prediction and the persistence baseline (ΔPSNR over persistence); the y-axis survey (this afternoon) may rename it | |
+| copy-last | 11 / 3 / 4 | "the persistence baseline (the last context frame copied forward)" once, then "persistence" | one term, not two |
+| latent skill | 0 / 3 / 7 | "latent skill score" once (the forecasting term), then "skill score" | |
+| ceiling | 7 / 3 / 3 | "reconstruction upper bound" | |
+| flip (perceptual flip) | 4 / 0 / 2 | "sign reversal of the perceptual margin" | |
+| step (family step; grid step; training step) | 15 / 15 / 6 | "gap between the training maps and every unseen arena" for the family step; "update" for optimizer steps; "grid point" for the evaluation grid; "tic" only for game time | three meanings today |
+| live weights | 5 / 6 / 3 | "non-EMA weights" | |
+| fresh set, fresh episodes | 14 / 15 / 5 | "the evaluation recordings" / "newly recorded held-out episodes" | |
+| tuned decoder | 1 / 1 / 8 | "fine-tuned decoder" | |
+| guards | 3 / 2 / 4 | "control checks" (the forgetting check, the directional check) | |
+| recipe | 3 / 5 / 5 | "training configuration" once, "recipe" allowed after | accepted ML usage |
+| row (a model) | 25 / 10 / 6 | "model" or "backbone" when it means a model; "row" only for table rows | |
+| footage | 5 / 2 / 1 | "recordings" | |
+| far arena, farthest | 1 / 0 / 1 | "highest-distance arena" | |
+| blur story, blur | 2 / 1 / 1 | "perceptual degradation"; "blur" only when describing an image | |
+| off the training maps | 5 / 0 / 2 | "outside the training distribution" or "on unseen arenas" | |
+| leg (three legs) | 2 / 0 / 0 | "component" / "measure" | |
+| lands, story | 0 / 1 / 0 | delete | |
+
+Keep as they are (standard or defined game terms): persistence, budget, censored, zero-shot, backbone, EMA, tic (defined once as one game step at 35 Hz), arena and map (defined once: a map of the deathmatch WAD), episode, window, adapter.
