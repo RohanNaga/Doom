@@ -98,7 +98,8 @@ Of the 17 arenas, four (2 to 5, 500 episodes each) are the training maps, scored
 \textbf{Three backbones, one training recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters) is the anchor: it is GameNGen's backbone~\citep{valevski2024gamengen}, so our in-distribution numbers come from the same network as the published Doom result.
 PixArt-$\alpha$~\citep{chen2023pixart} asks the architecture question at fixed scale, a 628M transformer instead of a U-Net in the same latent space, and architecture does not change what survives the shift (in distribution their PSNR and $A$ differ by under 0.1~dB; on unseen arenas their median $A$ falls to 2.03 and 2.19~dB and both lose to persistence in LPIPS on all 13; Table~\ref{tab:unseen}).
 SD~3.5 Medium~\citep{esser2024sd3}, a widely adopted open MMDiT (2.27B parameters, 16-channel latents), asks the scale question; its latent space changes with it, so that step compares pretrained packages, not architectures.
-All three become next-tic world models under one recipe (Figure~\ref{fig:method}; 32 context tics, $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}).
+All three become next-tic world models under one recipe (Figure~\ref{fig:method}): 32 context tics so the model sees motion, $v$-prediction~\citep{salimans2022progressive} for stable training across noise levels, and context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors.
+Each trains for 200k updates of batch 32, a step count matched across backbones, keeps an EMA at 0.9999 in fp32 because a bf16 EMA underflows and freezes, and is sampled with 10-step DDIM~\citep{song2021ddim} so that evaluation stays cheap (\appref{app:protocol}).
 
 \textbf{What we measure.} Four scores answer four questions about one predicted frame $\hat z$, given the ground-truth next frame $x$ with latent $z$, the last context frame $x_\text{last}$ with latent $z_\text{last}$, and the decoder $D$.
 How much better than copying is it? The \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$, a paired difference in the spirit of Genie's $\Delta$PSNR~\citep{bruce2024genie}, with persistence rather than random actions as the reference.
@@ -110,7 +111,12 @@ $M$ and $G$ are scored against the raw frame; pixel scores use the scene rows 0 
 $A_\text{train}$, the advantage on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.38), is the in-distribution reference every arena is measured against, not an arena's own upper bound.
 
 \textbf{Training setup.} Each backbone trains on one RTX A6000 (49~GB) in bf16 with fused AdamW, at 1.8 updates per second for the U-Net, 1.4 for PixArt-$\alpha$ and 0.53 for SD~3.5; each adapter trains on one RTX A4000 (16~GB) at about 1.0 updates per second.
-The decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their ground-truth latents, using MSE plus 0.1~LPIPS (MSE alone more than triples scene LPIPS, 0.092 to 0.339), and use it for every pixel score of the U-Net and PixArt unless stated otherwise; SD~3.5 uses its own.
+
+\textbf{Decoder.} Every backbone is trained on latents from its frozen encoder, so the latent space is the contract between encoder, world model and decoder: changing the encoder would move every training target and invalidate the trained backbones, the adapters and the reconstruction upper bound.
+The decoder only renders: it sits after the model, and in $A$ its errors are shared by the prediction, the rendered ground truth and persistence, so fine-tuning it changes what we can see, not what the model knows.
+We fine-tune the SD~1 decoder $D$ on training-map frames paired with their frozen-encoder latents, using MSE plus 0.1~LPIPS for 3,486 updates and gating it on held-out training-map frames (\appref{app:protocol}); it never sees an unseen arena.
+It raises the scene reconstruction from 26.9 to 28.4~dB and lowers its LPIPS from 0.092 to 0.060, yet moves $A$ by only 0.2~dB zero-shot and 0.7~dB after adaptation, so the shift lives in the model, not the renderer; the LPIPS term is there because MSE alone more than triples scene LPIPS (0.092 to 0.339).
+We use it for every pixel score of the U-Net and PixArt-$\alpha$ unless stated otherwise; SD~3.5 uses its own stock decoder.
 
 \textbf{In-distribution performance.} On the training maps all three backbones beat persistence one tic ahead in PSNR and LPIPS and turn the right way ($A$ from \prov{+3.89} to +5.06~dB, directional 0.84 to 0.86 against 0.885 for the ground-truth frames; Table~\ref{tab:unseen}).
 Four tics ahead they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k).
@@ -156,8 +162,9 @@ SD 3.5 Medium & training & \prov{24.50} & \prov{0.146} & \prov{+3.89} & \prov{$-
 We report what a model loses zero-shot, what post-training recovers and with what budget, and what predicts how far an arena gets.
 
 \textbf{Zero-shot: where the deficit sits.} What does a model keep and what does it lose when it meets an arena it never saw? We answer with the four scores of Section~\ref{sec:bench}. On unseen arenas the turn response survives (U-Net reversal rates 0.73 to 0.86 per arena against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
-$A$ stays positive on every arena and backbone but falls from 5.06 to a median 2.03~dB, while the decoder's scene reconstruction PSNR is 25.2 to 29.7~dB and $G$ grows from 3.4 to a median 5.0~dB; the fine-tuned decoder adds 0.2~dB to $A$ zero-shot.
+$A$ stays positive on every arena and backbone but falls from 5.06 to a median 2.03~dB, while the decoder's scene reconstruction PSNR is 25.2 to 29.7~dB and $G$ grows from 3.4 to a median 5.0~dB.
 Nor is the perceptual sign reversal the decoder's floor: its own reconstruction LPIPS (0.05 to 0.09) is far below persistence's (0.18 to 0.28), yet the prediction's LPIPS exceeds it on 13 of 13 arenas ($M$ +0.03 to +0.17, median +0.08, against $-$0.08 in distribution; Figure~\ref{fig:shift}b).
+The three backbones lose the same things (Table~\ref{tab:unseen}, Figure~\ref{fig:shift}a): the shift looks like a property of the task, not of the architecture or the scale.
 What the model keeps is how actions act on the world: zero-shot on arena 7 the weapon fires and the view advances as in the ground truth (Figure~\ref{fig:teaser}) and the turn response holds; the loss sits mostly in the scene, whose rows fall from 27.5 to a median 24.0~dB on unseen arenas while the map-independent HUD rows move from 35.5 to 33.8~dB (U-Net, PSNR against the rendered ground truth, as in $A$).
 
 \begin{figure}[t]
@@ -173,7 +180,6 @@ Eight episodes and 4k updates raise the median $A$ from 2.04 to 3.80~dB, and on 
 9 of 13 arenas close half of their gap, with a median budget of 1k updates [250, ${>}$4k] and 5 arenas within 500; one reaches $A_\text{train}$.
 Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
-The fine-tuned decoder adds 0.7~dB to $A$ after adaptation, against 0.2~dB zero-shot.
 
 \textbf{What predicts the outcome.} The frozen model's zero-shot skill score $S_0$ tracks where an arena ends up, not how much it gains (exploratory Spearman $+0.90$ with $A$ at 4k, $+0.18$ with the gain, $-0.61$ with the budget); a frame distance does not. Before scoring any map we froze $d$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (\appref{app:distance}).
 It places the training maps' held-out episodes inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), but within the 13 arenas it orders nothing (Spearman $-0.22$ with $A$, $-0.35$ with the budget); two registered transition-level distances fail even the separation (\appref{app:distance}).
