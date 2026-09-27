@@ -1,0 +1,526 @@
+{
+ "root": "results/teaser",
+ "home_root": "results/teaser_maps345",
+ "restart_root": "results/teaser_restart",
+ "hold_steps": 16,
+ "counts": {
+  "unseen:attack": 420,
+  "unseen:turn left": 5,
+  "unseen:turn right": 46,
+  "unseen:forward": 74,
+  "unseen:strafe left": 6,
+  "unseen:strafe right": 0,
+  "training:attack": 957,
+  "training:turn left": 24,
+  "training:turn right": 423,
+  "training:forward": 630,
+  "training:strafe left": 18,
+  "training:strafe right": 0
+ },
+ "floor": 14.919,
+ "rows": [
+  {
+   "row": "attack",
+   "unseen": [
+    {
+     "window": "unseen_arena07_ep288_s456",
+     "role": "unseen",
+     "action": "attack",
+     "button": "attack",
+     "tic": 77,
+     "depth": 93,
+     "control": "attack + turn left + strafe left",
+     "zero_shot": 13.518,
+     "chroma": 7.93,
+     "edges": 0.1115,
+     "luma": 69.86,
+     "chroma_ends": [
+      5.53,
+      7.93
+     ],
+     "chroma_median": 6.97,
+     "flash": false,
+     "held": 16,
+     "starts": false,
+     "co_held": [],
+     "adapted": 19.954,
+     "story": 6.436
+    },
+    {
+     "window": "unseen_arena07_ep197_s2184",
+     "role": "unseen",
+     "action": "attack",
+     "button": "attack",
+     "tic": 37,
+     "depth": 53,
+     "control": "attack + turn right + strafe left",
+     "zero_shot": 13.422,
+     "chroma": 5.7,
+     "edges": 0.1298,
+     "luma": 69.15,
+     "chroma_ends": [
+      6.12,
+      5.7
+     ],
+     "chroma_median": 6.56,
+     "flash": false,
+     "held": 16,
+     "starts": false,
+     "co_held": [],
+     "adapted": 19.526,
+     "story": 6.104
+    }
+   ],
+   "home": {
+    "window": "train_map03_ep6037_s2824",
+    "role": "training",
+    "action": "attack",
+    "button": "attack",
+    "tic": 55,
+    "depth": 71,
+    "control": "attack + back",
+    "in_domain": 21.613,
+    "chroma": 12.78,
+    "edges": 0.0928,
+    "luma": 47.3,
+    "chroma_ends": [
+     13.23,
+     12.78
+    ],
+    "chroma_median": 11.89,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "in_domain_restart": 20.99,
+    "persistence_restart": 15.675,
+    "advantage": 5.315,
+    "held_note": "held 16/16",
+    "rule": "restarted advantage over persistence"
+   },
+   "home_proxy": {
+    "window": "train_map04_ep6066_s1480",
+    "role": "training",
+    "action": "attack",
+    "button": "attack",
+    "tic": 369,
+    "depth": 16,
+    "control": "attack + forward",
+    "in_domain": 15.491,
+    "chroma": 22.29,
+    "edges": 0.386,
+    "luma": 70.92,
+    "chroma_ends": [
+     22.32,
+     22.29
+    ],
+    "chroma_median": 21.04,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "near": true,
+    "at_floor": true
+   }
+  },
+  {
+   "row": "turn",
+   "unseen": [
+    {
+     "window": "unseen_arena07_ep158_s1672",
+     "role": "unseen",
+     "action": "turn right",
+     "button": "turn right",
+     "tic": 208,
+     "depth": 224,
+     "control": "turn right + back",
+     "zero_shot": 13.139,
+     "chroma": 7.34,
+     "edges": 0.0977,
+     "luma": 88.26,
+     "chroma_ends": [
+      9.47,
+      7.34
+     ],
+     "chroma_median": 6.63,
+     "flash": false,
+     "held": 16,
+     "starts": false,
+     "co_held": [],
+     "adapted": 18.396,
+     "story": 5.257
+    },
+    {
+     "window": "unseen_arena07_ep158_s1672",
+     "role": "unseen",
+     "action": "turn right",
+     "button": "turn right",
+     "tic": 39,
+     "depth": 55,
+     "control": "attack + forward",
+     "zero_shot": 11.896,
+     "chroma": 6.78,
+     "edges": 0.106,
+     "luma": 99.15,
+     "chroma_ends": [
+      3.59,
+      6.78
+     ],
+     "chroma_median": 6.63,
+     "flash": false,
+     "held": 16,
+     "starts": true,
+     "co_held": [
+      "back"
+     ],
+     "adapted": 16.348,
+     "story": 4.452
+    }
+   ],
+   "home": {
+    "window": "train_map04_ep6074_s3912",
+    "role": "training",
+    "action": "turn right",
+    "button": "turn right",
+    "tic": 429,
+    "depth": 16,
+    "control": "turn right + forward",
+    "in_domain": 15.524,
+    "chroma": 19.36,
+    "edges": 0.2281,
+    "luma": 69.38,
+    "chroma_ends": [
+     25.66,
+     19.36
+    ],
+    "chroma_median": 21.03,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [
+     "forward"
+    ],
+    "near": true,
+    "at_floor": true
+   }
+  },
+  {
+   "row": "forward",
+   "unseen": [
+    {
+     "window": "unseen_arena07_ep41_s4360",
+     "role": "unseen",
+     "action": "forward",
+     "button": "forward",
+     "tic": 204,
+     "depth": 220,
+     "control": "turn right + back",
+     "zero_shot": 11.998,
+     "chroma": 3.75,
+     "edges": 0.1029,
+     "luma": 65.24,
+     "chroma_ends": [
+      5.78,
+      3.75
+     ],
+     "chroma_median": 7.64,
+     "flash": false,
+     "held": 16,
+     "starts": true,
+     "co_held": [],
+     "adapted": 17.864,
+     "story": 5.866
+    },
+    {
+     "window": "unseen_arena07_ep210_s2888",
+     "role": "unseen",
+     "action": "forward",
+     "button": "forward",
+     "tic": 217,
+     "depth": 233,
+     "control": "turn right + back",
+     "zero_shot": 12.054,
+     "chroma": 6.25,
+     "edges": 0.0741,
+     "luma": 65.66,
+     "chroma_ends": [
+      4.48,
+      6.25
+     ],
+     "chroma_median": 6.61,
+     "flash": false,
+     "held": 16,
+     "starts": true,
+     "co_held": [],
+     "adapted": 17.334,
+     "story": 5.28
+    }
+   ],
+   "home": {
+    "window": "train_map05_ep6059_s4104",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 239,
+    "depth": 255,
+    "control": "forward",
+    "in_domain": 19.996,
+    "chroma": 11.63,
+    "edges": 0.0816,
+    "luma": 35.53,
+    "chroma_ends": [
+     13.11,
+     11.63
+    ],
+    "chroma_median": 12.56,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "in_domain_restart": 23.662,
+    "persistence_restart": 16.109,
+    "advantage": 7.553,
+    "held_note": "held 16/16",
+    "rule": "named"
+   },
+   "home_rule": {
+    "window": "train_map04_ep6074_s3912",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 481,
+    "depth": 497,
+    "control": "turn right + forward",
+    "in_domain": 19.954,
+    "chroma": 11.47,
+    "edges": 0.1501,
+    "luma": 49.18,
+    "chroma_ends": [
+     21.45,
+     11.47
+    ],
+    "chroma_median": 21.03,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [
+     "turn right"
+    ],
+    "in_domain_restart": 20.275,
+    "persistence_restart": 12.327,
+    "advantage": 7.948,
+    "held_note": "+turn right \u00b7 16/16"
+   },
+   "home_proxy": {
+    "window": "train_map04_ep6066_s3528",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 181,
+    "depth": 16,
+    "control": "turn right + forward",
+    "in_domain": 14.919,
+    "chroma": 23.54,
+    "edges": 0.3421,
+    "luma": 64.84,
+    "chroma_ends": [
+     25.56,
+     23.54
+    ],
+    "chroma_median": 21.84,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [
+     "turn right"
+    ],
+    "near": true,
+    "at_floor": true
+   }
+  }
+ ],
+ "restart_missing": {
+  "fig_teaser_C_hold16": [
+   "train_map04_ep6074_s3912_t429"
+  ],
+  "fig_teaser_C_hold16_alt": [
+   "train_map04_ep6074_s3912_t429"
+  ]
+ },
+ "restarted": {
+  "attack": [
+   {
+    "window": "train_map03_ep6037_s2824",
+    "role": "training",
+    "action": "attack",
+    "button": "attack",
+    "tic": 55,
+    "depth": 71,
+    "control": "attack + back",
+    "in_domain": 21.613,
+    "chroma": 12.78,
+    "edges": 0.0928,
+    "luma": 47.3,
+    "chroma_ends": [
+     13.23,
+     12.78
+    ],
+    "chroma_median": 11.89,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "in_domain_restart": 20.99,
+    "persistence_restart": 15.675,
+    "advantage": 5.315,
+    "held_note": "held 16/16",
+    "rule_pick": true,
+    "chosen": true
+   },
+   {
+    "window": "train_map03_ep6037_s2824",
+    "role": "training",
+    "action": "attack",
+    "button": "attack",
+    "tic": 52,
+    "depth": 68,
+    "control": "attack + back",
+    "in_domain": 21.867,
+    "chroma": 10.79,
+    "edges": 0.1091,
+    "luma": 51.2,
+    "chroma_ends": [
+     12.82,
+     10.79
+    ],
+    "chroma_median": 11.89,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "in_domain_restart": 20.059,
+    "persistence_restart": 15.72,
+    "advantage": 4.339,
+    "held_note": "held 16/16",
+    "rule_pick": false,
+    "chosen": false
+   }
+  ],
+  "forward": [
+   {
+    "window": "train_map04_ep6074_s3912",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 481,
+    "depth": 497,
+    "control": "turn right + forward",
+    "in_domain": 19.954,
+    "chroma": 11.47,
+    "edges": 0.1501,
+    "luma": 49.18,
+    "chroma_ends": [
+     21.45,
+     11.47
+    ],
+    "chroma_median": 21.03,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [
+     "turn right"
+    ],
+    "in_domain_restart": 20.275,
+    "persistence_restart": 12.327,
+    "advantage": 7.948,
+    "held_note": "+turn right \u00b7 16/16",
+    "rule_pick": true,
+    "chosen": false
+   },
+   {
+    "window": "train_map04_ep6082_s4168",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 111,
+    "depth": 127,
+    "control": "turn right + forward",
+    "in_domain": 20.337,
+    "chroma": 11.81,
+    "edges": 0.1625,
+    "luma": 50.85,
+    "chroma_ends": [
+     23.71,
+     11.81
+    ],
+    "chroma_median": 22.88,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "in_domain_restart": 19.073,
+    "persistence_restart": 11.463,
+    "advantage": 7.61,
+    "held_note": "held 16/16",
+    "rule_pick": false,
+    "chosen": false
+   },
+   {
+    "window": "train_map05_ep6059_s4104",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 239,
+    "depth": 255,
+    "control": "forward",
+    "in_domain": 19.996,
+    "chroma": 11.63,
+    "edges": 0.0816,
+    "luma": 35.53,
+    "chroma_ends": [
+     13.11,
+     11.63
+    ],
+    "chroma_median": 12.56,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "in_domain_restart": 23.662,
+    "persistence_restart": 16.109,
+    "advantage": 7.553,
+    "held_note": "held 16/16",
+    "rule_pick": false,
+    "chosen": true
+   },
+   {
+    "window": "train_map04_ep6082_s4168",
+    "role": "training",
+    "action": "forward",
+    "button": "forward",
+    "tic": 112,
+    "depth": 128,
+    "control": "turn right + forward",
+    "in_domain": 20.117,
+    "chroma": 12.02,
+    "edges": 0.1612,
+    "luma": 54.48,
+    "chroma_ends": [
+     25.88,
+     12.02
+    ],
+    "chroma_median": 22.88,
+    "flash": false,
+    "held": 16,
+    "starts": false,
+    "co_held": [],
+    "in_domain_restart": 18.203,
+    "persistence_restart": 10.775,
+    "advantage": 7.428,
+    "held_note": "held 16/16",
+    "rule_pick": false,
+    "chosen": false
+   }
+  ]
+ }
+}
