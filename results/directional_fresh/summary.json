@@ -1,0 +1,470 @@
+{
+ "unet200k_ema": {
+  "per_map": {
+   "map01_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7265625,
+    "ref_frac": 0.8125,
+    "ref_raw_frac": 0.828125,
+    "persistence": 0.0
+   },
+   "map02_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.8046875,
+    "ref_frac": 0.84375,
+    "ref_raw_frac": 0.8515625,
+    "persistence": 0.0
+   },
+   "map03_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.7890625,
+    "ref_frac": 0.84375,
+    "ref_raw_frac": 0.8203125,
+    "persistence": 0.0
+   },
+   "map04_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.9140625,
+    "ref_frac": 0.9453125,
+    "ref_raw_frac": 0.9296875,
+    "persistence": 0.0
+   },
+   "map05_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.9140625,
+    "ref_frac": 0.9453125,
+    "ref_raw_frac": 0.9375,
+    "persistence": 0.0
+   },
+   "map06_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8203125,
+    "ref_frac": 0.8671875,
+    "ref_raw_frac": 0.875,
+    "persistence": 0.0
+   },
+   "map07_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.796875,
+    "ref_frac": 0.8984375,
+    "ref_raw_frac": 0.9140625,
+    "persistence": 0.0
+   },
+   "map08_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8515625,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.859375,
+    "persistence": 0.0
+   },
+   "map09_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.859375,
+    "ref_frac": 0.921875,
+    "ref_raw_frac": 0.921875,
+    "persistence": 0.0
+   },
+   "map10_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8125,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.8828125,
+    "persistence": 0.0
+   },
+   "map11_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8515625,
+    "ref_frac": 0.90625,
+    "ref_raw_frac": 0.8984375,
+    "persistence": 0.0
+   },
+   "map12_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8125,
+    "ref_frac": 0.859375,
+    "ref_raw_frac": 0.890625,
+    "persistence": 0.0
+   },
+   "map13_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.765625,
+    "ref_frac": 0.890625,
+    "ref_raw_frac": 0.8828125,
+    "persistence": 0.0
+   },
+   "map14_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7265625,
+    "ref_frac": 0.828125,
+    "ref_raw_frac": 0.828125,
+    "persistence": 0.0
+   },
+   "map15_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8203125,
+    "ref_frac": 0.90625,
+    "ref_raw_frac": 0.9140625,
+    "persistence": 0.0
+   },
+   "map16_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8203125,
+    "ref_frac": 0.9296875,
+    "ref_raw_frac": 0.9453125,
+    "persistence": 0.0
+   },
+   "map17_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7890625,
+    "ref_frac": 0.9296875,
+    "ref_raw_frac": 0.953125,
+    "persistence": 0.0
+   }
+  },
+  "pooled": {
+   "arenas13": {
+    "maps": 13,
+    "windows": 1664,
+    "correct_frac": 0.8041,
+    "ref_frac": 0.8858,
+    "ref_raw_frac": 0.8918
+   },
+   "val": {
+    "maps": 4,
+    "windows": 512,
+    "correct_frac": 0.8555,
+    "ref_frac": 0.8945,
+    "ref_raw_frac": 0.8848
+   }
+  }
+ },
+ "pixart200k_ema": {
+  "per_map": {
+   "map01_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.734375,
+    "ref_frac": 0.8125,
+    "ref_raw_frac": 0.828125,
+    "persistence": 0.0
+   },
+   "map02_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.7890625,
+    "ref_frac": 0.84375,
+    "ref_raw_frac": 0.8515625,
+    "persistence": 0.0
+   },
+   "map03_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.765625,
+    "ref_frac": 0.84375,
+    "ref_raw_frac": 0.8203125,
+    "persistence": 0.0
+   },
+   "map04_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.890625,
+    "ref_frac": 0.9453125,
+    "ref_raw_frac": 0.9296875,
+    "persistence": 0.0
+   },
+   "map05_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.921875,
+    "ref_frac": 0.9453125,
+    "ref_raw_frac": 0.9375,
+    "persistence": 0.0
+   },
+   "map06_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.78125,
+    "ref_frac": 0.8671875,
+    "ref_raw_frac": 0.875,
+    "persistence": 0.0
+   },
+   "map07_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.796875,
+    "ref_frac": 0.8984375,
+    "ref_raw_frac": 0.9140625,
+    "persistence": 0.0
+   },
+   "map08_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8828125,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.859375,
+    "persistence": 0.0
+   },
+   "map09_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8984375,
+    "ref_frac": 0.921875,
+    "ref_raw_frac": 0.921875,
+    "persistence": 0.0
+   },
+   "map10_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8125,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.8828125,
+    "persistence": 0.0
+   },
+   "map11_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8515625,
+    "ref_frac": 0.90625,
+    "ref_raw_frac": 0.8984375,
+    "persistence": 0.0
+   },
+   "map12_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8046875,
+    "ref_frac": 0.859375,
+    "ref_raw_frac": 0.890625,
+    "persistence": 0.0
+   },
+   "map13_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7890625,
+    "ref_frac": 0.890625,
+    "ref_raw_frac": 0.8828125,
+    "persistence": 0.0
+   },
+   "map14_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7109375,
+    "ref_frac": 0.828125,
+    "ref_raw_frac": 0.828125,
+    "persistence": 0.0
+   },
+   "map15_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8125,
+    "ref_frac": 0.90625,
+    "ref_raw_frac": 0.9140625,
+    "persistence": 0.0
+   },
+   "map16_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8671875,
+    "ref_frac": 0.9296875,
+    "ref_raw_frac": 0.9453125,
+    "persistence": 0.0
+   },
+   "map17_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.765625,
+    "ref_frac": 0.9296875,
+    "ref_raw_frac": 0.953125,
+    "persistence": 0.0
+   }
+  },
+  "pooled": {
+   "arenas13": {
+    "maps": 13,
+    "windows": 1664,
+    "correct_frac": 0.8083,
+    "ref_frac": 0.8858,
+    "ref_raw_frac": 0.8918
+   },
+   "val": {
+    "maps": 4,
+    "windows": 512,
+    "correct_frac": 0.8418,
+    "ref_frac": 0.8945,
+    "ref_raw_frac": 0.8848
+   }
+  }
+ },
+ "sd35_170000_ema": {
+  "per_map": {
+   "map01_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.6875,
+    "ref_frac": 0.8359375,
+    "ref_raw_frac": 0.828125,
+    "persistence": 0.0
+   },
+   "map02_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.7734375,
+    "ref_frac": 0.8515625,
+    "ref_raw_frac": 0.8515625,
+    "persistence": 0.0
+   },
+   "map03_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.796875,
+    "ref_frac": 0.8515625,
+    "ref_raw_frac": 0.8203125,
+    "persistence": 0.0
+   },
+   "map04_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.90625,
+    "ref_frac": 0.9375,
+    "ref_raw_frac": 0.9296875,
+    "persistence": 0.0
+   },
+   "map05_val": {
+    "set": "val",
+    "windows": 128,
+    "correct_frac": 0.921875,
+    "ref_frac": 0.9375,
+    "ref_raw_frac": 0.9375,
+    "persistence": 0.0
+   },
+   "map06_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.765625,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.875,
+    "persistence": 0.0
+   },
+   "map07_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7890625,
+    "ref_frac": 0.9140625,
+    "ref_raw_frac": 0.9140625,
+    "persistence": 0.0
+   },
+   "map08_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7890625,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.859375,
+    "persistence": 0.0
+   },
+   "map09_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8984375,
+    "ref_frac": 0.9296875,
+    "ref_raw_frac": 0.921875,
+    "persistence": 0.0
+   },
+   "map10_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.78125,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.8828125,
+    "persistence": 0.0
+   },
+   "map11_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.828125,
+    "ref_frac": 0.8984375,
+    "ref_raw_frac": 0.8984375,
+    "persistence": 0.0
+   },
+   "map12_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8125,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.890625,
+    "persistence": 0.0
+   },
+   "map13_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.78125,
+    "ref_frac": 0.8828125,
+    "ref_raw_frac": 0.8828125,
+    "persistence": 0.0
+   },
+   "map14_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.71875,
+    "ref_frac": 0.828125,
+    "ref_raw_frac": 0.828125,
+    "persistence": 0.0
+   },
+   "map15_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.7890625,
+    "ref_frac": 0.9140625,
+    "ref_raw_frac": 0.9140625,
+    "persistence": 0.0
+   },
+   "map16_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.8359375,
+    "ref_frac": 0.9375,
+    "ref_raw_frac": 0.9453125,
+    "persistence": 0.0
+   },
+   "map17_arenas13": {
+    "set": "arenas13",
+    "windows": 128,
+    "correct_frac": 0.828125,
+    "ref_frac": 0.953125,
+    "ref_raw_frac": 0.953125,
+    "persistence": 0.0
+   }
+  },
+  "pooled": {
+   "arenas13": {
+    "maps": 13,
+    "windows": 1664,
+    "correct_frac": 0.7927,
+    "ref_frac": 0.8942,
+    "ref_raw_frac": 0.8918
+   },
+   "val": {
+    "maps": 4,
+    "windows": 512,
+    "correct_frac": 0.8496,
+    "ref_frac": 0.8945,
+    "ref_raw_frac": 0.8848
+   }
+  }
+ }
+}

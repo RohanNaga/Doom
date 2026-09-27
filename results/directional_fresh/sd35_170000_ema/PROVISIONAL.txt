@@ -1,0 +1,1 @@
+PROVISIONAL (steward7, 2026-09-27T12:38Z): SD 3.5 read on snap_0170000 EMA while the trainer runs on; PixArt 200k EMA is final. repo_tools 0dc9d85.

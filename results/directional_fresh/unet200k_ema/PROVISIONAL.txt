@@ -1,0 +1,1 @@
+U-Net 200k EMA (final checkpoint), same estimator as the SD 3.5 and PixArt rows. repo_tools 0dc9d85.
