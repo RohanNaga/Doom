@@ -142,8 +142,8 @@ def test_the_drawn_lines_are_ema_solid_live_dotted_and_copy_last_the_zero_line(t
     assert lines["U-Net (SD 1.4) EMA"].get_linestyle() == "-" and lines["U-Net (SD 1.4) live"].get_linestyle() == ":"
     assert "PixArt-alpha live" not in lines          # no live reads, no dotted line
     assert lines["U-Net (SD 1.4) EMA"].get_color() == "#0072B2"      # the encoding table's U-Net blue
-    zero = lines["copy-last"]
+    zero = lines["persistence"]
     assert set(zero.get_ydata()) == {0} and zero.get_linestyle() == "-"
-    assert ax.get_xlabel().startswith("updates (thousands)") and "copy-last" in ax.get_ylabel()
+    assert ax.get_xlabel().startswith("updates (thousands)") and "persistence" in ax.get_ylabel()
     body_fig, body = tc.draw(curves)                     # the body panel: EMA only
     assert not any(ln.get_label().endswith(" live") for ln in body.get_lines())

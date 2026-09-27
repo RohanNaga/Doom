@@ -1,5 +1,5 @@
 """
-Training curves of the three backbones: one-tic gain over raw copy-last on the training maps' validation windows
+Training curves of the three backbones: one-tic ΔPSNR vs raw persistence on the training maps' validation windows
 against updates.
 
     python tools/training_curves.py
@@ -58,6 +58,8 @@ DEFAULT_OUT_DIR = os.path.join(REPO, "paper", "figures")
 FLOOR = -1.0            # dB of gain: the axis floor; reads below it are clipped and disclosed
 CEILING_MARGIN = 0.25   # dB above the highest drawn read
 MARK_EVERY = 50000      # updates between markers on a line
+# the U-Net's and PixArt's curves nearly coincide: their markers alternate (round 2, Astra 26), each at a measured read
+MARK_PHASE = {"unet": MARK_EVERY // 2, "pixart": 0, "sd35": 0}
 
 
 def _finite(v):
@@ -149,8 +151,10 @@ def draw(curves, weights=("ema",), size=PANEL_SIZE):
         for w in weights:
             s = series(c, w)
             if s["k_updates"]:
-                every = [i for i, k in enumerate(s["k_updates"]) if round(k * 1000) % MARK_EVERY == 0]
-                if not every or s["k_updates"][-1] - s["k_updates"][every[-1]] >= MARK_EVERY / 2000:
+                phase = MARK_PHASE.get(c["backbone"], 0)
+                every = [i for i, k in enumerate(s["k_updates"])
+                         if round(k * 1000) > 0 and (round(k * 1000) - phase) % MARK_EVERY == 0]
+                if not every or s["k_updates"][-1] - s["k_updates"][every[-1]] >= MARK_EVERY / 1000:
                     every.append(len(s["k_updates"]) - 1)      # the last read, unless a marker sits close by
                 ax.plot(s["k_updates"], s["gain"], color=ent.colour, ls=LINESTYLES[w],
                         lw=fs.DATA_LW if w == "ema" else 0.8, zorder=3 if w == "ema" else 2,
@@ -165,15 +169,18 @@ def draw(curves, weights=("ema",), size=PANEL_SIZE):
                 ax.plot(apart["k_updates"], apart["gain"], ls="none", marker=ent.marker, ms=3.5, mfc="white",
                         mec=ent.colour, mew=0.7, zorder=4, label=f"{c['label']} {w} (noted)")
     fs.end_labels(ax, ends, gap=(hi - lo) * 0.13, leaders=True)
-    ax.axhline(0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref", label="copy-last")
-    ax.text(1.0, 0, "copy-last", transform=ax.get_yaxis_transform(), ha="right", va="bottom", fontsize=fs.ANNOT_PT)
+    ax.axhline(0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref", label=fs.PERSISTENCE_LABEL)
+    ax.text(1.0, 0, fs.PERSISTENCE_LABEL, transform=ax.get_yaxis_transform(), ha="right", va="bottom",
+            fontsize=fs.ANNOT_PT)
     right = max(r["step"] for c in curves for r in c["reads"]) / 1000.0
     ax.set_xlim(0, right * (1.02 if size[0] < 3 else 1.1))
     ax.set_ylim(lo, hi)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(100 if size[0] < 3 else 50))
     ax.yaxis.set_major_locator(ticker.MultipleLocator(1.0))
     ax.set_xlabel("updates (thousands)")
-    ax.set_ylabel("gain over raw\ncopy-last (dB)" if size[1] < 1.6 else "gain over raw copy-last (dB)")
+    ax.set_ylabel("\u0394PSNR vs raw\npersistence (dB)" if size[1] < 1.6 else "\u0394PSNR vs raw persistence (dB)")
+    if size[0] < 3:
+        fs.panel_letter(ax, "b")              # its place in Figure 1 (round 2, Astra 27)
     return fig, ax
 
 
