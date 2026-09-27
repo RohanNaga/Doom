@@ -30,21 +30,35 @@ the recorded path is a server path), with the windows `eval_tf.py` flags as dupl
 **The cost rule** (`.claude/analyses/cost-target-decision-2026-09-26.md`, `lora-results-decision-2026-09-27.md`).
 Per arena the half-gap line is (A0 + home) / 2, where home is the training maps' A on the same crop and decoder:
 `--home` (default 4.138 dB, the stock decoder's scene home), or `--home-json`, an eval_tf read of the training
-maps, as `scene_psnr_dec - scene_copy_psnr_dec` (duplicate-free means where the read has them). The cost is
-the first grid step at or before the budget (`--budget`, default the headline grid's last step) whose A reaches the
-line; a curve scored to the budget that never reaches it is right-censored, and one not yet scored to the budget is
-incomplete and left out of every count. A median over arenas ranks a censored arena above every crossing and is
-censored when the middle lands on one. Spearman correlations are scipy's (average ranks) with a censored cost
-ranked as twice the budget.
+maps, as `scene_psnr_dec - scene_copy_psnr_dec` (duplicate-free means where the read has them); with a
+`per_window.csv` beside it, home's own episode interval is reported. The cost is the first grid step at or before
+the budget (`--budget`, default the headline grid's last step) whose A reaches the line; a curve scored to the
+budget that never reaches it is right-censored, and one not yet scored to the budget is incomplete and left out of
+every count. A median over arenas ranks a censored arena above every crossing and is censored when the middle lands
+on one. Spearman correlations are scipy's (average ranks) with a censored cost ranked as twice the budget.
+
+**Across arenas** (`.claude/analyses/per-arena-statistics-decision-2026-09-27.md`). The arena is the unit. Every
+aggregate carries a 95% percentile interval from a nested bootstrap (`--arena-bootstrap` draws): arenas resampled
+with replacement, then each drawn arena's held-out episodes, paired across steps, with each draw's half-gap line
+recomputed from its own A0 and home frozen; an arena whose per-window files are missing enters with its point
+curve (noted). Reported: the interquartile mean (`scipy.stats.trim_mean(x, 0.25)`) and median of A per step; the
+cumulative attainment of the half-gap line, one minus Kaplan-Meier, which equals the fraction crossed because
+every censoring falls at the last grid step, with the at-risk counts; the same for the fixed threshold
+`--fixed-threshold` (3.5 dB); the share of the gap closed at the budget, (A_budget - A0) / (home - A0); the median
+budget with its censored share; the margin M at the budget (lower than persistence, within 0.01); Spearman S0 with
+A at the budget; the performance profiles P(A >= tau) at 0, 500 and the budget.
 
 **Outputs.** In `--out-dir`, PDF and 600 dpi PNG through `figstyle.save` (drawn at printed size for the 5.5 in
-page, refused when degenerate): `fig3_adaptation_curves` (A per arena, the blue ramp keyed to S0, three arenas
-labelled), `fig3_adaptation_skill` (S instead of A), `fig3_adaptation_seeds`, `fig_adapt_ladder` and
-`fig_adapt_recipe` (when their runs carry the decoder), `fig2c_outcomes_by_skill` (A at the budget against S0),
-`fig2a_advantage_by_distance` and, with `--with-raw`, `fig2b_margin_by_distance` (zero-shot A and M per arena and
-backbone). In `--tables-dir`, under a
-provenance header: `adapt_cost.tex` (per arena), `adapt_perarena.tex` (the appendix table body) and
-`adapt_summary.json`, the numbers the text quotes.
+page, refused when degenerate): `fig4_adaptation` (Figure 4: (a) the interquartile-mean learning curve over the
+faint per-arena curves, (b) the attainment curves with the at-risk row and per-arena crossing ticks),
+`figA_adapt_arenas` (the per-arena small multiples with episode bands), `figA_adapt_profiles`,
+`fig3_adaptation_curves` (A per arena, the blue ramp keyed to S0, three arenas labelled), `fig3_adaptation_skill`
+(S instead of A), `fig3_adaptation_seeds`, `fig_adapt_ladder` and `fig_adapt_recipe` (when their runs carry the
+decoder), `fig2c_outcomes_by_skill` (A at the budget against S0), `fig2a_advantage_by_distance` and, with
+`--with-raw`, `fig2b_margin_by_distance` (zero-shot A and M per arena and backbone). In `--tables-dir`, under a
+provenance header: `adapt_cost.tex` (per arena), `adapt_perarena.tex` (the appendix table body), `adapt_table3.tex`
+(Table 3's tabular with arena-bootstrap intervals in brackets), and `adapt_summary.json`, the numbers the text
+quotes.
 """
 import argparse
 import csv
@@ -68,15 +82,20 @@ sys.path.insert(0, HERE)
 from score_adapt import DUPLICATE_FLAGS, OUTCOMES, STOCK, adaptation_cost  # noqa: E402
 
 import figstyle as fs  # noqa: E402
-from figstyle import step_axis, xs_of  # noqa: E402
-from matplotlib import ticker  # noqa: E402
+import matplotlib.patches  # noqa: E402
+from figstyle import step_axis, step_label, xs_of  # noqa: E402
+from matplotlib import ticker, transforms  # noqa: E402
+from matplotlib.path import Path  # noqa: E402
 
 STOCK_HOME = 4.138        # training maps' scene A, stock decoder, 512 validation windows (lora-results decision)
 TRAINING_MAPS = (2, 3, 4, 5)
 BASE_RANK, BASE_K, BASE_SEED = 16, 8, 0
 FALLBACK_BUDGET = 4000
-FIXED_THRESHOLD = 3.5     # dB; a fixed A threshold beside the per-arena half-gap line (statistics decision)
+FIXED_THRESHOLD = 3.5     # dB; the second attainment curve (statistics decision, 2026-09-27)
+PROFILE_STEPS = (0, 500)  # performance profiles at these steps and at the budget
 NAMED_ARENAS = (7, 9, 12)  # the far arena, the one at the training maps' line, the censored one (standard, Fig. 4)
+COMPARATOR_ARENA = 7      # Table 3's single-arena column (the full fine-tune's arena)
+LORA_PARAMS, FULL_PARAMS = "4.2M (0.49\\%)", "860M (all)"   # lora.parameter_counts (RESEARCH_CONTEXT 09-26 20:10)
 RUN_RE = re.compile(r"_map(?P<map>\d+)_r(?P<rank>\d+)_k(?P<k>\d+)_s(?P<seed>\d+)(?:_(?P<variant>\w+))?$")
 MAP_DIR_RE = re.compile(r"(?:^|[_-])map0*(?P<map>\d+)(?:_h(?P<h>\d+))?$|^0*(?P<bare>\d+)$")
 DECODER_A_RE = re.compile(r"^heldout_A_([A-Za-z][A-Za-z0-9]*)$")
@@ -87,10 +106,12 @@ RECIPE_ORDER = ("lr3e4", "lr5e4", "g8k")
 RECIPE_LABELS = {"lr3e4": "lr 3e-4", "lr5e4": "lr 5e-4", "g8k": "8k grid", "": "base"}
 
 # Printed sizes (in) on the 5.5 in single-column page (FIGURE_STANDARDS section 4); `\figslot` includes at scale 1.
+FIG4_SIZE = (fs.TEXT_WIDTH, 1.6)
 CURVES_SIZE = (3.3, 1.6)
 FIG3_SIZE = CURVES_SIZE          # the curves panel's name before the renumbering; its PDF is drawn at this size
 HALF_SIZE = (2.7, 1.6)           # an appendix half-width panel (ladder, profiles, endpoint against skill)
 WIDE_SIZE = (fs.TEXT_WIDTH, 1.6)  # an appendix full-width pair (seeds, recipe)
+ARENAS_SIZE = (fs.TEXT_WIDTH, 3.0)
 ZERO_SHOT_SIZE = (fs.TEXT_WIDTH / 2, 1.8)
 ADAPTER = fs.BACKBONES["adapter"]
 
@@ -678,6 +699,193 @@ def recipe_rank(variant):
 
 
 # ---------------------------------------------------------------------------------------------
+# across arenas: the nested bootstrap (arenas, then each arena's held-out episodes)
+# ---------------------------------------------------------------------------------------------
+
+def iqm(values, axis=None):
+    """The interquartile mean: `scipy.stats.trim_mean(x, 0.25)` (rliable's IQM; a plain mean below four values)."""
+    from scipy.stats import trim_mean
+    return trim_mean(values, 0.25, axis=axis)
+
+
+def episode_matrix(run, steps, decoder):
+    """(sums [steps x episodes], counts [episodes]) of A per held-out episode at each step, paired across steps,
+    or None when a step lacks its local per-window file or the steps disagree on the episodes or window counts."""
+    episodes, sums, counts = None, [], None
+    for s in steps:
+        row = run.by_step.get(s)
+        path = local_per_window(run, row) if row else None
+        if path is None:
+            return None
+        eps, vals = window_outcome(read_windows(path), "A", decoder)
+        if not vals:
+            return None
+        uniq, inv = np.unique(np.asarray(eps), return_inverse=True)
+        c = np.bincount(inv).astype(float)
+        if episodes is None:
+            episodes, counts = uniq, c
+        elif len(uniq) != len(episodes) or (uniq != episodes).any() or (c != counts).any():
+            return None
+        sums.append(np.bincount(inv, weights=np.asarray(vals, float)))
+    return np.asarray(sums), counts
+
+
+def nested_bootstrap(point, mats, draws, seed):
+    """[draws x arenas x steps] resampled per-arena curves: arenas drawn with replacement, then each drawn arena's
+    episodes with replacement, one episode draw shared by all steps; an arena without episodes keeps its point."""
+    rng = np.random.default_rng(seed)
+    n, S = point.shape
+    idx = rng.integers(0, n, (draws, n))
+    out = point[idx].copy()
+    for a, mat in enumerate(mats):
+        if mat is None:
+            continue
+        sums, counts = mat
+        where = np.argwhere(idx == a)
+        if not len(where):
+            continue
+        E = len(counts)
+        e = rng.integers(0, E, (len(where), E))
+        out[where[:, 0], where[:, 1], :] = (sums[:, e].sum(-1) / counts[e].sum(-1)).T
+    return idx, out
+
+
+def interval(samples, axis=0):
+    """The 95% percentile interval of bootstrap samples (NumPy's default interpolation)."""
+    lo, hi = np.nanpercentile(samples, [2.5, 97.5], axis=axis)
+    return lo, hi
+
+
+def first_step(curves, targets, steps):
+    """The first step whose value reaches the target, per curve along the last axis; +inf when none does."""
+    reached = curves >= targets[..., None]
+    first = np.where(reached.any(-1), np.asarray(steps, float)[reached.argmax(-1)], np.inf)
+    return first
+
+
+def censored_quantiles(samples):
+    """(2.5, 97.5) percentiles of a sample that holds +inf for censored values, without interpolating into inf."""
+    return [float(np.percentile(samples, q, method="inverted_cdf")) for q in (2.5, 97.5)]
+
+
+def at_risk(costs, steps):
+    """Arenas still under observation and not yet across before each step (the Kaplan-Meier at-risk row)."""
+    return [int(sum(1 for c in costs if c >= s)) for s in steps]
+
+
+def profile(values, taus):
+    """P(A >= tau) over arenas for each threshold: the fraction of arenas at or above it."""
+    v = np.asarray(values, float)
+    return (v[..., :, None] >= np.asarray(taus)[None, :]).mean(-2)
+
+
+def across_arenas(records, runs, decoder, home, budget, draws, seed, notes, fixed=FIXED_THRESHOLD):
+    """The distribution statements over the arenas scored to the budget, each with its nested-bootstrap interval,
+    plus the arrays the figures draw (under the key `_draw`, which the summary drops)."""
+    done = [r for r in records if not r["incomplete"]]
+    steps = sorted(set.intersection(*[{int(s) for s in r["A"] if int(s) <= budget} for r in done])) if done else []
+    if len(done) < 2 or len(steps) < 2 or 0 not in steps:
+        return None
+    point = np.array([[r["A"][str(s)] for s in steps] for r in done])
+    mats = [episode_matrix(runs[r["run"]], steps, decoder) for r in done]
+    missing = [r["arena"] for r, m in zip(done, mats) if m is None]
+    if missing:
+        notes.append(f"across arenas: arenas {missing} lack paired per-window files at every step; they enter the "
+                     "bootstrap with their point curves (arena resampling only)")
+    idx, boot = nested_bootstrap(point, mats, draws, seed)
+    j_budget = steps.index(budget) if budget in steps else len(steps) - 1
+    lines_p = (point[:, 0] + home) / 2
+    lines_b = (boot[:, :, 0] + home) / 2
+    cost_p = first_step(point, lines_p, steps)
+    cost_b = first_step(boot, lines_b, steps)
+    fixed_p = first_step(point, np.full(len(done), fixed), steps)
+    fixed_b = first_step(boot, np.full(boot.shape[:2], fixed), steps)
+    att = [float(np.mean(cost_p <= s)) for s in steps]
+    att_b = np.stack([(cost_b <= s).mean(1) for s in steps], 1)
+    fatt = [float(np.mean(fixed_p <= s)) for s in steps]
+    fatt_b = np.stack([(fixed_b <= s).mean(1) for s in steps], 1)
+    iqm_p, iqm_b = iqm(point, axis=0), iqm(boot, axis=1)
+    med_p, med_b = np.median(point, 0), np.median(boot, 1)
+    gain_p, gain_b = point[:, j_budget] - point[:, 0], boot[:, :, j_budget] - boot[:, :, 0]
+    share_p = gain_p / (home - point[:, 0])
+    share_b = gain_b / (home - boot[:, :, 0])
+    medcost_b = np.median(cost_b, 1)
+    n = len(done)
+
+    def band(p, b):
+        lo, hi = interval(b)
+        return {"value": [float(x) for x in np.atleast_1d(p)], "ci": [[float(a), float(c)] for a, c in
+                                                                      zip(np.atleast_1d(lo), np.atleast_1d(hi))]}
+
+    def count(p_frac, b_frac):
+        lo, hi = interval(b_frac)
+        return {"count": int(round(p_frac * n)), "n": n, "fraction": float(p_frac),
+                "fraction_ci": [float(lo), float(hi)], "count_ci": [int(round(lo * n)), int(round(hi * n))]}
+
+    out = {
+        "method": (f"nested bootstrap, {draws} draws (seed {seed}): arenas with replacement, then each drawn arena's "
+                   "held-out episodes with replacement, paired across steps; half-gap lines recomputed per draw from "
+                   "its A0 with home frozen; 95% percentile intervals, pointwise"),
+        "n": n, "arenas": [r["arena"] for r in done], "steps": steps, "budget": steps[j_budget],
+        "episode_resampling_missing": missing,
+        "iqm_A": band(iqm_p, iqm_b), "median_A": band(med_p, med_b),
+        "attainment_half_gap": {**band(att, att_b), "at_risk": at_risk(cost_p, steps),
+                                "crossing_step": {str(r["arena"]): (None if math.isinf(c) else int(c))
+                                                  for r, c in zip(done, cost_p)}},
+        "attainment_fixed": {**band(fatt, fatt_b), "threshold": fixed, "at_risk": at_risk(fixed_p, steps)},
+        "half_gap_by_budget": count(att[j_budget], att_b[:, j_budget]),
+        "fixed_by_budget": count(fatt[j_budget], fatt_b[:, j_budget]),
+        "median_gain": band(np.median(gain_p), np.median(gain_b, 1)),
+        "iqm_gain": band(iqm(gain_p), iqm(gain_b, axis=1)),
+        "gap_share": {"per_arena": {str(r["arena"]): float(s) for r, s in zip(done, share_p)},
+                      "median": float(np.median(share_p)), "quartiles": [float(q) for q in
+                                                                         np.percentile(share_p, [25, 75])],
+                      "median_ci": [float(x) for x in interval(np.median(share_b, 1))]},
+        "median_budget": {"value": None if math.isinf(np.median(cost_p)) else float(np.median(cost_p)),
+                          "ci": [None if math.isinf(x) else x for x in censored_quantiles(medcost_b)],
+                          "censored_share": float(np.mean(np.isinf(medcost_b))),
+                          "distribution": {("censored" if math.isinf(v) else f"{v:g}"): float(np.mean(medcost_b == v))
+                                           for v in np.unique(medcost_b)}},
+        "profiles": {}, "_draw": {"point": point, "boot": boot, "att_b": att_b, "fatt_b": fatt_b, "iqm_b": iqm_b,
+                                  "cost_p": cost_p, "fixed_p": fixed_p, "idx": idx},
+    }
+    # an arena crosses by the budget when home <= 2 A_s - A0 at some step s: every arena crosses at or below this home
+    out["gap_share"]["home_at_which_all_cross"] = float(np.min(np.max(2 * point - point[:, :1], axis=1)))
+    S0 = np.array([r["S0"] if r["S0"] is not None else np.nan for r in done])
+    if np.isfinite(S0).sum() >= 3:
+        from scipy.stats import spearmanr
+        rho = spearmanr(S0, point[:, j_budget]).statistic
+        rhos = [spearmanr(S0[i], boot[b, :, j_budget]).statistic for b, i in enumerate(idx[:2000])]
+        out["spearman_S0_A_budget"] = {"rho": float(rho), "ci": [float(x) for x in np.nanpercentile(rhos, [2.5, 97.5])],
+                                       "draws": min(2000, draws)}
+        rho_g = spearmanr(S0, gain_p).statistic
+        out["spearman_S0_gain"] = {"rho": float(rho_g)}
+    taus = sorted({2.5, 3.0, 3.5, 4.0, 4.5, 5.0, round(home, 3)})
+    for s in sorted({*[p for p in PROFILE_STEPS if p in steps], steps[j_budget]}):
+        j = steps.index(s)
+        p, b = profile(point[:, j], taus), profile(boot[:, :, j], taus)
+        lo, hi = interval(b)
+        out["profiles"][str(s)] = {"tau": taus, "fraction": [float(x) for x in p],
+                                   "ci": [[float(a), float(c)] for a, c in zip(lo, hi)]}
+    margins = [(r["arena"], r["M_budget"]) for r in done if r["M_budget"] is not None]
+    if len(margins) >= 2:
+        m = np.array([v for _, v in margins])
+        mi = np.random.default_rng(seed).integers(0, len(m), (draws, len(m)))
+        lo, hi = interval((m[mi] < 0).mean(1))
+        mlo, mhi = interval(np.median(m[mi], 1))
+        out["margin_budget"] = {"lower": int((m < 0).sum()), "within_001": int(((m >= 0) & (m <= 0.01)).sum()),
+                                "n": len(m), "lower_fraction_ci": [float(lo), float(hi)],
+                                "median": float(np.median(m)), "median_ci": [float(mlo), float(mhi)],
+                                "method": "arena bootstrap of the per-arena margins"}
+    return out
+
+
+def public(stats):
+    """The across-arena statistics without the arrays the figures draw."""
+    return {k: v for k, v in stats.items() if not k.startswith("_")} if stats else None
+
+
+# ---------------------------------------------------------------------------------------------
 # tables
 # ---------------------------------------------------------------------------------------------
 
@@ -694,6 +902,14 @@ def num(v, digits, signed=False, prov=False):
     return f"\\prov{{{s}}}" if prov else s
 
 
+def num_ci(v, ci, digits, prov=False):
+    """A number with its interval in brackets, `2.04 [1.70, 2.36]`, or the number alone without an interval."""
+    s = num(v, digits)
+    if ci and all(finite(x) for x in ci):
+        s += f" [{num(ci[0], digits)}, {num(ci[1], digits)}]"
+    return f"\\prov{{{s}}}" if prov and finite(v) else s
+
+
 def cost_cell(step, censored, incomplete, budget, prov=False):
     if incomplete:
         return "\\tbd"
@@ -701,10 +917,18 @@ def cost_cell(step, censored, incomplete, budget, prov=False):
     return f"\\prov{{{s}}}" if prov else s
 
 
-def median_cost_cell(entry, prov):
+def median_cost_cell(entry, prov, ci=None, censored_n=None, n=None, budget=None):
+    """The median budget: censored when the middle arena is; its arena-bootstrap interval in brackets (an upper end
+    past the budget written as >budget) and the count of censored arenas beside it."""
     if entry["censored"] is None:
         return "\\tbd"
     s = f"${{>}}${int(entry['label'][1:]):,}" if entry["censored"] else f"{entry['value']:,.0f}"
+    if ci is not None:
+        lo, hi = ci
+        s += " [" + ("${>}$" + f"{budget:,}" if lo is None else f"{lo:,.0f}") + ", " + \
+             ("${>}$" + f"{budget:,}" if hi is None else f"{hi:,.0f}") + "]"
+    if censored_n is not None and n:
+        s += f"; {censored_n} of {n} censored"
     return f"\\prov{{{s}}}" if prov else s
 
 
@@ -719,8 +943,9 @@ def tabular(colspec, head, body):
     return "\n".join(out + ["\\bottomrule", "\\end{tabular}"]) + "\n"
 
 
-def cost_table(records, summary, decoder, budget, prov):
-    """The per-arena cost table: arena, D, A0, A at the budget, half-gap line, cost, S and LPIPS at 0 and the budget."""
+def cost_table(records, summary, decoder, budget, prov, stats=None):
+    """The per-arena cost table: arena, D, A0, A at the budget, half-gap line, cost, S and LPIPS at 0 and the budget;
+    a median row and, with the across-arena statistics, an IQM row, both with arena-bootstrap intervals."""
     b = budget_label(budget)
     others = sorted({d for r in records for d in r["other_decoders"]})
     head = ["Arena", "$D$", "$A_0$", f"$A_{{\\mathrm{{{b}}}}}$", "Half-gap line", "Cost", "$S_0$",
@@ -738,10 +963,21 @@ def cost_table(records, summary, decoder, budget, prov):
     m = summary["medians"]
     other_medians = [median_or_none([r["other_decoders"].get(d, {}).get("A_budget") for r in records
                                      if not r["incomplete"]]) for d in others]
-    body += ["midrule", ["Median", "", num(m["A0"], 2, True, prov), num(m["A_budget"], 2, True, prov),
-                         num(m["half_gap_line"], 2, prov=prov), median_cost_cell(m["cost_half_gap"], prov),
+    med_ci = {0: None, 1: None}
+    cost_ci, censored_n, n = None, None, None
+    if stats:
+        med_ci = {0: stats["median_A"]["ci"][0], 1: stats["median_A"]["ci"][-1]}
+        cost_ci, n = stats["median_budget"]["ci"], stats["n"]
+        censored_n = n - stats["half_gap_by_budget"]["count"]
+    body += ["midrule", ["Median", "", num_ci(m["A0"], med_ci[0], 2, prov), num_ci(m["A_budget"], med_ci[1], 2, prov),
+                         num(m["half_gap_line"], 2, prov=prov),
+                         median_cost_cell(m["cost_half_gap"], prov, cost_ci, censored_n, n, budget),
                          num(m["S0"], 2, prov=prov), num(m["S_budget"], 2, prov=prov), num(m["lpips0"], 3, prov=prov),
                          num(m["lpips_budget"], 3, prov=prov)] + [num(v, 2, True, prov) for v in other_medians]]
+    if stats:
+        v, ci = stats["iqm_A"]["value"], stats["iqm_A"]["ci"]
+        body.append(["IQM", "", num_ci(v[0], ci[0], 2, prov), num_ci(v[-1], ci[-1], 2, prov)] +
+                    [""] * (len(head) - 4))
     return tabular("r" * len(head), head, body)
 
 
@@ -761,6 +997,59 @@ def perarena_table(records, budget, prov):
     return tabular("r" * len(head), head, body)
 
 
+def table3(records, summary, stats, home, home_ci, budget, prov):
+    """Table 3 (`tab:cost`): the 13-arena column as medians with arena-bootstrap intervals in brackets, the
+    comparator arena with its episode intervals, the full fine-tune pending; the median budget states its censoring."""
+    b = budget_label(budget)
+    comp = next((r for r in records if r["arena"] == COMPARATOR_ARENA and not r["incomplete"]), None)
+    m = summary["medians"]
+    n = summary["n_complete"]
+
+    def cnt(entry):
+        if not entry:
+            return "\\tbd"
+        lo, hi = entry["count_ci"]
+        s = f"{entry['count']} [{lo}, {hi}]"
+        return f"\\prov{{{s}}}" if prov else s
+
+    def cost_of(r, key, cens):
+        return "\\tbd" if r is None else cost_cell(r[key], r[cens], r["incomplete"], budget, prov)
+
+    cost_all = median_cost_cell(m["cost_half_gap"], prov, stats["median_budget"]["ci"] if stats else None,
+                                n - stats["half_gap_by_budget"]["count"] if stats else None, n, budget)
+    home_cost = median_cost_cell(m["cost_home"], prov)
+    mb = stats.get("margin_budget") if stats else None
+    share = stats["gap_share"] if stats else None
+    home_cell = num_ci(home, (home_ci or {}).get("ci"), 2, prov)
+    rows = [
+        ["Parameters trained; GPU-hours", f"{LORA_PARAMS}; \\tbd{{}}", "4.2M; \\tbd{}", f"{FULL_PARAMS}; \\tbd{{}}"],
+        ["Training maps (in-distribution) $A$ (dB)", home_cell, "--", "--"],
+        [f"Arenas past half gap / $A\\geq{FIXED_THRESHOLD:g}$ dB by {b}",
+         f"{cnt(stats and stats['half_gap_by_budget'])} / {cnt(stats and stats['fixed_by_budget'])} of {n}", "--",
+         "--"],
+        [f"Share of the gap closed at {b}",
+         (num_ci(share["median"], share["median_ci"], 2, prov) if share else "\\tbd"),
+         num(comp and comp["gap_share_budget"], 2, prov=prov), "\\tbd"],
+        ["Cost to half gap / training-maps line (updates)", f"{cost_all} / {home_cost}",
+         f"{cost_of(comp, 'cost_half_gap', 'censored_half_gap')} / {cost_of(comp, 'cost_home', 'censored_home')}",
+         "\\tbd{} / \\tbd{}"],
+        [f"$A$ (dB) / $M$ / $G$ (dB) at {b}",
+         f"{num_ci(m['A_budget'], stats and stats['median_A']['ci'][-1], 2, prov)} / "
+         f"{num_ci(mb['median'], mb['median_ci'], 3, prov) if mb else num(m['M_budget'], 3, True, prov)} / "
+         f"{num(m['G_budget'], 2, prov=prov)}",
+         (f"{num_ci(comp['A_budget'], comp['A_budget_ci'], 2, prov)} / "
+          f"{num_ci(comp['M_budget'], comp['M_budget_ci'], 3, prov)} / {num(comp['G_budget'], 2, prov=prov)}")
+         if comp else "\\tbd{} / \\tbd{} / \\tbd{}", "\\tbd{} / \\tbd{} / \\tbd{}"],
+        [f"Forgetting (dB) / directional at {b}",
+         f"{num(m['forgetting_budget'], 2, True, prov)} / {num(m['directional_budget'], 2, prov=prov)}",
+         (f"{num(comp['forgetting_budget'], 2, True, prov)} / {num(comp['directional_budget'], 2, prov=prov)}"
+          if comp else "\\tbd{} / \\tbd{}"), "\\tbd{} / \\tbd{}"],
+    ]
+    head = ["", f"LoRA, {n} arenas, median [95\\% arena bootstrap]", f"LoRA, arena {COMPARATOR_ARENA}",
+            f"Full, arena {COMPARATOR_ARENA}"]
+    return tabular("lrrr", head, rows)
+
+
 # ---------------------------------------------------------------------------------------------
 # figures
 # ---------------------------------------------------------------------------------------------
@@ -771,6 +1060,204 @@ def a_axis(ax, lo_data, hi_data, label="$A$ (dB)", step=1.0):
     ax.set_ylim(min(0.0, lo_data) - 0.15, top + 0.35)
     ax.yaxis.set_major_locator(ticker.MultipleLocator(step))
     ax.set_ylabel(label)
+
+
+def fig_adaptation(stats, records, home, budget, out_dir, fixed=FIXED_THRESHOLD, band=None):
+    """Figure 4. (a) The interquartile mean of A across arenas against updates, its nested-bootstrap band, the
+    per-arena curves faint behind, the training maps' line and copy-last. (b) Cumulative attainment, one minus
+    Kaplan-Meier: the fraction of arenas whose A has reached its half-gap line, with its band, the fixed threshold
+    as a thin second curve, per-arena crossing ticks along the top (open at the right: censored) and the at-risk row
+    under the axis."""
+    d = stats["_draw"]
+    steps, point = stats["steps"], d["point"]
+    fig, (ax, bx) = fs.new_figure(FIG4_SIZE, ncols=2, wspace=0.08)
+    z = step_axis(ax, steps)
+    for row in point:
+        ax.plot(xs_of(list(zip(steps, row)), z), row, color=fs.FAINT, lw=fs.MIN_LW, zorder=2)
+    val, ci = stats["iqm_A"]["value"], np.array(stats["iqm_A"]["ci"])
+    xs = [z if s == 0 else s for s in steps]
+    ax.fill_between(xs, ci[:, 0], ci[:, 1], color=ADAPTER.colour, alpha=0.18, lw=0, zorder=2.5)
+    ax.plot(xs, val, color=ADAPTER.colour, lw=fs.DATA_LW, marker=ADAPTER.marker, ms=2.8, mec="white",
+            mew=fs.MARKER_EDGE, zorder=4)
+    fs.direct_label(ax, xs[-1], val[-1], "IQM", colour=ADAPTER.colour, dx=3)
+    fs.training_line(ax, home, where=0.0, align="left", band=band)
+    fs.copy_last_line(ax, where=0.0, align="left")
+    a_axis(ax, 0.0, max(home, point.max()))
+    fs.panel_letter(ax, "a")
+
+    step_axis(bx, steps)
+    att, att_ci = stats["attainment_half_gap"]["value"], np.array(stats["attainment_half_gap"]["ci"])
+    bx.fill_between(xs, att_ci[:, 0], att_ci[:, 1], step="post", color=ADAPTER.colour, alpha=0.18, lw=0,
+                    zorder=2.5)
+    bx.step(xs, att, where="post", color=ADAPTER.colour, lw=fs.DATA_LW, zorder=4)
+    fatt = stats["attainment_fixed"]["value"]
+    bx.step(xs, fatt, where="post", color=ADAPTER.colour, lw=fs.REF_LW, ls=(0, (1, 1)), zorder=3.5)
+    label_attainment(bx, xs, att, fatt, fixed)
+    bx.set_ylim(-0.02, 1.02)
+    bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.25, 0.5, 0.75, 1.0]))
+    bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "", "0.5", "", "1"]))
+    bx.set_ylabel("fraction of arenas crossed")
+    crossing_rug(bx, stats, z, steps)
+    at_risk_row(bx, stats["attainment_half_gap"]["at_risk"], xs)
+    fs.panel_letter(bx, "b")
+    return fs.save(fig, out_dir, "fig4_adaptation")
+
+
+def label_attainment(ax, xs, att, fatt, fixed):
+    """Direct labels inside the panel: the half-gap curve left of its first rise, the fixed-threshold curve (dotted)
+    under its longest stretch apart from the half-gap curve, or beside the first label when the two coincide."""
+    rise = next((i for i, v in enumerate(att) if v > 0), None)
+    if rise is not None:
+        fs.direct_label(ax, xs[rise], att[rise], "half-gap line", colour=ADAPTER.colour, dx=-3, ha="right")
+    apart = [i for i in range(len(xs) - 1) if abs(att[i] - fatt[i]) > 1e-9]
+    if apart:
+        i = max(apart, key=lambda i: xs[i + 1] / xs[i])
+        below = fatt[i] < att[i]
+        fs.direct_label(ax, math.sqrt(xs[i] * xs[i + 1]), fatt[i], f"{fixed:g} dB", colour=ADAPTER.colour, dx=0,
+                        dy=-1.5 if below else 1.5, ha="center", va="top" if below else "bottom")
+    elif rise is not None:
+        fs.direct_label(ax, xs[rise], att[rise], f"and {fixed:g} dB", colour=ADAPTER.colour, dx=-3, dy=-8,
+                        ha="right")
+
+
+OPEN_TICK = Path([(-0.18, -0.5), (0.18, -0.5), (0.18, 0.5), (-0.18, 0.5), (-0.18, -0.5)],
+                 [Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY])
+
+
+def crossing_rug(ax, stats, z, steps):
+    """Per-arena ticks hanging from the top edge at each arena's crossing step, arena numbers stacked beneath;
+    arenas that do not cross by the budget as open ticks right of the last grid step."""
+    byx = {}
+    for arena, step in stats["attainment_half_gap"]["crossing_step"].items():
+        key = ("open", steps[-1] * 1.32) if step is None else ("filled", z if step == 0 else step)
+        byx.setdefault(key, []).append(int(arena))
+    top = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    for (kind, x), arenas in sorted(byx.items(), key=lambda kv: kv[0][1]):
+        ax.plot([x], [0.985], transform=top, marker=OPEN_TICK, ms=6, mfc="white" if kind == "open" else fs.INK,
+                mec=fs.INK, mew=0.5, ls="none", clip_on=False, zorder=5, gid="decor")
+        for i, a in enumerate(sorted(arenas)):
+            ax.text(x, 0.93 - 0.085 * i, str(a), transform=top, ha="center", va="top", fontsize=fs.MIN_PT,
+                    color=fs.CONTEXT_INK, gid="decor")
+
+
+def at_risk_row(ax, counts, xs, below_pt=12.5):
+    """The at-risk counts between the tick labels and the axis label, one per grid step, labelled at the left."""
+    fig = ax.figure
+    shift = transforms.ScaledTranslation(0, -below_pt / 72, fig.dpi_scale_trans)
+    under = transforms.blended_transform_factory(ax.transData, ax.transAxes) + shift
+    for x, c in zip(xs, counts):
+        ax.text(x, 0, str(c), transform=under, ha="center", va="top", fontsize=fs.MIN_PT, color=fs.CONTEXT_INK,
+                gid="decor")
+    ax.text(0.0, 0, "at risk ", transform=ax.transAxes + shift, ha="right", va="top", fontsize=fs.MIN_PT,
+            color=fs.CONTEXT_INK, gid="decor")
+    ax.xaxis.labelpad = below_pt - 3.0
+
+
+def fig_arenas(records, runs, home, budget, out_dir, band=None):
+    """Appendix: one small panel per arena, A against updates with its episode band, the half-gap line (dotted),
+    the training maps' line (dashed), copy-last at 0 and the crossing ticked; shared axes, ordered by arena."""
+    recs = sorted(records, key=lambda r: r["arena"])
+    ncols = min(5, len(recs))
+    nrows = math.ceil(len(recs) / ncols)
+    fig, axes = fs.new_figure((ARENAS_SIZE[0], min(ARENAS_SIZE[1], 0.2 + 0.95 * nrows)), ncols=ncols, nrows=nrows,
+                              sharex=True, sharey=True, wspace=0.02, hspace=0.03)
+    steps = sorted({int(s) for r in recs for s in r["A"] if int(s) <= budget})
+    top = max(max(v for r in recs for v in r["A"].values()), home)
+    keyed = False
+    for i, ax in enumerate(axes):
+        if i >= len(recs):
+            if keyed:
+                ax.remove()
+            else:
+                arenas_key(ax, band is not None)
+                keyed = True
+            continue
+        r = recs[i]
+        z = step_axis(ax, steps, label="updates" if i + ncols >= len(recs) else "")
+        pts = [(s, v) for s, v in sorted((int(s), v) for s, v in r["A"].items()) if s <= budget]
+        x = xs_of(pts, z)
+        cis = [r["A_ci"].get(str(s)) for s, _ in pts]
+        if all(cis):
+            ax.fill_between(x, [c[0] for c in cis], [c[1] for c in cis], color=ADAPTER.colour, alpha=0.2, lw=0)
+        ax.plot(x, [v for _, v in pts], color=ADAPTER.colour, lw=fs.DATA_LW, zorder=3)
+        ax.axhline(r["half_gap_line"], color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2)), zorder=1.4, gid="ref")
+        fs.training_line(ax, home, label=fs.TRAINING_LABEL if i == 0 and len(recs) % ncols == 0 else None,
+                         where=0.0, band=band)
+        fs.copy_last_line(ax, label=False)
+        if r["cost_half_gap"] is not None:
+            cx = z if r["cost_half_gap"] == 0 else r["cost_half_gap"]
+            ax.plot([cx, cx], [r["half_gap_line"] - 0.35, r["half_gap_line"] + 0.35], color=fs.INK, lw=0.8,
+                    zorder=4, gid="decor")
+        ax.text(0.97, 0.07, f"arena {r['arena']}", transform=ax.transAxes, ha="right", va="bottom",
+                fontsize=fs.ANNOT_PT, gid="decor")
+        ax.set_ylim(-0.2, top + 0.4)
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
+        if i % ncols == 0:
+            ax.set_ylabel("$A$ (dB)")
+        # the lowest panel of each column carries the x tick labels, also where the row below is short
+        ax.tick_params(labelbottom=i + ncols >= len(recs))
+    return fs.save(fig, out_dir, "figA_adapt_arenas")
+
+
+def arenas_key(ax, with_band):
+    """The small multiples' key, drawn in the first empty slot: what each reference mark means."""
+    ax.set_gid("decor")
+    ax.axis("off")
+    rows = [("training maps", "(in-distribution)", "train"), ("half-gap line", "", "half"),
+            ("first crossing", "", "tick"), ("copy-last", "", "zero")]
+    for k, (text, sub, kind) in enumerate(rows):
+        y = 0.86 - 0.24 * k
+        if kind == "train":
+            if with_band:
+                ax.add_patch(matplotlib.patches.Rectangle((0.02, y - 0.05), 0.22, 0.1, transform=ax.transAxes,
+                                                          color=fs.TRAINING_BAND, lw=0))
+            ax.plot([0.02, 0.24], [y, y], transform=ax.transAxes, color=fs.TRAINING_LINE, lw=fs.REF_LW,
+                    ls=fs.TRAINING_DASH)
+        elif kind == "half":
+            ax.plot([0.02, 0.24], [y, y], transform=ax.transAxes, color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2)))
+        elif kind == "tick":
+            ax.plot([0.13, 0.13], [y - 0.07, y + 0.07], transform=ax.transAxes, color=fs.INK, lw=0.8)
+        else:
+            ax.plot([0.02, 0.24], [y, y], transform=ax.transAxes, color=fs.BLACK, lw=fs.REF_LW)
+        ax.text(0.3, y, text + (f"\n{sub}" if sub else ""), transform=ax.transAxes, ha="left", va="center",
+                fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK, linespacing=1.0)
+
+
+def fig_profiles(stats, home, out_dir, band=None):
+    """Appendix: performance profiles, the fraction of arenas with A at or above a threshold, at step 0, 500 and
+    the budget, each with its nested-bootstrap band, in the adapter's blue ramp from light (step 0) to dark (the
+    budget); the training maps' A as a vertical reference."""
+    d = stats["_draw"]
+    steps, point, boot = stats["steps"], d["point"], d["boot"]
+    show = sorted({*[s for s in PROFILE_STEPS if s in steps], stats["budget"]})
+    lo_t, hi_t = float(point.min()) - 0.3, float(max(point.max(), home)) + 0.3
+    taus = np.linspace(lo_t, hi_t, 300)
+    fig, (ax,) = fs.new_figure(HALF_SIZE)
+    for n, s in enumerate(show):
+        j = steps.index(s)
+        colour = fs.ADAPTER_RAMP(0.15 + 0.85 * n / max(1, len(show) - 1))
+        p = profile(point[:, j], taus)
+        lo, hi = interval(profile(boot[:, :, j], taus))
+        ax.fill_between(taus, lo, hi, step="post", color=colour, alpha=0.13, lw=0)
+        ax.step(taus, p, where="post", color=colour, lw=fs.DATA_LW)
+        # labels alternate sides of their curves at staggered heights so neighbouring curves do not collide
+        level = (0.62, 0.9, 0.35, 0.75)[n % 4]
+        k = int(np.argmin(np.abs(p - level)))
+        left = n % 2 == 1
+        fs.direct_label(ax, taus[k], p[k], "zero-shot" if s == 0 else f"{step_label(s)} updates", colour=colour,
+                        dx=-3 if left else 3, ha="right" if left else "left")
+    fs.training_line(ax, home, orientation="v", label=None, band=band)
+    top = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(home, 1.02, fs.TRAINING_LABEL + " ", transform=top, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
+            color=fs.TRAINING_LINE)
+    ax.set_xlim(lo_t, hi_t)
+    ax.set_ylim(-0.02, 1.02)
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
+    ax.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
+    ax.set_xlabel(r"threshold $\tau$ on $A$ (dB)")
+    ax.set_ylabel(r"arenas with $A\geq\tau$ (fraction)")
+    return fs.save(fig, out_dir, "figA_adapt_profiles")
 
 
 def fig_curves(records, runs, home, budget, out_dir, column="A", band=None):
@@ -1099,6 +1586,8 @@ def build_parser():
                    help="the run-name variant whose seed-0, 8-episode runs are the headline set (e.g. g8k)")
     p.add_argument("--budget", type=int, default=None,
                    help="the fixed budget: A at it, censoring beyond it (default: the headline grid's last step)")
+    p.add_argument("--fixed-threshold", type=float, default=FIXED_THRESHOLD,
+                   help="the fixed A threshold (dB) of the second attainment curve")
     p.add_argument("--fresh-root", default=os.path.join(REPO, "results", "fresh_rescore"),
                    help="<root>/<row>/<map dir>/metrics.json zero-shot reads; each row a marker per arena")
     p.add_argument("--zero-shot", action="append", default=[], metavar="NAME=DIR",
@@ -1106,6 +1595,8 @@ def build_parser():
     p.add_argument("--with-raw", action="store_true", help="also draw the margin M per arena, where rows carry it")
     p.add_argument("--prov", action="store_true", help="wrap every table number in \\prov{} (provisional marks)")
     p.add_argument("--bootstrap", type=int, default=2000, help="episode-bootstrap draws per arena interval (0: none)")
+    p.add_argument("--arena-bootstrap", type=int, default=10000,
+                   help="nested (arena, then episode) bootstrap draws for the across-arena statistics (0: none)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-dir", default=os.path.join(HERE, "figures"))
     p.add_argument("--tables-dir", default=os.path.join(HERE, "tables"))
@@ -1132,7 +1623,7 @@ def main(argv=None):
     records_of = {}
     for run in runs:
         draws = a.bootstrap if run is base.get(run.arena) else 0
-        rec = run_record(run, a.decoder, home, budget, D, draws, a.seed, notes, FIXED_THRESHOLD)
+        rec = run_record(run, a.decoder, home, budget, D, draws, a.seed, notes, a.fixed_threshold)
         if rec is not None:
             rec["decoder"] = a.decoder
         records_of[run.name] = rec
@@ -1151,6 +1642,8 @@ def main(argv=None):
     summary = build_summary(records, budget, home)
     seed_summary = seed_entries(anchors, seeds, records_of, budget, a.headline_variant)
     ladder_summary = ladder_entries(anchors, ladder, records_of, budget)
+    stats = across_arenas(records, by_name, a.decoder, home, budget, a.arena_bootstrap, a.seed, notes,
+                          a.fixed_threshold) if a.arena_bootstrap else None
     home_ci = home_interval(a.home_json, a.decoder, max(a.bootstrap, 10000), a.seed)
     when = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     used = [base[a_].path for a_ in sorted(base)]
@@ -1159,6 +1652,7 @@ def main(argv=None):
                "home": home, "home_ci": home_ci,
                "home_source": rel(home_source) if os.path.exists(home_source) else home_source,
                "budget": budget, "headline_variant": a.headline_variant, "weights": a.weights, **summary,
+               "across_arenas": public(stats),
                "per_arena": records, "seeds": seed_summary, "ladder": ladder_summary,
                "recipe": recipe_entries(anchors, base, recipe, records_of, seed_summary),
                "zero_shot": {k: {**v, "maps": without_paths(v["maps"])} for k, v in zero_shot.items()},
@@ -1173,10 +1667,12 @@ def main(argv=None):
         "half-gap line = (A0 + training maps' A) / 2; the training maps' A is an in-distribution reference, not the "
         "arena's own ceiling",
         "\\tbd marks a quantity these rows do not carry yet; costs are first grid crossings, >budget right-censored",
+        "brackets: 95% intervals, nested (arena, then episode) bootstrap for aggregates, episode bootstrap per arena",
     ] + [f"  {rel(p)} sha256 {sha256(p)[:16]}" for p in used])
     written = []
-    tables = [("adapt_cost.tex", cost_table(records, summary, a.decoder, budget, a.prov)),
-              ("adapt_perarena.tex", perarena_table(records, budget, a.prov))]
+    tables = [("adapt_cost.tex", cost_table(records, summary, a.decoder, budget, a.prov, public(stats))),
+              ("adapt_perarena.tex", perarena_table(records, budget, a.prov)),
+              ("adapt_table3.tex", table3(records, summary, public(stats), home, home_ci, budget, a.prov))]
     for name, body in tables:
         path = os.path.join(a.tables_dir, name)
         with open(path, "w") as f:
@@ -1189,7 +1685,7 @@ def main(argv=None):
     written.append(path)
 
     fs.style()
-    written += draw_figures(a, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary,
+    written += draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary,
                             recipe, base, records_of, zero_shot, notes, band=(home_ci or {}).get("ci"))
     for p in written:
         print("wrote", rel(p))
@@ -1198,7 +1694,7 @@ def main(argv=None):
     return 0
 
 
-def draw_figures(a, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary, recipe,
+def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary, recipe,
                  base, records_of, zero_shot, notes, band=None):
     """Every figure the data support; a figure the data cannot fill is refused by `figstyle.save` and noted.
     `band` is the training maps' 95% episode interval, drawn around their dashed reference line."""
@@ -1211,6 +1707,12 @@ def draw_figures(a, records, by_name, home, budget, seed_summary, anchors, seeds
             notes.append(f"not drawn: {e}")
             return []
 
+    if stats:
+        written += attempt(fig_adaptation, stats, records, home, budget, a.out_dir, a.fixed_threshold, band=band)
+        written += attempt(fig_profiles, stats, home, a.out_dir, band=band)
+    complete = [r for r in records if not r["incomplete"]]
+    if complete:
+        written += attempt(fig_arenas, complete, by_name, home, budget, a.out_dir, band=band)
     written += attempt(fig_curves, records, by_name, home, budget, a.out_dir, "A", band=band)
     written += attempt(fig_curves, records, by_name, home, budget, a.out_dir, "S")
     written += attempt(fig_skill, records, home, budget, a.out_dir, band=band)

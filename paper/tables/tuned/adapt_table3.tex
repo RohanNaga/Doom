@@ -16,22 +16,16 @@
 %   results/adapt/unet200k_arenas13_map15_r16_k8_s0/scores.jsonl sha256 fbe3c508452653af
 %   results/adapt/unet200k_arenas13_map16_r16_k8_s0/scores.jsonl sha256 cd518fdef9124f34
 %   results/adapt/unet200k_arenas13_map17_r16_k8_s0/scores.jsonl sha256 f89c667098cf6a4b
-\begin{tabular}{rrrrrrrrrr}
+\begin{tabular}{lrrr}
 \toprule
-Arena & $D$ & $A_0$ & Half-gap line & Half gap & Training-maps line & $A$ at 4k & $M$ at 4k & Forgetting & Directional \\
+ & LoRA, 13 arenas, median [95\% arena bootstrap] & LoRA, arena 7 & Full, arena 7 \\
 \midrule
-8 & 0.118 & +2.04 & 3.55 & ${>}$4,000 & ${>}$4,000 & +3.44 & $-$0.021 & \tbd & \tbd \\
-15 & 0.127 & +2.88 & 3.97 & 500 & ${>}$4,000 & +4.56 & $-$0.046 & \tbd & \tbd \\
-17 & 0.130 & +1.65 & 3.35 & 1,000 & ${>}$4,000 & +3.83 & $-$0.040 & \tbd & \tbd \\
-12 & 0.138 & +1.79 & 3.42 & ${>}$4,000 & ${>}$4,000 & +3.33 & $-$0.017 & \tbd & \tbd \\
-14 & 0.147 & +1.85 & 3.46 & 2,000 & ${>}$4,000 & +3.62 & $-$0.010 & \tbd & \tbd \\
-13 & 0.154 & +2.12 & 3.59 & 2,000 & ${>}$4,000 & +3.80 & $-$0.023 & \tbd & \tbd \\
-10 & 0.155 & +2.31 & 3.68 & 250 & ${>}$4,000 & +4.82 & $-$0.015 & \tbd & \tbd \\
-11 & 0.156 & +2.28 & 3.67 & 250 & ${>}$4,000 & +4.31 & $-$0.051 & \tbd & \tbd \\
-16 & 0.171 & +2.53 & 3.79 & ${>}$4,000 & ${>}$4,000 & +3.64 & $-$0.017 & \tbd & \tbd \\
-1 & 0.172 & +1.84 & 3.45 & ${>}$4,000 & ${>}$4,000 & +3.37 & +0.001 & \tbd & \tbd \\
-9 & 0.184 & +2.88 & 3.97 & 250 & 4,000 & +5.11 & $-$0.047 & \tbd & \tbd \\
-6 & 0.198 & +1.07 & 3.06 & 1,000 & ${>}$4,000 & +3.38 & +0.008 & \tbd & \tbd \\
-7 & 0.270 & +1.07 & 3.06 & 250 & ${>}$4,000 & +3.86 & $-$0.026 & \tbd & \tbd \\
+Parameters trained; GPU-hours & 4.2M (0.49\%); \tbd{} & 4.2M; \tbd{} & 860M (all); \tbd{} \\
+Training maps (in-distribution) $A$ (dB) & 5.06 [4.75, 5.38] & -- & -- \\
+Arenas past half gap / $A\geq3.5$ dB by 4k & 9 [6, 12] / 9 [6, 12] of 13 & -- & -- \\
+Share of the gap closed at 4k & 0.58 [0.49, 0.74] & 0.70 & \tbd \\
+Cost to half gap / training-maps line (updates) & 1,000 [250, ${>}$4,000]; 4 of 13 censored / ${>}$4,000 & 250 / ${>}$4,000 & \tbd{} / \tbd{} \\
+$A$ (dB) / $M$ / $G$ (dB) at 4k & 3.80 [3.45, 4.39] / $-$0.021 [$-$0.040, $-$0.015] / \tbd & 3.86 [3.70, 4.02] / $-$0.026 [$-$0.033, $-$0.020] / \tbd & \tbd{} / \tbd{} / \tbd{} \\
+Forgetting (dB) / directional at 4k & \tbd / \tbd & \tbd / \tbd & \tbd{} / \tbd{} \\
 \bottomrule
 \end{tabular}

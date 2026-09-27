@@ -128,7 +128,8 @@ def cli(tmp_path, distances, *extra):
     out, tables = tmp_path / "figures", tmp_path / "tables"
     argv = ["--runs-glob", str(tmp_path / "results" / "adapt" / "*" / "scores.jsonl"), "--distances", distances,
             "--out-dir", str(out), "--tables-dir", str(tables), "--budget", str(BUDGET),
-            "--fresh-root", str(tmp_path / "no_fresh_reads"), "--bootstrap", "200", *extra]
+            "--fresh-root", str(tmp_path / "no_fresh_reads"), "--bootstrap", "200", "--arena-bootstrap", "1000",
+            *extra]
     if "--home" not in extra and "--home-json" not in extra:
         argv += ["--home", str(HOME)]
     assert maf.main(argv) == 0
@@ -293,7 +294,7 @@ def mediabox(path):
 
 def test_the_figures_are_written_as_pdf_and_png_at_the_slot_size_without_type3_fonts(tmp_path):
     out, _ = cli(tmp_path, tree(tmp_path))
-    for stem in ("fig3_adaptation_curves", "fig3_adaptation_skill",
+    for stem in ("fig3_adaptation_curves", "fig3_adaptation_skill", "fig4_adaptation",
                  "fig2a_advantage_by_distance"):
         for ext in ("pdf", "png"):
             p = os.path.join(out, f"{stem}.{ext}")
@@ -437,6 +438,85 @@ def test_a_decoder_no_row_carries_stops_with_a_message(tmp_path):
         cli(tmp_path, tree(tmp_path), "--decoder", "tuned", "--home", "4.6")
 
 
+# ---------------------------------------------------------------------------------------------
+# across arenas: attainment, the interquartile mean, the nested bootstrap, Table 3
+# ---------------------------------------------------------------------------------------------
+
+def test_the_interquartile_mean_trims_a_quarter_from_each_end():
+    import numpy as np
+    assert maf.iqm(np.arange(13.0)) == pytest.approx(6.0)             # keeps 3..9
+    assert maf.iqm(np.array([1.0, 3.0])) == pytest.approx(2.0)        # below four values: the mean
+    assert maf.iqm(np.array([[0.0, 100.0, 1.0, 2.0, 3.0]]), axis=1)[0] == pytest.approx(2.0)
+
+
+def test_first_attainment_at_risk_and_profiles():
+    import numpy as np
+    steps = [0, 250, 500]
+    curves = np.array([[1.0, 2.5, 3.0], [2.0, 2.5, 2.9]])
+    first = maf.first_step(curves, np.array([2.5, 3.0]), steps)
+    assert first.tolist() == [250, math.inf]
+    assert maf.at_risk(first.tolist(), steps) == [2, 2, 1]
+    assert maf.profile([1.0, 2.0, 3.0], [1.5, 3.0]).tolist() == pytest.approx([2 / 3, 1 / 3])
+
+
+def test_the_nested_bootstrap_resamples_arenas_then_episodes_paired_across_steps():
+    import numpy as np
+    point = np.array([[1.0, 2.0], [3.0, 5.0]])
+    # arena 0 has two episodes (two windows each) whose means straddle its point; arena 1 has no per-window files
+    mats = [(np.array([[0.5, 1.5], [1.0, 3.0]]) * 2, np.array([2.0, 2.0])), None]
+    idx, boot = maf.nested_bootstrap(point, mats, 400, 0)
+    assert boot.shape == (400, 2, 2)
+    assert np.allclose(boot[idx == 1], [3.0, 5.0])                  # no episodes: the point curve
+    drew_0 = boot[idx == 0]
+    assert set(np.round(drew_0[:, 0], 6)) <= {0.5, 1.0, 1.5}
+    # one episode draw serves every step: the step-0 and step-1 means move together
+    assert np.allclose(drew_0[:, 1] - 1.0, 2 * (drew_0[:, 0] - 0.5))
+
+
+def test_the_summary_carries_attainment_iqm_and_gap_share_with_intervals(tmp_path):
+    _, tables = cli(tmp_path, tree(tmp_path))
+    aa = summary(tables)["across_arenas"]
+    assert aa["steps"] == [0, 250, 500] and aa["n"] == 2
+    att = aa["attainment_half_gap"]
+    assert att["value"] == pytest.approx([0.0, 0.5, 0.5])
+    assert att["at_risk"] == [2, 2, 1] and att["crossing_step"] == {"6": 250, "9": None}
+    for (lo, hi), v in zip(att["ci"], att["value"]):
+        assert lo <= v <= hi
+    iqm = aa["iqm_A"]
+    assert iqm["value"] == pytest.approx([1.5, 2.5, 2.95])     # two arenas: the IQM is their mean
+    assert all(lo <= v <= hi for (lo, hi), v in zip(iqm["ci"], iqm["value"]))
+    assert aa["attainment_fixed"]["threshold"] == pytest.approx(3.5)
+    share = aa["gap_share"]["per_arena"]
+    assert share["6"] == pytest.approx((3.0 - 1.0) / (HOME - 1.0)) and share["9"] == pytest.approx(0.9 / 2.0)
+    assert "nested bootstrap" in aa["method"] and aa["episode_resampling_missing"] == []
+
+
+def test_figure_4_and_the_appendix_panels_are_drawn_at_their_sizes(tmp_path):
+    out, _ = cli(tmp_path, tree(tmp_path))
+    for stem in ("fig4_adaptation", "figA_adapt_arenas", "figA_adapt_profiles"):
+        assert os.path.getsize(os.path.join(out, f"{stem}.png")) > 1000, stem
+        assert b"/Type3" not in open(os.path.join(out, f"{stem}.pdf"), "rb").read()
+    w, h = mediabox(os.path.join(out, "fig4_adaptation.pdf"))
+    assert w == pytest.approx(maf.FIG4_SIZE[0], abs=0.01) and h == pytest.approx(maf.FIG4_SIZE[1], abs=0.01)
+
+
+def test_table_3_carries_arena_bootstrap_intervals_and_states_the_censoring(tmp_path):
+    p = tmp_path / "home" / "metrics.json"
+    os.makedirs(p.parent)
+    p.write_text(json.dumps({"scene_psnr_dec": {"mean": 25.0}, "scene_copy_psnr_dec": {"mean": 21.0}}))
+    write_per_window(str(p.parent / "per_window.csv"), {"stock": HOME})
+    _, tables = cli(tmp_path, tree(tmp_path), "--home-json", str(p))
+    s = summary(tables)
+    assert s["home"] == pytest.approx(HOME) and s["home_ci"]["ci"][0] < HOME < s["home_ci"]["ci"][1]
+    t3 = open(os.path.join(tables, "adapt_table3.tex")).read()
+    assert "\\toprule" in t3 and "arena bootstrap" in t3
+    assert "1 [" in t3 and "of 2" in t3                      # one of two past the half-gap line, with its interval
+    assert "1 of 2 censored" in t3                            # the median budget states its censoring
+    assert "4.00 [" in t3                                     # home with its episode interval
+    cost = open(os.path.join(tables, "adapt_cost.tex")).read()
+    assert "IQM" in cost and "censored" in cost
+
+
 def test_runs_without_the_decoders_rows_draw_no_seed_ladder_or_recipe_figure(tmp_path):
     distances = tree(tmp_path, tuned=True)
     write_run(tmp_path, 6, (1.0, 2.4, 3.2), seed=1)                   # stock only: nothing to draw under tuned
@@ -456,7 +536,7 @@ def test_the_headline_variant_flag_promotes_the_8k_grid_and_its_budget(tmp_path)
     write_run(tmp_path, 9, (2.0, 2.2, 2.5, 2.9, 3.1), variant="g8k", steps=steps8)
     argv = ["--runs-glob", str(tmp_path / "results" / "adapt" / "*" / "scores.jsonl"), "--distances", distances,
             "--out-dir", str(tmp_path / "f"), "--tables-dir", str(tmp_path / "t"), "--home", str(HOME),
-            "--fresh-root", str(tmp_path / "none"), "--bootstrap", "100",
+            "--fresh-root", str(tmp_path / "none"), "--bootstrap", "100", "--arena-bootstrap", "200",
             "--headline-variant", "g8k"]
     assert maf.main(argv) == 0
     s = summary(tmp_path / "t")
@@ -464,5 +544,6 @@ def test_the_headline_variant_flag_promotes_the_8k_grid_and_its_budget(tmp_path)
     assert all(r["run"].endswith("_g8k") for r in s["per_arena"])
     per = {r["arena"]: r for r in s["per_arena"]}
     assert per[6]["cost_half_gap"] == 250 and per[9]["cost_half_gap"] == 1000
+    assert s["across_arenas"]["steps"] == list(steps8)
     assert s["recipe"] == []                  # the base-recipe runs anchor the recipe tests; they are not tests
-    assert os.path.getsize(tmp_path / "f" / "fig3_adaptation_curves.pdf") > 1000
+    assert os.path.getsize(tmp_path / "f" / "fig4_adaptation.pdf") > 1000
