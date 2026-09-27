@@ -12,10 +12,14 @@ What is pinned, because each is a way the draft can go wrong without anyone noti
     whose comment names the run it depends on (`% depends:`);
   * the abstract is four to six sentences, as the template asks;
   * every figure and table label appears in `FIGURES.md`;
-  * the appendix comes after the bibliography;
-  * and, when pdflatex is installed, the documented build (pdflatex, bibtex, pdflatex, pdflatex) runs clean,
-    leaves no undefined citation or reference, keeps the body within four pages, and embeds a figure whose
-    file exists while boxing one whose file does not.
+  * the appendix comes after the bibliography, and the submission build leaves it out (`\\withappendixfalse`),
+    with every body pointer to it going through `\\appref`;
+  * the sources are anonymous: an identifying string (author, institution, lab host, account) appears only on a
+    `% camera-ready:` line;
+  * and, when pdflatex is installed, the documented build (pdflatex, bibtex, pdflatex, pdflatex) of both the
+    submission and the appendix version runs clean, leaves no undefined citation or reference and no overfull
+    box, and keeps the body within four pages; the submission PDF carries no identifying string and points the
+    reader to "the supplement"; the appendix build embeds the figure whose file exists while boxing the rest.
 
     python -m pytest paper/fixtures/test_paper_skeleton.py -q
 """
@@ -37,6 +41,9 @@ SHIPPED = {
     "corlabbrvnat.bst": "eb5c200b6c5a81cd774155c79c28d3a32ac8a5e25bb246a40dda74deb94dfa71",
 }
 MARKS = (r"\tbd", r"\todo{", r"\prov{")
+# identifying strings (Sep 27 anonymisation rule); allowed only on "% camera-ready:" lines of the sources
+IDENTIFYING = re.compile(r"rohan|keerthana|changliu|nagabhirava|chirumamilla|carnegie|\bcmu\b|pittsburgh|"
+                         r"spiderman|superman|rnagabhi|sata2|wandb|huggingface|github", re.I)
 DEFINITION = re.compile(r"^\s*\\(newcommand|renewcommand|providecommand|def)\b")
 
 
@@ -130,26 +137,75 @@ def test_the_appendix_comes_after_the_bibliography():
     assert bib != -1 and app != -1 and bib < app
 
 
-@pytest.mark.skipif(shutil.which("pdflatex") is None or shutil.which("bibtex") is None,
-                    reason="pdflatex or bibtex not installed")
-def test_the_documented_build_is_clean_and_the_body_fits_four_pages(tmp_path):
-    work = tmp_path / "paper"
+def test_the_submission_build_leaves_the_appendix_out_and_points_through_appref():
+    tex = "\n".join(strip_comment(ln) for ln in read("main.tex").splitlines())
+    submission = re.search(r"\\newif\\ifwithappendix\s*\\withappendixfalse", tex)
+    assert submission, "the submission build is body plus references"
+    assert r"\newcommand{\appref}" in tex
+    body = tex[:tex.find(r"\bibliography{refs}")]
+    bare = re.findall(r"Appendix~\\ref\{app:[^}]*\}", body.replace(r"\ifwithappendix Appendix~\ref{#1}", ""))
+    assert not bare, f"body points at the appendix without \\appref: {bare}"
+
+
+def test_the_sources_carry_identifying_strings_only_in_camera_ready_comments():
+    for name in SOURCES:
+        for n, line in enumerate(read(name).splitlines(), 1):
+            if IDENTIFYING.search(line):
+                assert line.lstrip().startswith("% camera-ready:"), f"{name}:{n}: {line.strip()[:120]}"
+
+
+def build(tmp_path, with_appendix):
+    """Run the documented chain on a copy of paper/; return the working directory."""
+    work = tmp_path / ("appendix" if with_appendix else "submission")
     shutil.copytree(PAPER, work, ignore=shutil.ignore_patterns("fixtures", "*.pdf", "*.aux", "*.log", "*.bbl",
                                                                "*.blg", "*.out", "__pycache__"))
-    # the build copies figures/, so the file that exists today embeds; the pending ones must box, not fail
+    if with_appendix:
+        main = work / "main.tex"
+        text = main.read_text()
+        assert text.count(r"\withappendixfalse") >= 1
+        flag = r"(\\newif\\ifwithappendix\s*)\\withappendixfalse"
+        main.write_text(re.sub(flag, r"\1\\withappendixtrue", text, count=1))
     for step in (["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "main"], ["bibtex", "main"],
                  ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "main"],
                  ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "main"]):
         proc = subprocess.run(step, cwd=work, capture_output=True, text=True)
         assert proc.returncode == 0, f"{' '.join(step)} failed:\n{proc.stdout[-3000:]}"
+    return work
+
+
+def check_clean(work):
     log = (work / "main.log").read_text(errors="replace")
     assert "undefined" not in log.lower().replace("undefined control", ""), "an undefined citation or reference"
     assert "There were undefined references" not in log
+    assert "Overfull \\hbox" not in log and "Overfull \\vbox" not in log, "an overfull box"
     blg = (work / "main.blg").read_text(errors="replace")
     assert "Warning--I didn't find a database entry" not in blg
     aux = (work / "main.aux").read_text(errors="replace")
     m = re.search(r"\\newlabel\{body-end\}\{\{[^}]*\}\{(\d+)\}", aux)
     assert m, "the body-end label is missing"
     assert int(m.group(1)) <= 4, f"the body ends on page {m.group(1)}"
-    assert "sd35_70k_live_vs_ema_rollout_strip.jpg" in log, "an existing figure file was not embedded"
     assert (work / "main.pdf").stat().st_size > 10000
+    return log
+
+
+NEEDS_LATEX = pytest.mark.skipif(shutil.which("pdflatex") is None or shutil.which("bibtex") is None,
+                                 reason="pdflatex or bibtex not installed")
+
+
+@NEEDS_LATEX
+def test_the_submission_build_is_clean_anonymous_and_fits_four_pages(tmp_path):
+    work = build(tmp_path, with_appendix=False)
+    check_clean(work)
+    if shutil.which("pdftotext"):
+        text = subprocess.run(["pdftotext", "main.pdf", "-"], cwd=work, capture_output=True, text=True).stdout
+        found = sorted({m.group(0).lower() for m in IDENTIFYING.finditer(text)})
+        assert not found, f"identifying strings in the submission PDF: {found}"
+        assert "the supplement" in text, "body pointers to the appendix should read 'the supplement'"
+        assert "Anonymous Author" in text
+
+
+@NEEDS_LATEX
+def test_the_appendix_build_is_clean_and_embeds_the_existing_figure(tmp_path):
+    work = build(tmp_path, with_appendix=True)
+    log = check_clean(work)
+    assert "sd35_70k_live_vs_ema_rollout_strip.jpg" in log, "an existing figure file was not embedded"
