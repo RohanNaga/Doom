@@ -258,3 +258,16 @@ The body panel is now `fig3b_zero_shot_paired` (3.3 x 1.9 in): unseen arenas as 
 22. Applied: M ticks are every 0.1 in Figure 3b and every 0.05 in `fig2b`, both including values below zero.
 23. Applied: the zero line is labelled "copy-last" on both rows.
 24. Applied: M is the bottom row of Figure 3b and shares the arena columns with A.
+
+### Comments 46 to 53 (Figure 2, `tools/compose_rollouts.py`)
+
+The composer reads the steward's export (`results/figure2_rollouts/<map>_<control>/<row>_<decoder>/tic_NN[_scene].png` with `manifest.json`) and writes `paper/figures/fig2_rollouts.pdf` and `.png` at 5.5 in wide. On the synthetic fixture the figure is 1.72 in tall with frames 0.33 in wide. Two controls side by side and seven columns each do not fit the standard's 0.39 in frames inside 5.5 in; `--stack` stacks the two controls instead and doubles the frame width, which is Rohan's open decision 3.
+
+46. Applied: row labels sit at the left, group labels ("map 2 (training)", "arena 7 (unseen)") are rotated beside them, tic numbers run above the first row, and each block carries its held control as a header.
+47. Applied: 2 pt white gutters separate the frames, and the scene crop removes the HUD bars.
+48. Applied: tic 0 is the last context frame, copy-last's prediction at every tic, so the copy-last row is dropped and a 4 pt gap separates the context column from the predictions.
+49. Applied: every frame is the scene crop (rows 0 to 207). Model rows use the tuned decoder (`--decoder`) and true rows use the raw frame (`--truth`).
+50. Answered, no data change: the steward confirmed that the row was tic 0 of the same window. The apparent mismatch came from the first column being tic 4 and from the stock decoder's HUD digits.
+51. Applied: the columns are tics 0, 1, 2, 4, 8, 16 and 32 (`--tics`).
+52. Applied: map 2 and arena 7 each get their own true row, in two row groups (true, U-Net; true, zero-shot, LoRA 4k).
+53. Partly applied: `fig2_rollouts.json` records each window's episode, start tic, files and printed PSNR for the caption. The seeded rule that chose the windows is the steward's to state.
