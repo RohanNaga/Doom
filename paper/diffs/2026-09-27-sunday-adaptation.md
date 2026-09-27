@@ -1,6 +1,6 @@
 # Overleaf diff, Sunday Sep 27 (adaptation, distance, decoder)
 
-Apply to `main.tex` as it stands in Overleaf. Each item gives the exact current text and the exact replacement. Numbers: tuned decoder (MSE + 0.1 LPIPS) unless marked stock; scene crop; live weights; 256 fresh held-out windows per arena; home = the training maps' 512 validation windows. Sources: `paper/tables/tuned/adapt_cost.tex`, `paper/tables/tuned/adapt_summary.json`, `results/fresh_rescore/*_tuned/map*/metrics.json` (script in the RESEARCH_CONTEXT 2026-09-27 08:05 entry), `.claude/analyses/distance-usefulness-decision-2026-09-27.md`. Marked **[map 6]** where the arena 6 tuned rescore (08:21) can move a count or a median by one step.
+Apply to `main.tex` as it stands in Overleaf. Each item gives the exact current text and the exact replacement. Numbers: tuned decoder (MSE + 0.1 LPIPS) unless marked stock; scene crop; live weights; 256 fresh held-out windows per arena; home = the training maps' 512 validation windows. Sources: `paper/tables/tuned/adapt_cost.tex`, `paper/tables/tuned/adapt_summary.json`, `results/fresh_rescore/*_tuned/map*/metrics.json` (script in the RESEARCH_CONTEXT 2026-09-27 08:05 entry), `.claude/analyses/distance-usefulness-decision-2026-09-27.md`. Final numbers (the arena 6 tuned rescore landed at 08:12: it crosses at 1,000).
 
 Metric conventions the diff assumes (say if you want the other): $A$ = scene PSNR of the rendered prediction minus scene PSNR of the rendered copy-last frame, both against the rendered true frame (unchanged). $M$ = scene LPIPS of the rendered prediction against the **raw** true frame minus scene LPIPS of raw persistence, so both sides are measured against the same raw frame; the decoded-reference version (kinder to the model by about 0.03) goes to the appendix. $G$ = scene PSNR of the decoder's own reconstruction minus scene PSNR of the prediction, same decoder.
 
@@ -18,7 +18,7 @@ Current:
 > We measure what closing half of each arena's gap to the home advantage costs rank-16 adapters on the frozen backbone: \tbd{} updates on \tbd{} of 13 arenas, at \tbd{}~dB of forgetting.
 
 Replace with:
-> Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the home advantage within 4k updates on 8 of 13 arenas **[map 6]** (five within 500), recover a median 1.7~dB, and turn the perceptual loss into a tie or a win on 11 of 13; one episode already yields most of the gain, and no per-frame or transition-level distance predicts which arenas adapt fastest, while the frozen model's own zero-shot latent skill does.
+> Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the home advantage within 4k updates on 9 of 13 arenas (five within 500), recover a median 1.8~dB, and turn the perceptual loss into a tie or a win on 11 of 13; one episode already yields most of the gain, and no per-frame or transition-level distance predicts which arenas adapt fastest, while the frozen model's own zero-shot latent skill does.
 
 (If this runs the abstract past six sentences, drop "one episode already yields most of the gain, and".)
 
@@ -28,7 +28,7 @@ Current:
 > (3) per-arena adaptation curves, with the cost for rank-16 adapters to close half of each arena's gap to the home advantage (\tbd{}) and a full fine-tune comparator; and (4) two negative results: a per-frame distance has no clear association with the advantage among arenas of one WAD, and one-step quality does not guarantee closed-loop stability.
 
 Replace with:
-> (3) per-arena adaptation curves for rank-16 adapters, with the budget to close half of each arena's gap to the home advantage (median 1.5k updates; 8 of 13 by 4k **[map 6]**), a data ladder showing one episode recovers most of the gain, and a full fine-tune comparator (\tbd{}); and (4) two negative results: neither a per-frame distance nor two transition-level distances order the arenas by zero-shot advantage or adaptation budget, whereas the frozen model's zero-shot latent skill does (Spearman 0.89 with the advantage at 4k), and one-step quality does not guarantee closed-loop stability.
+> (3) per-arena adaptation curves for rank-16 adapters, with the budget to close half of each arena's gap to the home advantage (median 1k updates; 9 of 13 by 4k), a data ladder showing one episode recovers most of the gain, and a full fine-tune comparator (\tbd{}); and (4) two negative results: neither a per-frame distance nor two transition-level distances order the arenas by zero-shot advantage or adaptation budget, whereas the frozen model's zero-shot latent skill does (Spearman 0.90 with the advantage at 4k), and one-step quality does not guarantee closed-loop stability.
 
 ## 4. Section 3, the decoder lines (lines 179 to 180)
 
@@ -46,10 +46,10 @@ Current (whole paragraph from "\textbf{The distance orders families, not arenas.
 
 Replace with:
 > \textbf{The distance orders families, not arenas.} Before scoring any map we froze $D$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (\appref{app:distance}).
-> The training maps' held-out episodes sit inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), so $D$ separates the families; within the 13 unseen arenas it does not order them: Spearman with $A$ $-0.24$, with the adaptation budget $-0.27$, with $A$ after adaptation $+0.06$ ($n = 13$, none below $p = 0.15$), and a leave-one-arena-out fit predicts no better than the mean.
+> The training maps' held-out episodes sit inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), so $D$ separates the families; within the 13 unseen arenas it does not order them: Spearman with $A$ $-0.22$, with the adaptation budget $-0.35$, with $A$ after adaptation $+0.10$ ($n = 13$, none below $p = 0.15$), and a leave-one-arena-out fit predicts no better than the mean.
 > Two transition-level distances we registered as alternatives, a directed coverage of transition windows by the training set and a nearest-neighbour transfer gap, fail even the family test: the training maps' held-out episodes score inside the unseen range on both (\appref{app:distance}).
 > The pre-registered 30-map test, which pooled campaign maps of another WAD, had a partial Spearman of $-0.73$ that falls to $-0.42$ with family indicators as covariates; we read it as a pooled family effect, not an ordering.
-> What does order the arenas is the frozen model's own zero-shot latent skill $S_0$, one evaluation pass on the new map's footage: Spearman $+0.89$ with $A$ at 4k and $-0.65$ with the budget, unchanged when motion or persistence PSNR is partialled out, and PixArt's zero-shot $A$ ranks the arenas the same way ($+0.95$), so the ordering is a property of the footage rather than of one backbone.
+> What does order the arenas is the frozen model's own zero-shot latent skill $S_0$, one evaluation pass on the new map's footage: Spearman $+0.90$ with $A$ at 4k and $-0.61$ with the budget, unchanged when motion or persistence PSNR is partialled out, and PixArt's zero-shot $A$ ranks the arenas the same way ($+0.95$), so the ordering is a property of the footage rather than of one backbone.
 
 ## 6. Figure 2 and 3 captions (lines 190 and 197)
 
@@ -57,7 +57,7 @@ Figure 2, current:
 > \caption{The 17 arenas sorted by $D$, training maps shaded (U-Net 200k EMA, one tic, 95\% intervals). (a) $A$; dashed: the training maps' mean. (b) $M$. $A$ drops off the training maps without following $D$; $M$ changes sign.}
 
 Replace with (and swap the second panel's file to `figures/fig2c_outcomes_by_skill.pdf`, left panel only, if you take the skill scatter; otherwise keep 2b):
-> \caption{(a) The 17 arenas sorted by $D$, training maps shaded (U-Net 200k EMA, one tic, tuned decoder, 95\% episode-bootstrap intervals): $A$ drops off the training maps without following $D$. (b) $A$ after 4k adapter updates against the frozen model's zero-shot latent skill $S_0$ on the same arena (Spearman 0.89); dashed: the home advantage.}
+> \caption{(a) The 17 arenas sorted by $D$, training maps shaded (U-Net 200k EMA, one tic, tuned decoder, 95\% episode-bootstrap intervals): $A$ drops off the training maps without following $D$. (b) $A$ after 4k adapter updates against the frozen model's zero-shot latent skill $S_0$ on the same arena (Spearman 0.90); dashed: the home advantage.}
 
 Figure 3, current:
 > \caption{$A$ against LoRA updates per unseen arena, coloured by $D$; dashed: home advantage; a tick on each curve: its half-gap line; markers: first crossings; open: censored. Black: full fine-tune.}
@@ -90,10 +90,10 @@ Replace with:
 Current (three sentences with \tbd):
 
 Replace with:
-> \textbf{What it takes.} 8 of 13 arenas **[map 6]** close half of their gap within 4k updates (5 within 500; median budget 1.5k **[map 6]**), one reaches the home line, and the median $A$ rises from 2.08 to 3.82~dB (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}); 69 percent of the gain lands by 250 updates and the curves still rise by 0.13~dB from 2k to 4k on every arena.
+> \textbf{What it takes.} 9 of 13 arenas close half of their gap within 4k updates (5 within 500; median budget 1k; arenas 1, 8, 12 and 16 censored), one reaches the home line, and the median $A$ rises from 2.04 to 3.80~dB (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}); 69 percent of the gain lands by 250 updates and the curves still rise by 0.13~dB from 2k to 4k on every arena.
 > Adaptation also closes the perceptual gap: at 4k the rendered prediction ties or beats raw persistence in LPIPS on 11 of 13 arenas ($M$ median $-0.02$ against $+0.08$ zero-shot) and the gap to the ceiling falls from 3.6 to 1.4~dB (home 1.1).
 > The gain is nearly data-free: on arenas 7, 8, 12 and 16 a single adaptation episode reaches within 0.0 to 0.25~dB of sixteen (\appref{app:perarena-adapt}), and neither a threefold or fivefold learning rate nor 8k updates moves $A$ at 4k beyond the seed-to-seed spread (0.02 to 0.06~dB), so each arena's ceiling is set by the arena, not by the budget, the rate or the data.
-> The budget tracks the zero-shot latent skill (Spearman $-0.65$) and not $D$ ($-0.27$) or the transition distances ($-0.22$, $-0.01$), exploratory at $n=13$; the forgetting and directional guards and the full fine-tune comparator are \tbd{} (Monday).
+> The budget tracks the zero-shot latent skill (Spearman $-0.61$) and not $D$ ($-0.35$) or the transition distances (no better), exploratory at $n=13$; the forgetting and directional guards and the full fine-tune comparator are \tbd{} (Monday).
 
 ## 9. Table 3 (lines 241 to 257)
 
@@ -105,12 +105,12 @@ Replace with: "What crossing costs (U-Net 200k from EMA weights, 8 episodes, liv
 Body rows (keep the header row; replace the five data rows):
 ```
 Parameters trained; GPU-hours & 4.2M (0.49\%); 1.1 per arena & 4.2M; 1.1 & 860M (all); \tbd{} \\
-Arenas past half gap / home line by 4k & 8 / 1 of 13 & -- & -- \\
-Cost to half gap / home line (updates) & 1.5k / ${>}$4k & 250 / ${>}$4k & \tbd{} / \tbd{} \\
-$A$ (dB) / $M$ / $G$ (dB) at 4k & +3.82 / $-$0.02 / 1.40 & +3.86 / $-$0.03 / 1.28 & \tbd{} / \tbd{} / \tbd{} \\
+Arenas past half gap / home line by 4k & 9 / 1 of 13 & -- & -- \\
+Cost to half gap / home line (updates) & 1k / ${>}$4k & 250 / ${>}$4k & \tbd{} / \tbd{} \\
+$A$ (dB) / $M$ / $G$ (dB) at 4k & +3.80 / $-$0.02 / 1.40 & +3.86 / $-$0.03 / 1.28 & \tbd{} / \tbd{} / \tbd{} \\
 Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{} / \tbd{} \\
 ```
-**[map 6]** may move "8 / 1" to "9 / 1" and "1.5k" to "1k" or "2k". Arena 7 $M$ and $G$ at 4k: $-0.026$ and 1.28 from `results/fresh_rescore/adapt4000_live_tuned/map07/metrics.json`. GPU-hours: 4,000 updates at 0.99 s on an A4000 (log.jsonl) is 1.1 h per arena.
+Arena 7 $M$ and $G$ at 4k: $-0.026$ and 1.28 from `results/fresh_rescore/adapt4000_live_tuned/map07/metrics.json`. GPU-hours: 4,000 updates at 0.99 s on an A4000 (log.jsonl) is 1.1 h per arena.
 
 ## 10. Limitations and conclusion (line 277)
 
@@ -118,7 +118,7 @@ Current:
 > Off its training maps the U-Net keeps its turn response and part of its advantage over copying, loses its perceptual advantage, and closes half of its gap to the home advantage within \tbd{} adapter updates.
 
 Replace with:
-> Off its training maps the U-Net keeps its turn response and part of its advantage over copying and loses its perceptual advantage; eight episodes and 4k rank-16 adapter updates (1.1 GPU-hours) close half of the gap on 8 of 13 arenas **[map 6]** and restore the perceptual tie on 11, and one episode gives most of that.
+> Off its training maps the U-Net keeps its turn response and part of its advantage over copying and loses its perceptual advantage; eight episodes and 4k rank-16 adapter updates (1.1 GPU-hours) close half of the gap on 9 of 13 arenas and restore the perceptual tie on 11, and one episode gives most of that.
 
 ## Not in this diff (Monday)
 

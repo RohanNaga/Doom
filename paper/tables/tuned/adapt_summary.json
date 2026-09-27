@@ -1,28 +1,29 @@
 {
  "generated_by": "paper/make_adapt_figures.py",
- "generated_at": "2026-09-27T07:59:27-04:00",
+ "generated_at": "2026-09-27T08:32:15-04:00",
  "decoder": "tuned",
  "home": 5.0592508260160685,
  "home_source": "results/home_unet_tuned/metrics.json",
  "budget": 4000,
  "weights": "live",
- "n_arenas": 12,
- "n_complete": 12,
+ "n_arenas": 13,
+ "n_complete": 13,
  "crossings": {
-  "half_gap_by_budget": 8,
+  "half_gap_by_budget": 9,
   "half_gap_by_500": 5,
   "half_gap_by_step": {
    "0": 0,
    "250": 4,
    "500": 5,
-   "1000": 6,
-   "2000": 8,
-   "4000": 8
+   "1000": 7,
+   "2000": 9,
+   "4000": 9
   },
   "home_by_budget": 1,
   "above_home_at_budget": 1,
   "margin_ties_by_budget": null,
   "crossed_arenas": [
+   6,
    7,
    9,
    10,
@@ -44,23 +45,23 @@
   "incomplete_arenas": []
  },
  "medians": {
-  "A0": 2.0786102432757616,
-  "A_budget": 3.8159363754093647,
-  "gain": 1.7246937919408083,
-  "half_gap_line": 3.568930534645915,
-  "auc": 3.5434123921440914,
-  "S0": 1.4711005465273697,
-  "S_budget": 2.3997733839155213,
-  "lpips0": 0.22458123746037018,
-  "lpips_budget": 0.14788605683861533,
+  "A0": 2.036097891628742,
+  "A_budget": 3.799065340310335,
+  "gain": 1.768414169549942,
+  "half_gap_line": 3.5476743588224053,
+  "auc": 3.5181330734631047,
+  "S0": 1.4232416525394926,
+  "S_budget": 2.363014597464318,
+  "lpips0": 0.22995023339171894,
+  "lpips_budget": 0.14680900426174048,
   "M_budget": null,
   "G_budget": null,
   "forgetting_budget": null,
   "directional_budget": null,
   "cost_half_gap": {
-   "value": 1500.0,
+   "value": 1000,
    "censored": false,
-   "label": "1500"
+   "label": "1000"
   },
   "cost_home": {
    "value": null,
@@ -71,52 +72,52 @@
  "spearman_cost_censored_as": 8000,
  "spearman": {
   "D_vs_A0": {
-   "rho": -0.02097902097902098,
-   "p": 0.9484022252365222,
-   "n": 12
+   "rho": -0.21978021978021978,
+   "p": 0.4706148514721426,
+   "n": 13
   },
   "D_vs_A_budget": {
-   "rho": 0.3076923076923077,
-   "p": 0.33058925941210965,
-   "n": 12
+   "rho": 0.09890109890109891,
+   "p": 0.7478683035983906,
+   "n": 13
   },
   "D_vs_gain": {
-   "rho": 0.37762237762237766,
-   "p": 0.22620604493502647,
-   "n": 12
+   "rho": 0.45604395604395603,
+   "p": 0.11728306543614486,
+   "n": 13
   },
   "D_vs_cost": {
-   "rho": -0.3559755110318876,
-   "p": 0.2560925692323638,
-   "n": 12
+   "rho": -0.3542796999226228,
+   "p": 0.23495925483842536,
+   "n": 13
   },
   "S0_vs_A_budget": {
-   "rho": 0.8951048951048951,
-   "p": 8.366586429091719e-05,
-   "n": 12
+   "rho": 0.8956043956043955,
+   "p": 3.480972994482089e-05,
+   "n": 13
   },
   "S0_vs_cost": {
-   "rho": -0.6865241998472118,
-   "p": 0.01367196394438158,
-   "n": 12
+   "rho": -0.6065268462675303,
+   "p": 0.027966357787419082,
+   "n": 13
   },
   "A0_vs_cost": {
-   "rho": -0.2252089967752758,
-   "p": 0.48158453930755085,
-   "n": 12
+   "rho": -0.1927281567579068,
+   "p": 0.5281502910476261,
+   "n": 13
   }
  },
  "late_gain": {
   "from": 2000,
   "to": 4000,
-  "mean": 0.13030766105900207,
-  "positive": 12,
-  "n": 12
+  "mean": 0.13122128437344843,
+  "positive": 13,
+  "n": 13
  },
  "gain_share_by_first_step": {
   "step": 250,
-  "mean": 0.6865863597731149,
-  "n": 12
+  "mean": 0.6949225989855728,
+  "n": 13
  },
  "per_arena": [
   {
@@ -125,7 +126,7 @@
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.11492021064088291,
+   "D": 0.11788685535167391,
    "A0": 2.036097891628742,
    "A": {
     "0": 2.036097891628742,
@@ -188,7 +189,7 @@
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.12650568312935714,
+   "D": 0.1268088966284467,
    "A0": 2.8785769753158092,
    "A": {
     "0": 2.8785769753158092,
@@ -246,75 +247,12 @@
    "decoder": "tuned"
   },
   {
-   "arena": 12,
-   "run": "unet200k_arenas13_map12_r16_k8_s0",
-   "seed": 0,
-   "k": 8,
-   "variant": "",
-   "D": 0.12778488033064855,
-   "A0": 1.7893540859222412,
-   "A": {
-    "0": 1.7893540859222412,
-    "250": 2.8784433230757713,
-    "500": 3.1361009627580643,
-    "1000": 3.1565768644213676,
-    "2000": 3.262058511376381,
-    "4000": 3.3284734338521957
-   },
-   "A_budget": 3.3284734338521957,
-   "gain": 1.5391193479299545,
-   "half_gap_line": 3.424302455969155,
-   "cost_half_gap": null,
-   "censored_half_gap": true,
-   "incomplete": false,
-   "cost_home": null,
-   "censored_home": true,
-   "cost_half_gap_full_curve": null,
-   "last_step": 4000,
-   "A_last": 3.3284734338521957,
-   "auc": 3.1770779504440725,
-   "S0": 1.20614604110417,
-   "S_budget": 2.0864871923688124,
-   "S": {
-    "0": 1.20614604110417,
-    "250": 1.7950773268103535,
-    "500": 1.8684038485695034,
-    "1000": 1.927106626861084,
-    "2000": 2.0187806389945564,
-    "4000": 2.0864871923688124
-   },
-   "lpips0": 0.20915920403786004,
-   "lpips_budget": 0.13332247160724364,
-   "M0": null,
-   "M_budget": null,
-   "G_budget": null,
-   "forgetting_budget": null,
-   "directional_budget": null,
-   "trainmap_S0": null,
-   "A0_ci": [
-    1.611926009412855,
-    1.975007385574281
-   ],
-   "A_budget_ci": [
-    3.1499727284535766,
-    3.5016283401288075
-   ],
-   "M0_ci": null,
-   "other_decoders": {
-    "stock": {
-     "A0": 1.5596391335129738,
-     "A_budget": 2.508146785199642
-    }
-   },
-   "decoder": "tuned"
-  },
-  {
    "arena": 17,
    "run": "unet200k_arenas13_map17_r16_k8_s0",
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.13015272389259283,
+   "D": 0.12987513995592131,
    "A0": 1.645927906036377,
    "A": {
     "0": 1.645927906036377,
@@ -372,12 +310,75 @@
    "decoder": "tuned"
   },
   {
+   "arena": 12,
+   "run": "unet200k_arenas13_map12_r16_k8_s0",
+   "seed": 0,
+   "k": 8,
+   "variant": "",
+   "D": 0.13759359951270747,
+   "A0": 1.7893540859222412,
+   "A": {
+    "0": 1.7893540859222412,
+    "250": 2.8784433230757713,
+    "500": 3.1361009627580643,
+    "1000": 3.1565768644213676,
+    "2000": 3.262058511376381,
+    "4000": 3.3284734338521957
+   },
+   "A_budget": 3.3284734338521957,
+   "gain": 1.5391193479299545,
+   "half_gap_line": 3.424302455969155,
+   "cost_half_gap": null,
+   "censored_half_gap": true,
+   "incomplete": false,
+   "cost_home": null,
+   "censored_home": true,
+   "cost_half_gap_full_curve": null,
+   "last_step": 4000,
+   "A_last": 3.3284734338521957,
+   "auc": 3.1770779504440725,
+   "S0": 1.20614604110417,
+   "S_budget": 2.0864871923688124,
+   "S": {
+    "0": 1.20614604110417,
+    "250": 1.7950773268103535,
+    "500": 1.8684038485695034,
+    "1000": 1.927106626861084,
+    "2000": 2.0187806389945564,
+    "4000": 2.0864871923688124
+   },
+   "lpips0": 0.20915920403786004,
+   "lpips_budget": 0.13332247160724364,
+   "M0": null,
+   "M_budget": null,
+   "G_budget": null,
+   "forgetting_budget": null,
+   "directional_budget": null,
+   "trainmap_S0": null,
+   "A0_ci": [
+    1.611926009412855,
+    1.975007385574281
+   ],
+   "A_budget_ci": [
+    3.1499727284535766,
+    3.5016283401288075
+   ],
+   "M0_ci": null,
+   "other_decoders": {
+    "stock": {
+     "A0": 1.5596391335129738,
+     "A_budget": 2.508146785199642
+    }
+   },
+   "decoder": "tuned"
+  },
+  {
    "arena": 14,
    "run": "unet200k_arenas13_map14_r16_k8_s0",
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.14581204575682813,
+   "D": 0.14672580235748658,
    "A0": 1.8517136983573437,
    "A": {
     "0": 1.8517136983573437,
@@ -435,75 +436,12 @@
    "decoder": "tuned"
   },
   {
-   "arena": 11,
-   "run": "unet200k_arenas13_map11_r16_k8_s0",
-   "seed": 0,
-   "k": 8,
-   "variant": "",
-   "D": 0.14955282244368115,
-   "A0": 2.276899054646492,
-   "A": {
-    "0": 2.276899054646492,
-    "250": 3.6722405701875687,
-    "500": 3.8844663463532925,
-    "1000": 4.013785224407911,
-    "2000": 4.130169928073883,
-    "4000": 4.310293216258287
-   },
-   "A_budget": 4.310293216258287,
-   "gain": 2.0333941616117954,
-   "half_gap_line": 3.6680749403312802,
-   "cost_half_gap": 250,
-   "censored_half_gap": false,
-   "incomplete": false,
-   "cost_home": null,
-   "censored_home": true,
-   "cost_half_gap_full_curve": 250,
-   "last_step": 4000,
-   "A_last": 4.310293216258287,
-   "auc": 4.0438086077338085,
-   "S0": 1.8032653445347009,
-   "S_budget": 2.7170882634173177,
-   "S": {
-    "0": 1.8032653445347009,
-    "250": 2.3453063861065693,
-    "500": 2.4779482319760784,
-    "1000": 2.5541285876130035,
-    "2000": 2.60188505393169,
-    "4000": 2.7170882634173177
-   },
-   "lpips0": 0.20850796235026792,
-   "lpips_budget": 0.12380236655008048,
-   "M0": null,
-   "M_budget": null,
-   "G_budget": null,
-   "forgetting_budget": null,
-   "directional_budget": null,
-   "trainmap_S0": null,
-   "A0_ci": [
-    2.0352404532022774,
-    2.513865417987108
-   ],
-   "A_budget_ci": [
-    4.107639253139496,
-    4.543899387493729
-   ],
-   "M0_ci": null,
-   "other_decoders": {
-    "stock": {
-     "A0": 2.005883350968361,
-     "A_budget": 3.7490554712712765
-    }
-   },
-   "decoder": "tuned"
-  },
-  {
    "arena": 13,
    "run": "unet200k_arenas13_map13_r16_k8_s0",
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.1564866731520289,
+   "D": 0.1535985226971703,
    "A0": 2.121122594922781,
    "A": {
     "0": 2.121122594922781,
@@ -566,7 +504,7 @@
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.16222065011616169,
+   "D": 0.15497229872153936,
    "A0": 2.307948589324951,
    "A": {
     "0": 2.307948589324951,
@@ -624,12 +562,75 @@
    "decoder": "tuned"
   },
   {
+   "arena": 11,
+   "run": "unet200k_arenas13_map11_r16_k8_s0",
+   "seed": 0,
+   "k": 8,
+   "variant": "",
+   "D": 0.15599316784118852,
+   "A0": 2.276899054646492,
+   "A": {
+    "0": 2.276899054646492,
+    "250": 3.6722405701875687,
+    "500": 3.8844663463532925,
+    "1000": 4.013785224407911,
+    "2000": 4.130169928073883,
+    "4000": 4.310293216258287
+   },
+   "A_budget": 4.310293216258287,
+   "gain": 2.0333941616117954,
+   "half_gap_line": 3.6680749403312802,
+   "cost_half_gap": 250,
+   "censored_half_gap": false,
+   "incomplete": false,
+   "cost_home": null,
+   "censored_home": true,
+   "cost_half_gap_full_curve": 250,
+   "last_step": 4000,
+   "A_last": 4.310293216258287,
+   "auc": 4.0438086077338085,
+   "S0": 1.8032653445347009,
+   "S_budget": 2.7170882634173177,
+   "S": {
+    "0": 1.8032653445347009,
+    "250": 2.3453063861065693,
+    "500": 2.4779482319760784,
+    "1000": 2.5541285876130035,
+    "2000": 2.60188505393169,
+    "4000": 2.7170882634173177
+   },
+   "lpips0": 0.20850796235026792,
+   "lpips_budget": 0.12380236655008048,
+   "M0": null,
+   "M_budget": null,
+   "G_budget": null,
+   "forgetting_budget": null,
+   "directional_budget": null,
+   "trainmap_S0": null,
+   "A0_ci": [
+    2.0352404532022774,
+    2.513865417987108
+   ],
+   "A_budget_ci": [
+    4.107639253139496,
+    4.543899387493729
+   ],
+   "M0_ci": null,
+   "other_decoders": {
+    "stock": {
+     "A0": 2.005883350968361,
+     "A_budget": 3.7490554712712765
+    }
+   },
+   "decoder": "tuned"
+  },
+  {
    "arena": 16,
    "run": "unet200k_arenas13_map16_r16_k8_s0",
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.163969750887128,
+   "D": 0.17080395683483,
    "A0": 2.5265442188829184,
    "A": {
     "0": 2.5265442188829184,
@@ -692,7 +693,7 @@
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.17870354617905018,
+   "D": 0.1716580750267614,
    "A0": 1.8385154083371162,
    "A": {
     "0": 1.8385154083371162,
@@ -755,7 +756,7 @@
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.18000319718455277,
+   "D": 0.18363665623403014,
    "A0": 2.8779164142906666,
    "A": {
     "0": 2.8779164142906666,
@@ -813,12 +814,75 @@
    "decoder": "tuned"
   },
   {
+   "arena": 6,
+   "run": "unet200k_arenas13_map06_r16_k8_s0",
+   "seed": 0,
+   "k": 8,
+   "variant": "",
+   "D": 0.19799332433933442,
+   "A0": 1.068928960710764,
+   "A": {
+    "0": 1.068928960710764,
+    "250": 2.903257805854082,
+    "500": 2.9968917705118656,
+    "1000": 3.1298484839498997,
+    "2000": 3.234199520200491,
+    "4000": 3.3763842843472958
+   },
+   "A_budget": 3.3763842843472958,
+   "gain": 2.307455323636532,
+   "half_gap_line": 3.064089893363416,
+   "cost_half_gap": 1000,
+   "censored_half_gap": false,
+   "incomplete": false,
+   "cost_home": null,
+   "censored_home": true,
+   "cost_half_gap_full_curve": 1000,
+   "last_step": 4000,
+   "A_last": 3.3763842843472958,
+   "auc": 3.139583728276193,
+   "S0": 1.136231114115652,
+   "S_budget": 2.227279244344696,
+   "S": {
+    "0": 1.136231114115652,
+    "250": 1.9840895067874724,
+    "500": 2.034423309743994,
+    "1000": 2.10980634834712,
+    "2000": 2.1496291115935353,
+    "4000": 2.227279244344696
+   },
+   "lpips0": 0.22995023339171894,
+   "lpips_budget": 0.1361852789123077,
+   "M0": null,
+   "M_budget": null,
+   "G_budget": null,
+   "forgetting_budget": null,
+   "directional_budget": null,
+   "trainmap_S0": null,
+   "A0_ci": [
+    0.9272539695724845,
+    1.1931502162478864
+   ],
+   "A_budget_ci": [
+    3.190710117202252,
+    3.5423633022233845
+   ],
+   "M0_ci": null,
+   "other_decoders": {
+    "stock": {
+     "A0": 1.080105409026146,
+     "A_budget": 2.6133661791682243
+    }
+   },
+   "decoder": "tuned"
+  },
+  {
    "arena": 7,
    "run": "unet200k_arenas13_map07_r16_k8_s0",
    "seed": 0,
    "k": 8,
    "variant": "",
-   "D": 0.2818850113173609,
+   "D": 0.2702537790745706,
    "A0": 1.0703127905726433,
    "A": {
     "0": 1.0703127905726433,
@@ -878,8 +942,33 @@
  ],
  "seeds": [
   {
+   "arena": 6,
+   "D": 0.19799332433933442,
+   "seeds": [
+    0
+   ],
+   "A_budget": {
+    "0": 3.3763842843472958
+   },
+   "spread_budget": null,
+   "cost_half_gap": {
+    "0": 1000
+   },
+   "A": {
+    "0": {
+     "0": 1.068928960710764,
+     "250": 2.903257805854082,
+     "500": 2.9968917705118656,
+     "1000": 3.1298484839498997,
+     "2000": 3.234199520200491,
+     "4000": 3.3763842843472958
+    }
+   },
+   "diff_from_seed0": {}
+  },
+  {
    "arena": 7,
-   "D": 0.2818850113173609,
+   "D": 0.2702537790745706,
    "seeds": [
     0
    ],
@@ -904,7 +993,7 @@
   },
   {
    "arena": 8,
-   "D": 0.11492021064088291,
+   "D": 0.11788685535167391,
    "seeds": [
     0
    ],
@@ -929,7 +1018,7 @@
   },
   {
    "arena": 16,
-   "D": 0.163969750887128,
+   "D": 0.17080395683483,
    "seeds": [
     0
    ],
@@ -991,15 +1080,6 @@
      "M": null,
      "M_ci": null
     },
-    "12": {
-     "A": 1.7893540859222412,
-     "A_ci": [
-      1.611926009412855,
-      1.975007385574281
-     ],
-     "M": null,
-     "M_ci": null
-    },
     "17": {
      "A": 1.645927906036377,
      "A_ci": [
@@ -1009,20 +1089,20 @@
      "M": null,
      "M_ci": null
     },
+    "12": {
+     "A": 1.7893540859222412,
+     "A_ci": [
+      1.611926009412855,
+      1.975007385574281
+     ],
+     "M": null,
+     "M_ci": null
+    },
     "14": {
      "A": 1.8517136983573437,
      "A_ci": [
       1.4493353741243482,
       2.158804221078753
-     ],
-     "M": null,
-     "M_ci": null
-    },
-    "11": {
-     "A": 2.276899054646492,
-     "A_ci": [
-      2.0352404532022774,
-      2.513865417987108
      ],
      "M": null,
      "M_ci": null
@@ -1041,6 +1121,15 @@
      "A_ci": [
       2.051174208521843,
       2.560862674191594
+     ],
+     "M": null,
+     "M_ci": null
+    },
+    "11": {
+     "A": 2.276899054646492,
+     "A_ci": [
+      2.0352404532022774,
+      2.513865417987108
      ],
      "M": null,
      "M_ci": null
@@ -1068,6 +1157,15 @@
      "A_ci": [
       2.6398800635710358,
       3.115668408386409
+     ],
+     "M": null,
+     "M_ci": null
+    },
+    "6": {
+     "A": 1.068928960710764,
+     "A_ci": [
+      0.9272539695724845,
+      1.1931502162478864
      ],
      "M": null,
      "M_ci": null
@@ -1631,6 +1729,104 @@
     }
    }
   },
+  "sd35_170000": {
+   "source": "results/fresh_rescore/sd35_170000",
+   "home": null,
+   "home_M": null,
+   "maps": {
+    "1": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "6": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "7": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "8": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "9": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "10": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "11": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "12": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "13": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "14": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "15": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "16": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    },
+    "17": {
+     "A": null,
+     "M": null,
+     "n": 256,
+     "A_ci": null,
+     "M_ci": null
+    }
+   }
+  },
   "unet200k_ema": {
    "source": "results/fresh_rescore/unet200k_ema",
    "home": null,
@@ -1913,7 +2109,7 @@
   },
   {
    "path": "results/adapt/unet200k_arenas13_map06_r16_k8_s0/scores.jsonl",
-   "sha256": "638c49bfbe34a0cb2c2e2837ef979eea52664dbfa36e0c5ae8b1036cd258544a"
+   "sha256": "fc9c39e35fada344fe474c89bd491c5869bc3ac28a94ae31e26e77d4d80bbb41"
   },
   {
    "path": "results/adapt/unet200k_arenas13_map06_r16_k8_s1/scores.jsonl",
@@ -2064,12 +2260,13 @@
    "sha256": "f89c667098cf6a4be4c519a34c4ebbaa7f4c81c78736f95ccdac6a8ba6123e6f"
   },
   {
-   "path": "results/distance_study/distances_sd1.json",
-   "sha256": "0e8abf3390533f2e8848d3b63fe54d40f46a99a24859a590a4f6850ca611490b"
+   "path": "results/distance_v2/distances_sd1.json",
+   "sha256": "f44399e268d6c11de67189d57f3474f9383648e39af8f2a7f90b62ca4ad90197"
   }
  ],
  "notes": [
   "unet200k_arenas13_map01_r16_k8_s0: 2 evaluation configurations; read 613c78713666d6e417ee06c5d7384ee4b8cca8b84ef5c5609d713a831e0c5342 (6 rows)",
+  "unet200k_arenas13_map06_r16_k8_s0: 2 evaluation configurations; read e6c76cde42e14f1a69aaee0bb79b7a270927f4ee072564c7117f8f606794d8ea (6 rows)",
   "unet200k_arenas13_map07_r16_k8_s0: 2 evaluation configurations; read 3754b0ee40d3f52538702b9d6cf23a1914a278676aba50a5f7f7f26af3c98a93 (6 rows)",
   "unet200k_arenas13_map08_r16_k8_s0: 2 evaluation configurations; read 172d27008772fb1fc981b664afd3192c07ee012b03340f2f4dd117964c027008 (6 rows)",
   "unet200k_arenas13_map09_r16_k8_s0: 2 evaluation configurations; read 252e9598f335bd58dcd04bd871c7b2af8344bb2bd86b9fddf6758825c05e8bdc (6 rows)",
@@ -2081,7 +2278,6 @@
   "unet200k_arenas13_map15_r16_k8_s0: 2 evaluation configurations; read a118e26e8151694923c8861b83b7f19178d18c57fbb8610aa8a677b964b4e341 (6 rows)",
   "unet200k_arenas13_map16_r16_k8_s0: 2 evaluation configurations; read 4ca28881b1a534fe5999b987a92e7fe66b8f99497f2072b2a3aadb50a6424623 (6 rows)",
   "unet200k_arenas13_map17_r16_k8_s0: 2 evaluation configurations; read 27458c00cb4fb5d572c33ff22eb2fdb5e1fc5a0a87964982b72405562670e252 (6 rows)",
-  "unet200k_arenas13_map06_r16_k8_s0: no step-0 heldout_A_tuned; left out",
   "unet200k_arenas13_map06_r16_k8_s1: no step-0 heldout_A_tuned; left out",
   "unet200k_arenas13_map07_r16_k16_s0: no step-0 heldout_A_tuned; left out",
   "unet200k_arenas13_map07_r16_k1_s0: no step-0 heldout_A_tuned; left out",
@@ -2112,7 +2308,6 @@
   "results/fresh_rescore/home_pixart200k_ema: no one-tic eval_tf reads keyed by map; row home_pixart200k_ema skipped",
   "results/fresh_rescore/home_pixart200k_ema_tuned: no one-tic eval_tf reads keyed by map; row home_pixart200k_ema_tuned skipped",
   "results/fresh_rescore/home_unet200k_ema: no one-tic eval_tf reads keyed by map; row home_unet200k_ema skipped",
-  "results/fresh_rescore/home_unet200k_ema_tuned: no one-tic eval_tf reads keyed by map; row home_unet200k_ema_tuned skipped",
-  "results/fresh_rescore/sd35_170000: no one-tic eval_tf reads keyed by map; row sd35_170000 skipped"
+  "results/fresh_rescore/home_unet200k_ema_tuned: no one-tic eval_tf reads keyed by map; row home_unet200k_ema_tuned skipped"
  ]
 }
