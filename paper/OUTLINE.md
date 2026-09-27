@@ -1,4 +1,9 @@
-# DoomShift paper outline (working copy, Sep 27 2026, 16:30 EDT; text at main af84490)
+# DoomShift paper outline
+
+**The living copy is the shared doc** https://claude.ai/code/artifact/cef8541f-35bd-4a13-9cc1-f7300e42e00b (Rohan and Keerthana edit there). Structure agreed on the Sep 27 15:09 EDT call: 1 Introduction (world models and games, why they fail to generalize and what we explore, contributions as bullets), 2 Related work, 3 Methodology (data, architectures, aim, training setup, in-distribution performance, post-training recipe), 4 Results (zero-shot deficit, post-training, what predicts the outcome), 5 Conclusion; abstract written last. The file below is the Sep 27 16:30 snapshot before that call and is kept for history.
+
+---
+
 
 Title: **DoomShift: Efficient Adaptation of World Models to Domain Shifts**. CoRL 2026 PhysWM workshop, 4 pages plus references, deadline Thu Oct 1, 07:59 EDT. Text lives in Overleaf; this outline is the plan the text follows. Status: **final** (numbers settled), **prov** (number may move when a run finishes), **tbd** (not written or not run).
 
