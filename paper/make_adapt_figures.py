@@ -1252,6 +1252,61 @@ def at_risk_row(ax, counts, xs, below_pt=12.5):
     ax.xaxis.labelpad = below_pt - 3.0
 
 
+def fig_dots(stats, records, home, out_dir, band=None):
+    """Figure 4, third variant (Rohan's simpler form). (a) The 13 per-arena curves of A in light grey and their median
+    in bold with markers at the reads, the in-distribution band and the persistence line; no bootstrap band (the
+    IQM and its interval go to the caption). (b) One dot per arena, arenas in the U-Net's zero-shot skill order as
+    in Figure 3b, at the share of its gap closed at the last read, (A - A0) / (A_train - A0); above each dot the
+    budget at which it first crossed half of its gap, or "never" over an open dot; lines at 0, 0.5 and 1."""
+    d = stats["_draw"]
+    steps, point = stats["steps"], d["point"]
+    fig, (ax, bx) = fs.new_figure(FIG4_SIZE, ncols=2, wspace=0.08)
+    z = step_axis(ax, steps)
+    xs = [z if s == 0 else s for s in steps]
+    for row in point:
+        ax.plot(xs, row, color=fs.FAINT, lw=fs.MIN_LW, zorder=2)
+    med = np.median(point, axis=0)
+    ax.plot(xs, med, color=ADAPTER.colour, lw=1.4, marker=ADAPTER.marker, ms=fs.MARKER_SIZE, mec="white",
+            mew=fs.MARKER_EDGE, zorder=4)
+    fs.direct_label(ax, xs[-1], med[-1], "median", colour=ADAPTER.colour, dx=3)
+    fs.training_line(ax, home, where=0.0, align="left", band=band)
+    fs.copy_last_line(ax, where=1.0, align="right")
+    a_axis(ax, 0.0, max(home, point.max()))
+    fs.panel_letter(ax, "a")
+
+    shares = stats["gap_share"]["per_arena"]
+    by_skill = sorted(records, key=lambda r: (r["S0"] is None, -(r["S0"] or 0), r["arena"]))
+    order = [r["arena"] for r in by_skill if str(r["arena"]) in shares]
+    crossing = stats["attainment_half_gap"]["crossing_step"]
+    for i, a in enumerate(order):
+        v, step = shares[str(a)], crossing.get(str(a))
+        never = step is None
+        bx.plot([i], [v], ls="none", marker="o", ms=4.0, mew=0.8, mec=ADAPTER.colour,
+                mfc="white" if never else ADAPTER.colour, zorder=3)
+        # a censored arena sits just under the 0.5 line, so its "never" goes beneath the dot, clear of the line
+        bx.annotate("never" if never else step_label(step), (i, v), xytext=(0, -5 if never else 4),
+                    textcoords="offset points", ha="center", va="top" if never else "bottom", fontsize=fs.MIN_PT,
+                    color=fs.CONTEXT_INK, annotation_clip=False)
+    for y, text, style in ((0.0, "zero-shot", "-"), (0.5, "half of the gap", (0, (1, 1.2))),
+                           (1.0, "in-distribution", fs.TRAINING_DASH)):
+        bx.axhline(y, color=fs.BLACK if y == 0 else (fs.CONTEXT_INK if y == 0.5 else fs.TRAINING_LINE),
+                   lw=fs.REF_LW if y != 0.5 else fs.MIN_LW, ls=style, zorder=1.5, gid="ref")
+        left = y == 0.5          # the half-gap label goes where the dots sit far above the line
+        bx.text(0.0 if left else 1.0, y, (" " if left else "") + text, transform=bx.get_yaxis_transform(),
+                ha="left" if left else "right", va="bottom", fontsize=fs.ANNOT_PT,
+                color=fs.INK if y == 0 else (fs.CONTEXT_INK if y == 0.5 else fs.TRAINING_LINE))
+    bx.set_xticks(range(len(order)), [str(a) for a in order])
+    bx.tick_params(axis="x", length=0)
+    bx.set_xlim(-0.6, len(order) - 0.4)
+    bx.set_ylim(0, 1.1)
+    bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
+    bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
+    bx.set_xlabel("unseen arena, by the U-Net's zero-shot skill $S_0$")
+    bx.set_ylabel("share of the gap closed\nat " + step_label(stats["budget"]))
+    fs.panel_letter(bx, "b")
+    return fs.save(fig, out_dir, "fig4_dots")
+
+
 def fig_gapshare(stats, home, out_dir):
     """Figure 4a, variant for the round-2 choice: the share of each arena's gap to the in-distribution reference
     closed, (A - A0) / (A_ref - A0), per arena faint, the IQM with its nested band, the half-gap criterion at 0.5
@@ -1923,6 +1978,7 @@ def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors
     if stats:
         written += attempt(fig_adaptation, stats, records, home, budget, a.out_dir, a.fixed_threshold, band=band)
         written += attempt(fig_gapshare, stats, home, a.out_dir)
+        written += attempt(fig_dots, stats, records, home, a.out_dir, band=band)
         written += attempt(fig_profiles, stats, home, a.out_dir, band=band)
     complete = [r for r in records if not r["incomplete"]]
     if complete:

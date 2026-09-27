@@ -619,3 +619,13 @@ def test_the_gap_share_variant_of_figure_4a_is_drawn(tmp_path):
     assert os.path.getsize(os.path.join(out, "fig4a_gapshare.png")) > 1000
     share = summary(tables)["across_arenas"]["iqm_gap_share"]["value"]
     assert share[0] == pytest.approx(0.0) and share[-1] == pytest.approx(((3.0 - 1.0) / 3.0 + 0.9 / 2.0) / 2)
+
+
+def test_the_simple_variant_of_figure_4_is_drawn_in_zero_shot_skill_order(tmp_path):
+    distances = write_distances(tmp_path / "distances.json")
+    write_run(tmp_path, 6, ARENA_A[6], skill=[1.0, 1.5, 2.0])
+    write_run(tmp_path, 9, ARENA_A[9], skill=[1.8, 2.0, 2.2])
+    out, tables = cli(tmp_path, distances)
+    assert os.path.getsize(os.path.join(out, "fig4_dots.png")) > 1000
+    w, h = mediabox(os.path.join(out, "fig4_dots.pdf"))
+    assert w == pytest.approx(maf.FIG4_SIZE[0], abs=0.01) and h == pytest.approx(maf.FIG4_SIZE[1], abs=0.01)
