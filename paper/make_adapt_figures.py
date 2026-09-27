@@ -939,11 +939,12 @@ def fig_ladder(ladder, records, home, budget, out_dir):
         if rec:
             ax.axhline(rec["A0"], color=c, lw=0.5, ls=(0, (1, 1.5)), zorder=1)
     ax.axhline(home, color=SECONDARY, lw=0.7, ls=(0, (3, 2)), zorder=2)
-    ax.text(ks[0], home, " home", ha="left", va="bottom", fontsize=5, color=SECONDARY)
+    ax.text(ks[-1] * 1.25, home, "home", ha="right", va="bottom", fontsize=5, color=SECONDARY)
     ax.set_xlim(ks[0] / 1.3, ks[-1] * 1.3)
     ax.set_xlabel("adaptation episodes")
     ax.set_ylabel(f"$A$ at {budget_label(budget)} (dB)")
-    ax.legend(loc="lower right")
+    # the step-0 dotted lines run the full width, so the legend goes above the axes
+    fig.legend(loc="outside upper center", ncol=2, handletextpad=0.3, columnspacing=0.8, fontsize=4.5)
     return save(fig, out_dir, "fig_adapt_ladder")
 
 
@@ -1120,7 +1121,7 @@ def jsonable(obj):
 def build_parser():
     p = argparse.ArgumentParser(description="The adaptation study's figures, tables and summary.")
     p.add_argument("--runs-glob", default=os.path.join(REPO, "results", "adapt", "*", "scores.jsonl"))
-    p.add_argument("--distances", default=os.path.join(REPO, "results", "distance_study", "distances_sd1.json"),
+    p.add_argument("--distances", default=os.path.join(REPO, "results", "distance_v2", "distances_sd1.json"),
                    help="distances_<space>.json; each arena's primary D colours and sorts everything")
     p.add_argument("--decoder", default=STOCK, help="stock or tuned (any decoder the rows carry as heldout_A_<name>)")
     p.add_argument("--home", type=float, default=None,
