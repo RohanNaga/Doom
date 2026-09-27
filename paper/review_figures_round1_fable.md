@@ -42,3 +42,23 @@ Appendix panels: 26 AGREE. 27 AGREE. 28 AGREE. 29 AGREE. 30 AGREE. 31 AGREE.
 ## Agreed set for the lead (both reviewers)
 
 Fable 1 (as Astra's change), 2 (separate rug lanes), 3, 5, 6, 8 (separate stock decoder input), 9 (thumbnails), 10, 11 (two thumbnail stacks), 12, 13 (disclose the clipping), 14, 15; Fable 4, 7, 16, 17, 18 withdrawn. Astra 1 to 7, 10 to 21, 24 to 31 as written; Astra 8, 22, 23 with the changes above; Astra 9 not applied.
+
+
+## Lead's response (round 1, agreed set)
+
+Figure 4 and the appendix panels (`paper/make_adapt_figures.py`):
+
+- Fable 1 with Astra's change: applied. The 3.5 dB curve is a full dashed step curve with its own nested-bootstrap bounds as thin dotted steps. Its label, "A ≥ 3.5 dB", sits under the stretch where it leaves the half-gap curve (1k to 2k). The caption says the two coincide except at 1k and that the filled band belongs to the half-gap curve.
+- Fable 2 and Astra 3: applied. Each arena gets one tick above the curves, and tied arenas take separate lanes with the number beside each tick. The rug sits above the fraction 1, clear of every band. To fit four lanes, Figure 4 grows from 1.6 to 1.75 in, over the standard's ceiling by 0.15 in; the 8k grid will spread the ties and shrink the rug again.
+- Fable 3 as Astra changed it: applied. The end label stays "IQM", and the caption defines it (FIGURES.md).
+- Fable 5: applied. Arenas 7, 9 and 12 are labelled at the ends of their faint lines in 4a, with leaders where a label had to move.
+- Astra 1 (bug): applied. The censored arenas' open ticks sit at 4k, the last read, with "censored at 4k" beside them; a test asserts that no rug mark lies past the last grid step.
+- Astra 2: applied. Panel b labels every grid step (0, 250, 500, 1k, 2k, 4k), and the row reads "at risk before read".
+- Astra 4: applied. The IQM diamonds are 3.75 pt.
+- Astra 5: applied. "copy-last" sits at the right end of the zero line in 4a.
+- Astra 6: applied, as in Fable 1.
+- Astra 26: applied. One shared label, "adapter updates (log scale)", replaces the per-panel "updates".
+- Astra 27: applied. The episode bands draw above the grey training-maps band (arena 10's upper interval is visible again).
+- Astra 28: applied. Diamonds mark the measured budgets on every small multiple, and the key lists "measured read".
+- Astra 30: applied. The threshold axis runs from 0 dB, with a vertical copy-last line labelled at the foot.
+- Rohan's addition: `fig4a_gapshare` is drawn beside 4a for the round-2 choice. It plots the share of each arena's gap to the in-distribution reference closed, per arena faint, with the IQM and its nested band and lines at 0.5 (half-gap) and 1 (the reference). The IQM share at 4k is 0.61.

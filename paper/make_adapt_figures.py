@@ -109,7 +109,7 @@ RECIPE_ORDER = ("lr3e4", "lr5e4", "g8k")
 RECIPE_LABELS = {"lr3e4": "lr 3e-4", "lr5e4": "lr 5e-4", "g8k": "8k grid", "": "base"}
 
 # Printed sizes (in) on the 5.5 in single-column page (FIGURE_STANDARDS section 4); `\figslot` includes at scale 1.
-FIG4_SIZE = (fs.TEXT_WIDTH, 1.6)
+FIG4_SIZE = (fs.TEXT_WIDTH, 1.75)   # 0.15 in over the standard's ceiling: the crossing rug's lanes
 CURVES_SIZE = (3.3, 1.6)
 FIG3_SIZE = CURVES_SIZE          # the curves panel's name before the renumbering; its PDF is drawn at this size
 HALF_SIZE = (2.7, 1.6)           # an appendix half-width panel (ladder, profiles, endpoint against skill)
@@ -890,6 +890,8 @@ def across_arenas(records, runs, decoder, home, budget, draws, seed, notes, fixe
         "attainment_fixed": {**band(fatt, fatt_b), "threshold": fixed, "at_risk": at_risk(fixed_p, steps)},
         "half_gap_by_budget": count(att[j_budget], att_b[:, j_budget]),
         "fixed_by_budget": count(fatt[j_budget], fatt_b[:, j_budget]),
+        "iqm_gap_share": band(iqm((point - point[:, :1]) / (home - point[:, :1]), axis=0),
+                              iqm((boot - boot[:, :, :1]) / (home - boot[:, :, :1]), axis=1)),
         "median_gain": band(np.median(gain_p), np.median(gain_b, 1)),
         "iqm_gain": band(iqm(gain_p), iqm(gain_b, axis=1)),
         "gap_share": {"per_arena": {str(r["arena"]): float(s) for r, s in zip(done, share_p)},
@@ -1118,61 +1120,84 @@ def a_axis(ax, lo_data, hi_data, label="$A$ (dB)", step=1.0):
 
 
 def fig_adaptation(stats, records, home, budget, out_dir, fixed=FIXED_THRESHOLD, band=None):
-    """Figure 4. (a) The interquartile mean of A across arenas against updates, its nested-bootstrap band, the
-    per-arena curves faint behind, the training maps' line and copy-last. (b) Cumulative attainment, one minus
-    Kaplan-Meier: the fraction of arenas whose A has reached its half-gap line, with its band, the fixed threshold
-    as a thin second curve, per-arena crossing ticks along the top (open at the right: censored) and the at-risk row
-    under the axis."""
-    d = stats["_draw"]
-    steps, point = stats["steps"], d["point"]
+    """Figure 4. (a) The interquartile mean (IQM) of A across arenas against updates with its nested-bootstrap
+    band, the per-arena curves faint behind (arenas 7, 9 and 12 labelled at their ends), the training maps' band
+    and copy-last. (b) Cumulative attainment, one minus Kaplan-Meier: the fraction of arenas whose A has reached its
+    half-gap line (solid, band), the fixed threshold as a dashed curve with its own thin bounds, one tick per arena
+    at its crossing in lanes above the curves (open at the last grid step: censored there), and the arenas at risk
+    before each read under the labelled budgets."""
     fig, (ax, bx) = fs.new_figure(FIG4_SIZE, ncols=2, wspace=0.08)
-    z = step_axis(ax, steps)
-    for row in point:
-        ax.plot(xs_of(list(zip(steps, row)), z), row, color=fs.FAINT, lw=fs.MIN_LW, zorder=2)
-    val, ci = stats["iqm_A"]["value"], np.array(stats["iqm_A"]["ci"])
-    xs = [z if s == 0 else s for s in steps]
-    ax.fill_between(xs, ci[:, 0], ci[:, 1], color=ADAPTER.colour, alpha=0.18, lw=0, zorder=2.5)
-    ax.plot(xs, val, color=ADAPTER.colour, lw=fs.DATA_LW, marker=ADAPTER.marker, ms=2.8, mec="white",
-            mew=fs.MARKER_EDGE, zorder=4)
-    fs.direct_label(ax, xs[-1], val[-1], "IQM", colour=ADAPTER.colour, dx=3)
-    fs.training_line(ax, home, where=0.0, align="left", band=band)
-    fs.copy_last_line(ax, where=0.0, align="left")
-    a_axis(ax, 0.0, max(home, point.max()))
-    fs.panel_letter(ax, "a")
-
-    step_axis(bx, steps)
-    att, att_ci = stats["attainment_half_gap"]["value"], np.array(stats["attainment_half_gap"]["ci"])
-    bx.fill_between(xs, att_ci[:, 0], att_ci[:, 1], step="post", color=ADAPTER.colour, alpha=0.18, lw=0,
-                    zorder=2.5)
-    bx.step(xs, att, where="post", color=ADAPTER.colour, lw=fs.DATA_LW, zorder=4)
-    fatt = stats["attainment_fixed"]["value"]
-    bx.step(xs, fatt, where="post", color=ADAPTER.colour, lw=fs.REF_LW, ls=(0, (1, 1)), zorder=3.5)
-    label_attainment(bx, xs, att, fatt, fixed)
-    bx.set_ylim(-0.02, 1.02)
-    bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.25, 0.5, 0.75, 1.0]))
-    bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "", "0.5", "", "1"]))
-    bx.set_ylabel("fraction of arenas crossed")
-    crossing_rug(bx, stats, z, steps)
-    at_risk_row(bx, stats["attainment_half_gap"]["at_risk"], xs)
-    fs.panel_letter(bx, "b")
+    iqm_panel(ax, stats, home, band)
+    attainment_panel(bx, stats, fixed)
     return fs.save(fig, out_dir, "fig4_adaptation")
 
 
+def iqm_panel(ax, stats, home, band, letter="a"):
+    """Figure 4a: the IQM of A over the faint per-arena curves."""
+    d = stats["_draw"]
+    steps, point = stats["steps"], d["point"]
+    z = step_axis(ax, steps)
+    xs = [z if s == 0 else s for s in steps]
+    for row in point:
+        ax.plot(xs, row, color=fs.FAINT, lw=fs.MIN_LW, zorder=2)
+    val, ci = stats["iqm_A"]["value"], np.array(stats["iqm_A"]["ci"])
+    ax.fill_between(xs, ci[:, 0], ci[:, 1], color=ADAPTER.colour, alpha=0.18, lw=0, zorder=2.5)
+    ax.plot(xs, val, color=ADAPTER.colour, lw=fs.DATA_LW, marker=ADAPTER.marker, ms=fs.MARKER_SIZE, mec="white",
+            mew=fs.MARKER_EDGE, zorder=4)
+    # an end within 0.15 dB of the training maps' dashed line is labelled just above it
+    ends = [(xs[-1], row[-1] if abs(row[-1] - home) >= 0.15 else home + 0.22, str(a), fs.CONTEXT_INK)
+            for a, row in zip(stats["arenas"], point) if a in NAMED_ARENAS]
+    fs.end_labels(ax, ends + [(xs[-1], val[-1], "IQM", ADAPTER.colour)], gap=0.4, leaders=True)
+    fs.training_line(ax, home, where=0.0, align="left", band=band)
+    fs.copy_last_line(ax, where=1.0, align="right")
+    a_axis(ax, 0.0, max(home, point.max()))
+    fs.panel_letter(ax, letter)
+
+
+RUG_LANE = 0.13           # data units of the attainment axis per rug lane
+RUG_BASE = 1.08           # the lowest rug lane sits just above the fraction 1
+
+
+def attainment_panel(bx, stats, fixed, letter="b"):
+    """Figure 4b: attainment of the half-gap line and of the fixed threshold, the crossing rug, the at-risk row."""
+    steps = stats["steps"]
+    z = step_axis(bx, steps, labelled=steps)
+    xs = [z if s == 0 else s for s in steps]
+    att, att_ci = stats["attainment_half_gap"]["value"], np.array(stats["attainment_half_gap"]["ci"])
+    fatt, fatt_ci = stats["attainment_fixed"]["value"], np.array(stats["attainment_fixed"]["ci"])
+    bx.fill_between(xs, att_ci[:, 0], att_ci[:, 1], step="post", color=ADAPTER.colour, alpha=0.18, lw=0,
+                    zorder=2.5)
+    for k in (0, 1):
+        bx.step(xs, fatt_ci[:, k], where="post", color=ADAPTER.colour, lw=fs.MIN_LW, ls=(0, (1, 1.5)), zorder=3)
+    bx.step(xs, att, where="post", color=ADAPTER.colour, lw=fs.DATA_LW, zorder=4)
+    bx.step(xs, fatt, where="post", color=ADAPTER.colour, lw=0.8, ls=(0, (3, 1.5)), zorder=3.5)
+    label_attainment(bx, xs, att, fatt, fixed)
+    lanes = crossing_rug(bx, stats, z, steps)
+    bx.set_ylim(-0.03, RUG_BASE + RUG_LANE * lanes)
+    bx.spines["left"].set_bounds(0, 1)
+    bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.25, 0.5, 0.75, 1.0]))
+    bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "", "0.5", "", "1"]))
+    bx.set_ylabel("fraction of arenas crossed")
+    at_risk_row(bx, stats["attainment_half_gap"]["at_risk"], xs)
+    fs.panel_letter(bx, letter)
+
+
 def label_attainment(ax, xs, att, fatt, fixed):
-    """Direct labels inside the panel: the half-gap curve left of its first rise, the fixed-threshold curve (dotted)
-    under its longest stretch apart from the half-gap curve, or beside the first label when the two coincide."""
+    """Direct labels inside the panel: the half-gap curve left of its first rise; the fixed-threshold curve under
+    its longest stretch apart from the half-gap curve, starting just right of that stretch's riser (or under the
+    half-gap label when the two curves coincide)."""
     rise = next((i for i, v in enumerate(att) if v > 0), None)
     if rise is not None:
         fs.direct_label(ax, xs[rise], att[rise], "half-gap line", colour=ADAPTER.colour, dx=-3, ha="right")
+    name = f"$A\\geq{fixed:g}$ dB"
     apart = [i for i in range(len(xs) - 1) if abs(att[i] - fatt[i]) > 1e-9]
     if apart:
         i = max(apart, key=lambda i: xs[i + 1] / xs[i])
         below = fatt[i] < att[i]
-        fs.direct_label(ax, math.sqrt(xs[i] * xs[i + 1]), fatt[i], f"{fixed:g} dB", colour=ADAPTER.colour, dx=0,
-                        dy=-1.5 if below else 1.5, ha="center", va="top" if below else "bottom")
+        fs.direct_label(ax, xs[i], fatt[i], name, colour=ADAPTER.colour, dx=2.5, dy=-1.5 if below else 1.5,
+                        ha="left", va="top" if below else "bottom")
     elif rise is not None:
-        fs.direct_label(ax, xs[rise], att[rise], f"and {fixed:g} dB", colour=ADAPTER.colour, dx=-3, dy=-8,
-                        ha="right")
+        fs.direct_label(ax, xs[rise], att[rise], "and " + name, colour=ADAPTER.colour, dx=-3, dy=-8, ha="right")
 
 
 OPEN_TICK = Path([(-0.18, -0.5), (0.18, -0.5), (0.18, 0.5), (-0.18, 0.5), (-0.18, -0.5)],
@@ -1180,41 +1205,88 @@ OPEN_TICK = Path([(-0.18, -0.5), (0.18, -0.5), (0.18, 0.5), (-0.18, 0.5), (-0.18
 
 
 def crossing_rug(ax, stats, z, steps):
-    """Per-arena ticks hanging from the top edge at each arena's crossing step, arena numbers stacked beneath;
-    arenas that do not cross by the budget as open ticks right of the last grid step."""
-    byx = {}
+    """One tick per arena above the curves, at its crossing step; arenas tied at a step take separate lanes (the
+    lowest arena number on top) with their numbers beside the ticks; arenas that never cross are open ticks at the
+    last grid step, marked "censored at <step>". Returns the number of lanes."""
+    groups = {}
     for arena, step in stats["attainment_half_gap"]["crossing_step"].items():
-        key = ("open", steps[-1] * 1.32) if step is None else ("filled", z if step == 0 else step)
-        byx.setdefault(key, []).append(int(arena))
-    top = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-    for (kind, x), arenas in sorted(byx.items(), key=lambda kv: kv[0][1]):
-        ax.plot([x], [0.985], transform=top, marker=OPEN_TICK, ms=6, mfc="white" if kind == "open" else fs.INK,
-                mec=fs.INK, mew=0.5, ls="none", clip_on=False, zorder=5, gid="decor")
-        for i, a in enumerate(sorted(arenas)):
-            ax.text(x, 0.93 - 0.085 * i, str(a), transform=top, ha="center", va="top", fontsize=fs.MIN_PT,
-                    color=fs.CONTEXT_INK, gid="decor")
+        groups.setdefault(("open", steps[-1]) if step is None else ("filled", step), []).append(int(arena))
+    lanes = max((len(v) for v in groups.values()), default=1)
+    top_y = RUG_BASE + RUG_LANE * (lanes - 0.5)
+    for (kind, step), arenas in groups.items():
+        x = z if step == 0 else step
+        for lane, a in enumerate(sorted(arenas)):
+            y = top_y - RUG_LANE * lane
+            if kind == "open":
+                ax.plot([x], [y], marker=OPEN_TICK, ms=5.5, mfc="white", mec=fs.INK, mew=0.5, ls="none",
+                        clip_on=False, zorder=5, gid="decor")
+            else:
+                ax.plot([x, x], [y - RUG_LANE * 0.36, y + RUG_LANE * 0.36], color=fs.INK, lw=1.0,
+                        solid_capstyle="butt", clip_on=False, zorder=5, gid="decor")
+            ax.annotate(str(a), (x, y), xytext=(2.5, 0), textcoords="offset points", ha="left", va="center",
+                        fontsize=fs.MIN_PT, color=fs.CONTEXT_INK, annotation_clip=False)
+        if kind == "open":
+            y = top_y - RUG_LANE * (len(arenas) - 1)
+            ax.annotate(f"censored at {step_label(step)}", (x, y), xytext=(-3, 0), textcoords="offset points",
+                        ha="right", va="center", fontsize=fs.MIN_PT, color=fs.CONTEXT_INK, annotation_clip=False)
+    return lanes
 
 
 def at_risk_row(ax, counts, xs, below_pt=12.5):
-    """The at-risk counts between the tick labels and the axis label, one per grid step, labelled at the left."""
+    """The arenas at risk just before each read, between the tick labels and the axis label, one under each
+    labelled budget, the row named at the left."""
     fig = ax.figure
     shift = transforms.ScaledTranslation(0, -below_pt / 72, fig.dpi_scale_trans)
     under = transforms.blended_transform_factory(ax.transData, ax.transAxes) + shift
     for x, c in zip(xs, counts):
         ax.text(x, 0, str(c), transform=under, ha="center", va="top", fontsize=fs.MIN_PT, color=fs.CONTEXT_INK,
                 gid="decor")
-    ax.text(0.0, 0, "at risk ", transform=ax.transAxes + shift, ha="right", va="top", fontsize=fs.MIN_PT,
-            color=fs.CONTEXT_INK, gid="decor")
+    ax.text(0.0, 0, "at risk\nbefore read ", transform=ax.transAxes + shift, ha="right", va="top",
+            fontsize=fs.MIN_PT, color=fs.CONTEXT_INK, linespacing=1.0, gid="decor")
     ax.xaxis.labelpad = below_pt - 3.0
 
 
+def fig_gapshare(stats, home, out_dir):
+    """Figure 4a, variant for the round-2 choice: the share of each arena's gap to the in-distribution reference
+    closed, (A - A0) / (A_ref - A0), per arena faint, the IQM with its nested band, the half-gap criterion at 0.5
+    and the reference at 1."""
+    d = stats["_draw"]
+    steps, point, boot = stats["steps"], d["point"], d["boot"]
+    share = (point - point[:, :1]) / (home - point[:, :1])
+    share_b = (boot - boot[:, :, :1]) / (home - boot[:, :, :1])
+    fig, (ax,) = fs.new_figure((FIG4_SIZE[0] / 2, FIG4_SIZE[1]))
+    z = step_axis(ax, steps)
+    xs = [z if s == 0 else s for s in steps]
+    for row in share:
+        ax.plot(xs, row, color=fs.FAINT, lw=fs.MIN_LW, zorder=2)
+    val = iqm(share, axis=0)
+    lo, hi = interval(iqm(share_b, axis=1))
+    ax.fill_between(xs, lo, hi, color=ADAPTER.colour, alpha=0.18, lw=0, zorder=2.5)
+    ax.plot(xs, val, color=ADAPTER.colour, lw=fs.DATA_LW, marker=ADAPTER.marker, ms=fs.MARKER_SIZE, mec="white",
+            mew=fs.MARKER_EDGE, zorder=4)
+    fs.direct_label(ax, xs[-1], val[-1], "IQM", colour=ADAPTER.colour, dx=3)
+    ax.axhline(0.5, color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2)), zorder=1.4, gid="ref")
+    ax.text(0.0, 0.5, " half-gap line", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
+            fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
+    fs.training_line(ax, 1.0, where=0.0)
+    ax.axhline(0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref")
+    ax.text(1.0, 0, "zero-shot", transform=ax.get_yaxis_transform(), ha="right", va="bottom", fontsize=fs.ANNOT_PT)
+    ax.set_ylim(-0.08, max(1.15, float(share.max()) + 0.1))
+    ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
+    ax.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
+    ax.set_ylabel("share of the gap closed")
+    fs.panel_letter(ax, "a")
+    return fs.save(fig, out_dir, "fig4a_gapshare")
+
+
 def fig_arenas(records, runs, home, budget, out_dir, band=None):
-    """Appendix: one small panel per arena, A against updates with its episode band, the half-gap line (dotted),
-    the training maps' line (dashed), copy-last at 0 and the crossing ticked; shared axes, ordered by arena."""
+    """Appendix: one small panel per arena, A against updates with its episode band and diamonds at the measured
+    budgets, the half-gap line (dotted), the training maps' band, copy-last at 0 and the crossing ticked; shared
+    axes and one shared update label, ordered by arena; a key in the first empty slot."""
     recs = sorted(records, key=lambda r: r["arena"])
     ncols = min(5, len(recs))
     nrows = math.ceil(len(recs) / ncols)
-    fig, axes = fs.new_figure((ARENAS_SIZE[0], min(ARENAS_SIZE[1], 0.2 + 0.95 * nrows)), ncols=ncols, nrows=nrows,
+    fig, axes = fs.new_figure((ARENAS_SIZE[0], min(ARENAS_SIZE[1], 0.3 + 0.95 * nrows)), ncols=ncols, nrows=nrows,
                               sharex=True, sharey=True, wspace=0.02, hspace=0.03)
     steps = sorted({int(s) for r in recs for s in r["A"] if int(s) <= budget})
     top = max(max(v for r in recs for v in r["A"].values()), home)
@@ -1228,13 +1300,15 @@ def fig_arenas(records, runs, home, budget, out_dir, band=None):
                 keyed = True
             continue
         r = recs[i]
-        z = step_axis(ax, steps, label="updates" if i + ncols >= len(recs) else "")
+        z = step_axis(ax, steps, label="")
         pts = [(s, v) for s, v in sorted((int(s), v) for s, v in r["A"].items()) if s <= budget]
         x = xs_of(pts, z)
         cis = [r["A_ci"].get(str(s)) for s, _ in pts]
         if all(cis):
-            ax.fill_between(x, [c[0] for c in cis], [c[1] for c in cis], color=ADAPTER.colour, alpha=0.2, lw=0)
-        ax.plot(x, [v for _, v in pts], color=ADAPTER.colour, lw=fs.DATA_LW, zorder=3)
+            ax.fill_between(x, [c[0] for c in cis], [c[1] for c in cis], color=ADAPTER.colour, alpha=0.25, lw=0,
+                            zorder=2.5)
+        ax.plot(x, [v for _, v in pts], color=ADAPTER.colour, lw=fs.DATA_LW, marker=ADAPTER.marker, ms=3.0,
+                mec="white", mew=fs.MARKER_EDGE, zorder=3)
         ax.axhline(r["half_gap_line"], color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2)), zorder=1.4, gid="ref")
         fs.training_line(ax, home, label=fs.TRAINING_LABEL if i == 0 and len(recs) % ncols == 0 else None,
                          where=0.0, band=band)
@@ -1251,6 +1325,7 @@ def fig_arenas(records, runs, home, budget, out_dir, band=None):
             ax.set_ylabel("$A$ (dB)")
         # the lowest panel of each column carries the x tick labels, also where the row below is short
         ax.tick_params(labelbottom=i + ncols >= len(recs))
+    fig.supxlabel("adapter updates (log scale)", fontsize=fs.LABEL_PT)
     return fs.save(fig, out_dir, "figA_adapt_arenas")
 
 
@@ -1259,9 +1334,9 @@ def arenas_key(ax, with_band):
     ax.set_gid("decor")
     ax.axis("off")
     rows = [("training maps", "(in-distribution)", "train"), ("half-gap line", "", "half"),
-            ("first crossing", "", "tick"), ("copy-last", "", "zero")]
+            ("first crossing", "", "tick"), ("measured read", "", "read"), ("copy-last", "", "zero")]
     for k, (text, sub, kind) in enumerate(rows):
-        y = 0.86 - 0.24 * k
+        y = 0.9 - 0.2 * k
         if kind == "train":
             if with_band:
                 ax.add_patch(matplotlib.patches.Rectangle((0.02, y - 0.05), 0.22, 0.1, transform=ax.transAxes,
@@ -1271,7 +1346,10 @@ def arenas_key(ax, with_band):
         elif kind == "half":
             ax.plot([0.02, 0.24], [y, y], transform=ax.transAxes, color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2)))
         elif kind == "tick":
-            ax.plot([0.13, 0.13], [y - 0.07, y + 0.07], transform=ax.transAxes, color=fs.INK, lw=0.8)
+            ax.plot([0.13, 0.13], [y - 0.06, y + 0.06], transform=ax.transAxes, color=fs.INK, lw=0.8)
+        elif kind == "read":
+            ax.plot([0.13], [y], transform=ax.transAxes, marker=ADAPTER.marker, ms=3.0, color=ADAPTER.colour,
+                    mec="white", mew=fs.MARKER_EDGE, ls="none")
         else:
             ax.plot([0.02, 0.24], [y, y], transform=ax.transAxes, color=fs.BLACK, lw=fs.REF_LW)
         ax.text(0.3, y, text + (f"\n{sub}" if sub else ""), transform=ax.transAxes, ha="left", va="center",
@@ -1281,12 +1359,12 @@ def arenas_key(ax, with_band):
 def fig_profiles(stats, home, out_dir, band=None):
     """Appendix: performance profiles, the fraction of arenas with A at or above a threshold, at step 0, 500 and
     the budget, each with its nested-bootstrap band, in the adapter's blue ramp from light (step 0) to dark (the
-    budget); the training maps' A as a vertical reference."""
+    budget); the threshold axis from 0 dB (copy-last) with the training maps' band as a vertical reference."""
     d = stats["_draw"]
     steps, point, boot = stats["steps"], d["point"], d["boot"]
     show = sorted({*[s for s in PROFILE_STEPS if s in steps], stats["budget"]})
-    lo_t, hi_t = float(point.min()) - 0.3, float(max(point.max(), home)) + 0.3
-    taus = np.linspace(lo_t, hi_t, 300)
+    lo_t, hi_t = 0.0, float(max(point.max(), home)) + 0.3
+    taus = np.linspace(lo_t, hi_t, 400)
     fig, (ax,) = fs.new_figure(HALF_SIZE)
     for n, s in enumerate(show):
         j = steps.index(s)
@@ -1305,7 +1383,9 @@ def fig_profiles(stats, home, out_dir, band=None):
     top = transforms.blended_transform_factory(ax.transData, ax.transAxes)
     ax.text(home, 1.02, fs.TRAINING_LABEL + " ", transform=top, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
             color=fs.TRAINING_LINE)
-    ax.set_xlim(lo_t, hi_t)
+    ax.axvline(0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref")
+    ax.text(0, 0.02, " copy-last", transform=top, ha="left", va="bottom", fontsize=fs.ANNOT_PT)
+    ax.set_xlim(lo_t - 0.1, hi_t)
     ax.set_ylim(-0.02, 1.02)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
     ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
@@ -1834,6 +1914,7 @@ def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors
 
     if stats:
         written += attempt(fig_adaptation, stats, records, home, budget, a.out_dir, a.fixed_threshold, band=band)
+        written += attempt(fig_gapshare, stats, home, a.out_dir)
         written += attempt(fig_profiles, stats, home, a.out_dir, band=band)
     complete = [r for r in records if not r["incomplete"]]
     if complete:

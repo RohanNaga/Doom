@@ -184,12 +184,22 @@ def declutter(values, gap):
     return out
 
 
-def end_labels(ax, points, gap, colour=CONTEXT_INK, dx=3.0):
-    """Direct labels at the right ends of lines: `points` is [(x, y, text)]; heights decluttered by `gap` (data)."""
-    ys = declutter([y for _, y, _ in points], gap)
-    for (x, _, text), y in zip(points, ys):
-        ax.annotate(text, (x, y), xytext=(dx, 0), textcoords="offset points", ha="left", va="center",
-                    fontsize=ANNOT_PT, color=colour, annotation_clip=False)
+def end_labels(ax, points, gap, colour=CONTEXT_INK, dx=3.0, leaders=False, min_shift=None):
+    """Direct labels at the right ends of lines: `points` is [(x, y, text)] or [(x, y, text, colour)]; heights
+    decluttered by `gap` (data units). With `leaders`, a label moved more than `min_shift` (default a third of the
+    gap) from its line's end is joined to it by a thin leader."""
+    ys = declutter([p[1] for p in points], gap)
+    shifted = transforms.offset_copy(ax.transData, fig=ax.figure, x=dx + (4.0 if leaders else 0.0), y=0,
+                                     units="points")
+    limit = gap / 3 if min_shift is None else min_shift
+    for p, y in zip(points, ys):
+        x, y0, text = p[:3]
+        c = p[3] if len(p) > 3 else colour
+        lead = leaders and abs(y - y0) > limit
+        ax.annotate(text, (x, y0), xytext=(x, y), textcoords=shifted, ha="left", va="center",
+                    fontsize=ANNOT_PT, color=c, annotation_clip=False,
+                    arrowprops={"arrowstyle": "-", "color": c, "lw": MIN_LW, "shrinkA": 1.0, "shrinkB": 1.5}
+                    if lead else None)
 
 
 def copy_last_line(ax, orientation="h", label=True, where=1.0, align="right"):

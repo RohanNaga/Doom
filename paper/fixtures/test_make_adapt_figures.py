@@ -593,3 +593,29 @@ def test_figure_3b_pairs_the_decoders_per_backbone_in_zero_shot_skill_order(tmp_
     assert rows["unet"]["stock"]["home"]["A"] == pytest.approx(4.0)
     assert "tuned" not in rows["sd35"]                 # SD 3.5 has no tuned read: no filled marker is invented
     assert rows["sd35"]["stock"]["maps"]["9"]["A"] == pytest.approx(1.5)
+
+
+def test_the_crossing_rug_puts_every_arena_at_a_measured_budget_one_tick_each():
+    import matplotlib.pyplot as plt
+    maf.fs.style()
+    fig, ax = plt.subplots()
+    steps = [0, 250, 500, 1000, 2000, 4000]
+    z = maf.step_axis(ax, steps)
+    crossing = {"7": 250, "9": 250, "10": 250, "15": 500, "1": None, "8": None}
+    stats = {"attainment_half_gap": {"crossing_step": crossing}}
+    n0 = len(ax.lines)
+    lanes = maf.crossing_rug(ax, stats, z, steps)
+    assert lanes == 3                                    # three arenas tie at 250: three lanes
+    assert len(ax.lines) - n0 == 6                       # one tick per arena
+    xs = [x for ln in ax.lines[n0:] for x in ln.get_xdata()]
+    assert max(xs) == 4000 and set(xs) <= {250, 500, 4000}   # censored arenas sit at the last read, not past it
+    labels = sorted(t.get_text() for t in ax.texts)
+    assert labels == sorted(["7", "9", "10", "15", "1", "8", "censored at 4k"])
+    plt.close(fig)
+
+
+def test_the_gap_share_variant_of_figure_4a_is_drawn(tmp_path):
+    out, tables = cli(tmp_path, tree(tmp_path))
+    assert os.path.getsize(os.path.join(out, "fig4a_gapshare.png")) > 1000
+    share = summary(tables)["across_arenas"]["iqm_gap_share"]["value"]
+    assert share[0] == pytest.approx(0.0) and share[-1] == pytest.approx(((3.0 - 1.0) / 3.0 + 0.9 / 2.0) / 2)
