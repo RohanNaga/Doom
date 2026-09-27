@@ -558,10 +558,11 @@ def write_paired(root, row, arena, a_stock, a_tuned, m_stock, m_tuned, name=None
     d = os.path.join(str(root), row + ("_tuned" if tuned_twin else ""), name or f"map{arena:02d}")
     os.makedirs(d, exist_ok=True)
     m = {"scene_psnr_dec": {"mean": 20.0 + a_stock, "n": 256}, "scene_copy_psnr_dec": {"mean": 20.0},
-         "scene_lpips_raw": {"mean": 0.2 + m_stock}, "scene_persist_lpips_raw": {"mean": 0.2}}
+         "scene_lpips_raw": {"mean": 0.2 + m_stock}, "scene_persist_lpips_raw": {"mean": 0.2},
+         "scene_psnr_raw": {"mean": 19.0 + a_stock}, "scene_persist_psnr_raw": {"mean": 19.0}}
     if tuned_twin:
         m.update({"scene_psnr_dec_tuned": {"mean": 21.0 + a_tuned}, "scene_copy_psnr_dec_tuned": {"mean": 21.0},
-                  "scene_lpips_raw_tuned": {"mean": 0.2 + m_tuned}})
+                  "scene_lpips_raw_tuned": {"mean": 0.2 + m_tuned}, "scene_psnr_raw_tuned": {"mean": 19.0 + a_tuned}})
     with open(os.path.join(d, "metrics.json"), "w") as f:
         json.dump(m, f)
 
@@ -593,6 +594,14 @@ def test_figure_3b_pairs_the_decoders_per_backbone_in_zero_shot_skill_order(tmp_
     assert rows["unet"]["stock"]["home"]["A"] == pytest.approx(4.0)
     assert "tuned" not in rows["sd35"]                 # SD 3.5 has no tuned read: no filled marker is invented
     assert rows["sd35"]["stock"]["maps"]["9"]["A"] == pytest.approx(1.5)
+    # the absolute form: scene PSNR and LPIPS against the raw frame, persistence beside every read
+    ab = summary(tables)["zero_shot_absolute"]
+    assert ab["unet"]["tuned"]["maps"]["6"]["psnr"] == pytest.approx(20.3)
+    assert ab["unet"]["stock"]["maps"]["6"]["persist_psnr"] == pytest.approx(19.0)
+    assert ab["pixart"]["tuned"]["maps"]["9"]["lpips"] == pytest.approx(0.2 + 0.03)
+    assert ab["unet"]["tuned"]["home"]["psnr"] == pytest.approx(24.0)
+    for stem in ("fig3b_zero_shot_absolute", "fig3b_zero_shot_absolute_stock"):
+        assert os.path.getsize(os.path.join(out, f"{stem}.png")) > 1000, stem
 
 
 def test_the_crossing_rug_puts_every_arena_at_a_measured_budget_one_tick_each():

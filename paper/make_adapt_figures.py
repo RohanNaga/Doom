@@ -463,6 +463,71 @@ def paired_zero_shot(root, draws, seed, notes):
     return out
 
 
+ABSOLUTE = {"psnr": "scene_psnr_raw", "lpips": "scene_lpips_raw"}
+PERSISTENCE = {"psnr": "scene_persist_psnr_raw", "lpips": "scene_persist_lpips_raw"}
+
+
+def absolute_read(metrics_path, decoder, draws, seed):
+    """Absolute scene PSNR and LPIPS of one eval_tf read against the raw true frame under `decoder`, persistence's
+    beside them (decoder-free), each with its episode-bootstrap interval: {psnr, lpips, persist_psnr, persist_lpips,
+    <key>_ci}."""
+    with open(metrics_path) as f:
+        metrics = json.load(f)
+    sfx = "" if decoder == STOCK else f"_{decoder}"
+    cols = {**{k: v + sfx for k, v in ABSOLUTE.items()}, **{f"persist_{k}": v for k, v in PERSISTENCE.items()}}
+    out = {}
+    for key, col in cols.items():
+        out[key] = next((m for m in (_mean(metrics.get(col + "_nodup")), _mean(metrics.get(col))) if m is not None),
+                        None)
+        out[f"{key}_ci"] = None
+    pw = os.path.join(os.path.dirname(metrics_path), "per_window.csv")
+    if draws and os.path.exists(pw):
+        windows = read_windows(pw)
+        for key, col in cols.items():
+            if out[key] is not None:
+                out[f"{key}_ci"] = episode_bootstrap(*window_difference(windows, col), draws, seed)
+    return out if out["psnr"] is not None else None
+
+
+def absolute_zero_shot(root, draws, seed, notes):
+    """{backbone: {decoder: {"maps": {arena: absolute_read}, "home": absolute_read}}} from the same rows as
+    `paired_zero_shot` (a row and its `_tuned` twin), for Figure 3b in absolute form."""
+    if not root or not os.path.isdir(root):
+        return {}
+    names = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)) and not d.startswith("home_")
+                   and d != "adapters")
+    out = {}
+    for base in sorted({n[:-len("_tuned")] if n.endswith("_tuned") else n for n in names}):
+        key = fs.backbone_of(base)
+        if key in out:
+            continue
+        twin = base + "_tuned" if base + "_tuned" in names else None
+        entry = {}
+        for decoder, row in (("stock", base if base in names else twin), ("tuned", twin)):
+            if row is None:
+                continue
+            maps = {}
+            for d in sorted(os.listdir(os.path.join(root, row))):
+                m = MAP_DIR_RE.search(d)
+                mp = os.path.join(root, row, d, "metrics.json")
+                if m and os.path.exists(mp) and (m["h"] is None or int(m["h"]) == 1):
+                    r = absolute_read(mp, decoder, draws, seed)
+                    if r is not None:
+                        maps[int(m["map"] or m["bare"])] = r
+            home = None
+            for hrow in (row, base):
+                found = sorted(glob.glob(os.path.join(root, f"home_{hrow}", "**", "metrics.json"), recursive=True))
+                if len(found) == 1:
+                    home = absolute_read(found[0], decoder, draws, seed)
+                    if home is not None:
+                        break
+            if maps:
+                entry[decoder] = {"maps": maps, "home": home, "source": rel(os.path.join(root, row))}
+        if entry:
+            out[key] = entry
+    return out
+
+
 def pooled_home(maps):
     """The training maps' A pooled over their windows (each map weighted by its window count), or None."""
     pts = [(maps[m]["A"], maps[m]["n"] or 1) for m in TRAINING_MAPS if m in maps and maps[m]["A"] is not None]
@@ -1632,6 +1697,85 @@ def fig_skill(records, home, budget, out_dir, band=None, x="S0", xlabel="zero-sh
     return fs.save(fig, out_dir, stem)
 
 
+ABSOLUTE_SIZE = (fs.TEXT_WIDTH, 2.1)
+ABSOLUTE_OFFSETS = {"unet": -0.27, "pixart": -0.09, "sd35": 0.09, "adapter": 0.27}
+PERSISTENCE_INK = "#8C8C8C"
+COLUMN_TINT = "#F4F4F4"
+
+
+def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig3b_zero_shot_absolute"):
+    """Figure 3b, absolute form: per unseen arena (arena-number order) scene PSNR (top, higher is better) and scene
+    LPIPS (bottom, lower is better) against the raw true frame, five marks per arena: persistence as a grey bar
+    across the column, the U-Net, PixArt-alpha and SD 3.5 (zero-shot) and the U-Net after 4k adapter updates; the
+    training maps' pooled read in the first column under the grey band. `decoder` picks the decoder of the U-Net,
+    PixArt and adapter marks (filled for the fine-tuned decoder, open for stock); SD 3.5 is always through its own
+    stock decoder (open). Alternate columns are tinted so each arena's marks read as one group."""
+    from matplotlib.lines import Line2D
+    fig, (ax, lx) = fs.new_figure(ABSOLUTE_SIZE, nrows=2, sharex=True, h_pad=0.01, hspace=0.02)
+    cols = ["train"] + list(arenas)
+    train_w = 1.6
+    xpos = {"train": train_w / 2}
+    xpos.update({a: train_w + 0.5 + i for i, a in enumerate(arenas)})
+    persistence_shown = False
+    for panel, key in ((ax, "psnr"), (lx, "lpips")):
+        fs.training_band(panel, 0.0, train_w)
+        # the tint starts on the second arena, so the column beside the training maps' grey band stays white
+        for i, a in enumerate(arenas):
+            if i % 2 == 1:
+                panel.axvspan(xpos[a] - 0.5, xpos[a] + 0.5, color=COLUMN_TINT, lw=0, zorder=0, gid="decor")
+        for col in cols:
+            half = (train_w / 2 if col == "train" else 0.5) - 0.08
+            persist = None
+            for backbone, entry in absolute.items():
+                d = STOCK if backbone == "sd35" else decoder
+                src = entry.get(d) or (entry.get(STOCK) if backbone == "sd35" else None)
+                if not src or (backbone == "adapter" and col == "train"):
+                    continue
+                e = src["home"] if col == "train" else src["maps"].get(col)
+                if not e or e.get(key) is None:
+                    continue
+                if persist is None and e.get(f"persist_{key}") is not None:
+                    persist = e[f"persist_{key}"]
+                ent = fs.BACKBONES[backbone]
+                x = xpos[col] + ABSOLUTE_OFFSETS[backbone] * (train_w if col == "train" else 1.0)
+                ci = e.get(f"{key}_ci")
+                if ci:
+                    panel.plot([x, x], ci, color=ent.colour, lw=fs.MIN_LW, zorder=4, solid_capstyle="butt")
+                filled = d != STOCK
+                panel.plot([x], [e[key]], ls="none", marker=ent.marker, ms=3.4, mew=0.6, mec=ent.colour,
+                           mfc=ent.colour if filled else "white", color=ent.colour, zorder=3)
+            if persist is not None:
+                panel.plot([xpos[col] - half, xpos[col] + half], [persist, persist], color=PERSISTENCE_INK, lw=1.3,
+                           solid_capstyle="butt", zorder=2.5)
+                persistence_shown = True
+        panel.tick_params(axis="x", length=0)
+    ax.set_ylabel("scene PSNR (dB)")
+    lx.set_ylabel("scene LPIPS")
+    ax.text(0.995, 0.97, "higher is better", transform=ax.transAxes, ha="right", va="top", fontsize=fs.ANNOT_PT,
+            color=fs.CONTEXT_INK)
+    lx.text(0.995, 0.03, "lower is better", transform=lx.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
+            color=fs.CONTEXT_INK)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
+    lx.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
+    lx.set_xticks([xpos[c] for c in cols], ["training\nmaps"] + [str(a) for a in arenas])
+    for t in lx.xaxis.get_ticklabels()[:1]:
+        t.set_fontsize(fs.MIN_PT)
+        t.set_linespacing(0.9)
+    lx.set_xlim(-0.1, xpos[arenas[-1]] + 0.6)
+    lx.set_xlabel("unseen arena")
+    fill = decoder != STOCK
+    handles = ([Line2D([], [], color=PERSISTENCE_INK, lw=1.3)] if persistence_shown else []) + [
+        Line2D([], [], ls="none", marker=fs.BACKBONES[b].marker, ms=3.4, mew=0.6, mec=fs.BACKBONES[b].colour,
+               mfc=fs.BACKBONES[b].colour if (fill and b != "sd35") else "white", color=fs.BACKBONES[b].colour)
+        for b in ("unet", "pixart", "sd35", "adapter") if b in absolute]
+    labels = (["persistence"] if persistence_shown else []) + [
+        {"unet": "U-Net", "pixart": "PixArt-\u03b1", "sd35": "SD 3.5", "adapter": "U-Net, 4k adapter updates"}[b]
+        for b in ("unet", "pixart", "sd35", "adapter") if b in absolute]
+    fig.legend(handles, labels, loc="outside upper center", ncol=len(labels), handlelength=1.4, columnspacing=1.1,
+               handletextpad=0.4, borderaxespad=0.1)
+    return fs.save(fig, out_dir, stem)
+
+
 FIG3B_SIZE = (3.3, 1.9)
 PAIRED_OFFSETS = {"unet": -0.27, "pixart": -0.09, "sd35": 0.09, "adapter": 0.27}
 
@@ -1901,6 +2045,7 @@ def main(argv=None):
 
     zero_shot = zero_shot_rows(a, records, home, a.bootstrap, notes)
     paired = paired_zero_shot(a.fresh_root, a.bootstrap, a.seed, notes)
+    absolute = absolute_zero_shot(a.fresh_root, a.bootstrap, a.seed, notes)
     s0_order = [r["arena"] for r in sorted(records, key=lambda r: (r["S0"] is None, -(r["S0"] or 0), r["arena"]))]
     margins_from_adapter_row(records, zero_shot, budget, notes)
     summary = build_summary(records, budget, home)
@@ -1920,6 +2065,9 @@ def main(argv=None):
                "per_arena": records, "seeds": seed_summary, "ladder": ladder_summary,
                "recipe": recipe_entries(anchors, base, recipe, records_of, seed_summary),
                "zero_shot": {k: {**v, "maps": without_paths(v["maps"])} for k, v in zero_shot.items()},
+               "zero_shot_absolute": {k: {d: {"source": e[d]["source"], "home": e[d]["home"],
+                                              "maps": {str(m): v for m, v in e[d]["maps"].items()}}
+                                          for d in e} for k, e in absolute.items()},
                "zero_shot_paired": {"order": s0_order, "rows": {
                    k: {d: {"source": e[d]["source"], "home": e[d]["home"], "maps": without_paths(e[d]["maps"])}
                        for d in ("stock", "tuned") if d in e} for k, e in paired.items()}},
@@ -1954,7 +2102,7 @@ def main(argv=None):
     fs.style()
     written += draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary,
                             recipe, base, records_of, zero_shot, notes, band=(home_ci or {}).get("ci"),
-                            paired=paired, s0_order=s0_order)
+                            paired=paired, s0_order=s0_order, absolute=absolute)
     for p in written:
         print("wrote", rel(p))
     for n in notes:
@@ -1963,7 +2111,7 @@ def main(argv=None):
 
 
 def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors, seeds, ladder_summary, recipe,
-                 base, records_of, zero_shot, notes, band=None, paired=None, s0_order=()):
+                 base, records_of, zero_shot, notes, band=None, paired=None, s0_order=(), absolute=None):
     """Every figure the data support; a figure the data cannot fill is refused by `figstyle.save` and noted.
     `band` is the training maps' 95% episode interval, drawn around their dashed reference line."""
     written = []
@@ -1998,6 +2146,12 @@ def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors
                                           for d in ("stock", "tuned"))]
     if order:
         written += attempt(fig_zero_shot_paired, paired, order, a.out_dir)
+    numbered = sorted({m for e in (absolute or {}).values() for d in e.values() for m in d["maps"]} -
+                      set(TRAINING_MAPS))
+    if numbered:
+        written += attempt(fig_zero_shot_absolute, absolute, numbered, a.out_dir, "tuned", "fig3b_zero_shot_absolute")
+        written += attempt(fig_zero_shot_absolute, absolute, numbered, a.out_dir, STOCK,
+                           "fig3b_zero_shot_absolute_stock")
     if zero_shot:
         order = [m for m in TRAINING_MAPS if any(m in v["maps"] for v in zero_shot.values())] + list(s0_order)
         written += attempt(fig_zero_shot, zero_shot, order, "A", a.out_dir, "fig2a_advantage_by_distance",
