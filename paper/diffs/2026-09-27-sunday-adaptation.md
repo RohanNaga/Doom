@@ -4,7 +4,7 @@ Revision 3 (10:10, all three statistics views in, `per-arena-statistics-decision
 
 Apply to `main.tex` as it stands in Overleaf. Each item gives the exact current text and the exact replacement. Numbers: tuned decoder (MSE + 0.1 LPIPS) unless marked stock; scene crop; live weights; 256 fresh held-out windows per arena; home = the training maps' 512 validation windows. Sources: `paper/tables/tuned/adapt_cost.tex`, `paper/tables/tuned/adapt_summary.json`, `results/fresh_rescore/*_tuned/map*/metrics.json` (script in the RESEARCH_CONTEXT 2026-09-27 08:05 entry), `.claude/analyses/distance-usefulness-decision-2026-09-27.md`. Final numbers (the arena 6 tuned rescore landed at 08:12: it crosses at 1,000).
 
-Metric conventions the diff assumes (say if you want the other): $A$ = scene PSNR of the rendered prediction minus scene PSNR of the rendered copy-last frame, both against the rendered true frame (unchanged). $M$ = scene LPIPS of the rendered prediction against the **raw** true frame minus scene LPIPS of raw persistence, so both sides are measured against the same raw frame; the decoded-reference version (kinder to the model by about 0.03) goes to the appendix. $G$ = scene PSNR of the decoder's own reconstruction of the true latent minus scene PSNR of the rendered prediction, both against the raw true frame, same decoder (the `score_adapt.py` definition; an earlier draft mixed references and understated $G$ by about 2 dB). $A_\text{home}$ = the source model's own advantage on held-out episodes of its four training maps, the in-distribution reference (5.06 dB, 95 percent episode-bootstrap interval 4.75 to 5.39); figures and tables label it "training maps (in-distribution)" with that band, never "home", and the text says it is a reference, not the arena's own ceiling.
+Metric conventions the diff assumes (say if you want the other): $A$ = scene PSNR of the rendered prediction minus scene PSNR of the rendered copy-last frame, both against the rendered true frame (unchanged). $M$ = scene LPIPS of the rendered prediction against the **raw** true frame minus scene LPIPS of raw persistence, so both sides are measured against the same raw frame; the decoded-reference version (kinder to the model by about 0.03) goes to the appendix. $G$ = scene PSNR of the decoder's own reconstruction of the true latent minus scene PSNR of the rendered prediction, both against the raw true frame, same decoder (the `score_adapt.py` definition; an earlier draft mixed references and understated $G$ by about 2 dB). $A_\text{train}$ = the source model's own advantage on held-out episodes of its four training maps, the in-distribution reference (5.06 dB, 95 percent episode-bootstrap interval 4.75 to 5.39); figures and tables label it "training maps (in-distribution)" with that band, never "home", and the text says it is a reference, not the arena's own ceiling.
 
 ## 1. Abstract, sentence 3 (line 67)
 
@@ -78,14 +78,14 @@ Replace with:
 > A full fine-tune at the GameNGen rate ($2\times10^{-5}$) on every arena is the comparator (\tbd{}: Monday).
 
 Cost, current:
-> \textbf{Cost.} An arena's headline cost is the first grid budget at which $A$ closes half of its own gap to the training maps' advantage $A_\text{home}$ (\prov{3.60}~dB), that is, reaches $\tfrac12(A_0+A_\text{home})$ with $A_0$ its zero-shot advantage; the second crossing is $A_\text{home}$ itself.
+> \textbf{Cost.} An arena's headline cost is the first grid budget at which $A$ closes half of its own gap to the training maps' advantage $A_\text{train}$ (\prov{3.60}~dB), that is, reaches $\tfrac12(A_0+A_\text{train})$ with $A_0$ its zero-shot advantage; the second crossing is $A_\text{train}$ itself.
 > Both lines are frozen from step-0 predictions; we also report the value at 4k and the area under the curve~\citep{taylor2009transfer}, and right-censor arenas that never cross.
-> Every arena starts below $A_\text{home}$ (\prov{0.72 to 2.68}~dB), but \prov{5} already sit above half of it, so the line is per arena ($M$ curves: \appref{app:perarena-adapt}).
+> Every arena starts below $A_\text{train}$ (\prov{0.72 to 2.68}~dB), but \prov{5} already sit above half of it, so the line is per arena ($M$ curves: \appref{app:perarena-adapt}).
 
 Replace with:
-> \textbf{Cost.} An arena's headline cost is the first grid budget at which $A$ closes half of its own gap to the source model's in-distribution advantage on its training maps, $A_\text{home}$ (5.06~dB, interval 4.75 to 5.39), that is, reaches $\tfrac12(A_0+A_\text{home})$ with $A_0$ its zero-shot advantage; the second crossing is $A_\text{home}$ itself.
+> \textbf{Cost.} An arena's headline cost is the first grid budget at which $A$ closes half of its own gap to the source model's in-distribution advantage on its training maps, $A_\text{train}$ (5.06~dB, interval 4.75 to 5.39), that is, reaches $\tfrac12(A_0+A_\text{train})$ with $A_0$ its zero-shot advantage; the second crossing is $A_\text{train}$ itself.
 > Both lines are frozen from step-0 predictions; we also report the value at 4k and the area under the curve~\citep{taylor2009transfer}, and right-censor arenas that never cross.
-> Every arena starts below $A_\text{home}$ ($A_0$ 1.07 to 2.88~dB), and because the line depends on $A_0$ we do not correlate the budget with $A_0$ itself ($M$ curves: \appref{app:perarena-adapt}).
+> Every arena starts below $A_\text{train}$ ($A_0$ 1.07 to 2.88~dB), and because the line depends on $A_0$ we do not correlate the budget with $A_0$ itself ($M$ curves: \appref{app:perarena-adapt}).
 
 ## 8. Section 4, What it takes (lines 237 to 239)
 
@@ -153,7 +153,7 @@ Counts are occurrences in `main.tex` / `appendix.tex` / this diff. Apply as a gl
 
 | ours | occurrences | replace with | note |
 |---|---|---|---|
-| home, home line, $A_\text{home}$ | 16 / 5 / 29 | in-distribution (the training maps); "the in-distribution reference"; $A_\text{ID}$ | never "home" |
+| home, home line, $A_\text{train}$ | 16 / 5 / 29 | in-distribution (the training maps); "the in-distribution reference"; the symbol $A_\text{train}$ ("$A$ on the training maps"), never $A_\text{ID}$, which reads as an identifier | never "home" |
 | half-gap line, half of its gap, crossing, cost | 1+7+7+16 / 3+1+0+2 / 2+10+9+13 | "the budget to close half of the in-distribution gap" (time-to-threshold, Taylor and Stone 2009); "reaches the threshold"; "budget" in updates, never "cost" | keep "half of the gap" as the threshold's definition |
 | advantage over copy-last, $A$ | 18 / 2 / 25 | keep $A$, defined once as the PSNR difference between the rendered prediction and the persistence baseline (ΔPSNR over persistence); the y-axis survey (this afternoon) may rename it | |
 | copy-last | 11 / 3 / 4 | "the persistence baseline (the last context frame copied forward)" once, then "persistence" | one term, not two |
