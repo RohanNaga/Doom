@@ -158,12 +158,16 @@ def test_the_submission_build_leaves_the_appendix_out_and_points_through_appref(
 
 
 def test_the_sources_carry_identifying_strings_only_in_camera_ready_comments():
-    if draft_phase():
-        pytest.skip("draft phase: [preprint] shows the authors; swap the blocks and drop the option before submission")
+    """The \\author block may name the authors: corl_2026 anonymises it unless [final] or [preprint] is set."""
     for name in SOURCES:
+        in_author = False
         for n, line in enumerate(read(name).splitlines(), 1):
+            if line.startswith("\\author{"):
+                in_author = True
             if IDENTIFYING.search(line):
-                assert line.lstrip().startswith("% camera-ready:"), f"{name}:{n}: {line.strip()[:120]}"
+                assert in_author or line.lstrip().startswith("% camera-ready:"), f"{name}:{n}: {line.strip()[:120]}"
+            if in_author and line.startswith("}"):
+                in_author = False
 
 
 def build(tmp_path, with_appendix):
