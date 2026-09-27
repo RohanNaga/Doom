@@ -135,6 +135,5 @@
     "ground truth": "/Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser_restart/unseen_arena07_ep288_s456_t77/truth_raw/tic_16_scene.png"
    }
   }
- ],
- "copied_from": "fig_teaser_C_hold16_pick_restart_nopersistence (tools/teaser_contact_sheet.py --hold-steps 16 --hold-rows forward:2,attack:1 --max-height 1.5 --no-persistence --restart-root results/teaser_restart)"
+ ]
 }
