@@ -1,0 +1,37 @@
+{
+ "window_seed": 0,
+ "noise_seed": 0,
+ "subset": "val",
+ "split": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/split_val.json",
+ "latents_dir": "/sata2/data/rnagabhi/doom/latents_arnold_dense_pertic_eval/val",
+ "context_frames": 32,
+ "horizon": 32,
+ "tic_stride": 1,
+ "step": 200000,
+ "windows": [
+  {
+   "index": 0,
+   "episode": 6000,
+   "start": 837,
+   "map": 2
+  },
+  {
+   "index": 1,
+   "episode": 6000,
+   "start": 225,
+   "map": 2
+  },
+  {
+   "index": 2,
+   "episode": 6000,
+   "start": 1838,
+   "map": 2
+  },
+  {
+   "index": 3,
+   "episode": 6024,
+   "start": 1428,
+   "map": 2
+  }
+ ]
+}
