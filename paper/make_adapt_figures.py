@@ -1323,12 +1323,16 @@ def at_risk_row(ax, counts, xs, below_pt=12.5):
     ax.xaxis.labelpad = below_pt - 3.0
 
 
+CENSORED_FILL, CENSORED_EDGE = "#A6A6A6", "#595959"   # grey-filled: open means the stock decoder elsewhere
+
+
 def fig_dots(stats, records, home, out_dir, band=None):
     """Figure 4, third variant (Rohan's simpler form). (a) The 13 per-arena curves of A in light grey and their median
     in bold with markers at the reads, the in-distribution band and the persistence line; no bootstrap band (the
-    IQM and its interval go to the caption). (b) One dot per arena, arenas in the U-Net's zero-shot skill order as
-    in Figure 3b, at the share of its gap closed at the last read, (A - A0) / (A_train - A0); above each dot the
-    budget at which it first crossed half of its gap, or "never" over an open dot; lines at 0, 0.5 and 1."""
+    IQM and its interval go to the caption). (b) One dot per arena, arenas in number order as in Figure 3b, at the
+    share of its gap closed at the last read, (A - A0) / (A_train - A0); above each dot the budget at which it first
+    crossed half of its gap, or "never" under a grey-filled dot (open would mean the stock decoder); lines at 0, 0.5
+    and 1."""
     d = stats["_draw"]
     steps, point = stats["steps"], d["point"]
     fig, (ax, bx) = fs.new_figure(FIG4_SIZE, ncols=2, wspace=0.08)
@@ -1346,15 +1350,15 @@ def fig_dots(stats, records, home, out_dir, band=None):
     fs.panel_letter(ax, "a")
 
     shares = stats["gap_share"]["per_arena"]
-    by_skill = sorted(records, key=lambda r: (r["S0"] is None, -(r["S0"] or 0), r["arena"]))
-    order = [r["arena"] for r in by_skill if str(r["arena"]) in shares]
+    order = sorted(r["arena"] for r in records if str(r["arena"]) in shares)     # number order, as Figure 3b
     crossing = stats["attainment_half_gap"]["crossing_step"]
     lowered = False
     for i, a in enumerate(order):
         v, step = shares[str(a)], crossing.get(str(a))
         never = step is None
-        bx.plot([i], [v], ls="none", marker="o", ms=4.0, mew=0.8, mec=ADAPTER.colour,
-                mfc="white" if never else ADAPTER.colour, zorder=3)
+        bx.plot([i], [v], ls="none", marker="o", ms=4.0, mew=0.8, mec=CENSORED_EDGE if never else ADAPTER.colour,
+                mfc=CENSORED_FILL if never else ADAPTER.colour, color=CENSORED_FILL if never else ADAPTER.colour,
+                zorder=3)
         # a censored arena sits just under the 0.5 line, so its "never" goes beneath the dot, clear of the line;
         # neighbouring "never" labels alternate between two depths so they do not overlap
         prev_never = i > 0 and crossing.get(str(order[i - 1])) is None
@@ -1367,17 +1371,26 @@ def fig_dots(stats, records, home, out_dir, band=None):
                            (1.0, "in-distribution", fs.TRAINING_DASH)):
         bx.axhline(y, color=fs.BLACK if y == 0 else (fs.CONTEXT_INK if y == 0.5 else fs.TRAINING_LINE),
                    lw=fs.REF_LW if y != 0.5 else fs.MIN_LW, ls=style, zorder=1.5, gid="ref")
-        left = y == 0.5          # the half-gap label goes where the dots sit far above the line
-        bx.text(0.0 if left else 1.0, y, (" " if left else "") + text, transform=bx.get_yaxis_transform(),
-                ha="left" if left else "right", va="bottom", fontsize=fs.ANNOT_PT,
-                color=fs.INK if y == 0 else (fs.CONTEXT_INK if y == 0.5 else fs.TRAINING_LINE))
+        if y == 0.5:
+            # on the line, centred on the longest run of arenas whose dots clear the text; below it sit the greys
+            above = [i for i, a in enumerate(order) if shares[str(a)] > 0.65]
+            runs, cur = [], []
+            for i in above:
+                cur = cur + [i] if cur and i == cur[-1] + 1 else [i]
+                runs.append(cur)
+            mid = (lambda r: (r[0] + r[-1]) / 2)(max(runs, key=len)) if runs else len(order) / 2
+            bx.annotate(text, (mid, y), xytext=(0, 1.5), textcoords="offset points", ha="center", va="bottom",
+                        fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
+            continue
+        bx.text(1.0, y, text, transform=bx.get_yaxis_transform(), ha="right", va="bottom", fontsize=fs.ANNOT_PT,
+                color=fs.INK if y == 0 else fs.TRAINING_LINE)
     bx.set_xticks(range(len(order)), [str(a) for a in order])
     bx.tick_params(axis="x", length=0)
     bx.set_xlim(-0.6, len(order) - 0.4)
     bx.set_ylim(0, 1.1)
     bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
     bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
-    bx.set_xlabel("unseen arena, by the U-Net's zero-shot skill $S_0$")
+    bx.set_xlabel("unseen arena")
     bx.set_ylabel("share of the gap closed\nat " + step_label(stats["budget"]))
     fs.panel_letter(bx, "b")
     return fs.save(fig, out_dir, "fig4_dots")
