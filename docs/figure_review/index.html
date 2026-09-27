@@ -28,7 +28,7 @@ details{margin:8px 0} summary{cursor:pointer;font-weight:600}
 svg text{font-family:"IBM Plex Sans",sans-serif}
 </style></head><body><main>
 <h1>Doom paper figures, Sunday morning state</h1>
-<p class="lead">Updated 11:20: the method overview and the training curves are in. Every figure the paper and appendix draw today from the 4k set (13 arenas, seed 0, live weights), the tuned decoder as the headline with the stock version underneath, the tables they feed, and mocks of the figures that only exist after the 8k rerun (about 16:00 today) and Monday's full fine-tune comparator. Tags: <span class="tag paper">paper</span> goes in the 4-page body, <span class="tag appx">appendix</span> in the supplement, <span class="tag mockt">mock</span> is a sketch of a figure that does not exist yet.</p>
+<p class="lead">Updated 11:50: Figure 4 redesigned by the design lead; the method overview and the training curves are in. Every figure the paper and appendix draw today from the 4k set (13 arenas, seed 0, live weights), the tuned decoder as the headline with the stock version underneath, the tables they feed, and mocks of the figures that only exist after the 8k rerun (about 16:00 today) and Monday's full fine-tune comparator. Tags: <span class="tag paper">paper</span> goes in the 4-page body, <span class="tag appx">appendix</span> in the supplement, <span class="tag mockt">mock</span> is a sketch of a figure that does not exist yet.</p>
 
 <h2>Method overview and training curves <span class="tag paper">paper</span> <span class="tag done">first draft, 11:15</span></h2>
 <p>Drawn from the code, not from memory (every fact on it is traced to a file and line in the worker's report). Data, the three backbones under one recipe, the two things done after pretraining, and the evaluation with its symbols. The curve panel is the every-5k one-tic read on the 512 training-map validation windows, EMA solid, live dotted, persistence dashed; the open triangle is SD 3.5's provisional 170k read. Both go to the design lead for the standard pass next.</p>
@@ -77,7 +77,15 @@ svg text{font-family:"IBM Plex Sans",sans-serif}
 </svg>
 <figcaption><b>Mock.</b> Same as 2a with the four training maps drawn as shaded columns on the left, so the family step (all four training maps at home, every arena below) is visible in one glance. Needs the per-map home read; everything else exists.</figcaption></figure>
 
-<h2>Figure 3 · adaptation curves <span class="tag paper">paper</span></h2>
+<h2>Figure 4 · adaptation, redesigned <span class="tag paper">paper</span> <span class="tag done">design lead, 11:45</span></h2>
+<p>The statistics three-way's design, drawn to the standard (5.5 by 1.6 in, one meaning per colour). (a) The interquartile mean of A across arenas with a nested arena-then-episode bootstrap band, the 13 per-arena curves faint behind, the in-distribution reference as a band (5.06, 4.75 to 5.38) and copy-last as the zero line. (b) The attainment curve: fraction of arenas that have reached their half-gap line against updates, censored at 4k, with its arena-bootstrap band, the crossing arenas named at each step, the censored four as an open tick, an at-risk row, and the fixed 3.5 dB threshold dotted. Table 3 is now generated from the same numbers (<code>paper/tables/tuned/adapt_table3.tex</code>): median budget 1k [250, beyond 4k], gap share 0.58 [0.49, 0.74].</p>
+<figure><img src="img/tuned_fig4_adaptation.png" alt="figure 4"><figcaption><b>Figure 4.</b> Tuned decoder, live adapter weights, one seed; the 8k grid replaces the x axis tonight.</figcaption></figure>
+<details><summary>Appendix panels: the 13 small multiples and the performance profiles</summary>
+<figure><img src="img/tuned_figA_adapt_arenas.png" alt="small multiples"><figcaption>Each arena's curve with its episode band, half-gap line and crossing.</figcaption></figure>
+<figure><img src="img/tuned_figA_adapt_profiles.png" alt="profiles"><figcaption>Fraction of arenas with A above a threshold, at 0, 500 and 4k updates.</figcaption></figure>
+</details>
+
+<h2>Figure 3 (previous) · adaptation curves <span class="tag appx">superseded</span></h2>
 <div class="grid">
 <figure><img src="img/tuned_fig3_adaptation_curves.png" alt="3 tuned"><figcaption><b>3, tuned decoder (the paper's panel).</b> A against updates per arena, coloured by D; dashed: home; thin lines: each arena's half-gap line; filled marker: first crossing; open: censored at 4k (arenas 1, 8, 12, 16). 9 of 13 cross, 5 by 250.</figcaption></figure>
 <figure><img src="img/tuned_fig3_adaptation_terciles.png" alt="3 terciles"><figcaption><b>3, tercile view (appendix or alternate).</b> Mean over arenas per D tercile with the range shaded: the three bands overlap, which is the "D orders nothing" picture in one panel.</figcaption></figure>
