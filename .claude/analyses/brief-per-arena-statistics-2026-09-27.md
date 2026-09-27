@@ -22,3 +22,17 @@ Three independent views (Opus 5.5 high, Astra, the main session); Rohan reads th
 5. **Pitfalls.** What would a careful reviewer object to in the current Figure 3 and Table 3, and how does the redesign answer it (the half-gap line depends on A0; arenas are not independent draws, they share one WAD; one seed; the coarse grid; the four-way tie at 250)?
 
 Memo under 1,500 words, one-line answers at the top, every number recomputed from the files, citations by arXiv id or venue and verified. Do not touch any server.
+
+## 6. The same treatment for every data figure in the paper (added 10:25, Rohan)
+
+Rohan: "Think about this throughout the paper, wherever we have these more complex graphs: how we can look at literature and how we typically show it, to provide the most value and show the data in the best way." For each of the following, say what the best papers do for that kind of figure, what our data supports, and the exact design (or say the current one is right):
+
+- **Figure 2 rollouts** (rows: truth, in-domain, unseen zero-shot, unseen adapted, copy-last; columns: tics under a held control): how GameNGen 2408.14837, DIAMOND 2405.12399, Genie 2402.15391 and Oasis lay out rollouts; how many tics and which; whether per-tic PSNR under the frames or a side sparkline helps; one control or two.
+- **Figure 3a, the family step** (D on x, zero-shot latent skill on y, three backbones, four training maps and 13 arenas): a step, not a slope; how to show the floor (band), whether to connect backbones per map, log or linear x, and how XEWorld 2608.05799 draws its distance-versus-error figure.
+- **Figure 3b, per-arena zero-shot with stock and tuned decoder paired** (13 arenas × 3 backbones × 2 decoders for A and M): dot plot with paired markers, slope chart (stock to tuned per arena), or a difference plot; how Weissgerber et al. (PLOS Bio 2015) and the "paired data" guidance apply; what to sort the arenas by (D, S0, A0) and why.
+- **The training-curve panel** (one-tic PSNR against updates for three backbones, EMA and live, persistence line): what training curves in GameNGen, DIAMOND, DreamerV3 2301.04104 show; log or linear x; whether LPIPS belongs in the same panel; how to mark the read that the paper uses.
+- **The decoder image pair** (same latent through stock and tuned decoder beside the raw frame, full frame and scene crop): how GameNGen presents its decoder fine-tune; crops and zoom insets.
+- **The distance null** (D against outcomes; the failed pre-registered gate): whether a null result deserves a panel, a table row, or a sentence, and how negative results are drawn in the papers above.
+- **Tables 1 to 3**: what a reader of GameNGen/DIAMOND/Genie expects in a results table (which reference rows, significance marks, bold rules), and the fewest columns that carry each claim.
+
+Keep the memo under 2,200 words with this section included.
