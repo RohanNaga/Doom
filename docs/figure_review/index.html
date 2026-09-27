@@ -28,7 +28,7 @@ details{margin:8px 0} summary{cursor:pointer;font-weight:600}
 svg text{font-family:"IBM Plex Sans",sans-serif}
 </style></head><body><main>
 <h1>Doom paper figures, Sunday morning state</h1>
-<p class="lead">Updated 11:50: Figure 4 redesigned by the design lead; the method overview and the training curves are in. Every figure the paper and appendix draw today from the 4k set (13 arenas, seed 0, live weights), the tuned decoder as the headline with the stock version underneath, the tables they feed, and mocks of the figures that only exist after the 8k rerun (about 16:00 today) and Monday's full fine-tune comparator. Tags: <span class="tag paper">paper</span> goes in the 4-page body, <span class="tag appx">appendix</span> in the supplement, <span class="tag mockt">mock</span> is a sketch of a figure that does not exist yet.</p>
+<p class="lead">Updated 13:45: family-step and deficit drafts added; Figure 4 redesigned by the design lead; the method overview and the training curves are in. Every figure the paper and appendix draw today from the 4k set (13 arenas, seed 0, live weights), the tuned decoder as the headline with the stock version underneath, the tables they feed, and mocks of the figures that only exist after the 8k rerun (about 16:00 today) and Monday's full fine-tune comparator. Tags: <span class="tag paper">paper</span> goes in the 4-page body, <span class="tag appx">appendix</span> in the supplement, <span class="tag mockt">mock</span> is a sketch of a figure that does not exist yet.</p>
 
 <h2>Method overview and training curves <span class="tag paper">paper</span> <span class="tag done">first draft, 11:15</span></h2>
 <p>Drawn from the code, not from memory (every fact on it is traced to a file and line in the worker's report). Data, the three backbones under one recipe, the two things done after pretraining, and the evaluation with its symbols. The curve panel is the every-5k one-tic read on the 512 training-map validation windows, EMA solid, live dotted, persistence dashed; the open triangle is SD 3.5's provisional 170k read. Both go to the design lead for the standard pass next.</p>
@@ -47,6 +47,13 @@ svg text{font-family:"IBM Plex Sans",sans-serif}
 <figure><img src="img/fig1_train_map02_fight_ep6024_s1428_strip.png" alt=""><figcaption>Map 2, fight (high motion).</figcaption></figure>
 <figure><img src="img/fig1_unseen_arena07_fight_ep314_s3728_strip.png" alt=""><figcaption>Arena 7, fight (high motion).</figcaption></figure>
 </details>
+
+<h2>Figure 3a and 4b drafts · the family step and the deficit <span class="tag paper">paper</span> <span class="tag done">first draft, 13:40; standard pass next</span></h2>
+<p>Left: the frame distance D on x against the zero-shot latent skill on y for the three backbones, training maps and the 13 arenas: every arena sits below every training map for all three backbones, and within the arenas D orders nothing (Spearman −0.05 to −0.17). Right: the endpoint against the motion-matched deficit Δ (U-Net), Spearman −0.90. Both are first drafts in the old style; the design lead brings them to the standard (full width, Okabe-Ito, median segments, the in-distribution band).</p>
+<div class="grid">
+<figure><img src="img/fig2d_family_step.png" alt="family step"><figcaption><b>Family step.</b> A step, not a slope.</figcaption></figure>
+<figure><img src="img/fig2e_deficit.png" alt="deficit"><figcaption><b>Deficit.</b> A at 4k against Δ, arenas labelled.</figcaption></figure>
+</div>
 
 <h2>Figure 2 · what happens off the training maps <span class="tag paper">paper</span></h2>
 <p>Left panel in the paper: zero-shot advantage per arena, sorted by the frame distance D, one marker per backbone, the 4k adapter beside them. Right panel: the choice on the table, either the perceptual margin by D (2b) or the outcome against the zero-shot skill (2c). The training maps are the dashed home line today; drawing them as four shaded columns needs a per-map home read (20 minutes, queued).</p>
