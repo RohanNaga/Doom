@@ -90,8 +90,10 @@ The reconstruction upper bound, the decoder applied to the ground-truth latent, 
 \section{Method}
 \label{sec:bench}
 
-\textbf{Data.} Every episode is ViZDoom~\citep{kempka2016vizdoom} deathmatch on one of the 17 arenas of the Arnold agent's level pack (a Doom WAD file)~\citep{lample2017arnold}: Arnold against 8 bots for 150~s, recorded at every tic (35~Hz, 320$\times$240) with the 19 executed buttons.
-Of these, four (2 to 5, 500 episodes each) are the training maps, scored on validation episodes (512 windows); the other thirteen (1, 6 to 17), never trained on, each have 24 new episodes, 16 for adaptation and 8 held out (256 windows).
+\textbf{Data.} Every episode is a ViZDoom~\citep{kempka2016vizdoom} deathmatch, a free-for-all match in which each player scores by killing the others, on one of the 17 arenas of the Arnold agent's level pack~\citep{lample2017arnold}.
+A level pack is a Doom WAD file that bundles a set of maps, and an arena is one of its maps, with its own layout, textures and lighting.
+Arnold plays against 8 bots for 150~s, recorded at every tic, the engine's 1/35~s simulation step, as 320$\times$240 frames with the 19 executed buttons.
+Of the 17 arenas, four (2 to 5, 500 episodes each) are the training maps, scored on validation episodes (512 windows); the other thirteen (1, 6 to 17), never trained on, each have 24 new episodes, 16 for adaptation and 8 held out (256 windows).
 
 \textbf{Three backbones, one training recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; 32 context tics, $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so this compares pretrained packages.
 
