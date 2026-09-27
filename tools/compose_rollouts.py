@@ -44,8 +44,10 @@ CONTROLS = ("turn_left", "forward")
 CONTROL_LABELS = {"turn_left": "held turn left", "turn_right": "held turn right", "forward": "held forward",
                   "strafe": "held strafe", "fight": "fight"}
 # (window map, group label, [(row label, row directory stem)]); the decoder suffix is added per row
+ADAPTED_LABEL = "after 8 episodes,\n4k updates"
 GROUPS = (("train_map02", "map 2\n(training)", (("true", "truth"), ("U-Net", "unet"))),
-          ("unseen_arena07", "arena 7\n(unseen)", (("true", "truth"), ("zero-shot", "unet"), ("LoRA 4k", "adapter"))))
+          ("unseen_arena07", "arena 7\n(unseen)",
+           (("true", "truth"), ("zero-shot", "unet"), (ADAPTED_LABEL, "adapter"))))
 SCENE_ROWS = 208                  # rows 0 to 207 of the frame are the scored scene; the HUD lies below
 GUTTER = 2 / 72                   # in, between frames
 CONTEXT_GAP = 4 / 72              # in, after the tic-0 column
@@ -168,7 +170,8 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
         t.remove()
         return w
 
-    row_w = max(text_width(label, fs.ANNOT_PT) for _, _, rows in groups for label, _, _ in rows) + 4 / 72
+    row_w = max(text_width(line, fs.ANNOT_PT) for _, _, rows in groups for label, _, _ in rows
+                for line in label.split("\n")) + 4 / 72
     lines = max(g[1].count("\n") + 1 for g in groups)
     group_w = lines * fs.ANNOT_PT * 1.1 / 72 + 2 / 72          # the group labels are rotated, one column per line
     plt.close(measure)
@@ -223,7 +226,8 @@ def compose(root, out_dir, controls=CONTROLS, tics=TICS, decoder="tuned", truth=
                     ax.imshow(frame(row_dir, tic), interpolation="lanczos", aspect="auto")
                     ax.set_axis_off()
                 if b == 0 or stack:
-                    fig_text(left - 3 / 72, y + fh / 2, label, ha="right", va="center", fontsize=fs.ANNOT_PT)
+                    fig_text(left - 3 / 72, y + fh / 2, label, ha="right", va="center", fontsize=fs.ANNOT_PT,
+                             linespacing=1.0)
                 shown = {}
                 if model:
                     series = per_tic(manifest, row)

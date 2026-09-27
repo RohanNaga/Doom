@@ -106,6 +106,7 @@ ADAPTER_ROW_RE = re.compile(r"^adapt(?P<step>\d+)_")
 ROW_ORDER = ("unet", "unet200k_ema", "unet200k_ema_tuned", "pixart", "pixart200k_ema", "pixart200k_ema_tuned",
              "sd35", "sd35_ema", "sd35_170000", "adapt4000_live", "adapt4000_live_tuned")
 RECIPE_ORDER = ("lr3e4", "lr5e4", "g8k")
+DECODER_NAMES = {"stock": "stock decoder", "tuned": "fine-tuned decoder"}   # printed names (Rohan, 2026-09-27)
 RECIPE_LABELS = {"lr3e4": "lr 3e-4", "lr5e4": "lr 5e-4", "g8k": "8k grid", "": "base"}
 
 # Printed sizes (in) on the 5.5 in single-column page (FIGURE_STANDARDS section 4); `\figslot` includes at scale 1.
@@ -117,6 +118,11 @@ WIDE_SIZE = (fs.TEXT_WIDTH, 1.6)  # an appendix full-width pair (seeds, recipe)
 ARENAS_SIZE = (fs.TEXT_WIDTH, 3.0)
 ZERO_SHOT_SIZE = (fs.TEXT_WIDTH / 2, 1.8)
 ADAPTER = fs.BACKBONES["adapter"]
+
+
+def row_label(name):
+    """A result row's printed name: its backbone's name in the encoding table (provenance stays in the caption)."""
+    return fs.BACKBONES[fs.backbone_of(name)].label
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1005,9 +1011,9 @@ def cost_table(records, summary, decoder, budget, prov, stats=None):
     a median row and, with the across-arena statistics, an IQM row, both with arena-bootstrap intervals."""
     b = budget_label(budget)
     others = sorted({d for r in records for d in r["other_decoders"]})
-    head = ["Arena", "$D$", "$A_0$", f"$A_{{\\mathrm{{{b}}}}}$", "Half-gap line", "Cost", "$S_0$",
+    head = ["Arena", "$d$", "$A_0$", f"$A_{{\\mathrm{{{b}}}}}$", "Half-gap line", "Budget", "$S_0$",
             f"$S_{{\\mathrm{{{b}}}}}$", "LPIPS$_0$", f"LPIPS$_{{\\mathrm{{{b}}}}}$"]
-    head += [f"$A_{{\\mathrm{{{b}}}}}$, {d}" for d in others]
+    head += [f"$A_{{\\mathrm{{{b}}}}}$, {DECODER_NAMES.get(d, d)}" for d in others]
     body = []
     for r in records:
         row = [str(r["arena"]), num(r["D"], 3, prov=prov), num(r["A0"], 2, True, prov),
@@ -1041,7 +1047,7 @@ def cost_table(records, summary, decoder, budget, prov, stats=None):
 def perarena_table(records, budget, prov):
     """The appendix table `tab:perarena-adapt`: the columns appendix.tex declares, one row per arena."""
     b = budget_label(budget)
-    head = ["Arena", "$D$", "$A_0$", "Half-gap line", "Half gap", "Training-maps line", f"$A$ at {b}",
+    head = ["Arena", "$d$", "$A_0$", "Half-gap line", "Half gap", "Training-maps line", f"$A$ at {b}",
             f"$M$ at {b}",
             "Forgetting", "Directional"]
     body = [[str(r["arena"]), num(r["D"], 3, prov=prov), num(r["A0"], 2, True, prov),
@@ -1080,14 +1086,14 @@ def table3(records, summary, stats, home, home_ci, budget, prov):
     home_cell = num_ci(home, (home_ci or {}).get("ci"), 2, prov)
     rows = [
         ["Parameters trained; GPU-hours", f"{LORA_PARAMS}; \\tbd{{}}", "4.2M; \\tbd{}", f"{FULL_PARAMS}; \\tbd{{}}"],
-        ["Training maps (in-distribution) $A$ (dB)", home_cell, "--", "--"],
+        ["$A_\\text{train}$ (dB), training maps (in-distribution)", home_cell, "--", "--"],
         [f"Arenas past half gap / $A\\geq{FIXED_THRESHOLD:g}$ dB by {b}",
          f"{cnt(stats and stats['half_gap_by_budget'])} / {cnt(stats and stats['fixed_by_budget'])} of {n}", "--",
          "--"],
         [f"Share of the gap closed at {b}",
          (num_ci(share["median"], share["median_ci"], 2, prov) if share else "\\tbd"),
          num(comp and comp["gap_share_budget"], 2, prov=prov), "\\tbd"],
-        ["Cost to half gap / training-maps line (updates)", f"{cost_all} / {home_cost}",
+        ["Budget to half gap / training-maps line (updates)", f"{cost_all} / {home_cost}",
          f"{cost_of(comp, 'cost_half_gap', 'censored_half_gap')} / {cost_of(comp, 'cost_home', 'censored_home')}",
          "\\tbd{} / \\tbd{}"],
         [f"$A$ (dB) / $M$ / $G$ (dB) at {b}",
@@ -1111,7 +1117,7 @@ def table3(records, summary, stats, home, home_ci, budget, prov):
 # figures
 # ---------------------------------------------------------------------------------------------
 
-def a_axis(ax, lo_data, hi_data, label="$A$ (dB)", step=1.0):
+def a_axis(ax, lo_data, hi_data, label=fs.A_LABEL, step=1.0):
     """The A axis: from 0 (copy-last) to past the data, round 1 dB ticks."""
     top = max(hi_data, 0.0)
     ax.set_ylim(min(0.0, lo_data) - 0.15, top + 0.35)
@@ -1274,7 +1280,7 @@ def fig_gapshare(stats, home, out_dir):
     ax.set_ylim(-0.08, max(1.15, float(share.max()) + 0.1))
     ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
     ax.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
-    ax.set_ylabel("share of the gap closed")
+    ax.set_ylabel("share of the gap closed,\n$(A - A_0)/(A_\\mathrm{train} - A_0)$")
     fs.panel_letter(ax, "a")
     return fs.save(fig, out_dir, "fig4a_gapshare")
 
@@ -1322,7 +1328,7 @@ def fig_arenas(records, runs, home, budget, out_dir, band=None):
         ax.set_ylim(-0.2, top + 0.4)
         ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
         if i % ncols == 0:
-            ax.set_ylabel("$A$ (dB)")
+            ax.set_ylabel(fs.A_LABEL_SHORT)
         # the lowest panel of each column carries the x tick labels, also where the row below is short
         ax.tick_params(labelbottom=i + ncols >= len(recs))
     fig.supxlabel("adapter updates (log scale)", fontsize=fs.LABEL_PT)
@@ -1334,7 +1340,7 @@ def arenas_key(ax, with_band):
     ax.set_gid("decor")
     ax.axis("off")
     rows = [("training maps", "(in-distribution)", "train"), ("half-gap line", "", "half"),
-            ("first crossing", "", "tick"), ("measured read", "", "read"), ("copy-last", "", "zero")]
+            ("first crossing", "", "tick"), ("measured read", "", "read"), (fs.PERSISTENCE_LABEL, "", "zero")]
     for k, (text, sub, kind) in enumerate(rows):
         y = 0.9 - 0.2 * k
         if kind == "train":
@@ -1384,14 +1390,14 @@ def fig_profiles(stats, home, out_dir, band=None):
     ax.text(home, 1.02, fs.TRAINING_LABEL + " ", transform=top, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
             color=fs.TRAINING_LINE)
     ax.axvline(0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref")
-    ax.text(0, 0.02, " copy-last", transform=top, ha="left", va="bottom", fontsize=fs.ANNOT_PT)
+    ax.text(0, 0.02, " " + fs.PERSISTENCE_LABEL, transform=top, ha="left", va="bottom", fontsize=fs.ANNOT_PT)
     ax.set_xlim(lo_t - 0.1, hi_t)
     ax.set_ylim(-0.02, 1.02)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
     ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
     ax.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
-    ax.set_xlabel(r"threshold $\tau$ on $A$ (dB)")
-    ax.set_ylabel(r"arenas with $A\geq\tau$ (fraction)")
+    ax.set_xlabel("threshold $\\tau$ on " + fs.A_LABEL)
+    ax.set_ylabel("arenas at or above $\\tau$\n(fraction)")
     return fs.save(fig, out_dir, "figA_adapt_profiles")
 
 
@@ -1420,7 +1426,7 @@ def fig_curves(records, runs, home, budget, out_dir, column="A", band=None):
     fs.copy_last_line(ax, where=0.0, align="left")
     vals = [v for r in records for _, v in runs[r["run"]].series(
         "heldout_latent_skill" if skill else f"heldout_A_{r['decoder']}", budget)]
-    a_axis(ax, min(vals), max(vals + ([ref] if ref is not None else [])), "$S$ (dB)" if skill else "$A$ (dB)")
+    a_axis(ax, min(vals), max(vals + ([ref] if ref is not None else [])), fs.S_LABEL if skill else fs.A_LABEL)
     return fs.save(fig, out_dir, "fig3_adaptation_skill" if skill else "fig3_adaptation_curves")
 
 
@@ -1458,8 +1464,8 @@ def fig_seeds(entries, anchors, seeds, decoder, budget, variant, out_dir, spread
         ax2.text(1.0, width, f"seed spread at {budget_label(budget)}", transform=ax2.get_yaxis_transform(),
                  ha="right", va="bottom", fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
     ax2.axhline(0, color=fs.BLACK, lw=fs.REF_LW, gid="ref")
-    ax.set_ylabel("$A$ (dB)")
-    ax2.set_ylabel("$A$, seed 1 $-$ seed 0 (dB)")
+    ax.set_ylabel(fs.A_LABEL)
+    ax2.set_ylabel("seed 1 $-$ seed 0 (dB)")
     ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
     ax2.yaxis.set_major_locator(ticker.MaxNLocator(4))
     fs.panel_letter(ax, "a")
@@ -1528,7 +1534,7 @@ def fig_recipe(recipe, anchors, base, seeds, records_of, home, decoder, out_dir,
                     va="bottom", fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
         fs.training_line(ax, home, where=0.0, band=band)
         ax.text(0.98, 0.04, f"arena {arena}", transform=ax.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT)
-        ax.set_ylabel("$A$ (dB)" if i == 0 else "")
+        ax.set_ylabel(fs.A_LABEL if i == 0 else "")
         ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
         fs.panel_letter(ax, "abcdefgh"[i])
     handles = {}
@@ -1542,35 +1548,33 @@ def fig_recipe(recipe, anchors, base, seeds, records_of, home, decoder, out_dir,
     return fs.save(fig, out_dir, "fig_adapt_recipe")
 
 
-# hand-placed label offsets (points) for the endpoint-against-skill scatter, where neighbours collide
-SKILL_LABEL_OFFSETS = {7: (3, -6), 13: (3, 3), 11: (-3, 3), 9: (3, -4), 1: (3, 0), 12: (0, -7), 8: (3, 3)}
-
-
-def fig_skill(records, home, budget, out_dir, band=None):
-    """Appendix: A at the budget against the zero-shot latent skill S0, one diamond per arena, every arena
-    numbered; the training maps' line."""
-    done = [r for r in records if r["S0"] is not None and r["A_budget"] is not None]
+def fig_skill(records, home, budget, out_dir, band=None, x="S0", xlabel="zero-shot latent skill $S_0$ (dB)",
+              stem="fig2c_outcomes_by_skill", size=None):
+    """A at the budget against a per-arena predictor (`x`, default the zero-shot skill S0; the family-step tool
+    passes the deficit Delta), one diamond per arena with its episode interval, every arena numbered by
+    `figstyle.label_points` (coincident markers share a label); the training maps' band."""
+    done = [r for r in records if r.get(x) is not None and r.get("A_budget") is not None]
     if not done:
         return []
-    fig, (ax,) = fs.new_figure(HALF_SIZE)
+    fig, (ax,) = fs.new_figure(size or HALF_SIZE)
     ax.set_gid("points")
     for r in done:
         ci = r.get("A_budget_ci")
         if ci:
-            ax.plot([r["S0"], r["S0"]], ci, color=ADAPTER.colour, lw=fs.MIN_LW, zorder=3.5)
-        ax.plot(r["S0"], r["A_budget"], ls="none", marker=ADAPTER.marker, ms=3.2, mfc=ADAPTER.colour, mec="white",
+            ax.plot([r[x], r[x]], ci, color=ADAPTER.colour, lw=fs.MIN_LW, zorder=3.5)
+        ax.plot(r[x], r["A_budget"], ls="none", marker=ADAPTER.marker, ms=3.2, mfc=ADAPTER.colour, mec="white",
                 mew=fs.MARKER_EDGE, zorder=3)
-        dx, dy = SKILL_LABEL_OFFSETS.get(r["arena"], (3, 0))
-        fs.direct_label(ax, r["S0"], r["A_budget"], str(r["arena"]), colour=fs.CONTEXT_INK, dx=dx, dy=dy,
-                        ha="left" if dx > 0 else "right" if dx < 0 else "center")
     fs.training_line(ax, home, where=0.0, band=band)
-    ax.set_xlabel("zero-shot latent skill $S_0$ (dB)")
+    ax.set_xlabel(xlabel)
     lo = min(r["A_budget"] for r in done)
-    ax.set_ylim(min(lo, home) - 0.5, max(max(r["A_budget"] for r in done), home) + 0.4)
-    ax.set_ylabel(f"$A$ at {budget_label(budget)} (dB)")
+    top = max([r["A_budget"] for r in done] + [home] + ([band[1]] if band else []))
+    ax.set_ylim(min(lo, home) - 0.5, top + 0.45)
+    ax.set_ylabel(f"\u0394PSNR vs persistence\nat {budget_label(budget)} (dB)")
     ax.yaxis.set_major_locator(ticker.MultipleLocator(0.5))
-    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.25))
-    return fs.save(fig, out_dir, "fig2c_outcomes_by_skill")
+    ax.xaxis.set_major_locator(ticker.MaxNLocator(5, steps=[1, 2, 2.5, 5, 10]))
+    ax.margins(x=0.08)
+    fs.label_points(ax, [(r[x], r["A_budget"], str(r["arena"])) for r in done])
+    return fs.save(fig, out_dir, stem)
 
 
 FIG3B_SIZE = (3.3, 1.9)
@@ -1604,7 +1608,10 @@ def fig_zero_shot_paired(paired, order, out_dir):
                         continue
                     e = src["home"] if col == "train" else src["maps"].get(col)
                     if e and e.get(key) is not None:
-                        vals[d] = (e[key], e.get(f"{key}_ci"))
+                        v, ci = e[key], e.get(f"{key}_ci")
+                        if key == "M":
+                            v, ci = fs.m_value(v), fs.m_interval(ci)
+                        vals[d] = (v, ci)
                 if not vals or (backbone == "adapter" and col == "train"):
                     continue
                 x = xpos[col] + (off * (1.8 if col == "train" else 1.0))
@@ -1618,10 +1625,10 @@ def fig_zero_shot_paired(paired, order, out_dir):
                     drawn[key].append(v)
         fs.copy_last_line(panel, where=0.0, align="left")
         panel.tick_params(axis="x", length=0)
-    ax.set_ylabel("$A$ (dB)")
-    mx.set_ylabel("$M$ (LPIPS)")
-    mx.text(0.995, 0.03, "lower is better", transform=mx.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
-            color=fs.CONTEXT_INK)
+    ax.set_ylabel(fs.A_LABEL_SHORT)
+    mx.set_ylabel("$M$, LPIPS diff.")
+    mx.text(0.995, 0.03, "higher is better" if fs.M_POSITIVE_IS_BETTER else "lower is better", transform=mx.transAxes,
+            ha="right", va="bottom", fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
     ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
     mx.yaxis.set_major_locator(ticker.MultipleLocator(0.1))
     ax.set_ylim(min(0.0, min(drawn["A"])) - 0.4, max(drawn["A"]) + 0.5)
@@ -1657,14 +1664,15 @@ def fig_zero_shot(zero_shot, order, key, out_dir, stem, ylabel, zero=False):
         ent = fs.BACKBONES[fs.backbone_of(name)]
         tuned = name.endswith("_tuned")
         off = (i - (len(rows) - 1) / 2) * width
-        pts = [(pos[a] + off, maps[a][key], maps[a].get(f"{key}_ci")) for a in arenas
+        conv = (fs.m_value, fs.m_interval) if key == "M" else (lambda v: v, lambda c: c)
+        pts = [(pos[a] + off, conv[0](maps[a][key]), conv[1](maps[a].get(f"{key}_ci"))) for a in arenas
                if a in maps and maps[a].get(key) is not None]
         for x, _v, ci in pts:
             if ci:
                 ax.plot([x, x], ci, color=ent.colour, lw=0.7, zorder=4, solid_capstyle="butt")
         ax.plot([x for x, _, _ in pts], [v for _, v, _ in pts], ls="none", marker=ent.marker, ms=3.2,
                 mfc=ent.colour if tuned else "white", mec=ent.colour, mew=0.7, zorder=3)
-        home = zero_shot[name].get("home") if key == "A" else zero_shot[name].get("home_M")
+        home = zero_shot[name].get("home") if key == "A" else fs.m_value(zero_shot[name].get("home_M"))
         if home is not None:
             ax.plot([len(arenas) - 0.3, len(arenas) + 0.3], [home, home], color=ent.colour, lw=fs.REF_LW,
                     ls=fs.TRAINING_DASH, zorder=2, clip_on=False)
@@ -1937,10 +1945,10 @@ def draw_figures(a, stats, records, by_name, home, budget, seed_summary, anchors
     if zero_shot:
         order = [m for m in TRAINING_MAPS if any(m in v["maps"] for v in zero_shot.values())] + list(s0_order)
         written += attempt(fig_zero_shot, zero_shot, order, "A", a.out_dir, "fig2a_advantage_by_distance",
-                           "$A$ (dB)")
+                           fs.A_LABEL)
         if a.with_raw and any(e.get("M") is not None for v in zero_shot.values() for e in v["maps"].values()):
             written += attempt(fig_zero_shot, zero_shot, order, "M", a.out_dir, "fig2b_margin_by_distance",
-                               "$M$, LPIPS difference (lower is better)", zero=True)
+                               fs.m_label(), zero=True)
     return written
 
 

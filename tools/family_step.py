@@ -56,6 +56,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "paper"))
+import figstyle as fs  # noqa: E402
 import make_adapt_figures as maf  # noqa: E402
 from score_adapt import DUPLICATE_FLAGS  # noqa: E402
 
@@ -256,7 +257,8 @@ def adaptation_records(path):
         recs[int(r["arena"])] = {**r, "cost_rank": maf.cost_rank_value(r["cost_half_gap"], budget),
                                  "fraction_closed": r["gain"] / gap if gap and maf.finite(r.get("gain")) else None}
     head = {"source": maf.rel(path), "decoder": js.get("decoder"), "weights": js.get("weights"), "home": home,
-            "budget": budget, "cost_censored_as": maf.cost_rank_value(None, budget), "n_arenas": len(recs)}
+            "home_ci": (js.get("home_ci") or {}).get("ci"), "budget": budget,
+            "cost_censored_as": maf.cost_rank_value(None, budget), "n_arenas": len(recs)}
     return head, recs
 
 
@@ -296,7 +298,7 @@ def backbone_entry(name, fresh_root, arena_D, train_D, n_bins):
     floor_range = value_range(maps[m]["delta"] for m in TRAINING_MAPS)
     arena_range = value_range(maps[m]["delta"] for m in arenas)
     return {
-        "label": maf.ROW_NAMES.get(name, name), "home": maf.rel(home_path),
+        "label": maf.row_label(name), "row": name, "home": maf.rel(home_path),
         "home_dropped_duplicates": home.dropped_duplicates, "home_dropped_undefined": home.dropped_undefined,
         "maps": maps,
         "step": step_check({m: s0[m] for m in TRAINING_MAPS}, {m: s0[m] for m in arenas}),
@@ -360,39 +362,55 @@ def write_csv(path, entries, adapt):
                             "lora_censored_half_gap": a.get("censored_half_gap")})
 
 
-def fig_family_step(entries, floor, out_dir):
-    """Figure 2d: S0 against D per map, one marker per backbone, the training floor of D shaded.
+FAMILY_SIZE = (fs.TEXT_WIDTH, 1.8)          # Figure 3a at full width (the coordinator's brief, round 1)
+DEFICIT_SIZE = maf.HALF_SIZE
 
-    Each backbone's lowest training map is a faint line in its colour across the panel, so the step reads as
-    every arena of that colour sitting under its own line.
-    """
-    fig, (ax,) = maf.new_figure(maf.FIG2_SIZE)
-    ax.axvspan(floor["min"], floor["max"], color=maf.SHADE, alpha=0.6, lw=0, zorder=0)
+
+def fig_family_step(entries, floor, out_dir):
+    """Figure 3a: zero-shot skill S0 against the frame distance D per map, three backbones in their encoding colours
+    and markers; the training maps' D floor as the grey band; per backbone the step drawn as two median segments,
+    one across the training maps' D range and one across the arenas', labelled at the right; copy-last at 0."""
+    fig, (ax,) = fs.new_figure(FAMILY_SIZE)
+    fs.training_band(ax, floor["min"], floor["max"])
+    ax.text((floor["min"] + floor["max"]) / 2, 0.07, "training maps ($d$ floor)", transform=ax.get_xaxis_transform(),
+            ha="center", va="bottom", fontsize=fs.ANNOT_PT, color=fs.TRAINING_LINE)
+    ends = []
     for name, e in entries.items():
-        slot = maf.backbone_slot(name)
-        c, mk = maf.SERIES[slot % len(maf.SERIES)], maf.MARKERS[slot % len(maf.MARKERS)]
-        pts = sorted((r["D"], r["S0"]) for r in e["maps"].values() if r["D"] is not None)
-        ax.plot([d for d, _ in pts], [s for _, s in pts], ls="none", marker=mk, ms=2.6, mfc=c, mec="white", mew=0.3,
-                zorder=3, label=e["label"])
-        ax.axhline(e["step"]["training_min"], color=c, lw=0.5, ls=(0, (1, 1.5)), alpha=0.8, zorder=1)
-    ax.text((floor["min"] + floor["max"]) / 2, 0.02, "training\nfloor", transform=ax.get_xaxis_transform(),
-            ha="center", va="bottom", fontsize=4.5, color=maf.SECONDARY, linespacing=0.9)
-    ax.set_xlim(0, None)
-    ax.set_xlabel("frame distance $D$")
-    ax.set_ylabel("zero-shot skill $S_0$ (dB)")
-    ax.xaxis.set_major_locator(ticker.MaxNLocator(4))
-    ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
-    ax.legend(loc="upper right", handletextpad=0.1, borderaxespad=0.1, labelspacing=0.2, fontsize=4.5)
-    return maf.save(fig, out_dir, "fig2d_family_step")
+        ent = fs.BACKBONES[fs.backbone_of(name)]
+        rows = [r for r in e["maps"].values() if r["D"] is not None]
+        ax.plot([r["D"] for r in rows], [r["S0"] for r in rows], ls="none", marker=ent.marker, ms=fs.MARKER_SIZE,
+                mfc=ent.colour, mec="white", mew=fs.MARKER_EDGE, zorder=3)
+        for role in ("training", "arena"):
+            group = [r for r in rows if r["role"] == role]
+            if not group:
+                continue
+            med = float(np.median([r["S0"] for r in group]))
+            xs = [min(r["D"] for r in group), max(r["D"] for r in group)]
+            ax.plot(xs, [med, med], color=ent.colour, lw=fs.DATA_LW, solid_capstyle="butt", zorder=2)
+            if role == "arena":
+                ends.append((xs[1], med, ent.label, ent.colour))
+    fs.end_labels(ax, ends, gap=0.28, leaders=True)
+    fs.copy_last_line(ax, where=1.0, align="right")
+    top = max(r["S0"] for e in entries.values() for r in e["maps"].values())
+    ax.set_xlim(0, max(0.3, max(r["D"] for e in entries.values() for r in e["maps"].values()
+                                if r["D"] is not None) * 1.12))
+    ax.set_ylim(-0.2, top + 0.4)
+    ax.set_xlabel("frame distance $d$")
+    ax.set_ylabel("zero-shot latent skill $S_0$ (dB)")
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(0.05))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+    return fs.save(fig, out_dir, "fig2d_family_step")
 
 
 def fig_deficit(entries, primary, adapt, head, out_dir):
-    """Figure 2e: A at the budget and the half-gap budget against the primary backbone's Delta (`fig_skill`)."""
+    """Figure 4 appendix panel: A at the budget against the primary backbone's skill deficit Delta (`fig_skill`),
+    with the training maps' in-distribution band."""
     maps = entries[primary]["maps"]
     records = [{**adapt[m], "delta": maps[m]["delta"], "D": maps[m]["D"]} for m in sorted(adapt)
                if m in maps and maps[m]["role"] == "arena"]
-    return maf.fig_skill(records, head["home"], head["budget"], out_dir, x="delta",
-                         xlabel=f"skill deficit $\\Delta$, {entries[primary]['label']} (dB)", stem="fig2e_deficit")
+    return maf.fig_skill(records, head["home"], head["budget"], out_dir, band=head.get("home_ci"), x="delta",
+                         xlabel=f"skill deficit $\\Delta$, {entries[primary]['label']} (dB)", stem="fig2e_deficit",
+                         size=DEFICIT_SIZE)
 
 
 def build_parser():
@@ -454,7 +472,7 @@ def main(argv=None):
         json.dump(maf.jsonable(result), f, indent=1)
         f.write("\n")
     write_csv(written[1], entries, adapt)
-    maf.style()
+    fs.style()
     written += fig_family_step(entries, floor, a.fig_dir)
     written += fig_deficit(entries, primary, adapt, head, a.fig_dir)
     for p in written:

@@ -1,6 +1,6 @@
 {
  "generated_by": "tools/family_step.py",
- "generated_at": "2026-09-27T09:33:53-04:00",
+ "generated_at": "2026-09-27T11:12:20-04:00",
  "definitions": {
   "skill": "s_w = -10 log10(latent_mse / copy_latent_mse); duplicates (dup_raw, dup_latent) left out",
   "S0": "mean s_w over a map's windows (arenas: 8 held-out episodes; training maps: home val windows)",
@@ -43,6 +43,10 @@
   "decoder": "tuned",
   "weights": "live",
   "home": 5.0592508260160685,
+  "home_ci": [
+   4.7538025615763955,
+   5.379118152882537
+  ],
   "budget": 4000,
   "cost_censored_as": 8000,
   "n_arenas": 13
@@ -50,6 +54,7 @@
  "backbones": {
   "unet200k_ema": {
    "label": "U-Net",
+   "row": "unet200k_ema",
    "home": "results/fresh_rescore/home_unet200k_ema/val/per_window.csv",
    "home_dropped_duplicates": 0,
    "home_dropped_undefined": 0,
@@ -293,7 +298,8 @@
    "delta_passes_floor": true
   },
   "pixart200k_ema": {
-   "label": "PixArt",
+   "label": "PixArt-\u03b1",
+   "row": "pixart200k_ema",
    "home": "results/fresh_rescore/home_pixart200k_ema/val/per_window.csv",
    "home_dropped_duplicates": 0,
    "home_dropped_undefined": 0,
@@ -537,7 +543,8 @@
    "delta_passes_floor": true
   },
   "sd35_170000": {
-   "label": "SD 3.5 (170k, provisional)",
+   "label": "SD 3.5",
+   "row": "sd35_170000",
    "home": "results/fresh_rescore/home_sd35_170000/val/per_window.csv",
    "home_dropped_duplicates": 0,
    "home_dropped_undefined": 0,
@@ -881,7 +888,7 @@
   },
   {
    "path": "paper/tables/tuned/adapt_summary.json",
-   "sha256": "697ee13ed8a3f7506708499f9a0493aabcd3ca3c1dc39d671c24594a4d762560"
+   "sha256": "0ba207c914f0a2fadab23ca4e1503699e0774e5ede0d70b69f238316c6c8c319"
   },
   {
    "path": "results/fresh_rescore/home_unet200k_ema/val/per_window.csv",

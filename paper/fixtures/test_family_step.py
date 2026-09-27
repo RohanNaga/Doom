@@ -274,9 +274,7 @@ def test_the_cli_writes_every_per_map_number_the_floor_and_the_correlations(tmp_
 
 def test_the_two_panels_are_written_in_the_builders_style(tmp_path):
     _, _, figs = run_cli(tmp_path)
-    import make_adapt_figures as maf
-    wide = (2 * maf.FIG2_SIZE[0], maf.FIG2_SIZE[1])
-    for stem, size in (("fig2d_family_step", maf.FIG2_SIZE), ("fig2e_deficit", wide)):
+    for stem, size in (("fig2d_family_step", fs.FAMILY_SIZE), ("fig2e_deficit", fs.DEFICIT_SIZE)):
         for ext in ("pdf", "png"):
             assert os.path.getsize(figs / f"{stem}.{ext}") > 1000
         pdf = open(figs / f"{stem}.pdf", "rb").read()

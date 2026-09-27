@@ -65,6 +65,33 @@ TRAINING_BAND = "#E8E8E8"         # grey band behind the training maps' points
 TRAINING_LINE = "#707070"         # the training maps' reference line, dashed
 TRAINING_DASH = (0, (3, 2))
 TRAINING_LABEL = "training maps (in-distribution)"   # never "home" (Rohan, 2026-09-27)
+PERSISTENCE_LABEL = "persistence"   # the copy-last baseline's printed name, the zero line (Rohan, 2026-09-27)
+# axis labels (the y-axis survey, opus-metrics-survey-2026-09-27.md): never "advantage" on an axis
+A_LABEL = "\u0394PSNR vs persistence (dB)"
+A_LABEL_SHORT = "\u0394PSNR vs\npersistence (dB)"
+S_LABEL = "latent skill (dB)"
+G_LABEL = "gap to reconstruction upper bound (dB)"
+# M's sign, one switch: False keeps M = LPIPS(model) - LPIPS(persistence) (lower is better); True flips it so that
+# above zero means "beats persistence" on every axis. Rohan decides; the default is the current sign.
+M_POSITIVE_IS_BETTER = False
+
+
+def m_value(v):
+    """M as drawn under the `M_POSITIVE_IS_BETTER` switch (None stays None)."""
+    return None if v is None else (-v if M_POSITIVE_IS_BETTER else v)
+
+
+def m_interval(ci):
+    """An M interval as drawn under the switch, low end first."""
+    return None if not ci else sorted(m_value(x) for x in ci)
+
+
+def m_label(short=False):
+    """M's axis label and its direction."""
+    direction = "higher is better" if M_POSITIVE_IS_BETTER else "lower is better"
+    return f"$M$, LPIPS difference\n({direction})" if short else f"$M$, LPIPS difference ({direction})"
+
+
 FULL_FT_DASH = (0, (3, 2))        # the full fine-tune: black, dashed, 1.0 pt
 SPARE = {"sky": "#56B4E9", "orange": "#E69F00", "yellow": "#F0E442", "purple": "#CC79A7"}  # unused by rule
 
@@ -202,17 +229,71 @@ def end_labels(ax, points, gap, colour=CONTEXT_INK, dx=3.0, leaders=False, min_s
                     if lead else None)
 
 
+# offsets (points) a point label tries in turn: right-above first, then right-below, the same on the left, over
+# and under the marker, then one line farther up or down on either side
+LABEL_OFFSETS = ((3, 1), (3, -7), (-3, 1), (-3, -7), (0, 4), (0, -10), (3, 7), (-3, 7), (3, -13), (-3, -13))
+
+
+def label_points(ax, points, fontsize=ANNOT_PT, colour=CONTEXT_INK, marker_radius=1.9):
+    """Label each (x, y, text) beside its marker at the first offset whose text stays inside the axes and clears
+    the texts already on the axes and every other marker; with no clear offset, the first one. Markers drawn on
+    top of each other (centres closer than a diameter) share one label, their texts joined in numeric order.
+
+    Call it after the axes' scales and limits are final: it draws the figure once so the constrained layout
+    settles, then measures the labels in display space. (Ported from the family-step worker's 404d577.)
+    """
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    frame = ax.get_window_extent(renderer)
+    r = marker_radius * fig.dpi / 72
+    marks = [ax.transData.transform((px, py)) for px, py, _ in points]
+    taken = [t.get_window_extent(renderer) for t in ax.texts]
+    groups, seen = [], set()
+    for i in range(len(points)):
+        if i not in seen:
+            members = [j for j in range(len(points)) if j not in seen and math.dist(marks[i], marks[j]) < 2 * r]
+            seen.update(members)
+            groups.append(members)
+
+    def clear(bb, members):
+        inside = frame.x0 <= bb.x0 and bb.x1 <= frame.x1 and frame.y0 <= bb.y0 and bb.y1 <= frame.y1
+        hits = any(bb.x0 - r < mx < bb.x1 + r and bb.y0 - r < my < bb.y1 + r
+                   for j, (mx, my) in enumerate(marks) if j not in members)
+        return inside and not hits and not any(bb.overlaps(o) for o in taken)
+
+    placed = []
+    for members in groups:
+        px, py = points[members[0]][:2]
+        text = ", ".join(sorted((points[j][2] for j in members), key=lambda t: (not t.isdigit(), len(t), t)))
+        chosen = None
+        for dx, dy in LABEL_OFFSETS:
+            t = ax.annotate(text, (px, py), xytext=(dx, dy), textcoords="offset points", fontsize=fontsize,
+                            color=colour, ha="left" if dx > 0 else "right" if dx < 0 else "center")
+            if clear(t.get_window_extent(renderer), members):
+                chosen = t
+                break
+            t.remove()
+        if chosen is None:
+            dx, dy = LABEL_OFFSETS[0]
+            chosen = ax.annotate(text, (px, py), xytext=(dx, dy), textcoords="offset points", fontsize=fontsize,
+                                 color=colour)
+        taken.append(chosen.get_window_extent(renderer))
+        placed.append(text)
+    return placed
+
+
 def copy_last_line(ax, orientation="h", label=True, where=1.0, align="right"):
-    """The zero line: copy-last (persistence), 0.6 pt black, labelled 'copy-last' at its end once."""
+    """The zero line: copy-last, 0.6 pt black, labelled with its printed name 'persistence' at its end once."""
     if orientation == "h":
         ax.axhline(0, color=BLACK, lw=REF_LW, zorder=1.5, gid="ref")
         if label:
-            ax.text(where, 0, "copy-last", transform=ax.get_yaxis_transform(), ha=align, va="bottom",
+            ax.text(where, 0, PERSISTENCE_LABEL, transform=ax.get_yaxis_transform(), ha=align, va="bottom",
                     fontsize=ANNOT_PT, color=INK, gid="decor")
     else:
         ax.axvline(0, color=BLACK, lw=REF_LW, zorder=1.5, gid="ref")
         if label:
-            ax.text(0, where, " copy-last", transform=ax.get_xaxis_transform(), ha="left",
+            ax.text(0, where, " " + PERSISTENCE_LABEL, transform=ax.get_xaxis_transform(), ha="left",
                     va="top" if where >= 0.5 else "bottom", fontsize=ANNOT_PT, color=INK, gid="decor")
 
 

@@ -93,7 +93,7 @@ def test_the_composer_draws_both_controls_and_both_maps_at_full_width(tmp_path):
     # the model rows carry their per-tic scene PSNR from the manifest (tuned rows are 4th and 6th in the fixture)
     expected = {"1": 24.8, "2": 24.5, "4": 24.0, "8": 23.0, "16": 21.0, "32": 17.0}
     assert arena["rows"]["unet_tuned"]["scene_psnr"] == expected
-    assert arena["rows"]["adapter_tuned"]["label"] == "LoRA 4k"
+    assert arena["rows"]["adapter_tuned"]["label"] == "after 8 episodes,\n4k updates"
     assert arena["rows"]["truth_raw"]["scene_psnr"] == {}                  # true rows get no numbers
     # each map has its own true row
     assert set(side["blocks"][0]["windows"]["train_map02"]["rows"]) == {"truth_raw", "unet_tuned"}

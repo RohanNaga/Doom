@@ -12,8 +12,8 @@
   32
  ],
  "frame_in": [
-  0.3087,
-  0.2007
+  0.2877,
+  0.187
  ],
  "blocks": [
   {
@@ -64,7 +64,7 @@
        }
       },
       "adapter_tuned": {
-       "label": "LoRA 4k",
+       "label": "after 8 episodes,\n4k updates",
        "scene_psnr": {
         "1": 25.9,
         "2": 23.6,
@@ -126,7 +126,7 @@
        }
       },
       "adapter_tuned": {
-       "label": "LoRA 4k",
+       "label": "after 8 episodes,\n4k updates",
        "scene_psnr": {
         "1": 22.2,
         "2": 20.7,

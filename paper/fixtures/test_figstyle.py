@@ -113,3 +113,31 @@ def test_the_step_axis_puts_zero_on_its_own_spine_segment():
     assert z8 == pytest.approx(20)
     assert [t.get_text() for t in ax.xaxis.get_ticklabels()] == ["0", "50", "250", "1k", "8k"]
     fs.plt.close(fig)
+
+
+def test_point_labels_stay_in_the_axes_clear_each_other_and_merge_on_markers_drawn_on_top_of_each_other():
+    # ported from the family-step worker's 404d577 test of the same placer
+    fs.style()
+    fig, (ax,) = fs.new_figure((2.7, 1.6))
+    # 12 and 1 coincide in the top-right corner; 7 and 9 sit close but apart; 3 alone near the bottom edge
+    pts = [(1.0, 1.0, "12"), (1.0005, 1.0005, "1"), (0.5, 0.5, "7"), (0.56, 0.5, "9"), (0.3, 0.02, "3")]
+    for x, y, _ in pts:
+        ax.plot(x, y, ls="none", marker="o", ms=3.0)
+    ax.set_xlim(0, 1.03)
+    ax.set_ylim(0, 1.03)
+    fs.label_points(ax, pts)
+    renderer = fig.canvas.get_renderer()
+    boxes = {t.get_text(): t.get_window_extent(renderer) for t in ax.texts}
+    assert sorted(boxes) == ["1, 12", "3", "7", "9"]
+    frame = ax.get_window_extent(renderer)
+    for text, bb in boxes.items():
+        assert frame.x0 <= bb.x0 and bb.x1 <= frame.x1 and frame.y0 <= bb.y0 and bb.y1 <= frame.y1, text
+    listed = list(boxes.values())
+    assert not any(a.overlaps(b) for i, a in enumerate(listed) for b in listed[i + 1:])
+    r = 1.9 * fig.dpi / 72                      # no label covers another arena's marker
+    for (x, y, text) in pts:
+        mx, my = ax.transData.transform((x, y))
+        for other, bb in boxes.items():
+            if text not in other.split(", "):
+                assert not (bb.x0 - r < mx < bb.x1 + r and bb.y0 - r < my < bb.y1 + r), (text, other)
+    fs.plt.close(fig)
