@@ -142,3 +142,7 @@ Replace with:
 
 The appendix's decoder paragraph (appendix.tex line 35) changes the same way; the launcher is `scripts/spiderman/decoder_mse_lpips.sh` (3,486 steps, lr 1e-5, batch 24, 4.0 h on an A6000; gate +4.33 dB, LPIPS $-$0.039 on the dev set).
 
+
+## 12. The decoder's symbol (Rohan, 13:55)
+
+`main.tex` uses $D$ both for the decoder (line 124 and wherever "$D(\cdot)$" renders a latent) and for the frame distance (section 3). Write the decoder in words everywhere ("the decoder", "decoded through the decoder"), never "the same decoder $D$"; $D$ is the distance only. In the method figure the evaluation box reads "decoder" and the caption says once that prediction, truth and copy-last are all rendered by the one fine-tuned decoder.
