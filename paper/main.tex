@@ -41,7 +41,7 @@
 \newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0.8,0,0}{[TODO: #1]}\else[TODO: #1]\fi}
 \newcommand{\prov}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{#1}\else#1\fi}
 % \figslot{file}{width}{height}{what it will show}: the figure when its file exists, a labelled box otherwise
-\newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][#3][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
+\newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][\dimexpr#3-2\fboxsep-2\fboxrule\relax][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
 
 \title{Crossing the Map Shift: What a Doom World Model Keeps, Loses and Relearns on Arenas It Never Saw}
 
@@ -61,14 +61,14 @@
 \begin{abstract}
 % depends: SD 3.5 200k rescore (Monday) for sentence 3's third backbone; sources: results/fresh_rescore/*_tuned (scene crop, fine-tuned decoder), paper/tables/tuned/adapt_summary.json, results/sd35_stability/collapse_rates_50k_130k.md
 Game world models are scored on held-out trajectories of their training scenes, and absolute PSNR mostly measures how static the recordings are.
-On an open 17-arena Doom benchmark scored against copy-last-frame persistence, we train three pretrained diffusion backbones on four arenas and ask what they keep, lose and relearn on the other thirteen.
-Decoded through one decoder, the U-Net still beats copy-last on every unseen arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13 arenas, while its turn response survives.
+On an open 17-arena Doom benchmark scored against persistence (the last frame copied forward), we train three pretrained diffusion backbones on four arenas and ask what they keep, lose and relearn on the other thirteen.
+Decoded through one decoder, the U-Net still beats persistence on every unseen arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13 arenas, while its turn response survives.
 A frame distance separates seen from unseen arenas but does not order the unseen ones; the frozen model's zero-shot latent skill score does.
-Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the in-distribution advantage within 4k updates on 9 of 13 arenas, recover a median 1.8~dB, and turn the perceptual loss into a win on 11 of 13 arenas.
+Rank-16 adapters on the frozen backbone, trained on eight episodes of an arena, close half of its gap to the in-distribution advantage within 4k updates on 9 of 13 arenas, recover a median 1.8~dB and beat persistence perceptually on 11 of 13.
 In closed loop, good one-tic scores do not guarantee stability, and the EMA reduces collapses without removing them.
 \end{abstract}
 
-\keywords{World models, Generalization, Persistence baseline}
+\keywords{World models, Generalization, Domain adaptation, Doom}
 
 %===============================================================================
 
@@ -76,9 +76,11 @@ In closed loop, good one-tic scores do not guarantee stability, and the EMA redu
 \label{sec:intro}
 
 A learned game simulator is judged on held-out trajectories of the scenes it trained on~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}, yet it must generalize to a new level before it can plan or train a policy there.
-We score a Doom model trained on four deathmatch arenas on each of the thirteen other arenas of its WAD, then adapt it to each from a few episodes; we found no Doom world model scored on maps it did not train on (MultiGen does not say~\citep{po2026multigen}).
+We score a Doom model trained on four deathmatch arenas on each of the thirteen other arenas of its WAD, then adapt it to each from a few episodes; no published Doom world model is scored on maps it did not train on, and MultiGen does not report one~\citep{po2026multigen}.
 Held-out domains elsewhere are an embodiment~\citep{chen2026xeworld}, a game or environment~\citep{rigter2024avid,gao2025adaworld} or a building~\citep{koh2021pathdreamer}, none scored per scene against persistence; Doom map holdouts have been for agents~\citep{lample2017arnold,wydmuch2018vizdoom}.
-Because absolute PSNR ranks how static a recording is, every score here is a paired difference against persistence, the last context frame copied forward, a baseline video prediction reported~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity} and game world models dropped, read beside the reconstruction upper bound~\citep{zheng2023occworld,karypidis2024dinoforesight}.
+Because absolute PSNR ranks how static a recording is, every score here is a paired difference against persistence, the last context frame copied forward.
+Video prediction reports this baseline~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity}; game world models dropped it.
+We read every score beside the reconstruction upper bound~\citep{zheng2023occworld,karypidis2024dinoforesight}.
 
 % depends: full fine-tune comparator (Monday) for item (3); SD 3.5 200k rescore (Monday) for item (2)'s third backbone
 We contribute (0) three action-conditioned latent world models of Doom (SD~1.4 U-Net, PixArt-$\alpha$, SD~3.5 Medium) trained under one next-tic recipe, a matched decoder fine-tune and the adapter path, released with the benchmark (Figure~\ref{fig:method});
@@ -88,10 +90,10 @@ We contribute (0) three action-conditioned latent world models of Doom (SD~1.4 U
 (4) two negative results: neither a per-frame distance nor two transition-level distances order the arenas, whereas the frozen model's zero-shot latent skill does (Spearman 0.90, exploratory at $n=13$), and one-tic quality does not guarantee closed-loop stability.
 
 \begin{figure}[t]
-% source: paper/figures/fig_teaser_B.json (arena 7 held-out episode 210 from tic 2888, rows attack at context tic 1 and turn right at tic 14; map 2 validation episode 6008 from tic 712, its first attack moment in both rows; U-Net 200k EMA and the 4k adapter through the fine-tuned decoder; drawn at 5.5 x 1.5 in, a87ee8f)
+% source: paper/figures/fig_teaser_B.json (arena 7 held-out episode 210 from tic 2888, rows attack at context tic 1 and turn right at tic 14; U-Net 200k EMA and the 4k adapter through the fine-tuned decoder; four columns, drawn at 5.5 x 1.5 in, cce87b9; the five-column version with a map 2 reference is fig_teaser_B_5col.pdf)
 \centering
 \figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, layout B}
-\caption{Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a true context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and true; the training-map column is one reference moment on map 2, the same in both rows.}
+\caption{Off its training maps the U-Net keeps the action and loses the arena; eight episodes bring the arena back. The frame 8 tics after a true context frame on unseen arena 7 under the named control: zero-shot, after 4k adapter updates on 8 episodes of arena 7, and true.}
 \label{fig:teaser}
 \end{figure}
 
@@ -105,14 +107,14 @@ The models train on arenas 2 to 5 (500 episodes each) and are scored on their va
 
 % depends: SD 3.5 200k final read (Monday 00:30); four-tic sources: RESEARCH_CONTEXT 2026-09-26 section 0 item 5 (U-Net, SD 3.5 140k), 2026-09-27 01:20 (PixArt 200k); stock decoders, full frame, 512 validation windows
 \textbf{Three backbones, one recipe.} The SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), PixArt-$\alpha$~\citep{chen2023pixart} (a 628M DiT in the same latents) and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT, 16-channel latents) become next-tic world models under one recipe (Figure~\ref{fig:method}; $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen~\citep{valevski2024gamengen}, 200k updates of batch 32, fp32 EMA 0.9999, 10-step DDIM~\citep{song2021ddim}); backbone and latent space change together, so they compare pretrained packages.
-Four tics ahead on the training maps they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at a provisional 140k).
+Four tics ahead on the training maps they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k, its latest four-tic read).
 Rollouts stay in latent space, so the decoder only renders; we fine-tune the SD~1 decoder on training-map frames from their true latents with the encoder frozen, using MSE plus 0.1~LPIPS, and use it for every pixel number below.
 An MSE-only objective sharpens the HUD but triples scene LPIPS.
 
 \textbf{What we measure.} With $x$ the true next frame, $x_\text{last}$ the last context frame, $z$, $z_\text{last}$ their latents, $\hat z$ the prediction and $D$ the decoder, the \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$ is the PSNR gain over persistence, a paired difference like Genie's $\Delta$PSNR~\citep{bruce2024genie}.
 The \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips} is below zero when the model looks better than copying, the \emph{gap} $G=\mathrm{PSNR}(D(z),x)-\mathrm{PSNR}(D(\hat z),x)$ is the distance to the reconstruction upper bound, and the \emph{zero-shot latent skill score} $S_0$ is $10\log_{10}$ of persistence's latent MSE over the model's.
 The \emph{directional} score is the fraction of turning windows whose predicted view turns the other way when left and right are swapped in the newest control.
-Pixel scores use the scene rows 0 to 207, since persistence copies the HUD almost exactly; $A_\text{train}$, $A$ on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.39), is the in-distribution reference, not an arena's own upper bound.
+Pixel scores use the scene rows 0 to 207, since persistence copies the HUD almost exactly; $A_\text{train}$, $A$ on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.38), is the in-distribution reference, not an arena's own upper bound.
 
 \begin{figure}[t]
 % the method figure is being redrawn at 5.5 x 1.8 in (method owner); the slot is budgeted at that height
@@ -158,7 +160,7 @@ Nor is the sign reversal of the perceptual margin the decoder's floor: its own r
 \centering
 \figslot{figures/fig2d_family_step.pdf}{2.25in}{1.5in}{Figure 3a: family step}\hfill
 \figslot{figures/tuned/fig3b_zero_shot_absolute.pdf}{3.15in}{1.5in}{Figure 3b: zero-shot absolute}
-\caption{(a) The shift is a gap, not a slope: every unseen arena has lower zero-shot latent skill $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman $-0.05$, $-0.15$, $-0.17$; band: the train-versus-train $d$ range). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Raw true frame, scene rows, one tic, 95\% episode-bootstrap intervals; filled: fine-tuned SD~1 decoder; open: SD~3.5 through its own decoder (provisional 170k).}
+\caption{(a) The shift is a gap, not a slope: every unseen arena has lower zero-shot latent skill $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman $-0.05$, $-0.15$, $-0.17$; band: the train-versus-train $d$ range). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Raw true frame, scene rows, one tic, 95\% episode-bootstrap intervals; U-Net and PixArt-$\alpha$ through the fine-tuned SD~1 decoder (filled), SD~3.5 through its own (open, provisional 170k).}
 \label{fig:shift}
 \end{figure}
 
@@ -177,11 +179,11 @@ The frozen model's zero-shot latent skill $S_0$ does order the arenas: it predic
 
 % depends: full fine-tune comparator (Monday); the 8k grid (tonight) replaces the 4k numbers
 \textbf{Protocol.} For each unseen arena we adapt the U-Net 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone, as Vista does~\citep{gao2024vista}, and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent)~\citep{xie2023difffit}.
-We train on 8 adaptation episodes, score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates, and keep forgetting ($A$ on the training maps) and the directional score as control checks; a full fine-tune is the comparator (\tbd{}: Monday).
+We train on 8 adaptation episodes, score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates, and keep forgetting ($A$ on the training maps) and the directional score as control checks; a full fine-tune at $2\times10^{-5}$ is the comparator (in progress, \tbd{}).
 An arena's budget is the first grid point at which $A$ reaches $\tfrac12(A_0+A_\text{train})$, half of its gap from its zero-shot $A_0$; arenas that do not by the final budget of the grid are right-censored~\citep{taylor2009transfer}.
 Half of the gap in dB is not half of the error: closing 1.8~dB removes 34 percent of the persistence error, not 28.
 
-% depends: nothing in the text (forgetting and directional after adaptation are Table 3 cells, 8k chain tonight); source: paper/tables/tuned/adapt_summary.json; the data-ladder and recipe sentence (RESEARCH_CONTEXT 2026-09-27 08:05) is out for space, Rohan decides body or appendix
+% depends: nothing in the text (forgetting and directional after adaptation are Table 3 cells, 8k chain tonight); source: paper/tables/tuned/adapt_summary.json; the data-ladder and recipe sentence (RESEARCH_CONTEXT 2026-09-27 08:05) is out for space, an open decision (body or appendix)
 \textbf{What it takes.} 9 of 13 arenas close half of their gap within 4k updates (5 within 500; median budget 1k), one reaches $A_\text{train}$, and the median $A$ rises from 2.04 to 3.80~dB, 69 percent of the gain by 250 updates (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
 At 4k the prediction has lower scene LPIPS than persistence on 11 of 13 arenas, the other two within 0.01, and the median $G$ falls from 5.0~dB to the in-distribution 3.4.
 
@@ -196,7 +198,7 @@ At 4k the prediction has lower scene LPIPS than persistence on 11 of 13 arenas, 
 \begin{table}[tb]
 % depends: full fine-tune comparator (Monday); forgetting and directional control checks (8k chain tonight); rows from paper/tables/tuned/adapt_table3.tex (make_adapt_figures.py, 11:27), the A_train and gap-share rows dropped for space (A_train is in the text, the share in Figure 4b); G at 4k from results/fresh_rescore/adapt4000_live_tuned (median 3.44, arena 7 4.65); GPU-hours from results/adapt/*_map07_r16_k8_s0/log.jsonl (1.10 h wall)
 \centering\footnotesize\setlength{\tabcolsep}{2pt}
-\caption{What closing the gap takes (non-EMA weights, fine-tuned decoder; brackets: 95\% arena-bootstrap intervals; ${>}$4k: censored).}
+\caption{What closing the gap takes (non-EMA weights, fine-tuned decoder; brackets: 95\% arena-bootstrap intervals; ${>}$4k: censored; arena 7 is the highest-distance arena).}
 \label{tab:cost}
 \begin{tabular}{lccc}
 \toprule
@@ -215,7 +217,7 @@ Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{}
 \section{Limitations and conclusion}
 \label{sec:limits}
 
-Our claims cover 13 arenas of one WAD, one agent, one-tic scoring and mostly one seed; persistence is weak on fights.
+Our claims cover 13 arenas of one WAD, one agent, one-tic scoring and mostly one seed; persistence is a weak reference where the camera moves fast.
 Off its training maps the U-Net keeps its turn response and part of its advantage over persistence but loses its perceptual advantage; eight episodes and 1.1 GPU-hours of adapter training close half of the gap on 9 of 13 arenas and restore the perceptual advantage on 11.
 \label{body-end}
 
