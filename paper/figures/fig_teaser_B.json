@@ -1,33 +1,34 @@
 {
  "layout": "C",
+ "simple": true,
  "mode": "restart",
  "restart_root": "results/teaser_restart",
  "horizon": 16,
  "note": "rollout frames at +16 tics after 32 ground-truth context tics",
  "size_in": [
   5.5,
-  1.5
+  1.333
  ],
  "frame_in": [
-  0.6256,
-  0.4067
+  0.6467,
+  0.4204
  ],
  "columns": [
   {
-   "block": "training maps (in-domain)",
-   "name": "context (t = 0)"
+   "block": "training maps (in distribution)",
+   "name": "context"
   },
   {
-   "block": "training maps (in-domain)",
-   "name": "U-Net"
+   "block": "training maps (in distribution)",
+   "name": "prediction"
   },
   {
-   "block": "training maps (in-domain)",
+   "block": "training maps (in distribution)",
    "name": "ground truth"
   },
   {
    "block": "unseen arena 7",
-   "name": "context (t = 0)"
+   "name": "context"
   },
   {
    "block": "unseen arena 7",
@@ -71,7 +72,7 @@
     "unseen": 18.846
    },
    "context_notes": {
-    "in-domain": "map 5",
+    "in-domain": null,
     "unseen": null
    },
    "held": {
@@ -155,7 +156,7 @@
     "unseen": 16.546
    },
    "context_notes": {
-    "in-domain": "map 3",
+    "in-domain": null,
     "unseen": null
    },
    "held": {
@@ -211,6 +212,5 @@
     "ground truth": "results/teaser_restart/unseen_arena07_ep288_s456_t77/truth_raw/tic_16_scene.png"
    }
   }
- ],
- "copied_from": "fig_teaser_C_hold16_pick_restart_nopersistence (tools/teaser_contact_sheet.py --root results/teaser --home-root results/teaser_maps345 --restart-root results/teaser_restart --hold-steps 16 --hold-rows forward:2,attack:1 --home-moments forward:train_map05_ep6059_s4104_t239 --max-height 1.5 --no-persistence --review-dir paper/figures/review/maps345)"
+ ]
 }

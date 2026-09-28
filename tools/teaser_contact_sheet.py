@@ -529,7 +529,7 @@ def restart_rows(rows, restart_root, found, floor):
 
 def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_horizons=(HORIZON,),
         row_order=None, hold_steps=None, hold_rows=None, max_height=2.05, persistence=True, home_root=None,
-        home_moments=None):
+        home_moments=None, simple=False):
     """Score every moment, draw the sheet, compose the top candidates; returns the sidecar record. With
     `hold_steps` it runs the hold round instead (`run_hold`, which alone takes `home_root` and `home_moments`)."""
     ws = ct.windows(root)
@@ -537,7 +537,7 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
         raise SystemExit(f"no window directories <map>_ep<E>_s<S> under {root}")
     if hold_steps:
         return run_hold(root, out_dir, review_dir, hold_steps, restart_root, row_order, hold_rows, max_height,
-                        persistence, home_root, home_moments)
+                        persistence, home_root, home_moments, simple)
     if home_root or home_moments:
         raise SystemExit("--home-root and --home-moments belong to the hold round (--hold-steps)")
     found = [m for name, wdir in ws.items() for m in window_moments(root, name, wdir)]
@@ -583,7 +583,7 @@ def run(root, out_dir, review_dir, n_candidates=3, restart_root=None, restart_ho
 
 
 def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None, hold_rows=None,
-             max_height=2.05, persistence=True, home_root=None, home_moments=None):
+             max_height=2.05, persistence=True, home_root=None, home_moments=None, simple=False):
     """The hold round: every moment whose button is pressed on all `steps` restart steps, counted per button and
     role; the per-row picks (`row_picks`); layout C of the first and second picks at +`steps` from the continuous
     rollouts (`fig_teaser_C_hold<steps>[_alt]`) and, when the restart export holds every moment, from it
@@ -646,15 +646,16 @@ def run_hold(root, out_dir, review_dir, steps, restart_root=None, row_order=None
         if not subset:
             rows = sorted(rows, key=lambda r: order.index(r["row"]))
         stem = f"fig_teaser_C_hold{steps}{suffix}"
-        tail = "" if persistence else "_nopersistence"      # the default figures stay as they are
+        tail = ("" if persistence else "_nopersistence") + ("_simple" if simple else "")
         height = max_height if subset else 2.05
         written += ct.layout_c(root, out_dir, rows, stem=stem + tail, horizon=steps, max_height=height,
-                               persistence=persistence, home_root=home_root)[0]
+                               persistence=persistence, home_root=home_root, simple=simple)[0]
         need = [f"{r['window']}_t{r['tic']}" for r in rows] + [f"{r['home']['window']}_t{r['home']['tic']}"
                                                                for r in rows]
         if restart_root and all(d in have for d in need):
             written += ct.layout_c(root, out_dir, rows, stem=stem + "_restart" + tail, horizon=steps,
-                                   restart_root=restart_root, max_height=height, persistence=persistence)[0]
+                                   restart_root=restart_root, max_height=height, persistence=persistence,
+                                   home_root=home_root, simple=simple)[0]
         elif restart_root:
             picks.setdefault("restart_missing", {})[stem] = [d for d in need if d not in have]
     rec = {"root": root, "home_root": home_root, "restart_root": restart_root, "hold_steps": steps,
@@ -682,6 +683,9 @@ def main(argv=None):
     p.add_argument("--hold-rows", default=None,
                    help="the hold round's chosen figure: row:pick pairs in order, e.g. forward:2,attack:1")
     p.add_argument("--max-height", type=float, default=2.05, help="the chosen figure's page height at most (in)")
+    p.add_argument("--simple", action="store_true",
+                   help="the reader's figure: headers only, no horizon, adapter, held-button or map notes; "
+                        "writes <stem>_simple beside the defaults")
     p.add_argument("--no-persistence", action="store_true",
                    help="leave persistence off the context frames; writes <stem>_nopersistence beside the defaults")
     p.add_argument("--restart-horizon", type=int, nargs="+", default=[HORIZON],
@@ -698,7 +702,7 @@ def main(argv=None):
     rec = run(a.root, a.out_dir, a.review_dir, a.candidates, a.restart_root, tuple(a.restart_horizon),
               tuple(a.row_order.split(",")) if a.row_order else None, a.hold_steps,
               tuple(a.hold_rows.split(",")) if a.hold_rows else None, a.max_height, not a.no_persistence,
-              a.home_root, named)
+              a.home_root, named, a.simple)
     for path in rec["written"]:
         print("wrote", os.path.relpath(path, REPO) if path.startswith(REPO) else path)
     for i, pick in enumerate(rec["candidates"], 1):

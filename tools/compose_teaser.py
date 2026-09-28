@@ -430,7 +430,7 @@ def moment_steps(manifest, first, count):
 
 def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 episodes, 4k updates)",
              horizon=HORIZON_B, width=fs.TEXT_WIDTH, max_height=2.05, stem="fig_teaser_C", restart_root=None,
-             persistence=True, home_root=None):
+             persistence=True, home_root=None, simple=False):
     """Layout C (the selection round's form); returns the written paths and the sidecar record. One row per entry
     of `rows` ({"row", "window", "tic", "button", "home": {"window", "tic"}}), in the order given, seven frames: the
     in-domain block (a start of the same button on a training map: its ground-truth context, the U-Net `horizon`
@@ -444,7 +444,9 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     moment stops the build. Without it the frames come from the one closed-loop rollout per window, so the note
     says "rollout tic t+8" and each context frame carries its rollout tic. `persistence=False` leaves the
     persistence numbers off the context frames (they stay in the sidecar) for a caption that states them once.
-    `home_root` is a second export the in-domain windows may come from (the training maps 3 to 5 export)."""
+    `home_root` is a second export the in-domain windows may come from (the training maps 3 to 5 export).
+    `simple` draws the reader's version: block and column headers only (no horizon note, no adapter note, no
+    held-button or map notes under the frames) and "prediction" for the in-domain model column."""
     ws = {**(windows(home_root) if home_root else {}), **windows(root)}
     fs.style()
     restart = restart_root is not None
@@ -464,7 +466,7 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     group_gap = 6 / 72
     ncols = 7
     fixed = label_w + (ncols - 2) * GUTTER + group_gap + 0.02
-    head = 4 * 8 / 72
+    head = (2 * 8 / 72 + 2 / 72) if simple else 4 * 8 / 72
     number_line = 7 / 72
     n = len(rows)
     d0, c0, _ = source(rows[0]["window"], rows[0]["tic"])
@@ -484,10 +486,11 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     # rows from different training maps: the header says "training maps" and each in-domain context names its map
     mixed = len(set(home_places)) > 1
     home_place = "training maps" if mixed else home_places[0]
-    context = "context (t = 0)"
-    columns = [{"block": f"{home_place} (in-domain)", "name": context},
-               {"block": f"{home_place} (in-domain)", "name": "U-Net"},
-               {"block": f"{home_place} (in-domain)", "name": TRUTH_LABEL},
+    context = "context" if simple else "context (t = 0)"
+    home_block = f"{home_place} (in distribution)" if simple else f"{home_place} (in-domain)"
+    columns = [{"block": home_block, "name": context},
+               {"block": home_block, "name": "prediction" if simple else "U-Net"},
+               {"block": home_block, "name": TRUTH_LABEL},
                {"block": away_place, "name": context},
                {"block": away_place, "name": "zero-shot"},
                {"block": away_place, "name": adapted_label},
@@ -498,14 +501,16 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     for lo, hi in ((0, 2), (3, 6)):
         _text(fig, width, height, (xs[lo] + xs[hi] + fw) / 2, 0.0, columns[lo]["block"], ha="center", va="top",
               fontsize=fs.ANNOT_PT)
-    _text(fig, width, height, (xs[0] + xs[-1] + fw) / 2, 8 / 72, note, ha="center", va="top", fontsize=fs.MIN_PT,
-          color=fs.CONTEXT_INK)
+    if not simple:
+        _text(fig, width, height, (xs[0] + xs[-1] + fw) / 2, 8 / 72, note, ha="center", va="top",
+              fontsize=fs.MIN_PT, color=fs.CONTEXT_INK)
     for xi, col in zip(xs, columns):
-        _text(fig, width, height, xi + fw / 2, 16 / 72, col["name"], ha="center", va="top", fontsize=fs.ANNOT_PT)
-    if adapted_note:
+        _text(fig, width, height, xi + fw / 2, (8 if simple else 16) / 72, col["name"], ha="center", va="top",
+              fontsize=fs.ANNOT_PT)
+    if adapted_note and not simple:
         _text(fig, width, height, xs[5] + fw / 2, 24 / 72, adapted_note, ha="center", va="top", fontsize=fs.MIN_PT,
               color=fs.CONTEXT_INK)
-    record = {"layout": "C", "mode": "restart" if restart else "rollout", "restart_root": restart_root,
+    record = {"layout": "C", "simple": simple, "mode": "restart" if restart else "rollout", "restart_root": restart_root,
               "horizon": horizon, "note": note, "size_in": [width, round(height, 4)],
               "frame_in": [round(fw, 4), round(fh, 4)], "columns": columns, "rows": []}
     for r, row in enumerate(rows):
@@ -520,6 +525,8 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
         notes = {"in-domain": context_note(copy_scores["in-domain"] if persistence else None, row["home"]["tic"],
                                            restart, home_places[r].replace("training ", "") if mixed else None),
                  "unseen": context_note(copy_scores["unseen"] if persistence else None, row["tic"], restart)}
+        if simple:
+            notes = {"in-domain": None, "unseen": None}
         held, step_controls = {}, {}
         for key, man, first in (("in-domain", hman, hc + 1), ("unseen", uman, uc + 1)):
             steps = moment_steps(man, first, horizon)
@@ -528,11 +535,11 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
             step_controls[key] = [action_text(s) for s in steps] if steps else None
         cells = [("in-domain context", os.path.join(hd, ROWS["truth"]), hc, notes["in-domain"]),
                  ("in-domain", os.path.join(hd, ROWS["model"]), h8, psnr["in-domain"]),
-                 ("in-domain ground truth", os.path.join(hd, ROWS["truth"]), h8, held["in-domain"]),
+                 ("in-domain ground truth", os.path.join(hd, ROWS["truth"]), h8, None if simple else held["in-domain"]),
                  ("context", os.path.join(ud, ROWS["truth"]), uc, notes["unseen"]),
                  ("zero-shot", os.path.join(ud, ROWS["model"]), u8, psnr["zero-shot"]),
                  ("adapted", os.path.join(ud, ROWS["adapted"]), u8, psnr["adapted"]),
-                 ("ground truth", os.path.join(ud, ROWS["truth"]), u8, held["unseen"])]
+                 ("ground truth", os.path.join(ud, ROWS["truth"]), u8, None if simple else held["unseen"])]
         sources = {}
         for xi, (key, row_dir, tic, value) in zip(xs, cells):
             sources[key] = frame_path(row_dir, tic)
