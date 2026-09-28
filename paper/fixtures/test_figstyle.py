@@ -91,6 +91,28 @@ def test_a_legend_entry_with_no_drawn_series_is_refused(tmp_path):
         fs.save(fig, str(tmp_path), "legend")
 
 
+def test_a_legend_may_key_references_colour_swatches_and_a_text_only_label(tmp_path):
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    fs.style()
+    fig, (ax,) = fs.new_figure((2, 1.5))
+    ax.plot([0, 1], [0, 1], color="#0072B2")
+    fs.training_band(ax, 0.2, 0.4)                                   # a reference band (gid "ref")
+    ax.axhline(0.5, color=fs.TRAINING_LINE, ls=fs.TRAINING_DASH, gid="ref")
+    label = Line2D([], [], ls="none")
+    label.set_visible(False)                                        # a text-only entry names the swatches after it
+    handles = [Patch(facecolor=fs.TRAINING_BAND), Line2D([], [], color=fs.TRAINING_LINE, ls=fs.TRAINING_DASH),
+               label, Patch(facecolor="#0072B2")]                   # a swatch keyed to a drawn line's colour
+    ax.legend(handles, ["band", "reference", "colour:", "swatch"])
+    fs.save(fig, str(tmp_path), "keys")
+    # a swatch or reference whose colour nothing drawn carries is still refused
+    fig, (ax,) = fs.new_figure((2, 1.5))
+    ax.plot([0, 1], [0, 1], color="#0072B2")
+    ax.legend([Patch(facecolor="#D55E00"), Line2D([], [], color="#CC79A7", ls="--")], ["orange", "purple"])
+    with pytest.raises(fs.DegenerateFigure, match="orange"):
+        fs.save(fig, str(tmp_path), "keys_bad")
+
+
 def test_text_below_the_six_point_floor_is_refused(tmp_path):
     fs.style()
     fig, (ax,) = fs.new_figure((2, 1.5))

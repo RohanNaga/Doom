@@ -489,8 +489,9 @@ def _norm_ls(ls):
     return "none" if ls in (None, "", " ", "None", "none") else str(ls)
 
 
-def _handle_matches(handle, lines, colls):
-    """True when a legend handle matches a drawn data series by colour and (for lines) line style and marker."""
+def _handle_matches(handle, lines, colls, patches=()):
+    """True when a legend handle matches a drawn series by colour and (for lines) line style and marker. `lines`
+    include the reference lines, `patches` the drawn rectangles (bands), so a legend may key a reference."""
     if isinstance(handle, Line2D):
         for ln in lines:
             if not _same_colour(handle.get_color(), ln.get_color()):
@@ -505,7 +506,10 @@ def _handle_matches(handle, lines, colls):
         return any(_same_colour(handle.get_color(), fc) for c in colls if isinstance(c, mcoll.PathCollection)
                    for fc in (list(c.get_facecolors()) + list(c.get_edgecolors()))[:4])
     if isinstance(handle, Patch):
-        return any(_same_colour(handle.get_facecolor(), fc) for c in colls for fc in list(c.get_facecolors())[:4])
+        # a band or bar (a collection or a drawn rectangle), or a colour-key swatch of a drawn line
+        return (any(_same_colour(handle.get_facecolor(), fc) for c in colls for fc in list(c.get_facecolors())[:4])
+                or any(_same_colour(handle.get_facecolor(), p.get_facecolor()) for p in patches)
+                or any(_same_colour(handle.get_facecolor(), ln.get_color()) for ln in lines))
     return True
 
 
@@ -531,10 +535,15 @@ def refuse_degenerate(fig, stem=""):
                                    "a curve needs at least two")
         lines += data_lines(ax)
         colls += data_collections(ax)
+    # a legend may also key what the axes draw as references: dashed lines and grey bands (gid "ref")
+    refs = [ln for ax in axes for ln in ax.lines if ln.get_gid() == "ref" and ln.get_visible()]
+    patches = [p for ax in axes for p in ax.patches if p.get_visible()]
     legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None] + list(fig.legends)
     for leg in legends:
         for handle, text in zip(leg.legend_handles, leg.get_texts()):
-            if not _handle_matches(handle, lines, colls):
+            if not handle.get_visible():         # a text-only entry names the entries after it
+                continue
+            if not _handle_matches(handle, lines + refs, colls, patches):
                 raise DegenerateFigure(f"{where}the legend entry {text.get_text()!r} has no drawn series")
     for t in fig.findobj(Text):
         if t.get_visible() and t.get_text().strip() and t.get_fontsize() < MIN_PT - 1e-6:

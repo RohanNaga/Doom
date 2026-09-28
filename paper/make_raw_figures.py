@@ -63,6 +63,7 @@ from score_adapt import DUPLICATE_FLAGS  # noqa: E402
 
 from matplotlib import ticker  # noqa: E402  (maf has already selected the Agg backend)
 from matplotlib.lines import Line2D  # noqa: E402
+from matplotlib.patches import Patch  # noqa: E402
 
 BACKBONES = ("unet200k_ema", "pixart200k_ema", "sd35_170000")
 DECODER_SUFFIX = {"unet200k_ema": "_tuned", "pixart200k_ema": "_tuned", "sd35_170000": ""}
@@ -75,9 +76,11 @@ TRAINING_MAPS = maf.TRAINING_MAPS
 PRIMARY = "unet200k_ema"
 COMPARATOR_ARENAS = (6, 7, 8, 16)               # the full fine-tune's arenas (Table 2's last column)
 GROUP_NAMES = ("hard", "medium", "easy")
-SIZES = {"raw_row": (5.5, 1.6), "raw_row_grid": (5.5, 3.0), "raw_fig3a_psnr": (2.25, 1.5),
+SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_fig3a_psnr": (2.25, 1.5),
          "raw_fig3a_lpips": (2.25, 1.5)}
-UPPER = "upper bound"                            # "reconstruction upper bound", never "ceiling", in labels
+UPPER = "reconstruction upper bound"             # never "ceiling" in a label
+IN_DISTRIBUTION = "training maps (in distribution)"
+BAND_LABEL = "train vs train $d$"               # the training maps' own d range (tools/family_step.py)
 CEILING_INK = fs.BLACK
 CEILING_LW = 1.0
 PSNR_LABEL, LPIPS_LABEL = "scene PSNR (dB) ↑", "scene LPIPS ↓"
@@ -373,15 +376,15 @@ def fig_3a(entries, floor, key, out_dir):
                 ax.plot([min(p[0] for p in g), max(p[0] for p in g)], [median([p[1] for p in g])] * 2,
                         color=ent.colour, lw=fs.DATA_LW, solid_capstyle="butt", zorder=2)
         handles.append(Line2D([], [], color=ent.colour, lw=fs.DATA_LW, label=ent.label, **style))
+    handles.append(Patch(facecolor=fs.TRAINING_BAND, edgecolor="none", label=BAND_LABEL))
     higher = key == "psnr"
     lo, hi = ax.get_ylim()
     span = hi - lo
-    ax.set_ylim(lo, hi + span * 0.15) if higher else ax.set_ylim(lo - span * 0.05, hi + span * 0.1)
+    # the key sits where the data leave room: above the arenas in PSNR, under them (the axis from 0) in LPIPS
+    ax.set_ylim(lo, hi + span * 0.15) if higher else ax.set_ylim(0.0, hi + span * 0.05)
     ax.legend(handles=handles, loc="upper right" if higher else "lower right", frameon=False, fontsize=fs.ANNOT_PT,
               handlelength=1.6,
               handletextpad=0.4, labelspacing=0.25, borderaxespad=0.1)
-    ax.text((floor["min"] + floor["max"]) / 2, 0.97, "training\nmaps", transform=ax.get_xaxis_transform(),
-            ha="center", va="top", fontsize=fs.MIN_PT, color=fs.TRAINING_LINE, linespacing=0.9)
     ax.set_xlim(0, 0.3)
     ax.xaxis.set_major_locator(ticker.MultipleLocator(0.1))
     ax.set_xlabel("frame distance $d$")
@@ -404,11 +407,11 @@ def _in_distribution(ax, level, label=None, below=False):
                 fontsize=fs.MIN_PT, color=fs.TRAINING_LINE, gid="decor")
 
 
-def before_after_panel(ax, arenas, zero, adapted, ceilings, level, key, colour_of, labels=False):
+def before_after_panel(ax, arenas, zero, adapted, ceilings, level, key, colour_of):
     """One arena per column in number order: the ceiling as a dotted tick, zero-shot open, after 8k updates filled,
     a thin connector between them, the in-distribution level as the dashed line; marks in the arena's colour."""
     pos = {a: i for i, a in enumerate(arenas)}
-    _in_distribution(ax, level, "training maps" if key == "lpips" else None, below=True)
+    _in_distribution(ax, level)
     _ceiling_ticks(ax, [pos[a] for a in arenas], [ceilings[a][f"ceiling_{key}"] for a in arenas])
     for a in arenas:
         c = colour_of(a)
@@ -417,11 +420,6 @@ def before_after_panel(ax, arenas, zero, adapted, ceilings, level, key, colour_o
             ax.plot([pos[a], pos[a]], [z, d], color=c, lw=0.8, solid_capstyle="butt", zorder=2.7)
             ax.plot([pos[a]], [d], ls="none", marker="o", ms=fs.MARKER_SIZE, mfc=c, mec=c, mew=0.6, zorder=3.2)
         ax.plot([pos[a]], [z], ls="none", marker="o", ms=fs.MARKER_SIZE, mfc="white", mec=c, mew=0.8, zorder=3.1)
-    if labels and key == "psnr":          # name the upper bound once, above the first arena's tick
-        a = arenas[0]
-        ax.annotate(UPPER, (pos[a], ceilings[a][f"ceiling_{key}"]), xytext=(0, 1.5 if key == "psnr" else -1.5),
-                    textcoords="offset points", ha="left", va="bottom" if key == "psnr" else "top",
-                    fontsize=fs.MIN_PT, color=fs.INK)
     ax.set_xticks([pos[a] for a in arenas], [str(a) for a in arenas])
     ax.tick_params(axis="x", length=0, labelsize=fs.MIN_PT, pad=1.0)
     ax.set_xlim(-0.6, len(arenas) - 0.4)
@@ -446,7 +444,26 @@ def curve_panel(ax, curves, key, level, colour_of, steps, named=(), ticks=None, 
     ax.set_xlabel(xlabel)
 
 
-def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, named, out_dir, layout="row"):
+def row_legends(fig, key_colours):
+    """The row's two keys: above it, what each mark and line means; below it, the colour of the arena groups by
+    the zero-shot gap to the upper bound (`key_colours`: [(group, colour)])."""
+    ink = fs.BACKBONES["unet"].colour
+    marks = [Line2D([], [], ls="none", marker="o", ms=fs.MARKER_SIZE, mfc="white", mec=ink, mew=0.8),
+             Line2D([], [], ls="none", marker="o", ms=fs.MARKER_SIZE, mfc=ink, mec=ink, mew=0.6),
+             Line2D([], [], color=CEILING_INK, lw=CEILING_LW),
+             Line2D([], [], color=fs.TRAINING_LINE, lw=fs.REF_LW, ls=fs.TRAINING_DASH)]
+    fig.legend(marks, ["zero-shot", "after 8k updates", UPPER, IN_DISTRIBUTION], loc="outside upper center",
+               ncol=4, handlelength=1.4, columnspacing=1.4, handletextpad=0.4, borderaxespad=0.1)
+    label = Line2D([], [], ls="none")
+    label.set_visible(False)                     # a text-only entry names the swatches after it
+    swatches = [label] + [Patch(facecolor=c, edgecolor="none") for _, c in key_colours]
+    fig.legend(swatches, ["zero-shot gap to the upper bound:"] + [g for g, _ in key_colours],
+               loc="outside lower center", ncol=len(swatches), handlelength=1.0, handleheight=0.8,
+               columnspacing=1.0, handletextpad=0.35, borderaxespad=0.1)
+
+
+def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, named, out_dir, layout="row",
+            key_colours=()):
     """The merged Figure 3: how much the unseen arenas improve and how fast. (a) before and after in raw PSNR,
     (b) in LPIPS, (c) and (d) each arena's raw trajectory over the adapter reads that exist, sharing its y axis
     with (a) and (b) so every curve ends on its filled 8k mark. `layout` "grid" draws two rows of two (PSNR above,
@@ -460,7 +477,7 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     pc.sharey(pa)
     lc.sharey(la)
     for ax, key in ((pa, "psnr"), (la, "lpips")):
-        before_after_panel(ax, arenas, zero, adapted, ceilings, level[key], key, colour_of, labels=key == "psnr")
+        before_after_panel(ax, arenas, zero, adapted, ceilings, level[key], key, colour_of)
     steps = sorted({s for c in trajectories.values() for s in c["steps"]})
     for ax, key in ((pc, "psnr"), (lc, "lpips")):
         curve_panel(ax, trajectories, key, level[key], colour_of, steps, named=named if key == "psnr" else (),
@@ -474,6 +491,8 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     la.yaxis.set_major_locator(ticker.MultipleLocator(0.05))
     for ax, letter in zip((pa, la, pc, lc), "abcd"):
         fs.panel_letter(ax, letter)
+    if key_colours:
+        row_legends(fig, key_colours)
     return fs.save(fig, out_dir, stem)
 
 
@@ -610,9 +629,15 @@ def main(argv=None):
     def colour_of(m):
         return fs.ramp_colour(ease[m], lo, hi)                           # dark = hardest
     named = (min(complete, key=lambda m: ease[m]), max(complete, key=lambda m: ease[m])) if complete else ()
-    written += fig_row(arenas, zero[PRIMARY], ad8, ceilings, level, trajectories, colour_of, named, a.out_dir)
-    written += fig_row(arenas, zero[PRIMARY], ad8, ceilings, level, trajectories, colour_of, named, a.out_dir,
-                       layout="grid")
+    groups = group_arenas({m: key_of[m] for m in complete}, higher_is_harder=harder)
+    # each group's swatch is the colour of its middle arena by the key (a colour the row draws), a tie between two
+    # middle arenas going to the group's own end: the harder for hard, the easier otherwise
+    key_colours = [(name, colour_of(sorted(members, key=lambda m: ease[m])[
+                        (len(members) - 1) // 2 if name == "hard" else len(members) // 2]))
+                   for name, members in groups if members]
+    for layout in ("row", "grid"):
+        written += fig_row(arenas, zero[PRIMARY], ad8, ceilings, level, trajectories, colour_of, named, a.out_dir,
+                           layout=layout, key_colours=key_colours)
 
     # Table 2's candidate: the arenas grouped by the key
     at = {s: adapted.get(s, {}) for s in (4000, 8000)}
@@ -620,7 +645,6 @@ def main(argv=None):
                "ceiling": ceilings[m]["ceiling_psnr"], "lpips_zero_shot": zero[PRIMARY][m]["lpips"],
                "lpips_4k": at[4000].get(m, {}).get("lpips"), "lpips_8k": ad8[m]["lpips"],
                "budget": adaptation[m]["budget"]} for m in complete}
-    groups = group_arenas({m: key_of[m] for m in complete}, higher_is_harder=harder)
     gstats = group_stats(groups, per)
     os.makedirs(a.tables_dir, exist_ok=True)
     table = os.path.join(a.tables_dir, "adapt_groups.tex")

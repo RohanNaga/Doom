@@ -164,6 +164,14 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
         letters.append(letter)
         return draw_letter(ax, letter, **kw)
     monkeypatch.setattr(mrf.fs, "panel_letter", record_letter)
+    legends = {}
+    save = mrf.fs.save
+
+    def record_legends(fig, out_dir, stem):
+        found = list(fig.legends) + [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
+        legends[stem] = [t.get_text() for lg in found for t in lg.get_texts()]
+        return save(fig, out_dir, stem)
+    monkeypatch.setattr(mrf.fs, "save", record_legends)
     out, side, tables = tmp_path / "figs", tmp_path / "raw_summary.json", tmp_path / "tables"
     assert mrf.main(["--fresh-root", str(fresh), "--distances", str(dist), "--training-distances", str(tdist),
                      "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
@@ -199,6 +207,16 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert "\\tbd" in tex and "upper bound" in tex
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
     assert letters == list("abcd") * 2
+    # legends: the marks and the colour key on the row (both layouts), the backbones and the band on the step panels
+    shown = [g for g in ("hard", "medium", "easy") if s["groups"][g]["n"]]      # two arenas: medium only
+    assert shown == ["medium"]
+    for stem in ("raw_row", "raw_row_grid"):
+        for text in ["zero-shot", "after 8k updates", "reconstruction upper bound",
+                     "training maps (in distribution)", "zero-shot gap to the upper bound:"] + shown:
+            assert text in legends[stem], (stem, text)
+        assert not {"hard", "easy"} & set(legends[stem])               # an empty group gets no swatch
+    for stem in ("raw_fig3a_psnr", "raw_fig3a_lpips"):
+        assert {"U-Net", "PixArt-α", "SD 3.5", "train vs train $d$"} <= set(legends[stem]), stem
     # the numbers the text waits on: counts and medians with arena-bootstrap intervals, provisional until the grid
     t = s["text_numbers"]
     assert t["provisional"] is True and t["pending"]["forgetting"] and t["pending"]["gain_step"]
