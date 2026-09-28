@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-28T10:54:36-04:00",
+ "generated_at": "2026-09-28T10:59:39-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1276,7 +1276,18 @@
     250
    ],
    "censored": 0,
-   "gpu_hours_headline": 1.0991523875130547,
+   "gpu_hours_headline_by_card": {
+    "A4000": {
+     "median": 1.0991523875130547,
+     "n": 4,
+     "arenas": [
+      6,
+      7,
+      8,
+      16
+     ]
+    }
+   },
    "decoder": "tuned",
    "decoder_identity": "sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646",
    "g_train_source": "unet200k_ema_tuned",
@@ -1323,7 +1334,18 @@
     4000
    ],
    "censored": 0,
-   "gpu_hours_headline": 0.8310704880952835,
+   "gpu_hours_headline_by_card": {
+    "A6000": {
+     "median": 0.8310704880952835,
+     "n": 4,
+     "arenas": [
+      6,
+      7,
+      8,
+      16
+     ]
+    }
+   },
    "decoder": "tuned",
    "decoder_identity": "sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646",
    "g_train_source": "unet200k_ema_tuned",
@@ -1402,7 +1424,27 @@
     150
    ],
    "censored": 0,
-   "gpu_hours_headline": 0.8759480004178153,
+   "gpu_hours_headline_by_card": {
+    "A6000": {
+     "median": 0.8759480004178153,
+     "n": 13,
+     "arenas": [
+      1,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17
+     ]
+    }
+   },
    "decoder": "tuned",
    "decoder_identity": "sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646",
    "g_train_source": "pixart200k_ema_tuned",
@@ -1466,7 +1508,28 @@
     250
    ],
    "censored": 0,
-   "gpu_hours_headline": 2.3291167058878477,
+   "gpu_hours_headline_by_card": {
+    "A4000": {
+     "median": 3.3435582674211926,
+     "n": 4,
+     "arenas": [
+      9,
+      11,
+      13,
+      14
+     ]
+    },
+    "A6000": {
+     "median": 1.3302527933981683,
+     "n": 4,
+     "arenas": [
+      6,
+      7,
+      8,
+      16
+     ]
+    }
+   },
    "decoder": "tuned",
    "decoder_identity": "sha256:a8d22f2af42b10dd322ce0fa823403cedbe350b6375150d2e9a22a600add1d05",
    "g_train_source": "sd35_200000",

@@ -118,6 +118,8 @@ def export(tmp_path):
             f.write("\n".join(json.dumps(r) for r in rows) + "\n")
         with open(run / "log.jsonl", "w") as f:
             f.write(json.dumps({"event": "start", "world": 1, "time": 0.0}) + "\n" +
+                    json.dumps({"event": "certificate", "line": "ADAPT_CERTIFICATE seed=0 source=/sata2/x/041-pixart-"
+                                                                "nexttic/snap_0200000.pt world=1"}) + "\n" +
                     json.dumps({"event": "checkpoint", "step": 4000, "time": 5400.0}) + "\n")
     # the U-Net's full fine-tune on arena 6: its 4k read only (its step-0 checkpoint went before scoring), from the
     # same checkpoint as the U-Net's 8k-grid LoRA runs (whose configs sit beside them)
@@ -341,6 +343,23 @@ def test_the_raw_set_switches_sd35_to_200k_through_its_fine_tuned_decoder(tmp_pa
     sd35 = s["blocks"]["sd35_lora"]
     assert sd35["g_train_source"] == "sd35_200000" and sd35["g_train"] == pytest.approx(28.0 - (22.45 - 0.4))
     assert sd35["budget_final"] is True
+
+
+def test_gpu_hours_are_reported_per_card_and_never_as_one_median():
+    # SD 3.5's arenas trained on two cards (1.33 h on an A6000, 3.35 h on an A4000): one median would be neither
+    def arena(hours, card):
+        return {"grid": [0, 4000], "gpu_hours": {} if hours is None else {"4000": hours}, "card": card,
+                "reads": {st: {"quantity": "raw", "psnr": 20.0 + st / 4000, "lpips": 0.3, "upper": 26.0}
+                          for st in (0, 4000)}}
+    data = {6: arena(1.33, "A6000"), 7: arena(1.34, "A6000"), 9: arena(3.38, "A4000"), 11: arena(3.34, "A4000"),
+            13: arena(3.35, "A4000"), 16: arena(2.0, None), 17: arena(None, "A6000")}
+    b = mrf.block_summary(data, [6, 7, 9, 11, 13, 16, 17], 3.0, "half_excess_gap", 4000)
+    assert "gpu_hours_headline" not in b
+    by = b["gpu_hours_headline_by_card"]
+    assert by["A6000"] == {"median": pytest.approx(1.335), "n": 2, "arenas": [6, 7]}     # 17 has no log time
+    assert by["A4000"] == {"median": pytest.approx(3.35), "n": 3, "arenas": [9, 11, 13]}
+    assert by["unknown"] == {"median": pytest.approx(2.0), "n": 1, "arenas": [16]}
+    assert list(by) == ["A4000", "A6000", "unknown"]
 
 
 def test_a_full_fine_tune_without_its_step_0_read_borrows_the_lora_one_only_from_the_same_checkpoint():
@@ -574,7 +593,8 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     blocks = s["blocks"]
     assert blocks["pixart_lora"]["quantity"] == "raw" and blocks["pixart_lora"]["decoder"] == "tuned"
     assert blocks["pixart_lora"]["budget_final"] is True and blocks["pixart_lora"]["budget_middle"] == [4000]
-    assert blocks["pixart_lora"]["gpu_hours_headline"] == pytest.approx(1.5)
+    assert blocks["pixart_lora"]["gpu_hours_headline_by_card"] == {
+        "A6000": {"median": pytest.approx(1.5), "n": 2, "arenas": [6, 9]}}
     # SD 3.5's own fine-tuned decoder has no training-map read: no in-distribution gap and no budget, never the stock
     # decoder's gap (whose upper bound is another decoder's)
     sd35 = blocks["sd35_lora"]

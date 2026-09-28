@@ -151,6 +151,20 @@ def test_gpu_hours_to_a_step_come_from_the_training_log():
     assert ra.gpu_hours(log)["4000"] == pytest.approx(2.2)
 
 
+def certificate(source):
+    return {"event": "certificate", "line": f"ADAPT_CERTIFICATE git=abc seed=0 map=arenas13_map07 source={source} "
+                                            "source_step=200000 source_weights=ema world=1"}
+
+
+def test_the_card_a_run_trained_on_comes_from_the_server_its_certificate_names():
+    # Spiderman's /sata2 holds RTX A6000s, Superman's /home/rohan RTX A4000s; GPU-hours on the two are not one number
+    assert ra.run_card([certificate("/sata2/data/rnagabhi/doom/results_spiderman/042-sd35-nexttic/snap_0200000.pt")]) \
+        == "A6000"
+    assert ra.run_card([certificate("/home/rohan/Doom/data/results_042/snap_0200000.pt")]) == "A4000"
+    assert ra.run_card([certificate("/scratch/elsewhere/snap_0200000.pt")]) is None
+    assert ra.run_card([{"event": "start", "world": 1, "time": 0.0}]) is None          # no certificate
+
+
 def test_runs_group_into_blocks_with_the_8k_grid_preferred_for_the_u_net(tmp_path):
     ref = {7: {"upper": 27.0, "persist_lpips": 0.20, "copy_psnr_dec": 21.0},
            16: {"upper": 26.0, "persist_lpips": 0.25, "copy_psnr_dec": 20.0}}
@@ -159,7 +173,7 @@ def test_runs_group_into_blocks_with_the_8k_grid_preferred_for_the_u_net(tmp_pat
     for arena in (7, 16):
         write_run(root, f"pixart200k_arenas13_map{arena:02d}_r16_k8_s0",
                   [row(s, heldout_B_stock=-0.01 * s / 4000, heldout_C_stock=4.0 - s / 4000) for s in (0, 250, 4000)],
-                  log=log)
+                  log=log + [certificate("/sata2/x/041-pixart-nexttic/snap_0200000.pt")] * (arena == 7))
     write_run(root, "unet200k_arenas13_map16_r0_k8_s0", [row(s, heldout_A_stock=0.1 * s / 250) for s in (0, 250)])
     write_run(root, "unet200k_arenas13_map07_r16_k8_s0", [row(0, heldout_A_stock=1.0)])
     write_run(root, "unet200k_arenas13_map07_r16_k8_s0_g8k", [row(0, heldout_A_stock=2.0)])
@@ -177,6 +191,7 @@ def test_runs_group_into_blocks_with_the_8k_grid_preferred_for_the_u_net(tmp_pat
     again = ra.load_blocks(str(root), {"pixart": {"stock": ref}, "unet": {"stock": ref}})
     assert again["pixart_lora"]["arenas"][7]["source"] == ("snap_0200000.pt", "ema")    # the file name, any server
     assert r["grid"] == [0, 250, 4000] and r["gpu_hours"]["4000"] == pytest.approx(1.0)
+    assert r["card"] == "A6000" and px["arenas"][16]["card"] is None                 # 16's log has no certificate
     assert r["reads"][4000]["quantity"] == "raw" and r["reads"][4000]["psnr"] == pytest.approx(27.0 - 3.0)
     assert blocks["unet_lora"]["arenas"][7]["run"].endswith("_g8k")          # the 8k grid over the base run
     assert blocks["unet_full"]["arenas"][16]["reads"][250]["quantity"] == "dec"

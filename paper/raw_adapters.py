@@ -30,7 +30,9 @@ per-window file of that step (`step_files`), in order:
 4. `row`, decoded: PSNR = decoded copy-last's PSNR + A (`heldout_A_<decoder>`), no LPIPS.
 
 **GPU-hours** to a step (`gpu_hours`): the training log's checkpoint time at that step minus its start, times the
-number of processes.
+number of processes. They depend on the card, so every arena records the one it trained on (`run_card`): the server
+whose path its certificate's source checkpoint has (Spiderman's `/sata2/` holds RTX A6000s, Superman's `/home/rohan/`
+RTX A4000s).
 """
 import csv
 import glob
@@ -50,6 +52,8 @@ RUN_RE = re.compile(r"^(?P<source>[a-z0-9_]+?)_(?P<set>arenas\d+)_map(?P<map>\d+
                     r"(?P<seed>\d+)(?:_(?P<variant>\w+))?$")
 BACKBONE_PREFIXES = (("unet", "unet"), ("pixart", "pixart"), ("sd35", "sd35"))
 PREFERRED_VARIANTS = ("g8k", "")                 # the 8k grid over the base recipe; other variants are recipe tests
+SERVER_CARDS = (("/sata2/", "A6000"), ("/home/rohan/", "A4000"))    # Spiderman, Superman (CLAUDE.md)
+SOURCE_RE = re.compile(r"\bsource=(\S+)")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -214,6 +218,14 @@ def gpu_hours(events):
             if e.get("event") == "checkpoint" and isinstance(e.get("time"), (int, float)) and "step" in e}
 
 
+def run_card(events):
+    """The card a run trained on ("A6000", "A4000"), from the server its certificate's source checkpoint lives on;
+    None when the log has no certificate or names no known server."""
+    line = next((e.get("line", "") for e in events if e.get("event") == "certificate"), "")
+    m = SOURCE_RE.search(line)
+    return next((card for prefix, card in SERVER_CARDS if m and m.group(1).startswith(prefix)), None)
+
+
 def _live_rows(path, weights="live"):
     with open(path) as f:
         rows = [json.loads(line) for line in f if line.strip()]
@@ -251,8 +263,9 @@ def run_source(run_dir):
 
 def load_blocks(adapt_root, refs, k=8, seed=0):
     """{"<backbone>_<kind>": {backbone, kind, decoder, identity, arenas: {arena: {run, decoder, identity, grid,
-    reads, gpu_hours, source}}}} over the eight-episode, seed-0 runs under `adapt_root` (the block's decoder "mixed"
-    when its arenas differ; `source` from `run_source`); `refs` is {backbone: {decoder: {arena: reference}}}."""
+    reads, gpu_hours, card, source}}}} over the eight-episode, seed-0 runs under `adapt_root` (the block's decoder
+    "mixed" when its arenas differ; `card` from `run_card`, `source` from `run_source`); `refs` is {backbone: {decoder:
+    {arena: reference}}}."""
     runs = {}
     for name in sorted(os.listdir(adapt_root)) if os.path.isdir(adapt_root) else []:
         meta = run_meta(name)
@@ -276,14 +289,15 @@ def load_blocks(adapt_root, refs, k=8, seed=0):
         reads = {s: rd for s, rs in by_step.items() for rd in [step_read(rs, run_dir, decoder, ref, s)] if rd}
         grid = sorted(int(s) for s in (next(iter(by_step.values()))[0].get("grid") or by_step))
         log_path = os.path.join(run_dir, "log.jsonl")
-        hours = {}
+        events = []
         if os.path.exists(log_path):
             with open(log_path) as f:
-                hours = gpu_hours([json.loads(line) for line in f if line.strip()])
+                events = [json.loads(line) for line in f if line.strip()]
         block = blocks.setdefault(f"{backbone}_{kind}", {"backbone": backbone, "kind": kind, "decoder": decoder,
                                                          "identity": identity, "arenas": {}})
         if block["decoder"] != decoder:
             block["decoder"] = "mixed"
         block["arenas"][arena] = {"run": name, "decoder": decoder, "identity": identity, "grid": grid, "reads": reads,
-                                  "gpu_hours": hours, "source": run_source(run_dir)}
+                                  "gpu_hours": gpu_hours(events), "card": run_card(events),
+                                  "source": run_source(run_dir)}
     return blocks

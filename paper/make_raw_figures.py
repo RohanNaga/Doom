@@ -511,8 +511,8 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
     """One per-backbone block of Table 2: over the `wanted` arenas it reports (`split_arenas`), the medians of scene
     PSNR and LPIPS at 0, the headline and the check step (None when the block's grid stops before it), the upper
     bound, the budget (final only when every arena's grid reads are raw), the quantity the reads are in
-    (`raw_adapters.step_read`), the arenas left out as decoded only, and the median GPU-hours to the headline.
-    `arenas_data` is {arena: {grid, reads: {step: read}, gpu_hours}}."""
+    (`raw_adapters.step_read`), the arenas left out as decoded only, and the median GPU-hours to the headline per card
+    (`gpu_hours_by_card`). `arenas_data` is {arena: {grid, reads: {step: read}, gpu_hours, card}}."""
     present, decoded_only, in_progress = split_arenas(arenas_data, wanted, headline, check)
 
     def get(a, step, key):
@@ -532,7 +532,6 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
             continue
         threshold = budget_threshold(rule, reads[0]["psnr"], upper_of(a), g_train)
         budgets.append(budget_step([(st, reads[st]["psnr"]) for st in grid], threshold))
-    hours = [arenas_data[a].get("gpu_hours", {}).get(str(headline)) for a in present]
     # scored only at 0 and the headline: a budget is "by the headline" or "beyond it", nothing finer
     coarse = bool(present) and all({st for st in arenas_data[a]["grid"] if st > 0} == {headline} for a in present)
     return {"n": len(present), "n_wanted": len(wanted), "wanted": list(wanted), "arenas": present,
@@ -549,7 +548,20 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
             "budgets": {str(a): b for a, b in zip(present, budgets)} if final else None,
             "budget_middle": middle_reads(budgets) if final else None,
             "censored": sum(1 for b in budgets if b is None) if final else None,
-            "gpu_hours_headline": median(hours)}
+            "gpu_hours_headline_by_card": gpu_hours_by_card({a: arenas_data[a] for a in present}, headline)}
+
+
+def gpu_hours_by_card(arenas_data, step):
+    """{card: {median, n, arenas}} of the GPU-hours to `step` over the arenas whose log has that step, grouped by the
+    card each trained on ("unknown" when the log names none), cards sorted. Never one median over two cards: the SD 3.5
+    LoRA took 1.33 h to 4k on an A6000 and 3.33 to 3.38 h on an A4000."""
+    groups = {}
+    for a, d in sorted(arenas_data.items()):
+        h = (d.get("gpu_hours") or {}).get(str(step))
+        if h is not None:
+            groups.setdefault(d.get("card") or "unknown", []).append((a, h))
+    return {card: {"median": median([h for _, h in v]), "n": len(v), "arenas": [a for a, _ in v]}
+            for card, v in sorted(groups.items())}
 
 
 def block_label(name, b, wanted_all):
@@ -1108,7 +1120,7 @@ def main(argv=None):
 
     unet_hours = loaded.get("unet_lora", {}).get("arenas", {})
     unet_data = {m: {"grid": list(GRID), "gpu_hours": unet_hours.get(m, {}).get("gpu_hours", {}),
-                     "source": unet_hours.get(m, {}).get("source"),
+                     "card": unet_hours.get(m, {}).get("card"), "source": unet_hours.get(m, {}).get("source"),
                      "reads": {st: {"quantity": "raw", "psnr": p, "lpips": lp, "upper": adaptation[m]["upper_bound"]}
                                for st, p, lp in zip(t["steps"], t["psnr"], t["lpips"])}}
                  for m, t in trajectories.items()}
