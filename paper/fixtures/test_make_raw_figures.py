@@ -105,6 +105,18 @@ def test_the_half_ceiling_budget_is_the_first_read_past_halfway_and_censored_oth
     assert mrf.half_ceiling_budget(18.0, [(4000, 20.0), (8000, 21.9)], 26.0) is None
 
 
+def test_arenas_are_coloured_by_their_group_and_the_key_uses_the_same_three_shades():
+    from matplotlib import colors
+    groups = [("hard", [7, 11, 14, 15]), ("medium", [8, 9]), ("easy", [16])]
+    colour_of, key = mrf.group_colours(groups)
+    assert [name for name, _ in key] == ["hard", "medium", "easy"]
+    shade = dict(key)
+    assert colour_of[7] == colour_of[14] == colour_of[15] == shade["hard"]         # one shade per group, as keyed
+    assert colour_of[8] == shade["medium"] and colour_of[16] == shade["easy"]
+    lum = {g: sum(colors.to_rgb(c)) for g, c in key}
+    assert lum["hard"] < lum["medium"] < lum["easy"]                                # dark = hard
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)

@@ -31,10 +31,10 @@ censored arena above every crossing (`make_adapt_figures.censored_median_entry`)
 a raw read the table prints the budget cells as \\tbd and the summary marks the budgets provisional.
 
 **Groups and colours** (the same decision). The arenas sorted by G0, largest first, split into hard, medium and easy
-(4, 5, 4); the merged row colours each arena by G0 on the adapter's blue ramp, dark = largest. Zero-shot PSNR
-itself (`--group-by zero_shot_psnr`) tracks persistence's PSNR more than the shift (the paper owner's check).
-Table 2's candidate (`adapt_groups.tex`) gives each group's medians and the full fine-tune column's comparator
-arenas.
+(4, 5, 4); the merged row colours each arena by its group, three shades of the adapter's blue ramp, dark = hard.
+Zero-shot PSNR itself (`--group-by zero_shot_psnr`) tracks persistence's PSNR more than the shift (the paper
+owner's check). Table 2's candidate (`adapt_groups.tex`) gives each group's medians and the full fine-tune
+column's comparator arenas.
 
 **Outputs.** `<out-dir>/raw_*.pdf` and 600 dpi PNGs at the slot sizes in `SIZES`; `<tables-dir>/adapt_groups.tex`;
 `--summary`: every number drawn, the step checks, the counts, the inputs' sha256.
@@ -289,6 +289,17 @@ def group_arenas(values, higher_is_harder=False):
         out.append((name, sorted(order[i:i + k])))
         i += k
     return out
+
+
+GROUP_SHADES = {"hard": 0.0, "medium": 0.5, "easy": 1.0}      # positions on the adapter's blue ramp
+
+
+def group_colours(groups):
+    """({arena: colour}, [(group, colour)]): one shade of the adapter's blue ramp per group, dark = hard, so a
+    three-swatch key names every mark exactly."""
+    shade = {g: fs.ramp_colour(GROUP_SHADES[g], 0.0, 1.0) for g in GROUP_SHADES}
+    return ({m: shade[name] for name, members in groups for m in members},
+            [(name, shade[name]) for name, members in groups if members])
 
 
 def group_stats(groups, per):
@@ -623,18 +634,15 @@ def main(argv=None):
         harder, key_name = True, "zero-shot gap to the reconstruction upper bound (dB)"
     else:
         key_of, harder, key_name = dict(z0), False, "zero-shot raw scene PSNR (dB)"
-    ease = {m: (-v if harder else v) for m, v in key_of.items()}          # low = hard, as the ramp reads it
-    lo, hi = min(ease.values()), max(ease.values())
-
-    def colour_of(m):
-        return fs.ramp_colour(ease[m], lo, hi)                           # dark = hardest
+    ease = {m: (-v if harder else v) for m, v in key_of.items()}          # low = hard
     named = (min(complete, key=lambda m: ease[m]), max(complete, key=lambda m: ease[m])) if complete else ()
     groups = group_arenas({m: key_of[m] for m in complete}, higher_is_harder=harder)
-    # each group's swatch is the colour of its middle arena by the key (a colour the row draws), a tie between two
-    # middle arenas going to the group's own end: the harder for hard, the easier otherwise
-    key_colours = [(name, colour_of(sorted(members, key=lambda m: ease[m])[
-                        (len(members) - 1) // 2 if name == "hard" else len(members) // 2]))
-                   for name, members in groups if members]
+    # one shade per group, so the key's three swatches are exactly the marks' colours (the paper owner's check:
+    # a continuous ramp keyed by three swatches made two hard arenas read as medium)
+    shade_of, key_colours = group_colours(groups)
+
+    def colour_of(m):
+        return shade_of.get(m, fs.BACKBONES["adapter"].colour)
     for layout in ("row", "grid"):
         written += fig_row(arenas, zero[PRIMARY], ad8, ceilings, level, trajectories, colour_of, named, a.out_dir,
                            layout=layout, key_colours=key_colours)
