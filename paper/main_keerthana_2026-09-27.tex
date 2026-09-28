@@ -1,0 +1,225 @@
+\documentclass{article}
+\usepackage[preprint]{corl_2026} % submission: \usepackage{corl_2026}, which anonymises the authors; final: [final]
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+\newif\ifdraftmarks \draftmarkstrue
+\newif\ifwithappendix \withappendixfalse % submission: body plus references; \withappendixtrue for the camera-ready or an anonymous supplement
+\newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplementary material\fi}
+\newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[tbd]}\else[tbd]\fi}
+\newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[#1]}\else[#1]\fi}
+\newcommand{\prov}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{#1}\else#1\fi}
+% \figslot{file}{width}{height}{what it will show}: the figure when its file exists, a labelled box otherwise
+\newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][\dimexpr#3-2\fboxsep-2\fboxrule\relax][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
+
+\title{DoomShift: Efficient Adaptation of World Models to Domain Shifts}
+
+\author{
+  Rohan Nagabhirava\\
+  Carnegie Mellon University\\
+  \texttt{rnagabhi@andrew.cmu.edu}
+  \And
+  Keerthana Chirumamilla\\
+  Carnegie Mellon University\\
+  \texttt{kchiruma@andrew.cmu.edu}
+  \And
+  Changliu Liu\\
+  Carnegie Mellon University\\
+  \texttt{cliu6@andrew.cmu.edu}
+}
+
+\begin{document}
+\maketitle
+
+%===============================================================================
+
+\begin{abstract}
+World models have become capable simulators, but they are tested primarily in the domain they were trained on.
+A small domain shift, a new arena of the same game, makes their outputs drift and lose realism, though the physics is unchanged and only the situation differs.
+DoomShift asks how quickly and cheaply a world model can be adapted across such a shift: one Doom level pack has 17 arenas; we train three pretrained diffusion backbones on four and score each of the other thirteen against persistence (the last frame copied forward), zero-shot for all three and after adaptation for the U-Net.
+Off the training maps the U-Net still beats persistence on every arena, but its advantage shrinks from 5.1~dB in distribution to 1.1--2.9~dB (median 2.0) and its LPIPS is worse than persistence's on 13 of 13, while its turn response survives.
+Rank-16 adapters trained on eight episodes close half of an arena's gap to the in-distribution advantage within 4k updates on 9 of 13 arenas, recover a median 1.8~dB and beat persistence perceptually on 11 of 13.
+\end{abstract}
+
+\keywords{World models, Domain shift, Few-shot adaptation}
+
+%===============================================================================
+
+\section{Introduction}
+\label{sec:intro}
+
+Game world models now render playable worlds from pixels and controls.
+GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond} and Matrix-Game~2 scales the recipe to open worlds~\citep{he2025matrixgame2}.
+Each of these models is evaluated only in the environment it was trained on: the reported score is a held-out trajectory drawn from its own training scenes and none has been shown to generalize to a new environment within the same game.
+This holds even for MultiGen, which trains a single Doom model across 100 procedurally generated maps with a pre-trained agent~\citep{po2026multigen}: it reports PSNR, SSIM and LPIPS only on its training distribution, with no map held out for evaluation.
+
+A learned simulator is useful only where it is faithful and a robot or an agent moving to a new room, level or workspace needs to know how much of its world model still holds there and what it costs to make the rest hold.
+Game worlds let us pose this question with the engine held fixed and only the environment changed: a new arena of the same game preserves the physics and the controls exactly and only the layout, textures and lighting differ.
+Yet unchanged dynamics alone do not guarantee a faithful render: pretrained video and world models are typically moved to a new domain only through a further full fine-tune~\citep{gao2025adaworld} or a dedicated adapter on the frozen backbone~\citep{rigter2024avid} and a model trained on a handful of maps tends to fall back on the appearance it already knows once the surroundings change.
+Training a separate model per map is prohibitively costly, so the open question is how cheaply post-training can close this gap once it appears: when a world model meets a new arena of the same game, what does it retain, what does it lose and how many episodes and updates does it take to relearn the rest.
+
+Our paper addresses these concerns and contributes the following:
+\begin{itemize}\setlength{\itemsep}{0pt}
+\item \textbf{DoomShift}, a benchmark that turns this question into a concrete testbed: 17 arenas of one Doom level pack, three pretrained diffusion backbones trained on four of them and the remaining thirteen scored both zero-shot and after post-training. We release every-tic recordings of \prov{6,000} episodes on the four training maps and 24 on each of the 13 unseen arenas (this paper trains on 2,000 of them), along with the three trained models, the decoder fine-tune and the adapter path (Figure~\ref{fig:method}; link withheld for review).
+\item A post-training recipe that adapts a frozen model to a new arena from just eight episodes with a small adapter, together with the per-arena protocol that scores the budget it requires.
+\item Evidence that this generalizes without heavy retraining: half of the gap to the training maps is closed on 9 of 13 unseen arenas within 4k updates, most of it within 250 and a perceptual advantage over persistence (the last frame copied forward) is restored on 11 of 13 (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{}).
+\item A characterization of the shift and what predicts it: on unseen arenas the PSNR advantage over persistence shrinks and the perceptual margin changes sign for all three backbones, while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift}). The model's own zero-shot skill score turns out to be the strongest predictor of where an arena ends up, while the registered distances between recordings order nothing.
+\end{itemize}
+
+\begin{figure}[t]
+\centering
+\figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, two rows}
+\caption{On an unseen arena the U-Net keeps moving and firing but renders the arena in training-map masonry; eight episodes restore it. Left, training maps 5 and 3 (in distribution); right, unseen arena 7 zero-shot and after 4k adapter updates on 8 episodes. Selected windows, rolled out 16 tics past the context frame with the row's button held throughout; fine-tuned decoder, raw ground truth, scene PSNR; persistence scores 16 to 19~dB on these windows.}
+\label{fig:teaser}
+\end{figure}
+
+%===============================================================================
+
+\section{Prior work}
+\label{sec:related}
+
+Most Doom and game world models are trained on a set of maps and tested on maps from that same set. Papers that test on maps the model never trained on exist, but they keep aside something other than a map from the same game: a new physical body for the agent (concurrent work~\citep{chen2026xeworld}), a whole new game or environment~\citep{rigter2024avid,gao2025adaworld}, or a new building~\citep{koh2021pathdreamer}. Doom itself is tested this way, but only for the agents that play it~\citep{lample2017arnold,wydmuch2018vizdoom}, not for the world models built to simulate it. No prior paper tests a Doom world model on a map from its own game that it never trained on.
+
+We take our method from two papers that move a pretrained video model into a new setting. AVID shows that training a small adapter on top of a frozen model is enough to do this~\citep{rigter2024avid}; Vista uses the same frozen-model-plus-adapter idea to add action control rather than move the model to new content~\citep{gao2024vista}. Neither tests this on a map kept aside from the same game and neither reports what adapting actually costs: how many episodes, how many training updates, for one new scene. AdaWorld solves a similar problem with a short full fine-tune instead of a small adapter~\citep{gao2025adaworld}; we use it as the full-fine-tune comparison our own method should eventually be measured against. DoomShift combines what none of these do: maps kept aside from within a single game, with the adaptation cost measured directly. As our comparison for held-out maps we use persistence, which is using the last frame forward, the standard reference in video prediction~\citep{mathieu2016deep,lotter2017prednet,villegas2019fidelity} that game world models have dropped in favor of raw PSNR, a number that mostly measures how still a video is rather than how good the prediction is. We also compare every score to the reconstruction upper bound: encoding and decoding the true next frame and measuring the quality lost in that round trip alone~\citep{zheng2023occworld,karypidis2024dinoforesight}, which tells us how much error is the model's fault versus a limit built into its own decoder.
+%===============================================================================
+
+\section{Method}
+\label{sec:bench}
+
+\textbf{Data.} We collect the data for this research by running experiments with the Arnold agent~\citep{lample2017arnold} through ViZDoom~\citep{kempka2016vizdoom} deathmatches: free-for-all matches where each player scores by killing the others. Arnold's level pack has 17 arenas. A level pack is a single Doom WAD file that bundles a set of maps and each arena is one of those maps, with its own layout, textures and lighting. For every episode, we let Arnold play against 8 bots for 150 seconds. We record every tic, the engine's 1/35~s simulation step, capturing a 320$\times$240 frame and the 19 buttons Arnold pressed. We split the 17 arenas into two groups. Four arenas (2 to 5) are our training maps: we record 500 episodes on each, then hold out 25 validation episodes per map (512 windows) for scoring. The other thirteen arenas (1, 6 to 17) are never trained on: we record 24 new episodes on each, using 16 for adaptation and holding out 8 (256 windows) for scoring. In total we collect 2,412 episodes, about 96 hours of play and about 12.1 million frames.
+
+\textbf{Three backbones, one training recipe.} We pick three pretrained backbones to ask three different questions. Our anchor is the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters): it is GameNGen's backbone~\citep{valevski2024gamengen}, so our in-distribution numbers come from the same network as the published Doom result. To test how different architectures perform at fixed scale, we swap in PixArt-$\alpha$~\citep{chen2023pixart}, a 628M transformer in the same latent space instead of a U-Net; architecture turns out not to change what survives the shift (in distribution their PSNR and $A$ differ by under 0.1~dB; on unseen arenas their median $A$ falls to 2.03 and 2.19~dB and both lose to persistence in LPIPS on all 13; Table~\ref{tab:unseen}). To test the performace with scaling of the model, we use SD~3.5 Medium~\citep{esser2024sd3}, a widely adopted open MMDiT (2.27B parameters, 16-channel latents); its latent space changes along with its scale, so this step compares pretrained packages rather than architectures.
+
+We turn all three into next-tic world models under one shared recipe (Figure~\ref{fig:method}). We give each model 32 context tics so it can see motion, train with $v$-prediction~\citep{salimans2022progressive} for stable training across noise levels and add context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors. We train each backbone for 200k updates at batch size 32, a step count we match across backbones, keep an EMA at 0.9999 in fp32 (a bf16 EMA underflows and freezes) and sample with 10-step DDIM~\citep{song2021ddim} to keep evaluation cheap (\appref{app:protocol}).
+
+\textbf{Metrics} We score every predicted frame $\hat z$ against four questions: is it more accurate than just copying the last frame forward, does it look more realistic than that copy, how far is it from the best the decoder could possibly render and does it turn the right way when we mirror the controls? We compute each score using the ground-truth next frame $x$ (latent $z$), the last context frame $x_\text{last}$ (latent $z_\text{last}$) and the decoder $D$.
+
+For accuracy, we compute the \emph{decoded advantage} $A=\mathrm{PSNR}(D(\hat z),D(z))-\mathrm{PSNR}(D(z_\text{last}),D(z))$, a paired difference in the spirit of Genie's $\Delta$PSNR~\citep{bruce2024genie}, but using persistence rather than random actions as the reference. For realism, we compute the \emph{perceptual margin} $M=\mathrm{LPIPS}(D(\hat z),x)-\mathrm{LPIPS}(x_\text{last},x)$~\citep{zhang2018lpips}, which is negative exactly when the prediction looks better than the copy. For distance from the decoder's ceiling, we compute the \emph{gap} $G=\mathrm{PSNR}(D(z),x)-\mathrm{PSNR}(D(\hat z),x)$ to the reconstruction upper bound. For turning, we compute the \emph{directional} score: the fraction of turning windows whose predicted view turns the other way once we swap left and right in the newest control.
+
+We also ask a fifth question before any decoding happens: how good is the model in its own latent space? We answer it with the \emph{zero-shot latent skill score} $S_0$, $10\log_{10}$ of persistence's latent MSE over the model's. We score $M$ and $G$ against the raw frame and restrict pixel scores to the scene rows 0 to 207, since persistence copies the HUD almost exactly. We use $A_\text{train}$, the advantage on the training maps (5.06~dB, episode-bootstrap interval 4.75 to 5.38), as the in-distribution reference every arena is measured against, not as an arena's own upper bound.
+
+\textbf{Training setup.} We train each backbone on a single RTX A6000 (49~GB) in bf16 with fused AdamW, reaching 1.8 updates per second for the U-Net, 1.4 for PixArt-$\alpha$ and 0.53 for SD~3.5. We train each adapter on a single RTX A4000 (16~GB), at about 1.0 updates per second.
+
+
+\textbf{Decoder.} Every backbone is trained on latents from its frozen encoder, so the latent space is the contract between encoder, world model and decoder: changing the encoder would move every training target and invalidate the trained backbones, the adapters and the reconstruction upper bound.
+The decoder only renders: it sits after the model and in $A$ its errors are shared by the prediction, the rendered ground truth and persistence, so fine-tuning it changes what we can see, not what the model knows.
+We fine-tune the SD~1 decoder $D$ on training-map frames paired with their frozen-encoder latents, using MSE plus 0.1~LPIPS for 3,486 updates and gating it on held-out training-map frames (\appref{app:protocol}); it never sees an unseen arena.
+It raises the scene reconstruction from 26.9 to 28.4~dB and lowers its LPIPS from 0.092 to 0.060, yet moves $A$ by only 0.2~dB zero-shot and 0.7~dB after adaptation, so the shift lives in the model, not the renderer; the LPIPS term is there because MSE alone more than triples scene LPIPS (0.092 to 0.339).
+We use it for every pixel score of the U-Net and PixArt-$\alpha$ unless stated otherwise; SD~3.5 uses its own stock decoder.
+
+\textbf{In-distribution performance.} On the training maps all three backbones beat persistence one tic ahead in PSNR and LPIPS and turn the right way ($A$ from \prov{+3.89} to +5.06~dB, directional 0.84 to 0.86 against 0.885 for the ground-truth frames; Table~\ref{tab:unseen}).
+Four tics ahead they reach 21.33, 21.29 and \prov{21.59}~dB against persistence's 19.21~dB (stock decoders, full frame; SD~3.5 at 140k).
+
+\textbf{Post-training.} To move a trained model to a new arena we keep its weights frozen and train a small adapter on a few episodes of that arena, then score the adapted model on held-out episodes at each update budget.
+For each unseen arena we adapt the U-Net 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent)~\citep{xie2023difffit}.
+We train on 8 adaptation episodes (1.1 A4000 GPU-hours per arena for 4k updates) and score the non-EMA weights at 0, 250, 500, 1k, 2k and 4k updates; forgetting ($A$ on the training maps), the directional check and a full fine-tune comparator at $2\times10^{-5}$ are in progress (\tbd{}).
+An arena's budget is the first grid point at which $A$ reaches $\tfrac12(A_0+A_\text{train})$, half of its gap from its zero-shot $A_0$; arenas that do not by the final budget of the grid are right-censored~\citep{taylor2009transfer}.
+Half of the gap in dB is not half of the error: the median gain of 1.8~dB removes 34 percent of the model's starting squared error (geometric mean over windows).
+
+\begin{figure}[t]
+\centering
+\figslot{figures/fig1_method.pdf}{\linewidth}{1.8in}{Figure 2: method overview}
+\caption{What we built: (a) the benchmark, (b) three backbones under one recipe, (c) post-training, (d) evaluation. In $A$, prediction, ground truth and persistence are all rendered by the same decoder $D$; $M$ and $G$ compare with the raw frame.}
+\label{fig:method}
+\end{figure}
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{3.2pt}
+\caption{Training maps (pooled means over windows) and unseen arenas (medians over arenas; in parentheses, arenas with $A>0$ or $M<0$), scene rows, one tic. U-Net and PixArt-$\alpha$ through the fine-tuned SD~1 decoder, SD~3.5 through its own (provisional 170k\ifdraftmarks{}, blue\fi). $A$ against the rendered ground-truth frame, the rest against the raw frame; directional pooled (ground truth 0.885, 0.892).}
+\label{tab:unseen}
+\begin{tabular}{llcccccc}
+\toprule
+Model & Maps & PSNR & LPIPS & $A$ (dB) & $M$ & $G$ (dB) & Directional \\
+\midrule
+Persistence & training & 20.95 & 0.239 & 0 & 0 & -- & 0 \\
+ & unseen & 19.75 & 0.222 & 0 & 0 & -- & 0 \\
+SD 1.4 U-Net & training & 25.20 & 0.158 & +5.06 & $-$0.081 & 3.36 & 0.855 \\
+ & unseen & 22.30 & 0.303 & +2.03 (13/13) & +0.081 (0/13) & 4.96 & 0.804 \\
+PixArt-$\alpha$ & training & 25.18 & 0.159 & +5.05 & $-$0.081 & 3.37 & 0.842 \\
+ & unseen & 22.38 & 0.285 & +2.19 (13/13) & +0.062 (0/13) & 4.71 & 0.808 \\
+SD 3.5 Medium & training & \prov{24.50} & \prov{0.146} & \prov{+3.89} & \prov{$-$0.094} & \prov{5.48} & \prov{0.850} \\
+ & unseen & \prov{21.55} & \prov{0.280} & \prov{+1.50 (13/13)} & \prov{+0.059 (0/13)} & \prov{6.98} & \prov{0.793} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%===============================================================================
+
+\section{Results}
+\label{sec:results}
+
+We report what a model loses zero-shot, what post-training recovers and with what budget and what predicts how far an arena gets.
+
+\textbf{Zero-shot: where the deficit sits.} What does a model keep and what does it lose when it meets an arena it never saw? We answer with the four scores of Section~\ref{sec:bench}. On unseen arenas the turn response survives (U-Net reversal rates 0.73 to 0.86 per arena against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
+$A$ stays positive on every arena and backbone but falls from 5.06 to a median 2.03~dB, while the decoder's scene reconstruction PSNR is 25.2 to 29.7~dB and $G$ grows from 3.4 to a median 5.0~dB.
+Nor is the perceptual sign reversal the decoder's floor: its own reconstruction LPIPS (0.05 to 0.09) is far below persistence's (0.18 to 0.28), yet the prediction's LPIPS exceeds it on 13 of 13 arenas ($M$ +0.03 to +0.17, median +0.08, against $-$0.08 in distribution; Figure~\ref{fig:shift}b).
+The three backbones lose the same things (Table~\ref{tab:unseen}, Figure~\ref{fig:shift}a): the shift looks like a property of the task, not of the architecture or the scale.
+What the model keeps is how actions act on the world: zero-shot on arena 7 the weapon fires and the view advances as in the ground truth (Figure~\ref{fig:teaser}) and the turn response holds; the loss sits mostly in the scene, whose rows fall from 27.5 to a median 24.0~dB on unseen arenas while the map-independent HUD rows move from 35.5 to 33.8~dB (U-Net, PSNR against the rendered ground truth, as in $A$).
+
+\begin{figure}[t]
+\centering
+\figslot{figures/fig2d_family_step.pdf}{2.25in}{1.5in}{Figure 3a: family step}\hfill
+\figslot{figures/tuned/fig3b_zero_shot_absolute.pdf}{3.15in}{1.5in}{Figure 3b: zero-shot absolute}
+\caption{(a) The shift is a step, not a slope: every unseen arena has a lower zero-shot skill score $S_0$ than every training map for all three backbones and among the arenas $S_0$ does not follow $d$ (Spearman $-0.05$, $-0.15$, $-0.17$). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Scene rows, one tic, 95\% episode-bootstrap intervals; filled: fine-tuned SD~1 decoder (U-Net, PixArt-$\alpha$); open: SD~3.5's own (provisional 170k).}
+\label{fig:shift}
+\end{figure}
+
+\textbf{Post-training: what it takes.} We next adapt a small subset of the U-Net's parameters on each unseen arena and ask what it takes to recover what was lost.
+Eight episodes and 4k updates raise the median $A$ from 2.04 to 3.80~dB and on average 69 percent of each arena's gain comes within 250 updates (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
+9 of 13 arenas close half of their gap, with a median budget of 1k updates [250, ${>}$4k] and 5 arenas within 500; one reaches $A_\text{train}$.
+Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
+At 4k the prediction's LPIPS is below persistence's on 11 of 13 arenas, the other two within 0.01 and the median $G$ falls from 5.0 to the in-distribution 3.4~dB.
+
+\textbf{What predicts the outcome.} The frozen model's zero-shot skill score $S_0$ tracks where an arena ends up, not how much it gains (exploratory Spearman $+0.90$ with $A$ at 4k, $+0.18$ with the gain, $-0.61$ with the budget); a frame distance does not. Before scoring any map we froze $d$, the sliced Wasserstein-2 distance between the motion-weighted cloud of a map's per-frame SD~1 latents and that of its nearest training map (\appref{app:distance}).
+It places the training maps' held-out episodes inside the train-versus-train floor (0.03 to 0.07 against 0.02 to 0.09) and every unseen arena outside it (0.12 to 0.27), but within the 13 arenas it orders nothing (Spearman $-0.22$ with $A$, $-0.35$ with the budget); two registered transition-level distances fail even the separation (\appref{app:distance}).
+
+\begin{figure}[t]
+\centering
+\figslot{figures/tuned/fig4_dots.pdf}{\linewidth}{1.4in}{Figure 4: adaptation}
+\caption{Eight episodes and 4k updates lift the median $A$ from 2.04 to 3.80~dB, most of it by 250 updates (a); 9 of 13 arenas close half of their gap to $A_\text{train}$ (b; budgets above dots; grey: censored).}
+\label{fig:adapt}
+\end{figure}
+
+\begin{table}[tb]
+\centering\footnotesize\setlength{\tabcolsep}{2pt}
+\caption{What closing the gap takes (non-EMA weights, fine-tuned decoder; brackets: 95\% arena-bootstrap intervals; ${>}$4k: censored; arena 7 is the highest-distance arena).}
+\label{tab:cost}
+\begin{tabular}{lccc}
+\toprule
+ & LoRA, 13 arenas, median & LoRA, arena 7 & Full fine-tune \\
+\midrule
+Arenas past half gap / $A_\text{train}$ by 4k & 9 [6, 12] / 1 of 13 & -- & \tbd{} \\
+Budget to half gap / $A_\text{train}$ (updates) & 1k [250, ${>}$4k] / ${>}$4k & 250 / ${>}$4k & \tbd{} / \tbd{} \\
+$A$ (dB) / $M$ / $G$ (dB) at 4k & 3.80 [3.45, 4.39] / $-$0.021 / 3.44 & 3.86 / $-$0.026 / 4.65 & \tbd{} \\
+Forgetting (dB) / directional at 4k & \tbd{} / \tbd{} & \tbd{} / \tbd{} & \tbd{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%===============================================================================
+
+\section{Future work}
+\label{sec:limits}
+
+On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and a few hundred adapter updates recover more than half of its deficit on most arenas and restore a perceptual advantage over persistence on 11 of 13.
+The claims cover 13 arenas of one level pack, one agent, one-tic scoring and mostly one seed and persistence is a weak reference where the camera moves fast.
+One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic on the full frame with stock decoders, collapses in 23 non-EMA and 9 EMA rollouts of 256 and the EMA removes checkpoint-specific collapses, not the failure mode (\appref{app:closedloop}).
+Next are other level packs and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot skill score so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
+The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own and DoomShift is a testbed for that loop.
+\label{body-end}
+
+%===============================================================================
+
+\clearpage
+\acknowledgments{\tbd}
+
+\bibliography{refs}
+
+\ifwithappendix
+\clearpage
+\appendix
+\input{appendix}
+\fi
+
+\end{document}
