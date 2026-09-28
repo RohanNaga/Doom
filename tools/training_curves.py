@@ -28,7 +28,7 @@ file's persistence PSNR is kept in the sidecar only. `series` still carries the 
   "copy-last".
 - `figA_training_curves.pdf/.png`, full width: the same with the live weights dotted beside each EMA line.
 
-A read carrying a `note` (SD 3.5's provisional 170k read from another scorer) is an open marker not joined to its
+A read carrying a `note` (SD 3.5's 200k read, scored after the periodic evaluation ended at 155k) is an open marker not joined to its
 line. Early EMA reads fall far below copy-last (the fp32 EMA at 0.9999 still averages the pretrained start for the
 first few thousand updates, 6.7 to 11.8 dB PSNR at 5k); the axis floor clips them, and every clipped read is
 printed and written to `<stem>.json` beside the figure so the caption can disclose it.

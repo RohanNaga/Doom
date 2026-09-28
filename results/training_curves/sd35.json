@@ -442,11 +442,11 @@
    "note": null
   },
   {
-   "step": 170000,
+   "step": 200000,
    "weights": "ema",
-   "psnr": 23.356793208047748,
-   "lpips": 0.12873775687330635,
-   "note": "provisional fresh-rescore home read, not a steward read"
+   "psnr": 23.44544849358499,
+   "lpips": 0.12388066911807982,
+   "note": "200k fresh_rescore home read (results/fresh_rescore/home_sd35_200000/val/metrics.json, psnr_raw), the same eval_tf.py pipeline, scored after the steward export ended at 155k"
   }
  ]
 }
