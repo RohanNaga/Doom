@@ -99,6 +99,34 @@ def test_each_read_takes_the_best_quantity_the_run_carries(tmp_path):
     assert ra.step_read(row(4000), str(tmp_path / "d"), "stock", ref) is None
 
 
+def test_a_step_takes_its_best_read_across_every_row_and_per_window_file_of_that_step(tmp_path):
+    root = tmp_path / "adapt"
+    name = "pixart200k_arenas13_map07_r16_k8_s0"
+    d = root / name
+    raw = windows(7, scene_psnr_raw_tuned=23.0, scene_lpips_raw_tuned=0.21, scene_vae_psnr_tuned=27.0)
+    dec = windows(7, scene_psnr_dec=30.0, scene_lpips_dec=0.10)                   # a guard read: stock columns only
+    write_csv(str(d / "scores" / "step0000000_live_main" / "heldout" / "per_window.csv"),
+              windows(7, scene_psnr_raw_tuned=21.0, scene_lpips_raw_tuned=0.30, scene_vae_psnr_tuned=27.0))
+    write_csv(str(d / "scores" / "step0004000_live_main" / "heldout" / "per_window.csv"), raw)
+    write_csv(str(d / "scores" / "step0004000_live_guard" / "heldout" / "per_window.csv"), dec)
+    rec = "/sata2/x/results_spiderman/adapt/" + name + "/scores/{}/heldout/per_window.csv"
+    rows = [row(0, decoders=("stock", "tuned"), grid=(0, 4000)),                    # names no per-window file
+            row(4000, decoders=("stock", "tuned"), grid=(0, 4000), pw=rec.format("step0004000_live_main")),
+            # the guard row: same configuration, scored later, its file lacks the tuned raw columns
+            {**row(4000, decoders=("stock", "tuned"), grid=(0, 4000), pw=rec.format("step0004000_live_guard")),
+             "scored_at": "t9999", "directional_correct_frac": 0.8}]
+    write_run(root, name, rows)
+    blocks = ra.load_blocks(str(root), {})
+    reads = blocks["pixart_lora"]["arenas"][7]["reads"]
+    assert reads[0]["quantity"] == "raw" and reads[0]["psnr"] == pytest.approx(21.0)      # found by the step's glob
+    assert reads[4000]["quantity"] == "raw" and reads[4000]["psnr"] == pytest.approx(23.0)
+    assert reads[4000]["path"].endswith(os.path.join("step0004000_live_main", "heldout", "per_window.csv"))
+    # the training-map guard's file in the same step directory is never taken for a held-out read
+    write_csv(str(d / "scores" / "step0008000_live_main" / "trainmap" / "per_window.csv"), raw)
+    write_run(root, name, rows + [row(8000, decoders=("stock", "tuned"), grid=(0, 4000, 8000))])
+    assert 8000 not in ra.load_blocks(str(root), {})["pixart_lora"]["arenas"][7]["reads"]
+
+
 def test_gpu_hours_to_a_step_come_from_the_training_log():
     log = [{"event": "start", "world": 1, "time": 1000.0}, {"event": "checkpoint", "step": 0, "time": 1003.0},
            {"event": "checkpoint", "step": 4000, "time": 1000.0 + 3960.0}]

@@ -11,11 +11,16 @@ recipe tests) is left out.
 **The decoder** (`pick_decoder`) is the fine-tuned one (`tuned`) when the rows carry it, else the stock one, named
 by the identity the rows record; U-Net and PixArt-alpha share the fine-tuned SD 1 decoder, SD 3.5 has its own.
 
-**A read** (`step_read`), per scored step and live weights, takes the best quantity the run carries, in order:
+**A read** (`step_read`), per scored step and live weights, takes the best quantity the run carries across every
+row of that step (the guard rows share the curve's configuration and may be scored later) and every held-out
+per-window file of that step (`step_files`), in order:
 
-1. `per-window`, raw: the per-window file the row names (found beside the run when the recorded path is a server
-   path) with the decoder's raw scene columns: the prediction against the raw frame (`scene_psnr_raw`,
-   `scene_lpips_raw`) and the reconstruction upper bound (`scene_vae_psnr`), duplicate windows left out;
+1. `per-window`, raw: a held-out per-window file with the decoder's raw scene columns: the prediction against the
+   raw frame (`scene_psnr_raw`, `scene_lpips_raw`) and the reconstruction upper bound (`scene_vae_psnr`), duplicate
+   windows left out. `score_adapt.py` writes it to `<run>/scores/step<NNNNNNN>_<weights>_<hash>/heldout/
+   per_window.csv` and records the server path in the row; the files the rows name come first (found under the run
+   when the recorded path is a server path), then any other held-out file of the step under `scores/`. The
+   training-map guard's file beside it (`.../trainmap/per_window.csv`) is never a held-out read;
 2. `row`, raw: the row's raw margin B (`heldout_B_<decoder>`) and gap C (`heldout_C_<decoder>`) with the arena's
    reference from a zero-shot read of the same windows (`zero_shot_refs`): PSNR = upper bound - C, LPIPS = raw
    persistence's LPIPS + B. The upper bound and persistence do not depend on the model, only on the decoder and the
@@ -28,6 +33,7 @@ by the identity the rows record; U-Net and PixArt-alpha share the fine-tuned SD 
 number of processes.
 """
 import csv
+import glob
 import json
 import math
 import os
@@ -109,6 +115,24 @@ def local_per_window(run_dir, recorded):
     return None
 
 
+def step_files(run_dir, rows, step=None, weights="live"):
+    """The held-out per-window files one step may read, in preference order and without repeats: those its rows
+    name (`rows` latest scored first), then any other `scores/step<NNNNNNN>_<weights>_*/heldout/per_window.csv` of
+    the step under the run, newest first."""
+    named = [p for r in rows for p in [local_per_window(run_dir, r.get("heldout_per_window"))] if p]
+    found = []
+    if step is not None:
+        pattern = os.path.join(glob.escape(run_dir), "scores", f"step{int(step):07d}_{weights}_*", "heldout",
+                               "per_window.csv")
+        found = sorted(glob.glob(pattern), key=lambda p: (-os.path.getmtime(p), p))
+    out, seen = [], set()
+    for p in named + found:
+        if os.path.realpath(p) not in seen:
+            seen.add(os.path.realpath(p))
+            out.append(p)
+    return out
+
+
 # ---------------------------------------------------------------------------------------------
 # references and reads
 # ---------------------------------------------------------------------------------------------
@@ -126,28 +150,35 @@ def zero_shot_refs(per_window_files, sfx):
     return out
 
 
-def step_read(row, run_dir, decoder, ref):
-    """One scored step's read (the module docstring's order), or None when the run carries nothing usable."""
+def step_read(rows, run_dir, decoder, ref, step=None, weights="live"):
+    """One scored step's read (the module docstring's order), or None when the run carries nothing usable. `rows`
+    is the step's rows, latest scored first (or one row); with `step` the step's other held-out files count too."""
+    rows = [rows] if isinstance(rows, dict) else list(rows)
     sfx = "" if decoder == STOCK else f"_{decoder}"
-    path = local_per_window(run_dir, row.get("heldout_per_window"))
-    if path:
-        rows = read_windows(path)
-        header = set(rows[0]) if rows else set()
-        if f"scene_psnr_raw{sfx}" in header:
-            return {"quantity": "raw", "source": "per-window", "psnr": mean_of(rows, f"scene_psnr_raw{sfx}"),
-                    "lpips": mean_of(rows, f"scene_lpips_raw{sfx}"),
-                    "upper": mean_of(rows, f"scene_vae_psnr{sfx}") or (ref or {}).get("upper"), "path": path}
-        if f"scene_psnr_dec{sfx}" in header:
-            return {"quantity": "dec", "source": "per-window", "psnr": mean_of(rows, f"scene_psnr_dec{sfx}"),
-                    "lpips": mean_of(rows, f"scene_lpips_dec{sfx}"), "upper": None, "path": path}
     ref = ref or {}
-    b, c = as_float(row.get(f"heldout_B_{decoder}")), as_float(row.get(f"heldout_C_{decoder}"))
-    if b is not None and c is not None and ref.get("upper") is not None and ref.get("persist_lpips") is not None:
-        return {"quantity": "raw", "source": "row", "psnr": ref["upper"] - c, "lpips": ref["persist_lpips"] + b,
-                "upper": ref["upper"]}
-    a = as_float(row.get(f"heldout_A_{decoder}"))
-    if a is not None and ref.get("copy_psnr_dec") is not None:
-        return {"quantity": "dec", "source": "row", "psnr": ref["copy_psnr_dec"] + a, "lpips": None, "upper": None}
+    decoded = None
+    for path in step_files(run_dir, rows, step, weights):
+        windows = read_windows(path)
+        header = set(windows[0]) if windows else set()
+        if f"scene_psnr_raw{sfx}" in header:
+            return {"quantity": "raw", "source": "per-window", "psnr": mean_of(windows, f"scene_psnr_raw{sfx}"),
+                    "lpips": mean_of(windows, f"scene_lpips_raw{sfx}"),
+                    "upper": mean_of(windows, f"scene_vae_psnr{sfx}") or ref.get("upper"), "path": path}
+        if decoded is None and f"scene_psnr_dec{sfx}" in header:
+            decoded = {"quantity": "dec", "source": "per-window", "psnr": mean_of(windows, f"scene_psnr_dec{sfx}"),
+                       "lpips": mean_of(windows, f"scene_lpips_dec{sfx}"), "upper": None, "path": path}
+    for row in rows:
+        b, c = as_float(row.get(f"heldout_B_{decoder}")), as_float(row.get(f"heldout_C_{decoder}"))
+        if b is not None and c is not None and ref.get("upper") is not None and ref.get("persist_lpips") is not None:
+            return {"quantity": "raw", "source": "row", "psnr": ref["upper"] - c, "lpips": ref["persist_lpips"] + b,
+                    "upper": ref["upper"]}
+    if decoded:
+        return decoded
+    for row in rows:
+        a = as_float(row.get(f"heldout_A_{decoder}"))
+        if a is not None and ref.get("copy_psnr_dec") is not None:
+            return {"quantity": "dec", "source": "row", "psnr": ref["copy_psnr_dec"] + a, "lpips": None,
+                    "upper": None}
     return None
 
 
@@ -171,8 +202,8 @@ def _live_rows(path, weights="live"):
 
 
 def _by_step(rows, decoder):
-    """The rows of the evaluation configuration with the most steps among those carrying the decoder's columns
-    (the latest scored on a tie), latest per step."""
+    """{step: rows, latest scored first} of the evaluation configuration with the most steps among those carrying
+    the decoder's columns (the latest scored on a tie)."""
     column = f"heldout_A_{decoder}"
     groups = {}
     for r in rows:
@@ -183,9 +214,9 @@ def _by_step(rows, decoder):
                 or any(r.get("heldout_per_window") for r in rs)] or list(groups.values())
     best = max(carrying, key=lambda rs: (len({r["step"] for r in rs}), max(str(r.get("scored_at", "")) for r in rs)))
     out = {}
-    for r in sorted(best, key=lambda r: str(r.get("scored_at", ""))):
-        out[int(r["step"])] = r
-    return out
+    for r in sorted(best, key=lambda r: str(r.get("scored_at", "")), reverse=True):
+        out.setdefault(int(r["step"]), []).append(r)
+    return dict(sorted(out.items()))
 
 
 def load_blocks(adapt_root, refs, k=8, seed=0):
@@ -212,8 +243,8 @@ def load_blocks(adapt_root, refs, k=8, seed=0):
         decoder, identity = pick_decoder(rows)
         by_step = _by_step(rows, decoder)
         ref = refs.get(backbone, {}).get(decoder, {}).get(arena)
-        reads = {s: rd for s, r in sorted(by_step.items()) for rd in [step_read(r, run_dir, decoder, ref)] if rd}
-        grid = sorted(int(s) for s in (next(iter(by_step.values())).get("grid") or by_step))
+        reads = {s: rd for s, rs in by_step.items() for rd in [step_read(rs, run_dir, decoder, ref, s)] if rd}
+        grid = sorted(int(s) for s in (next(iter(by_step.values()))[0].get("grid") or by_step))
         log_path = os.path.join(run_dir, "log.jsonl")
         hours = {}
         if os.path.exists(log_path):
