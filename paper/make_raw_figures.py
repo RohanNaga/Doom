@@ -91,7 +91,8 @@ HEADLINE_STEP = 4000                            # the paper's budget (Rohan, Sep
 ROW_TICKS = (0, 100, 1000, 8000)                # labelled steps in the row's narrow curve panels
 GRID_TICKS = (0, 50, 250, 1000, 4000, 8000)     # and in the two-by-two layout's wider ones
 SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_figA_adapt_arenas": (5.5, 3.0),
-         "raw_backbones": (5.5, 1.6), "raw_backbones_shared": (5.5, 1.6), "raw_fig3a_psnr": (2.25, 1.5),
+         "raw_backbones": (5.5, 1.6), "raw_backbones_shared": (5.5, 1.6), "raw_fullft": (5.5, 1.6),
+         "raw_fig3a_psnr": (2.25, 1.5),
          "raw_fig3a_lpips": (2.25, 1.5)}
 UPPER = "reconstruction upper bound"             # never "ceiling" in a label
 IN_DISTRIBUTION = "training maps (in distribution)"
@@ -785,6 +786,13 @@ def shared_arenas(arena_sets):
     return sorted(set.intersection(*lora)) if lora else []
 
 
+def fullft_arenas(lora_arenas, full_arenas):
+    """The arenas of the full fine-tune panel: the comparator arenas the U-Net LoRA has, once the full fine-tune has
+    every one of them (sorted); None before then, or when there is none."""
+    wanted = sorted(set(COMPARATOR_ARENAS) & set(lora_arenas))
+    return wanted if wanted and set(wanted) <= set(full_arenas) else None
+
+
 def panel_points(raw, arenas=None):
     """{step: (median PSNR, median LPIPS)} over `arenas` (every arena of `raw` when None) of one block's raw reads
     (`raw` is {arena: {step: read}}); None when the block lacks one of `arenas`."""
@@ -1154,6 +1162,13 @@ def main(argv=None):
     curves = every
     if shared_curves:
         written += fig_backbones(shared_curves, levels, a.out_dir, a.headline_step, stem="raw_backbones_shared")
+    # the full fine-tune panel: the U-Net LoRA's whole grid against the full fine-tune's two reads (0 and 4k) on the
+    # comparator arenas, drawn once the full fine-tune has every one the LoRA has
+    ft_arenas = fullft_arenas(panel_arenas.get("unet_lora", []), panel_arenas.get("unet_full", []))
+    ft_curves = [(key, PANEL_LABELS[key], pts, len(ft_arenas)) for key in ("unet_lora", "unet_full") if ft_arenas
+                 for pts in [panel_points(panel_raw[key], ft_arenas)] if pts]
+    if len(ft_curves) == 2:
+        written += fig_backbones(ft_curves, levels, a.out_dir, a.headline_step, stem="raw_fullft")
 
     s0 = {}
     if os.path.exists(a.family_step):
@@ -1204,6 +1219,11 @@ def main(argv=None):
         "blocks": block_stats,
         "backbone_panel": {"drawn": [c[0] for c in curves], "not_drawn": not_drawn, "arenas": panel_arenas,
                            "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in curves}},
+        "fullft_panel": {"arenas": ft_arenas or [], "drawn": [c[0] for c in ft_curves] if len(ft_curves) == 2 else [],
+                         "waiting_for": sorted(set(COMPARATOR_ARENAS) & set(panel_arenas.get("unet_lora", []))
+                                               - set(panel_arenas.get("unet_full", []))),
+                         "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in ft_curves}
+                         if len(ft_curves) == 2 else {}},
         "backbone_panel_shared": {"arenas": shared, "drawn": [c[0] for c in shared_curves],
                                   "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in shared_curves}},
         "per_arena_table": per_arena_rows,

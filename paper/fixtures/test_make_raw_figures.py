@@ -390,6 +390,14 @@ def test_a_block_scored_only_at_0_and_4k_prints_its_budget_as_at_most_4k():
     assert b["coarse_grid"] is False and budget == "250" and "budget grid 0 and 4k only" not in tex
 
 
+def test_the_full_fine_tune_panel_waits_for_every_comparator_arena_the_lora_has():
+    # the comparator arenas the U-Net LoRA has; drawn only when the full fine-tune has every one of them
+    assert mrf.fullft_arenas([1, 6, 7, 8, 9, 16, 17], [6, 8, 16]) is None
+    assert mrf.fullft_arenas([1, 6, 7, 8, 9, 16, 17], [6, 7, 8, 16]) == [6, 7, 8, 16]
+    assert mrf.fullft_arenas([6, 9], [6]) == [6]                          # the LoRA has only arena 6 of the four
+    assert mrf.fullft_arenas([6, 9], []) is None and mrf.fullft_arenas([9], [9]) is None
+
+
 def test_backbone_end_labels_clear_every_mark_and_the_next_panel(tmp_path, monkeypatch):
     # the shared panel's case: three curves ending within 0.1 dB, two at 4k and the U-Net's at 8k
     kept = {}
@@ -574,7 +582,15 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # no 200k SD 3.5 files: the provisional 170k read through the stock decoder, recorded as the fallback
     assert s["sd35_row"] == {"row": "sd35_170000", "decoder": "stock", "fallback": True}
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
-    assert letters == list("abcd") * 2 + list("ab") * 2      # the row, its grid layout, both backbone panels
+    # the row, its grid layout, both backbone panels and the full fine-tune panel
+    assert letters == list("abcd") * 2 + list("ab") * 3
+    # the full fine-tune panel: the U-Net LoRA against the full fine-tune on the comparator arenas both have (6)
+    ft = s["fullft_panel"]
+    assert (ft["arenas"], ft["drawn"]) == ([6], ["unet_lora", "unet_full"])
+    assert sorted(ft["medians"]["unet_full"]) == ["0", "4000"]                        # two points, 0 borrowed
+    assert ft["medians"]["unet_full"]["4000"][0] == pytest.approx(23.0)
+    assert ft["medians"]["unet_lora"]["0"][0] == pytest.approx(18.0) == ft["medians"]["unet_full"]["0"][0]
+    assert len(ft["medians"]["unet_lora"]) > 2                                       # the LoRA's whole grid
     # the appendix's per-arena table: the gap, its threshold, the reads, the guards
     per = s["per_arena_table"]
     assert per["6"]["gap_zero_shot"] == pytest.approx(8.0)
