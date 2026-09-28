@@ -165,8 +165,8 @@ The zero-shot latent skill score $S_0=10\,\overline{\log_{10}(\text{persistence 
 
 \begin{figure}[ht]
 \centering
-\figslot{figures/tuned/figA_adapt_arenas.pdf}{\linewidth}{3.0in}{Per-arena adaptation curves}
-\caption{Gains differ between arenas, and the two arenas that miss their half-gap threshold by 8k do so by at most 0.12~dB. Each panel is one arena's $A$ against adapter updates with its 95\% episode-bootstrap band (8 held-out episodes); the dotted line is the arena's half-gap threshold and the tick the first grid point at which it reaches the threshold. Arenas 12 and 16 are censored at 8k. Non-EMA adapter weights, seed 0, fine-tuned decoder.}
+\figslot{figures/raw/raw_figA_adapt_arenas.pdf}{\linewidth}{3.0in}{Per-arena adaptation curves}
+\caption{Every arena closes at least half of the extra distance the shift opened to its reconstruction upper bound by 4k updates. Each panel is one arena's scene PSNR against the raw frame at 0, 4k and 8k adapter updates (large filled mark: 4k), with its reconstruction upper bound (solid), the PSNR at which half of that extra distance is closed (dotted) and the training maps' level (dashed); colour: group by zero-shot gap to the upper bound (dark: hard). U-Net, non-EMA adapter weights, seed 0, fine-tuned decoder, 256 held-out windows per arena.}
 \label{fig:adapt-arenas}
 \end{figure}
 
