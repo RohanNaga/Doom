@@ -65,7 +65,7 @@ We contribute:
 \item \textbf{DoomShift}, the benchmark and its dataset: every-tic recordings of \prov{6,000} episodes on the four training maps and 24 on each of the 13 unseen arenas (this paper trains on 2,000 of them), with the three trained models, the decoder fine-tune and the adapter path released (Figure~\ref{fig:method}; link withheld for review).
 \item A post-training recipe that adapts a frozen model to a new arena from eight episodes with a small adapter, and the per-arena protocol that scores the budget it needs.
 \item The finding that it generalizes without heavy retraining: within 8k updates the median scene PSNR on the unseen arenas rises from 22.3 to 23.7~dB and LPIPS falls from 0.303 to 0.204, and all 13 arenas close half of the excess gap over the in-distribution gap by 4k (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{}).
-\item The measured shift: on unseen arenas all three backbones lose scene PSNR and LPIPS in the same way while the turn response survives (Figures~\ref{fig:teaser} and~\ref{fig:shift}).
+\item The measured shift: on unseen arenas all three backbones lose scene PSNR and LPIPS in the same way while the turn response survives (Table~\ref{tab:unseen}, Figures~\ref{fig:teaser} and~\ref{fig:adapt}).
 \end{itemize}
 
 \begin{figure}[t]
@@ -159,16 +159,15 @@ We report what a model loses zero-shot, what post-training recovers and with wha
 \textbf{Zero-shot: where the deficit sits.} What does a model keep and what does it lose when it meets an arena it never saw? On unseen arenas the turn response survives (U-Net reversal rates 0.73 to 0.86 per arena against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
 The appearance does not: the U-Net's scene PSNR falls from 25.2~dB on the training maps to a median 22.3~dB (20.5 to 24.7 per arena), its LPIPS rises from 0.158 to 0.303 (0.229 to 0.401), and its gap to the reconstruction upper bound grows from 3.4 to a median 5.0~dB (3.7 to 6.9).
 The decoder is not the limit: it reconstructs the unseen arenas nearly as well as the training maps (median 27.3 against 28.6~dB, LPIPS 0.05 to 0.09).
-The three backbones lose the same things (Table~\ref{tab:unseen}, Figure~\ref{fig:shift}): the shift looks like a property of the task, not of the architecture or the scale.
+The three backbones lose the same things (Table~\ref{tab:unseen}; \appref{app:distance}): the shift looks like a property of the task, not of the architecture or the scale.
 It is a step, not a slope: every unseen arena has a lower zero-shot skill score $S_0$ and a worse LPIPS than every training map for all three backbones (\appref{app:distance}).
 What the model keeps is how actions act on the world: zero-shot on arena 7 the weapon fires and the view advances as in the ground truth (Figure~\ref{fig:teaser}) and the turn response holds; the loss sits in the scene, whose rows fall 2.9~dB (25.2 to a median 22.3) while the map-independent HUD rows fall 0.2~dB (29.7 to 29.5).
 
 \begin{figure}[t]
 \centering
-\figslot{figures/fig2d_family_step.pdf}{2.25in}{1.5in}{Figure 3a: family step}\hfill
-\figslot{figures/tuned/fig3b_zero_shot_absolute.pdf}{3.15in}{1.5in}{Figure 3b: zero-shot absolute}
-\caption{(a) The shift is a step, not a slope: every unseen arena has a lower zero-shot skill score $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman $-0.05$, $-0.15$, $-0.17$). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Scene rows, one tic, 95\% episode-bootstrap intervals; filled: fine-tuned SD~1 decoder (U-Net, PixArt-$\alpha$); open: SD~3.5's own (provisional 170k).}
-\label{fig:shift}
+\figslot{figures/raw/raw_row.pdf}{\linewidth}{1.6in}{Figure 3: the shift and its repair}
+\caption{On unseen arenas the U-Net loses appearance; eight episodes recover about half in PSNR and most in LPIPS. PSNR (a) and LPIPS (b) per arena zero-shot (open) and after 8k updates (filled); black ticks: reconstruction upper bound; dashed: training maps; (c, d) against updates, coloured by zero-shot gap to the upper bound (dark: hard). Medians: 2.9~dB lost, 1.35~dB recovered; LPIPS 0.303 to 0.204. Fine-tuned decoder, raw frame.}
+\label{fig:adapt}
 \end{figure}
 
 \textbf{Post-training: what it takes.} We next adapt a small subset of the U-Net's parameters on each unseen arena and ask what it takes to recover what was lost.
@@ -179,13 +178,6 @@ Data matters less than the first updates: on the four arenas of the data ladder,
 The adapters trade some in-distribution skill for it: the training maps' scene PSNR falls on \tbd{} of 13 arenas (median \tbd{}~dB), while the directional score rises from 0.81 to 0.84.
 
 \textbf{What predicts the outcome.} Neither the zero-shot skill score nor a registered distance orders how far an arena gets in raw terms: $S_0$ correlates only weakly with the 8k gap to the reconstruction upper bound ($+0.38$, $p=0.20$) and with the PSNR gain ($+0.43$, $p=0.14$), and a frame distance $d$ between an arena's recordings and the nearest training map, registered before any scoring, separates the training maps from every unseen arena but orders none of the 13 (Spearman $-0.07$ with the zero-shot PSNR; \appref{app:distance}).
-
-\begin{figure}[t]
-\centering
-\figslot{figures/tuned/fig4_dots.pdf}{\linewidth}{1.4in}{Figure 4: adaptation}
-\caption{Eight episodes and 8k updates lift the median $A$ from 2.04 to 3.94~dB, most of it by 250 updates (a); 11 of 13 arenas close half of their gap to $A_\text{train}$ (b; budgets above dots; grey: censored).}
-\label{fig:adapt}
-\end{figure}
 
 \begin{table}[tb]
 \centering\footnotesize

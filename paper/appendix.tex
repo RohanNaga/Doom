@@ -89,6 +89,13 @@ PixArt-$\alpha$ & training & 24.49 & 0.194 & +4.12 & $-$0.045 & 2.59 & 27.08 \\
 
 \textbf{Definition, frozen Sep 25 before any map was scored.} A map is a cloud of 1,000 frames: 4 episodes $\times$ 250 frames at least 32 tics into a life, averaged over ten random 4-episode subsets where a map has more episodes. Features are SD~1.x latents with the padding rows removed, pooled $5\times5$ to 192 dimensions. Each frame is weighted by its latent motion $\lVert z_t-z_{t-1}\rVert$ plus a floor that gives the quietest half of the cloud 25 percent of the weight; the unweighted distance differs by at most 0.006 and swaps two adjacent ranks, so the weighting is immaterial here. The reference is 50 seeded training episodes per training map, 250 frames each, 25 per motion decile. $d(m)=\min_k \mathrm{SW}_2(\text{cloud}_m,\text{reference}_k)$ over the four training maps, the sliced Wasserstein-2 distance with 1,000 projection directions shared by every distance; the nearest map, not the pooled corpus, because transport to a mixture charges a seen map for not resembling the other three. A disjoint second reference draw gives the train-versus-train floor, 0.022 to 0.093; on the evaluation recordings the 13 arenas lie at 0.118 to 0.270. Pixel-space and SD~3.5-space versions rank the 30 maps of the pre-registered set like the primary (Kendall $\tau$ 0.70 and 0.76).
 
+\begin{figure}[ht]
+\centering
+\figslot{figures/raw/raw_fig3a_lpips.pdf}{2.25in}{1.5in}{Zero-shot LPIPS against d}
+\caption{The shift is a step in LPIPS for all three backbones: every unseen arena has a worse zero-shot scene LPIPS than every training map, while within the arenas LPIPS does not follow the frame distance $d$ (grey: the train-versus-train range of $d$; lines: group medians).}
+\label{fig:step-lpips}
+\end{figure}
+
 \begin{table}[ht]
 \centering\footnotesize\setlength{\tabcolsep}{4pt}
 \caption{The pre-declared validation checks of $d$ on the 30-map set of the earlier episodes (SD~1.x space). The pre-declared gate required all five; it failed, and the pre-declared verdict ``does not support'' stands. The dated amendment separates checks of the measurement (i, iii, v) from an assumption about the maps (iv) and a subset tolerance stricter than the estimator reported (ii).}
