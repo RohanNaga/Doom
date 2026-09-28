@@ -36,11 +36,12 @@
 %===============================================================================
 
 \begin{abstract}
-World models have become capable simulators, but they are tested primarily in the domain they were trained on.
-A small domain shift, a new arena of the same game, makes their outputs drift and lose realism, though the physics is unchanged and only the situation differs.
-DoomShift asks how quickly and cheaply a world model can be adapted across such a shift: one Doom level pack has 17 arenas; we train three pretrained diffusion backbones on four and score each of the other thirteen zero-shot for all three and after adaptation for the U-Net.
-On the unseen arenas the U-Net's scene PSNR falls from 25.2~dB in distribution to a median 22.3~dB and its LPIPS rises from 0.158 to 0.303, while its turn response survives; the other two backbones lose the same way.
-Rank-16 adapters trained on eight episodes raise the median scene PSNR to 23.7~dB and lower LPIPS to 0.204 within 8k updates, and by 4k every arena has closed at least half of the gap that the shift opened to the reconstruction upper bound.
+World models have become capable simulators, but they are tested almost only in the domain they were trained on.
+A small domain shift, such as a new arena of the same game, a new texture or lighting set, or a different weapon in view, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
+DoomShift asks how quickly and cheaply a world model can be adapted across such a shift.
+We train three diffusion backbones, each initialized from a pretrained image model, on four maps of one Doom level pack and score each on in-domain data and on the 13 other maps of the same pack, which it never saw.
+On the unseen maps the U-Net's scene PSNR falls from 25.2~dB to a median 22.3~dB and its LPIPS rises from 0.158 to 0.303, while its turn response survives; the other two backbones lose the same way.
+Rank-16 adapters trained on eight episodes bring the U-Net back to 23.7~dB and 0.204 within 8k updates, and by 4k updates every unseen map has closed at least half of the gap that the shift opened to the reconstruction upper bound.
 \end{abstract}
 
 \keywords{World models, Domain shift, Few-shot adaptation}
