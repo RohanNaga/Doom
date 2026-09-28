@@ -66,8 +66,10 @@ from matplotlib import ticker  # noqa: E402  (maf has already selected the Agg b
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
+# the zero-shot rows when no later SD 3.5 read through its fine-tuned decoder exists (`backbone_rows` picks the rows)
 BACKBONES = ("unet200k_ema", "pixart200k_ema", "sd35_170000")
 DECODER_SUFFIX = {"unet200k_ema": "_tuned", "pixart200k_ema": "_tuned", "sd35_170000": ""}
+SD35_FALLBACK = "sd35_170000"                   # the provisional 170k read through the stock decoder
 GRID = (0, 50, 100, 150, 250, 500, 1000, 2000, 4000, 8000)      # the 8k grid's reads
 ADAPTER_ROW_RE = re.compile(r"^adapt(\d+)g8k_live_tuned$")
 ADAPTER_8K_ROW = "adapt8000_live_tuned"          # item 11's 8k read of the 8k-grid runs (no g8k in its name)
@@ -177,14 +179,38 @@ def home_reads(root, row, sfx, extra=()):
             "n": len(rows), "path": found[0]}
 
 
-def latest_sd35_row(root):
+def _header(path):
+    with open(path, newline="") as f:
+        return set(next(csv.reader(f), []))
+
+
+def _carries_tuned(root, row):
+    """Whether a row's arena files and its one training-map file all carry the fine-tuned decoder's raw columns."""
+    arena = per_window_files(os.path.join(root, row))
+    home = glob.glob(os.path.join(glob.escape(root), f"home_{row}", "**", "per_window.csv"), recursive=True)
+    need = {"scene_psnr_raw_tuned", "scene_lpips_raw_tuned", "scene_vae_psnr_tuned"}
+    return bool(arena) and len(home) == 1 and all(need <= _header(p) for p in list(arena.values()) + home)
+
+
+def latest_sd35_row(root, tuned=False):
     """The SD 3.5 zero-shot row with the highest checkpoint under `root` (`sd35_<step>` with per-window files and
-    a home read beside it), or None: its upper bound and persistence are the SD 3.5 blocks' references and its home
-    read their in-distribution gap."""
+    a home read beside it; with `tuned`, both carrying the fine-tuned SD 3.5 decoder's columns), or None: its upper
+    bound and persistence are the SD 3.5 blocks' references and its home read their in-distribution gap."""
     rows = [(int(m.group(1)), d) for d in (os.listdir(root) if os.path.isdir(root) else [])
             for m in [re.fullmatch(r"sd35_(\d+)", d)] if m and per_window_files(os.path.join(root, d))
-            and os.path.isdir(os.path.join(root, f"home_{d}"))]
+            and os.path.isdir(os.path.join(root, f"home_{d}")) and (not tuned or _carries_tuned(root, d))]
     return max(rows)[1] if rows else None
+
+
+def backbone_rows(root):
+    """{name: (row directory, column suffix)} of the zero-shot reads the figures and summaries use, each backbone
+    through its own fine-tuned decoder (Table 1's rule): the U-Net and PixArt-alpha through the fine-tuned SD 1
+    decoder, SD 3.5 at its latest checkpoint whose arena and training-map files carry the fine-tuned SD 3.5
+    decoder's columns; without one, the provisional 170k read through the stock decoder (the fallback)."""
+    rows = {n: (n + DECODER_SUFFIX[n], DECODER_SUFFIX[n]) for n in BACKBONES if not n.startswith("sd35")}
+    sd = latest_sd35_row(root, tuned=True)
+    rows.update({sd: (sd, "_tuned")} if sd else {SD35_FALLBACK: (SD35_FALLBACK, DECODER_SUFFIX[SD35_FALLBACK])})
+    return rows
 
 
 def training_distances(path):
@@ -881,10 +907,13 @@ def main(argv=None):
     floor = distance_floor(a.distances)
     inputs = [a.distances, a.training_distances]
     zero, home = {}, {}
-    for name in BACKBONES:
-        sfx = DECODER_SUFFIX[name]
-        zero[name], files = row_reads(a.fresh_root, name + sfx, sfx)
-        home[name] = home_reads(a.fresh_root, name + sfx, sfx,
+    rows_used = backbone_rows(a.fresh_root)
+    names = list(rows_used)
+    sd35_name = next(n for n in names if n.startswith("sd35"))
+    for name in names:
+        row, sfx = rows_used[name]
+        zero[name], files = row_reads(a.fresh_root, row, sfx)
+        home[name] = home_reads(a.fresh_root, row, sfx,
                                 extra=("scene_psnr_dec_tuned", "scene_lpips_dec_tuned") if name == PRIMARY else ())
         inputs += files + [home[name]["path"]]
     arenas = sorted(zero[PRIMARY])
@@ -895,7 +924,7 @@ def main(argv=None):
 
     # the step without persistence (the supplement's 3a)
     entries, step = {}, {}
-    for name in BACKBONES:
+    for name in names:
         rows = {m: {**zero[name][m], "D": arena_d.get(m), "role": "arena"} for m in zero[name]}
         rows.update({m: {**home[name]["maps"][m], "D": train_d.get(m), "role": "training"}
                      for m in TRAINING_MAPS if m in home[name]["maps"]})
@@ -1005,14 +1034,16 @@ def main(argv=None):
     written.append(table)
 
     # Table 2's per-backbone blocks and the per-backbone panel: every backbone's adaptation runs
-    names = {n: n + DECODER_SUFFIX[n] for n in BACKBONES}
-    zero_rows = {"unet": names[PRIMARY], "pixart": names["pixart200k_ema"],
-                 "sd35": latest_sd35_row(a.fresh_root) or names["sd35_170000"]}
+    # the SD 3.5 blocks need only the latest checkpoint's training-map read for their gap (raw_adapters picks the
+    # decoder's columns), so they take the latest SD 3.5 row even before its arena files carry the tuned columns
+    sd35_row = latest_sd35_row(a.fresh_root) or SD35_FALLBACK
+    zero_rows = {"unet": rows_used[PRIMARY][0], "pixart": rows_used["pixart200k_ema"][0], "sd35": sd35_row}
     refs = {}
     for backbone, row in zero_rows.items():
         files = per_window_files(os.path.join(a.fresh_root, row))
+        tuned = row.endswith("_tuned") or _carries_tuned(a.fresh_root, row)
         refs[backbone] = {dec: rad.zero_shot_refs(files, "" if dec == "stock" else f"_{dec}")
-                          for dec in (("stock", "tuned") if row.endswith("_tuned") else ("stock",))}
+                          for dec in (("stock", "tuned") if tuned else ("stock",))}
     loaded = rad.load_blocks(a.adapt_root, refs)
 
     unet_hours = loaded.get("unet_lora", {}).get("arenas", {})
@@ -1096,15 +1127,17 @@ def main(argv=None):
         "definitions": {"psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
                         "lpips": "scene LPIPS of D(z_hat) against the raw frame",
                         "upper_bound": "the same for D(z), the decoder on the ground-truth latent",
-                        "decoders": {n: ("fine-tuned SD 1" if DECODER_SUFFIX[n] else "own (SD 3.5)")
-                                     for n in BACKBONES},
+                        "decoders": {n: ("fine-tuned SD 1" if not n.startswith("sd35") else "fine-tuned SD 3.5"
+                                         if rows_used[n][1] else "stock SD 3.5 (fallback)") for n in names},
                         "budget": f"first adapter read reaching the {a.budget_rule} threshold (budget_threshold)",
                         "groups": f"arenas sorted by the {key_name}, hardest first, split 4, 5, 4"},
         "group_key": key_name,
         "headline_step": a.headline_step,
-        "zero_shot": {n: {str(m): e for m, e in zero[n].items()} for n in BACKBONES},
+        "sd35_row": {"row": rows_used[sd35_name][0], "decoder": "tuned" if rows_used[sd35_name][1] else "stock",
+                     "fallback": sd35_name == SD35_FALLBACK and not rows_used[sd35_name][1]},
+        "zero_shot": {n: {str(m): e for m, e in zero[n].items()} for n in names},
         "in_distribution": {n: {"pooled": home[n]["pooled"], "maps": {str(m): e for m, e in home[n]["maps"].items()},
-                                "n": home[n]["n"]} for n in BACKBONES},
+                                "n": home[n]["n"]} for n in names},
         "d": {"arenas": {str(m): v for m, v in arena_d.items()}, "training": {str(m): v for m, v in train_d.items()},
               "floor": floor},
         "step": step,

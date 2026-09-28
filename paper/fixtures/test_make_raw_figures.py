@@ -276,6 +276,57 @@ def test_the_shared_panel_averages_the_arenas_every_lora_backbone_has_finished()
     assert mrf.panel_points(raw)[0][0] == pytest.approx(20.0)                   # every arena when no set is given
 
 
+def write_sd35_200k(fresh, arenas=ARENAS, tuned=True):
+    """The SD 3.5 200k zero-shot read as the steward writes it: arena and training-map files carrying the stock and
+    (with `tuned`) the fine-tuned SD 3.5 decoder's columns from one pass."""
+    for a in arenas:
+        rows = windows(a, ZERO[a][0] - 0.4, ZERO[a][1], CEILING[a], "")
+        if tuned:
+            for r, t in zip(rows, windows(a, ZERO[a][0] - 0.2, ZERO[a][1] - 0.02, CEILING[a], "_tuned")):
+                r.update(t)
+        write_windows(str(fresh / "sd35_200000" / f"map{a:02d}" / "per_window.csv"), rows)
+    home = []
+    for m in TRAINING:
+        rows = windows(m, 22.0 + 0.3 * (m - 2) - 0.4, 0.15, CEILING[m], "")
+        if tuned:
+            for r, t in zip(rows, windows(m, 22.0 + 0.3 * (m - 2) - 0.4, 0.12, CEILING[m], "_tuned")):
+                r.update(t)
+        home += rows
+    write_windows(str(fresh / "home_sd35_200000" / "val" / "per_window.csv"), home)
+
+
+def test_sd35_is_read_at_its_latest_checkpoint_through_its_own_fine_tuned_decoder(tmp_path):
+    fresh, _, _ = export(tmp_path)
+    fallback = {"unet200k_ema": ("unet200k_ema_tuned", "_tuned"), "pixart200k_ema": ("pixart200k_ema_tuned", "_tuned"),
+                "sd35_170000": ("sd35_170000", "")}
+    assert mrf.backbone_rows(str(fresh)) == fallback                  # no 200k files: the provisional stock read
+    write_sd35_200k(fresh, tuned=False)
+    assert mrf.backbone_rows(str(fresh)) == fallback                  # 200k without its decoder's columns: still
+    write_sd35_200k(fresh)
+    assert mrf.backbone_rows(str(fresh)) == {**{k: v for k, v in fallback.items() if not k.startswith("sd35")},
+                                             "sd35_200000": ("sd35_200000", "_tuned")}
+
+
+def test_the_raw_set_switches_sd35_to_200k_through_its_fine_tuned_decoder(tmp_path):
+    fresh, dist, tdist = export(tmp_path)
+    write_sd35_200k(fresh)
+    out, side, tables = tmp_path / "figs", tmp_path / "raw_summary.json", tmp_path / "tables"
+    assert mrf.main(["--fresh-root", str(fresh), "--distances", str(dist), "--training-distances", str(tdist),
+                     "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
+                     "--family-step", str(tmp_path / "family_step.json"),
+                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k"), "--adapt-root", str(tmp_path / "adapt")]) == 0
+    s = json.load(open(side))
+    # the step panels, the zero-shot and in-distribution reads: SD 3.5 at 200k through its fine-tuned decoder
+    assert sorted(s["step"]) == ["pixart200k_ema", "sd35_200000", "unet200k_ema"]
+    assert s["zero_shot"]["sd35_200000"]["6"]["psnr"] == pytest.approx(ZERO[6][0] - 0.2)          # the tuned column
+    assert s["definitions"]["decoders"]["sd35_200000"] == "fine-tuned SD 3.5"
+    assert s["sd35_row"] == {"row": "sd35_200000", "decoder": "tuned", "fallback": False}
+    # the SD 3.5 block gets its in-distribution gap from the same read, so its budget can be final
+    sd35 = s["blocks"]["sd35_lora"]
+    assert sd35["g_train_source"] == "sd35_200000" and sd35["g_train"] == pytest.approx(28.0 - (22.45 - 0.4))
+    assert sd35["budget_final"] is True
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)
@@ -419,6 +470,8 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert shared["medians"]["pixart_lora"]["0"][0] == pytest.approx(18.2)
     assert shared["medians"]["unet_lora"]["0"][0] == pytest.approx(18.0)
     assert shared["medians"]["sd35_lora"]["4000"][0] == pytest.approx(19.5)
+    # no 200k SD 3.5 files: the provisional 170k read through the stock decoder, recorded as the fallback
+    assert s["sd35_row"] == {"row": "sd35_170000", "decoder": "stock", "fallback": True}
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
     assert letters == list("abcd") * 2 + list("ab") * 2      # the row, its grid layout, both backbone panels
     # the appendix's per-arena table: the gap, its threshold, the reads, the guards
