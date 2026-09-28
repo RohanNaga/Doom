@@ -40,8 +40,8 @@ World models have become capable simulators, but they are evaluated almost exclu
 A small domain shift, such as a new arena of the same game, a new texture set, a lighting change or a different cast of enemies, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift.
 We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 other out-of-distribution maps that it never saw.
-On the unseen maps the U-Net's perceptual error (LPIPS) roughly doubles, from \prov{0.158} to a median \prov{0.303} and, pooled over the unseen maps, one predicted frame in \prov{five} no longer resembles the recorded one (LPIPS above 0.4, a level reached by one frame in \prov{73} in domain and by \prov{three in five} on the hardest map), and its scene PSNR drops \prov{2.9}~dB; its turn response survives, and the other two backbones lose the same way.
-Rank-16 adapters trained on eight episodes with \prov{2\%} of the training updates recover \prov{72\%} of the lost perceptual quality and close \prov{94\%} of the extra distance that the shift opened between the model and its reconstruction upper bound, and at least half of it on every map.
+On the unseen maps the U-Net's perceptual error (LPIPS) doubles, from \prov{0.158} to a median \prov{0.303}, and its scene PSNR drops \prov{2.9}~dB, from \prov{25.2} to a median \prov{22.3}~dB; its turn response survives, and the other two backbones lose the same way.
+We then train rank-16 adapters on 8 episodes of each unseen map with \prov{2\%} of the original training updates and recover \prov{72\%} of the lost perceptual quality and about \prov{half} of the lost PSNR.
 \end{abstract}
 
 \keywords{World models, Few-shot adaptation}
