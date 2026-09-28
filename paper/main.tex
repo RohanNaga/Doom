@@ -44,7 +44,7 @@ A small domain shift, such as a new arena of the same game, a new texture set, a
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift.
 We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 other out-of-distribution maps that it never saw.
 On the unseen maps the U-Net's perceptual error (LPIPS) doubles, from \prov{0.158} to a median \prov{0.303}, and its scene PSNR drops \prov{2.9}~dB, from \prov{25.2} to a median \prov{22.3}~dB; its turn response survives, and the other two backbones lose the same way.
-We then train rank-16 adapters on 8 episodes of each unseen map with \prov{2\%} of the original training updates and recover \prov{72\%} of the lost perceptual quality and about \prov{half} of the lost PSNR.
+We then train rank-16 adapters on 8 episodes of each unseen map with \prov{2\%} of the original training updates and recover \prov{72\%} of the lost perceptual quality and about \prov{half} of the lost PSNR; the same recipe carries over unchanged to PixArt-$\alpha$, recovering \prov{76\%}, and to SD~3.5.
 \end{abstract}
 
 \keywords{World models, Few-shot adaptation}
