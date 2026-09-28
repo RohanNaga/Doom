@@ -360,6 +360,36 @@ def test_a_full_fine_tune_without_its_step_0_read_borrows_the_lora_one_only_from
         "U-Net full fine-tune (1 of 4)"
 
 
+def test_a_block_scored_only_at_0_and_4k_prints_its_budget_as_at_most_4k():
+    def arena(p4):
+        return {"grid": [0, 4000], "gpu_hours": {}, "reads": {0: {"quantity": "raw", "psnr": 20.0, "lpips": 0.3,
+                                                                  "upper": 26.0},
+                                                              4000: {"quantity": "raw", "psnr": p4, "lpips": 0.2,
+                                                                     "upper": 26.0}}}
+    # threshold 26 - (6 + 3) / 2 = 21.5: reached by 4k at 22, not at 21
+    empty = {"arenas": [], "n": 0, "budget_middle": None, "censored": None, **dict.fromkeys(
+        ("psnr_zero_shot", "psnr_4k", "psnr_8k", "ceiling", "lpips_zero_shot", "lpips_4k", "lpips_8k"))}
+    stats = {g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}
+
+    def cell(data):
+        b = mrf.block_summary(data, [6, 7, 8, 16], 3.0, "half_excess_gap", 4000)
+        tex = mrf.groups_table(stats, budgets_final=False, blocks=[("U-Net full fine-tune (x)", b, "sha256:t")])
+        row = next(ln for ln in tex.splitlines() if ln.startswith("U-Net full fine-tune"))
+        return b, row.split(" & ")[-1].rstrip(" \\"), tex
+    b, budget, tex = cell({8: arena(22.0)})
+    assert b["coarse_grid"] is True and budget == "${\\le}$4k"
+    assert "budget grid 0 and 4k only" in tex
+    _, budget, _ = cell({8: arena(21.0)})
+    assert budget == "${>}$4k; 1 of 1 censored"                    # not reached by 4k: above 4k, never above 8k
+    _, budget, _ = cell({8: arena(22.0), 16: arena(22.0), 6: arena(21.0)})
+    assert budget == "${\\le}$4k; 1 of 3 censored"
+    # a finer grid keeps the rule's own label
+    fine = {8: {**arena(22.0), "grid": [0, 250, 4000]}}
+    fine[8]["reads"][250] = {"quantity": "raw", "psnr": 21.8, "lpips": 0.25, "upper": 26.0}
+    b, budget, tex = cell(fine)
+    assert b["coarse_grid"] is False and budget == "250" and "budget grid 0 and 4k only" not in tex
+
+
 def test_backbone_end_labels_clear_every_mark_and_the_next_panel(tmp_path, monkeypatch):
     # the shared panel's case: three curves ending within 0.1 dB, two at 4k and the U-Net's at 8k
     kept = {}
@@ -503,6 +533,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # the full fine-tune's arena 6 has its 4k read and the U-Net LoRA's step 0 (the same checkpoint): 1 of 4
     ft = lines["U-Net full fine-tune (1 of 4)"]
     assert " & 18.00 & 23.00 & " in ft and "zero-shot of arenas 6 from the U-Net LoRA's step 0" in tex
+    assert ft.endswith(" & ${\\le}$4k \\\\")                          # scored at 0 and 4k only
     px = lines["PixArt-$\\alpha$ LoRA (all 2)"]
     assert " & 20.70 & " in px and px.split(" & ")[3] == "--"                         # 4k median; its grid stops at 4k
     sd = lines["SD 3.5 LoRA (1 of 2)"]

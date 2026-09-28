@@ -452,6 +452,16 @@ def budget_label(reads):
     return "--".join("${>}$8k" if r is None else fs.step_label(int(r)) for r in reads)
 
 
+def coarse_budget_label(reads, headline=HEADLINE_STEP):
+    """A budget cell for a block scored only at 0 and the headline, where the rule cannot resolve finer: "${\\le}$4k"
+    for a middle read reached by the headline, "${>}$4k" for one not reached (censored), a pair joined by an en dash
+    when the two middle reads differ."""
+    if not reads:
+        return "--"
+    cells = [("${>}$" if r is None else "${\\le}$") + fs.step_label(int(headline)) for r in reads]
+    return "--".join(dict.fromkeys(cells))
+
+
 def _budget_cell(g, final=True):
     if not final:
         return "\\tbd{}"
@@ -522,8 +532,11 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
         threshold = budget_threshold(rule, reads[0]["psnr"], upper_of(a), g_train)
         budgets.append(budget_step([(st, reads[st]["psnr"]) for st in grid], threshold))
     hours = [arenas_data[a].get("gpu_hours", {}).get(str(headline)) for a in present]
+    # scored only at 0 and the headline: a budget is "by the headline" or "beyond it", nothing finer
+    coarse = bool(present) and all({st for st in arenas_data[a]["grid"] if st > 0} == {headline} for a in present)
     return {"n": len(present), "n_wanted": len(wanted), "wanted": list(wanted), "arenas": present,
             "quantity": quantity, "decoded_only": decoded_only, "in_progress": in_progress, "headline": headline,
+            "coarse_grid": coarse,
             "psnr_zero_shot": median([get(a, 0, "psnr") for a in present]),
             "psnr_4k": median([get(a, headline, "psnr") for a in present]),
             "psnr_8k": median([get(a, check, "psnr") for a in present]) if has_check else None,
@@ -586,7 +599,9 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
             lines.append(f"{label} & " + " & ".join(["\\tbd{}"] * 8) + " \\\\")
             continue
         censored = f"; {b['censored']} of {b['n']} censored" if b["budget_final"] and b["censored"] else ""
-        budget = budget_label(b["budget_middle"]) + censored if b["budget_final"] else "\\tbd{}"
+        middle = coarse_budget_label(b["budget_middle"], b.get("headline", HEADLINE_STEP)) if b.get("coarse_grid") \
+            else budget_label(b["budget_middle"])
+        budget = middle + censored if b["budget_final"] else "\\tbd{}"
         lines.append(f"{label} & {num(b['psnr_zero_shot'], 2)} & {num(b['psnr_4k'], 2)} & {num(b['psnr_8k'], 2)} & "
                      f"{num(b['ceiling'], 2)} & {num(b['lpips_zero_shot'], 3)} & {num(b['lpips_4k'], 3)} & "
                      f"{num(b['lpips_8k'], 3)} & {budget} \\\\")
@@ -602,7 +617,9 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
                         f"{budget_label([b.get('headline', HEADLINE_STEP)])} read yet), left out"
                         if b.get("in_progress") else "")
                      + (f"; zero-shot of arenas {', '.join(map(str, b['zero_shot_borrowed']))} from the U-Net LoRA's "
-                        "step 0 (the same checkpoint and windows)" if b.get("zero_shot_borrowed") else ""))
+                        "step 0 (the same checkpoint and windows)" if b.get("zero_shot_borrowed") else "")
+                     + ("; budget grid 0 and 4k only: ${\\le}$4k means reached by 4k, the rule cannot resolve finer"
+                        if b.get("coarse_grid") else ""))
     return "\n".join(lines) + "\n"
 
 
