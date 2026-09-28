@@ -118,7 +118,7 @@ Four tics ahead they reach 21.33, 21.29 and \prov{21.59}~dB (stock decoders, ful
 
 \textbf{Post-training.} To move a trained model to a new arena we keep its weights frozen and train a small adapter on a few episodes of that arena, then score the adapted model on held-out episodes at each update budget.
 For each unseen arena we adapt the U-Net 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent)~\citep{xie2023difffit}.
-We train on 8 adaptation episodes (about 1 A4000 GPU-hour per arena for 4k updates) and score the non-EMA weights at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates, with the control checks (forgetting, the scene PSNR on the training maps, and the directional check) at 0 and 8k. 4k updates is the elbow of the curve: on average 96 percent of each arena's 8k gain is in place by then (Figure~\ref{fig:adapt}), so the recipe stops at 4k and 8k serves as the check; a full fine-tune comparator at $2\times10^{-5}$ is in progress (\tbd{}).
+We train on 8 adaptation episodes (about 1 A4000 GPU-hour per arena for 4k updates) and score the non-EMA weights at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates, with the control checks (forgetting, the scene PSNR on the training maps, and the directional check) at 0 and 8k. 4k updates is the elbow of the curve, and we report it everywhere: across the 13 arenas it captures most of the benefit (on average 96 percent of each arena's 8k gain; Figure~\ref{fig:adapt}) at the smallest budget, which is why the recipe costs 2 percent of the original training updates; 8k serves as the check, and a full fine-tune comparator at $2\times10^{-5}$ is in progress (\tbd{}).
 An arena's budget is the first grid point at which it closes half of its excess gap over the in-distribution gap to the reconstruction upper bound, that is, at which its gap to the upper bound falls to the midpoint between its zero-shot gap and the training maps' 3.4~dB; arenas that do not by 8k are right-censored~\citep{taylor2009transfer}.
 
 \begin{table}[t]
@@ -157,17 +157,17 @@ What the model keeps is how actions act on the world: zero-shot on arena 7 the w
 \begin{figure}[t]
 \centering
 \figslot{figures/raw/raw_row.pdf}{\linewidth}{1.75in}{Figure 3: the shift and its repair}
-\caption{On unseen arenas the U-Net loses appearance; eight episodes recover about half in PSNR and most in LPIPS. PSNR (a) and LPIPS (b) per arena zero-shot (open) and after 8k updates (filled); black ticks: reconstruction upper bound; dashed: training maps; (c, d) against updates; colour: group by zero-shot gap to the upper bound (dark: hard). Medians: 2.9~dB lost, 1.35 recovered; LPIPS 0.303 to 0.204. Fine-tuned decoder, raw frame.}
+\caption{On unseen arenas the U-Net loses appearance; eight episodes recover about half in PSNR and most in LPIPS. PSNR (a) and LPIPS (b) per arena zero-shot (open) and after 4k updates (filled); black ticks: reconstruction upper bound; dashed: training maps; (c, d) against updates; colour: group by zero-shot gap to the upper bound (dark: hard). Medians: 2.9~dB lost, 1.3 recovered; LPIPS 0.303 to 0.210. Fine-tuned decoder, raw frame.}
 \label{fig:adapt}
 \end{figure}
 
 \textbf{Post-training: what it takes.} We next adapt a small subset of the U-Net's parameters on each unseen arena and ask what it takes to recover what was lost.
-Eight episodes and 8k updates raise the median scene PSNR from 22.3 to 23.7~dB and lower the median LPIPS from 0.303 to 0.204, and the median gap to the reconstruction upper bound falls from 5.0 to 3.4~dB, the in-distribution level (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
-Most of the PSNR still missing against the training maps (1.5~dB) reflects the arenas' lower upper bound (27.3 against 28.6~dB), not the model.
+Eight episodes and 4k updates raise the median scene PSNR from 22.3 to 23.6~dB and lower the median LPIPS from 0.303 to 0.210 (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}); the 8k check adds little (23.7~dB, 0.204).
+Most of the PSNR still missing against the training maps (1.6~dB) reflects the arenas' lower upper bound (27.3 against 28.6~dB), not the model.
 In domain the model sits 3.4~dB below its reconstruction upper bound; zero-shot on the unseen arenas it sits a median 5.0~dB below, and after 4k adapter updates, 2 percent of the backbone's 200k, a median 3.4~dB again, so per arena the adapter closes a median 94 percent of the extra distance the shift opened, and at least half on every arena (budgets below 4k \tbd{}).
 By the same 4k updates it recovers a median 72 percent of each arena's rise in LPIPS over the training maps (at least 48 percent) and a median 48 percent of its lost scene PSNR (over 100 percent on arenas 8, 9 and 10, whose static recordings already sit near the training maps' PSNR).
 Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
-The adapters trade some in-distribution skill for it: the training maps' scene PSNR against the decoded ground truth falls on all 13 arenas (median 0.59~dB; stock decoder), while the directional score rises from 0.81 to 0.84.
+The adapters trade some in-distribution skill for it: the training maps' scene PSNR against the decoded ground truth falls on all 13 arenas at the 8k check (median 0.59~dB; stock decoder), while the directional score rises from 0.81 to 0.84.
 
 Neither the model's own latent-space score nor a frame distance between an arena's recordings and the training maps predicts how far an arena gets (\appref{app:distance}).
 
@@ -183,7 +183,7 @@ Neither the model's own latent-space score nor a frame distance between an arena
 \section{Future work}
 \label{sec:limits}
 
-On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and at most 8k adapter updates raise its median scene PSNR from 22.3 to 23.7~dB and lower its LPIPS from 0.303 to 0.204, closing half of the excess gap over the in-distribution gap on all 13 arenas by 4k.
+On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and 4k adapter updates raise its median scene PSNR from 22.3 to 23.6~dB and lower its LPIPS from 0.303 to 0.210, closing at least half of the extra distance the shift opened to the reconstruction upper bound on every arena.
 The claims cover 13 arenas of one game, one agent, one-tic scoring and mostly one seed.
 One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic on the full frame with stock decoders, collapses in 23 non-EMA and 9 EMA rollouts of 256, and the EMA removes checkpoint-specific collapses, not the failure mode (\appref{app:closedloop}).
 Next are other Doom maps and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot scores so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
