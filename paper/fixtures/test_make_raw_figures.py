@@ -119,6 +119,17 @@ def export(tmp_path):
         with open(run / "log.jsonl", "w") as f:
             f.write(json.dumps({"event": "start", "world": 1, "time": 0.0}) + "\n" +
                     json.dumps({"event": "checkpoint", "step": 4000, "time": 5400.0}) + "\n")
+    # PixArt-alpha LoRA on arena 16, still training: its zero-shot read only, far below the others
+    run = adapt / "pixart200k_arenas13_map16_r16_k8_s0"
+    write_windows(str(run / "scores" / "step0000000_live_px" / "heldout" / "per_window.csv"),
+                  windows(16, 12.0, 0.60, CEILING[6], "_tuned"))
+    with open(run / "scores.jsonl", "w") as f:
+        f.write(json.dumps({"step": 0, "weights": "live", "grid": [0, 250, 4000],
+                            "heldout_decoders": ["stock", "tuned"],
+                            "decoders": {"stock": {"identity": "hub:stock"}, "tuned": {"identity": "sha256:sd1tuned"}},
+                            "eval_fingerprint": "px", "scored_at": "t0",
+                            "heldout_per_window": f"/home/x/results/adapt/{run.name}/scores/step0000000_live_px/"
+                                                  "heldout/per_window.csv"}) + "\n")
     # SD 3.5 LoRA on arena 6 only, as the overnight runs leave it: every read of its six-step grid through the
     # fine-tuned SD 3.5 decoder (`tuned`), per-window raw files under scores/, while the only SD 3.5 training-map read
     # is the stock decoder's
@@ -222,6 +233,27 @@ def test_a_block_mixing_raw_and_decoded_arenas_reports_the_raw_ones_and_lists_th
     # with no raw arena the block reports them all, daggered
     only_dec = mrf.block_summary({a: data[a] for a in (8, 9)}, [6, 7, 8, 9], 3.0, "half_excess_gap", 4000)
     assert (only_dec["arenas"], only_dec["quantity"], only_dec["decoded_only"]) == ([8, 9], "dec", [])
+
+
+def test_an_arena_still_training_stays_out_of_its_block_until_it_has_the_headline_read():
+    def arena(reads):
+        return {"grid": [0, 250, 4000], "gpu_hours": {},
+                "reads": {st: {"quantity": "raw", "psnr": p, "lpips": 0.3, "upper": 26.0} for st, p in reads.items()}}
+    # arena 10 has its zero-shot and first reads only: in a median its 17 dB would sit in the zero-shot column only
+    data = {6: arena({0: 20.0, 250: 21.0, 4000: 22.0}), 7: arena({0: 21.0, 250: 22.0, 4000: 23.0}),
+            10: arena({0: 17.0, 250: 18.0})}
+    b = mrf.block_summary(data, [6, 7, 10], 3.0, "half_excess_gap", 4000)
+    assert (b["arenas"], b["in_progress"], b["decoded_only"]) == ([6, 7], [10], [])
+    assert b["psnr_zero_shot"] == pytest.approx(20.5) and b["psnr_4k"] == pytest.approx(22.5)
+    assert b["budget_final"] is True                                     # the two finished arenas have every read
+    assert mrf.block_label("PixArt LoRA", b, True) == "PixArt LoRA, 2 of 3 (6, 7)"
+    empty = {"arenas": [], "n": 0, "budget_middle": None, "censored": None, **dict.fromkeys(
+        ("psnr_zero_shot", "psnr_4k", "psnr_8k", "ceiling", "lpips_zero_shot", "lpips_4k", "lpips_8k"))}
+    tex = mrf.groups_table({g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}, budgets_final=False,
+                           blocks=[("PixArt LoRA, 2 of 3 (6, 7)", b, "sha256:sd1tuned")])
+    assert "arenas 10 still training (no 4k read yet)" in tex
+    assert mrf.finished(data[6], 4000) and not mrf.finished(data[10], 4000)
+    assert mrf.finished({"grid": [0, 250], "reads": {0: {}, 250: {}}}, 4000)          # a grid that stops before
 
 
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
@@ -355,6 +387,9 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # the per-backbone panel: median raw PSNR and LPIPS against updates, one curve per backbone with raw reads
     assert s["backbone_panel"]["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]
     assert s["backbone_panel"]["not_drawn"] == {"unet_full": "no runs"}
+    # PixArt's arena 16 is still training: out of its curve, whose every step is then over the same arenas
+    assert s["backbone_panel"]["arenas"]["pixart_lora"] == [6, 9]
+    assert s["backbone_panel"]["medians"]["pixart_lora"]["0"][0] == pytest.approx((18.2 + 19.2) / 2)
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
     assert letters == list("abcd") * 2 + list("ab")          # the row, its grid layout, the backbone panel
     # the appendix's per-arena table: the gap, its threshold, the reads, the guards
