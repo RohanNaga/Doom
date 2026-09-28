@@ -166,7 +166,7 @@ The zero-shot latent skill score $S_0=10\,\overline{\log_{10}(\text{persistence 
 \begin{figure}[ht]
 \centering
 \figslot{figures/raw/raw_figA_adapt_arenas.pdf}{\linewidth}{3.0in}{Per-arena adaptation curves}
-\caption{Every arena closes at least half of the extra distance the shift opened to its reconstruction upper bound by 4k updates. Each panel is one arena's scene PSNR against the raw frame at 0, 4k and 8k adapter updates (large filled mark: 4k), with its reconstruction upper bound (solid), the PSNR at which half of that extra distance is closed (dotted) and the training maps' level (dashed); colour: group by zero-shot gap to the upper bound (dark: hard). U-Net, non-EMA adapter weights, seed 0, fine-tuned decoder, 256 held-out windows per arena.}
+\caption{Every arena closes at least half of the extra distance the shift opened to its reconstruction upper bound by 4k updates. Each panel is one arena's scene PSNR against the raw frame at each grid read from 0 to 8k adapter updates (large filled mark: 4k), with its reconstruction upper bound (solid), the PSNR at which half of that extra distance is closed (dotted) and the training maps' level (dashed); colour: group by zero-shot gap to the upper bound (dark: hard). U-Net, non-EMA adapter weights, seed 0, fine-tuned decoder, 256 held-out windows per arena.}
 \label{fig:adapt-arenas}
 \end{figure}
 
