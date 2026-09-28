@@ -387,8 +387,7 @@ def fig_3a(entries, floor, key, out_dir):
     ax.set_xlabel("frame distance $d$")
     ax.set_ylabel("zero-shot scene\nPSNR (dB) ↑" if higher else "zero-shot scene\nLPIPS ↓")
     ax.yaxis.set_major_locator(ticker.MultipleLocator(2 if higher else 0.05))
-    fs.panel_letter(ax, "a")
-    return fs.save(fig, out_dir, stem)
+    return fs.save(fig, out_dir, stem)          # a single supplement panel: no panel letter
 
 
 def _ceiling_ticks(ax, xs, values, half=0.36):

@@ -155,8 +155,15 @@ def test_adapter_rows_are_the_8k_grid_runs_reads_by_step(tmp_path):
                                                8000: "adapt8000_live_tuned"}
 
 
-def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp_path):
+def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp_path, monkeypatch):
     fresh, dist, tdist = export(tmp_path)
+    letters = []
+    draw_letter = mrf.fs.panel_letter
+
+    def record_letter(ax, letter, **kw):
+        letters.append(letter)
+        return draw_letter(ax, letter, **kw)
+    monkeypatch.setattr(mrf.fs, "panel_letter", record_letter)
     out, side, tables = tmp_path / "figs", tmp_path / "raw_summary.json", tmp_path / "tables"
     assert mrf.main(["--fresh-root", str(fresh), "--distances", str(dist), "--training-distances", str(tdist),
                      "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
@@ -190,6 +197,8 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert s["trajectories"]["6"]["psnr"] == [pytest.approx(18.0), pytest.approx(19.0), pytest.approx(22.5)]
     tex = open(tables / "adapt_groups.tex").read()
     assert "\\tbd" in tex and "upper bound" in tex
+    # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
+    assert letters == list("abcd") * 2
     # the numbers the text waits on: counts and medians with arena-bootstrap intervals, provisional until the grid
     t = s["text_numbers"]
     assert t["provisional"] is True and t["pending"]["forgetting"] and t["pending"]["gain_step"]
