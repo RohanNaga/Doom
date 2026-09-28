@@ -2,7 +2,8 @@
  "weights": [
   "ema"
  ],
- "floor_db": -1.0,
+ "quantity": "full-frame PSNR against the raw frame (dB)",
+ "floor_db": 19.907795948907733,
  "persistence_psnr": {
   "unet": 21.56569146923721,
   "pixart": 21.56569146923721,
@@ -22,13 +23,6 @@
    "step": 10000,
    "psnr": 14.65,
    "gain": -6.92
-  },
-  {
-   "backbone": "unet",
-   "weights": "ema",
-   "step": 20000,
-   "psnr": 20.07,
-   "gain": -1.5
   },
   {
    "backbone": "pixart",
@@ -64,13 +58,6 @@
    "step": 10000,
    "psnr": 15.57,
    "gain": -5.99
-  },
-  {
-   "backbone": "sd35",
-   "weights": "ema",
-   "step": 15000,
-   "psnr": 20.41,
-   "gain": -1.15
   }
  ],
  "noted_reads": [
@@ -86,19 +73,19 @@
   "unet": {
    "ema": {
     "step": 200000,
-    "gain": 0.9231279343366623
+    "psnr": 22.48881940357387
    }
   },
   "pixart": {
    "ema": {
     "step": 200000,
-    "gain": 0.9139199312776327
+    "psnr": 22.47961140051484
    }
   },
   "sd35": {
    "ema": {
     "step": 155000,
-    "gain": 1.746058052405715
+    "psnr": 23.311749521642923
    }
   }
  }

@@ -107,13 +107,15 @@ def test_series_are_sorted_in_thousands_of_updates_and_noted_reads_are_kept_apar
     assert apart["k_updates"] == [35.0] and apart["psnr"] == [23.0]
 
 
-def test_the_gain_axis_clips_the_ema_warm_up_and_lists_every_clipped_read(tmp_path):
+def test_the_psnr_axis_clips_the_ema_warm_up_and_lists_every_clipped_read(tmp_path):
     curves = tc.load_curves(str(write_curves(tmp_path)))
     lo, hi = tc.y_limits(curves)
-    assert lo == tc.FLOOR and hi >= 23.0 - 21.5          # the gain over copy-last, not PSNR
-    assert tc.series(curves[0], "ema")["gain"] == pytest.approx([11.8 - 21.5, 14.6 - 21.5, 21.9 - 21.5])
+    # absolute PSNR: the floor sits one dB under the lowest live read (21.1), the top above the highest read (23.0)
+    assert lo == pytest.approx(21.1 - tc.FLOOR_BELOW_LIVE) and hi >= 23.0
     clipped = {(r["backbone"], r["step"]) for r in tc.clipped_reads(curves)}
     assert clipped == {("unet", 5000), ("unet", 10000), ("pixart", 5000), ("pixart", 10000), ("sd35", 5000)}
+    # the gain over persistence stays available for the record, not drawn
+    assert tc.series(curves[0], "ema")["gain"] == pytest.approx([11.8 - 21.5, 14.6 - 21.5, 21.9 - 21.5])
 
 
 def test_the_figure_is_written_as_pdf_and_png_at_the_panel_size(tmp_path):
@@ -135,15 +137,15 @@ def test_the_figure_is_written_as_pdf_and_png_at_the_panel_size(tmp_path):
     assert {r["backbone"] for r in side["clipped_reads"]} == {"unet", "pixart", "sd35"}
 
 
-def test_the_drawn_lines_are_ema_solid_live_dotted_and_copy_last_the_zero_line(tmp_path):
+def test_the_drawn_lines_are_ema_solid_live_dotted_in_absolute_psnr_with_no_persistence(tmp_path):
     curves = tc.load_curves(str(write_curves(tmp_path)))
     fig, ax = tc.draw(curves, weights=tc.WEIGHTS, size=tc.APPENDIX_SIZE)
     lines = {ln.get_label(): ln for ln in ax.get_lines()}
     assert lines["U-Net (SD 1.4) EMA"].get_linestyle() == "-" and lines["U-Net (SD 1.4) live"].get_linestyle() == ":"
     assert "PixArt-alpha live" not in lines          # no live reads, no dotted line
     assert lines["U-Net (SD 1.4) EMA"].get_color() == "#0072B2"      # the encoding table's U-Net blue
-    zero = lines["persistence"]
-    assert set(zero.get_ydata()) == {0} and zero.get_linestyle() == "-"
-    assert ax.get_xlabel().startswith("updates (thousands)") and "persistence" in ax.get_ylabel()
+    assert "persistence" not in lines and "persistence" not in ax.get_ylabel()     # nothing relative to it
+    assert list(lines["U-Net (SD 1.4) EMA"].get_ydata()) == pytest.approx([11.8, 14.6, 21.9])     # absolute PSNR
+    assert ax.get_xlabel().startswith("updates (thousands)") and "PSNR (dB)" in ax.get_ylabel()
     body_fig, body = tc.draw(curves)                     # the body panel: EMA only
     assert not any(ln.get_label().endswith(" live") for ln in body.get_lines())
