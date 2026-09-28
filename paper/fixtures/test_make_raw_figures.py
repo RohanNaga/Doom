@@ -226,8 +226,11 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     home_psnr = 28.0 - g_id
     assert ba["psnr"]["in_distribution"] == pytest.approx(home_psnr)
     assert ba["psnr"]["median_drop"] == pytest.approx(home_psnr - 18.5)
-    assert ba["psnr"]["median_recovery"] == pytest.approx(((22.5 - 18.0) + (24.0 - 19.0)) / 2)
-    assert ba["lpips"]["median_recovery"] == pytest.approx(((0.20 - 0.30) + (0.18 - 0.26)) / 2)
+    # the headline is 4k updates (Rohan, Sep 27 evening); 8k is the check
+    assert s["headline_step"] == 4000
+    assert ba["psnr"]["median_recovery"] == pytest.approx(((19.0 - 18.0) + (23.5 - 19.0)) / 2)
+    assert ba["lpips"]["median_recovery"] == pytest.approx(((0.22 - 0.30) + (0.19 - 0.26)) / 2)
+    assert ba["psnr"]["median_recovery_8k"] == pytest.approx(((22.5 - 18.0) + (24.0 - 19.0)) / 2)
     # the raw trajectory of the row's curve panels ends on the filled 8k mark of its before-and-after panel
     assert s["trajectories"]["6"]["steps"] == [0, 4000, 8000]
     assert s["trajectories"]["6"]["psnr"] == [pytest.approx(18.0), pytest.approx(19.0), pytest.approx(22.5)]
@@ -247,7 +250,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     shown = [g for g in ("hard", "medium", "easy") if s["groups"][g]["n"]]      # two arenas: medium only
     assert shown == ["medium"]
     for stem in ("raw_row", "raw_row_grid"):
-        for text in ["zero-shot", "after 8k updates", "reconstruction upper bound",
+        for text in ["zero-shot", "after 4k updates", "reconstruction upper bound",
                      "training maps (in distribution)", "zero-shot gap to the upper bound:"] + shown:
             assert text in legends[stem], (stem, text)
         assert not {"hard", "easy"} & set(legends[stem])               # an empty group gets no swatch

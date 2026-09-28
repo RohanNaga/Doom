@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-27T20:46:42-04:00",
+ "generated_at": "2026-09-27T21:26:30-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -14,6 +14,7 @@
   "groups": "arenas sorted by the zero-shot gap to the reconstruction upper bound (dB), hardest first, split 4, 5, 4"
  },
  "group_key": "zero-shot gap to the reconstruction upper bound (dB)",
+ "headline_step": 4000,
  "zero_shot": {
   "unet200k_ema": {
    "1": {
@@ -484,22 +485,30 @@
  "before_after": {
   "psnr": {
    "in_distribution": 25.196385307237506,
+   "headline_step": 4000,
    "median_zero_shot": 22.297485141083598,
-   "median_adapted_8k": 23.688441541045904,
+   "median_adapted": 23.601111978292465,
    "median_upper_bound": 27.319409392774105,
    "median_drop": 2.8989001661539078,
-   "median_recovery": 1.346378181129694,
-   "median_left_to_in_distribution_8k": 1.5079437661916018,
+   "median_recovery": 1.2967762015759945,
+   "median_left_to_in_distribution": 1.5952733289450407,
+   "arenas_at_or_past_in_distribution": 3,
+   "median_adapted_8k": 23.688441541045904,
+   "median_recovery_8k": 1.346378181129694,
    "arenas_at_or_past_in_distribution_8k": 3
   },
   "lpips": {
    "in_distribution": 0.1580457560630748,
+   "headline_step": 4000,
    "median_zero_shot": 0.30288498516893014,
-   "median_adapted_8k": 0.203747603809461,
+   "median_adapted": 0.21024158014915884,
    "median_upper_bound": 0.07498558102815878,
    "median_drop": -0.14483922910585534,
-   "median_recovery": -0.10035029944265261,
-   "median_left_to_in_distribution_8k": -0.04570184774638619,
+   "median_recovery": -0.09593413167749532,
+   "median_left_to_in_distribution": -0.05219582408608403,
+   "arenas_at_or_past_in_distribution": 0,
+   "median_adapted_8k": 0.203747603809461,
+   "median_recovery_8k": -0.10035029944265261,
    "arenas_at_or_past_in_distribution_8k": 0
   }
  },

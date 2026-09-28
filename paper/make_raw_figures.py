@@ -76,7 +76,11 @@ TRAINING_MAPS = maf.TRAINING_MAPS
 PRIMARY = "unet200k_ema"
 COMPARATOR_ARENAS = (6, 7, 8, 16)               # the full fine-tune's arenas (Table 2's last column)
 GROUP_NAMES = ("hard", "medium", "easy")
-SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_fig3a_psnr": (2.25, 1.5),
+HEADLINE_STEP = 4000                            # the paper's budget (Rohan, Sep 27 evening); 8k is the check
+ROW_TICKS = (0, 100, 1000, 8000)                # labelled steps in the row's narrow curve panels
+GRID_TICKS = (0, 50, 250, 1000, 4000, 8000)     # and in the two-by-two layout's wider ones
+SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_figA_adapt_arenas": (5.5, 3.0),
+         "raw_fig3a_psnr": (2.25, 1.5),
          "raw_fig3a_lpips": (2.25, 1.5)}
 UPPER = "reconstruction upper bound"             # never "ceiling" in a label
 IN_DISTRIBUTION = "training maps (in distribution)"
@@ -503,13 +507,21 @@ def before_after_panel(ax, arenas, zero, adapted, ceilings, level, key, colour_o
     ax.set_xlabel("unseen arena")
 
 
-def curve_panel(ax, curves, key, level, colour_of, steps, named=(), ticks=None, xlabel="adapter updates (log)"):
-    """One line per arena against adapter updates (log axis, the 0 read at the left), in the arena's colour, the
-    in-distribution level as the dashed line; the arenas in `named` labelled at their right ends."""
-    z = fs.step_axis(ax, steps, labelled=ticks)
+def curve_panel(ax, curves, key, level, colour_of, steps, named=(), ticks=None, xlabel="adapter updates (log)",
+                headline=HEADLINE_STEP):
+    """One line per arena against adapter updates (log axis, the 0 read at the left), in the arena's colour, a
+    small mark at every read and a filled one at the `headline` read (the filled mark of the before-and-after
+    panel), the in-distribution level as the dashed line; the arenas in `named` labelled at their right ends.
+    `ticks` are the labelled steps (every grid step keeps a tick; with three reads or fewer all are labelled)."""
+    labelled = list(steps) if len(steps) <= 3 else ([t for t in ticks if t in steps] if ticks else None)
+    z = fs.step_axis(ax, steps, labelled=labelled)
     for a, c in sorted(curves.items()):
         xs = [z if s == 0 else s for s in c["steps"]]
-        ax.plot(xs, c[key], color=colour_of(a), lw=0.8, zorder=3, marker="o" if len(xs) <= 3 else None, ms=1.8)
+        ax.plot(xs, c[key], color=colour_of(a), lw=0.8, zorder=3, marker="o", ms=1.2)
+        if headline in c["steps"]:
+            j = c["steps"].index(headline)
+            ax.plot([xs[j]], [c[key][j]], ls="none", marker="o", ms=2.6, mfc=colour_of(a), mec="white",
+                    mew=0.3, zorder=3.5)
     _in_distribution(ax, level)
     named = [a for a in named if a in curves]
     if named:
@@ -521,7 +533,7 @@ def curve_panel(ax, curves, key, level, colour_of, steps, named=(), ticks=None, 
     ax.set_xlabel(xlabel)
 
 
-def row_legends(fig, key_colours):
+def row_legends(fig, key_colours, headline=HEADLINE_STEP):
     """The row's two keys: above it, what each mark and line means; below it, the colour of the arena groups by
     the zero-shot gap to the upper bound (`key_colours`: [(group, colour)])."""
     ink = fs.BACKBONES["unet"].colour
@@ -529,7 +541,8 @@ def row_legends(fig, key_colours):
              Line2D([], [], ls="none", marker="o", ms=fs.MARKER_SIZE, mfc=ink, mec=ink, mew=0.6),
              Line2D([], [], color=CEILING_INK, lw=CEILING_LW),
              Line2D([], [], color=fs.TRAINING_LINE, lw=fs.REF_LW, ls=fs.TRAINING_DASH)]
-    fig.legend(marks, ["zero-shot", "after 8k updates", UPPER, IN_DISTRIBUTION], loc="outside upper center",
+    fig.legend(marks, ["zero-shot", f"after {fs.step_label(headline)} updates", UPPER, IN_DISTRIBUTION],
+               loc="outside upper center",
                ncol=4, handlelength=1.4, columnspacing=1.4, handletextpad=0.4, borderaxespad=0.1)
     label = Line2D([], [], ls="none")
     label.set_visible(False)                     # a text-only entry names the swatches after it
@@ -540,11 +553,11 @@ def row_legends(fig, key_colours):
 
 
 def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, named, out_dir, layout="row",
-            key_colours=()):
-    """The merged Figure 3: how much the unseen arenas improve and how fast. (a) before and after in raw PSNR,
-    (b) in LPIPS, (c) and (d) each arena's raw trajectory over the adapter reads that exist, sharing its y axis
-    with (a) and (b) so every curve ends on its filled 8k mark. `layout` "grid" draws two rows of two (PSNR above,
-    LPIPS below)."""
+            key_colours=(), headline=HEADLINE_STEP):
+    """The merged Figure 3: how much the unseen arenas improve and how fast. (a) before and after `headline`
+    updates in raw PSNR (`adapted` holds that step's reads), (b) in LPIPS, (c) and (d) each arena's raw trajectory
+    over the adapter reads that exist, sharing its y axis with (a) and (b) so the filled mark is the curve's read at
+    the headline step. `layout` "grid" draws two rows of two (PSNR above, LPIPS below)."""
     stem = {"row": "raw_row", "grid": "raw_row_grid"}[layout]
     if layout == "row":
         fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=4, width_ratios=[1.6, 1.6, 0.8, 0.8], wspace=0.02)
@@ -558,7 +571,8 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     steps = sorted({s for c in trajectories.values() for s in c["steps"]})
     for ax, key in ((pc, "psnr"), (lc, "lpips")):
         curve_panel(ax, trajectories, key, level[key], colour_of, steps, named=named if key == "psnr" else (),
-                    xlabel="updates (log)" if layout == "row" else "adapter updates (log)")
+                    xlabel="updates (log)" if layout == "row" else "adapter updates (log)",
+                    ticks=ROW_TICKS if layout == "row" else GRID_TICKS, headline=headline)
     pa.set_ylabel(PSNR_LABEL)
     la.set_ylabel(LPIPS_LABEL)
     if layout == "grid":
@@ -569,7 +583,64 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     for ax, letter in zip((pa, la, pc, lc), "abcd"):
         fs.panel_letter(ax, letter)
     if key_colours:
-        row_legends(fig, key_colours)
+        row_legends(fig, key_colours, headline)
+    return fs.save(fig, out_dir, stem)
+
+
+def fig_arenas_raw(arenas, trajectories, adaptation, level, colour_of, out_dir, headline=HEADLINE_STEP):
+    """Appendix: one small panel per arena, raw scene PSNR against adapter updates (log axis, the 0 read at the
+    left) in the arena's group colour, the headline read filled, the budget's threshold (dotted), the arena's
+    reconstruction upper bound (black) and the training maps' level (dashed); shared axes in arena order, the
+    key in the first empty slot (or under the panels when none is empty)."""
+    stem = "raw_figA_adapt_arenas"
+    recs = [m for m in arenas if m in trajectories]
+    ncols = min(5, len(recs))
+    nrows = math.ceil(len(recs) / ncols)
+    fig, axes = fs.new_figure(SIZES[stem], ncols=ncols, nrows=nrows, sharex=True, sharey=True, wspace=0.02,
+                              hspace=0.03)
+    steps = sorted({s for m in recs for s in trajectories[m]["steps"]})
+    values = [v for m in recs for v in trajectories[m]["psnr"]] + [adaptation[m]["upper_bound"] for m in recs]
+    ink = fs.BACKBONES["unet"].colour
+    key = ([Line2D([], [], color=ink, lw=fs.DATA_LW, marker="o", ms=2.5),
+            Line2D([], [], ls="none", marker="o", ms=3.5, mfc=ink, mec=ink),
+            Line2D([], [], color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2))),
+            Line2D([], [], color=CEILING_INK, lw=fs.REF_LW),
+            Line2D([], [], color=fs.TRAINING_LINE, lw=fs.REF_LW, ls=fs.TRAINING_DASH)],
+           ["scene PSNR", f"after {fs.step_label(headline)} updates", "half the excess gap", UPPER, IN_DISTRIBUTION])
+    keyed = False
+    for i, ax in enumerate(axes):
+        if i >= len(recs):
+            if keyed:
+                ax.remove()
+            else:
+                ax.set_axis_off()
+                ax.set_gid("decor")
+                ax.legend(*key, loc="center", frameon=False, fontsize=fs.MIN_PT, handlelength=1.6)
+                keyed = True
+            continue
+        m = recs[i]
+        t, r = trajectories[m], adaptation[m]
+        z = fs.step_axis(ax, steps, label="")
+        xs = [z if s == 0 else s for s in t["steps"]]
+        ax.plot(xs, t["psnr"], color=colour_of(m), lw=fs.DATA_LW, marker="o", ms=2.5, zorder=3)
+        if headline in t["steps"]:
+            j = t["steps"].index(headline)
+            ax.plot([xs[j]], [t["psnr"][j]], ls="none", marker="o", ms=3.5, mfc=colour_of(m), mec=colour_of(m),
+                    zorder=3.5)
+        ax.axhline(r["threshold"], color=fs.CONTEXT_INK, lw=fs.MIN_LW, ls=(0, (1, 1.2)), zorder=1.4, gid="ref")
+        ax.axhline(r["upper_bound"], color=CEILING_INK, lw=fs.REF_LW, zorder=1.4, gid="ref")
+        ax.axhline(level, color=fs.TRAINING_LINE, lw=fs.REF_LW, ls=fs.TRAINING_DASH, zorder=1.4, gid="ref")
+        # the arena's name at the bottom edge, under every threshold line (the lowest sits 0.9 dB above the floor)
+        ax.text(0.97, 0.02, f"arena {m}", transform=ax.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT,
+                gid="decor")
+        ax.set_ylim(min(values) - 0.8, max(values) + 0.5)
+        ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
+        if i % ncols == 0:
+            ax.set_ylabel("scene PSNR (dB)")
+        ax.tick_params(labelbottom=i + ncols >= len(recs))
+    if not keyed:
+        fig.legend(*key, loc="outside lower center", ncol=len(key[1]), handlelength=1.4, columnspacing=1.0)
+    fig.supxlabel("adapter updates (log scale)", fontsize=fs.LABEL_PT)
     return fs.save(fig, out_dir, stem)
 
 
@@ -601,6 +672,8 @@ def build_parser():
     p.add_argument("--family-step", default=os.path.join(REPO, "results", "family_step", "family_step.json"),
                    help="the zero-shot latent skill S0 per arena (tools/family_step.py), for the Spearman numbers")
     p.add_argument("--budget-rule", choices=BUDGET_RULES, default="half_excess_gap")
+    p.add_argument("--headline-step", type=int, default=HEADLINE_STEP,
+                   help="the adapter read the filled marks and the medians report (8k stays the check)")
     p.add_argument("--group-by", choices=("gap", "zero_shot_psnr"), default="gap",
                    help="the key that groups and colours the arenas: the zero-shot gap to the upper bound (default)")
     p.add_argument("--out-dir", default=os.path.join(HERE, "figures", "raw"))
@@ -684,17 +757,26 @@ def main(argv=None):
               "grid_complete": grid_complete, "reads": sorted(adapted), **counts_for(a.budget_rule),
               "by_rule": {r: counts_for(r) for r in BUDGET_RULES}}
     ad8 = adapted[8000]
+    if a.headline_step not in adapted:
+        raise SystemExit(f"no raw read of the adapter at the headline step {a.headline_step}")
+    after = adapted[a.headline_step]
     level = {k: home[PRIMARY]["pooled"][k] for k in ("psnr", "lpips")}
     ba = {}
     for key in ("psnr", "lpips"):
         better = (lambda v, lv: v >= lv) if key == "psnr" else (lambda v, lv: v <= lv)
-        ba[key] = {"in_distribution": level[key],
-                   "median_zero_shot": median([zero[PRIMARY][m][key] for m in arenas]),
-                   "median_adapted_8k": median([ad8[m][key] for m in arenas if m in ad8]),
+        z = {m: zero[PRIMARY][m][key] for m in arenas}
+        ba[key] = {"in_distribution": level[key], "headline_step": a.headline_step,
+                   "median_zero_shot": median(list(z.values())),
+                   "median_adapted": median([after[m][key] for m in arenas if m in after]),
                    "median_upper_bound": median([ceilings[m][f"ceiling_{key}"] for m in arenas]),
-                   "median_drop": median([level[key] - zero[PRIMARY][m][key] for m in arenas]),
-                   "median_recovery": median([ad8[m][key] - zero[PRIMARY][m][key] for m in arenas if m in ad8]),
-                   "median_left_to_in_distribution_8k": median([level[key] - ad8[m][key] for m in arenas if m in ad8]),
+                   "median_drop": median([level[key] - z[m] for m in arenas]),
+                   "median_recovery": median([after[m][key] - z[m] for m in arenas if m in after]),
+                   "median_left_to_in_distribution": median([level[key] - after[m][key] for m in arenas if m in after]),
+                   "arenas_at_or_past_in_distribution": sum(1 for m in arenas if m in after
+                                                            and better(after[m][key], level[key])),
+                   # the 8k check
+                   "median_adapted_8k": median([ad8[m][key] for m in arenas if m in ad8]),
+                   "median_recovery_8k": median([ad8[m][key] - z[m] for m in arenas if m in ad8]),
                    "arenas_at_or_past_in_distribution_8k": sum(1 for m in arenas if m in ad8
                                                                and better(ad8[m][key], level[key]))}
 
@@ -714,8 +796,9 @@ def main(argv=None):
     def colour_of(m):
         return shade_of.get(m, fs.BACKBONES["adapter"].colour)
     for layout in ("row", "grid"):
-        written += fig_row(arenas, zero[PRIMARY], ad8, ceilings, level, trajectories, colour_of, named, a.out_dir,
-                           layout=layout, key_colours=key_colours)
+        written += fig_row(arenas, zero[PRIMARY], after, ceilings, level, trajectories, colour_of, named, a.out_dir,
+                           layout=layout, key_colours=key_colours, headline=a.headline_step)
+    written += fig_arenas_raw(arenas, trajectories, adaptation, level["psnr"], colour_of, a.out_dir, a.headline_step)
 
     # Table 2's candidate: the arenas grouped by the key
     at = {s: adapted.get(s, {}) for s in (4000, 8000)}
@@ -763,6 +846,7 @@ def main(argv=None):
                         "budget": f"first adapter read reaching the {a.budget_rule} threshold (budget_threshold)",
                         "groups": f"arenas sorted by the {key_name}, hardest first, split 4, 5, 4"},
         "group_key": key_name,
+        "headline_step": a.headline_step,
         "zero_shot": {n: {str(m): e for m, e in zero[n].items()} for n in BACKBONES},
         "in_distribution": {n: {"pooled": home[n]["pooled"], "maps": {str(m): e for m, e in home[n]["maps"].items()},
                                 "n": home[n]["n"]} for n in BACKBONES},
