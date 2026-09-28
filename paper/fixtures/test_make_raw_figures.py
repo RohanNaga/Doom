@@ -471,6 +471,42 @@ def test_backbone_end_labels_clear_every_mark_and_the_next_panel(tmp_path, monke
     assert not [(a, b) for a in labels for b in right if a.overlaps(b)]                  # clear of panel b
 
 
+def slim_block(n, wanted, p0, p4, l0, l4, upper, middle, coarse=False, quantity="raw", final=True):
+    return {"n": n, "n_wanted": len(wanted), "wanted": list(wanted), "arenas": list(wanted)[:n], "quantity": quantity,
+            "psnr_zero_shot": p0, "psnr_4k": p4, "lpips_zero_shot": l0, "lpips_4k": l4, "ceiling": upper,
+            "budget_middle": middle, "budget_final": final, "censored": 0, "coarse_grid": coarse, "headline": 4000}
+
+
+def test_the_slim_results_table_has_one_row_per_backbone_and_the_comparison_on_four_arenas():
+    four = (6, 7, 8, 16)
+    rows = [("SD 1.4 U-Net", slim_block(13, ALL_13, 22.30, 23.60, 0.303, 0.210, 27.32, [150]), (25.20, 0.158), True),
+            ("PixArt-$\\alpha$", slim_block(13, ALL_13, 22.38, 23.72, 0.285, 0.205, 27.32, [150]), (25.18, 0.159),
+             True),
+            ("SD 3.5 Medium", slim_block(8, ALL_13, 21.97, 23.53, 0.260, 0.167, 31.38, [250]), (25.38, 0.126), True),
+            ("U-Net LoRA", slim_block(4, four, 21.71, 22.88, 0.292, 0.209, 26.69, [100, 250]), None, False),
+            ("U-Net full fine-tune", slim_block(4, four, 21.71, 23.11, 0.292, 0.182, 26.69, [4000], coarse=True),
+             None, False)]
+    tex = mrf.slim_table(rows)
+    body = [ln for ln in tex.splitlines() if " & " in ln and not ln.startswith("%")][2:]      # after the two headers
+    assert [ln.split(" & ")[0] for ln in body] == ["SD 1.4 U-Net", "PixArt-$\\alpha$", "SD 3.5 Medium (8 of 13)",
+                                                   "U-Net LoRA (6, 7, 8, 16)", "U-Net full fine-tune (6, 7, 8, 16)"]
+    cells = [ln.rstrip(" \\").split(" & ")[1:] for ln in body]
+    assert cells[0] == ["25.20", "0.158", "22.30", "0.303", "23.60", "0.210", "27.32", "150"]
+    assert cells[2][-2:] == ["31.38", "250"]
+    # the comparison rows leave the training maps blank: the source model's read, not theirs after adaptation
+    assert cells[3] == ["", "", "21.71", "0.292", "22.88", "0.209", "26.69", "100--250"]
+    assert cells[4][-1] == "${\\le}$4k"                            # scored at 0 and 4k only
+    assert all(len(c) == 8 for c in cells)
+    # no group rows (they go to the supplement), and nothing waits in a finished table
+    assert not [ln for ln in tex.splitlines() if ln.startswith(("Hard", "Medium", "Easy", "All"))]
+    assert "\\tbd" not in tex
+    assert tex.count("\\midrule") == 2 and "\\begin{tabular}{lrrrrrrrr}" in tex
+    # a budget that is not final yet waits
+    waiting = mrf.slim_table([("SD 3.5 Medium", slim_block(8, ALL_13, 21.97, 23.53, 0.260, 0.167, 31.38, None,
+                                                           final=False), (25.38, 0.126), True)])
+    assert waiting.splitlines()[-3].endswith("& 31.38 & \\tbd{} \\\\")
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)
@@ -621,6 +657,14 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert shared["medians"]["pixart_lora"]["0"][0] == pytest.approx(18.2)
     assert shared["medians"]["unet_lora"]["0"][0] == pytest.approx(18.0)
     assert shared["medians"]["sd35_lora"]["4000"][0] == pytest.approx(19.5)
+    # the slim results table: the U-Net over every arena (6 and 9 here) from the row's own reads, then the blocks
+    slim = open(tables / "results_slim.tex").read()
+    lines = {line.split(" & ")[0]: line.rstrip(" \\").split(" & ")[1:] for line in slim.splitlines()
+             if " & " in line and not line.startswith("%")}
+    assert lines["SD 1.4 U-Net"][:7] == ["22.45", "0.150", "18.50", "0.280", "21.25", "0.205", "26.50"]
+    assert lines["PixArt-$\\alpha$"][4] == "20.70" and lines["SD 3.5 Medium (1 of 2)"][4] == "19.50"
+    assert lines["U-Net full fine-tune (1 of 4)"][:2] == ["", ""]
+    assert lines["U-Net LoRA (1 of 4)"][2] == "18.00"
     # no 200k SD 3.5 files: the provisional 170k read through the stock decoder, recorded as the fallback
     assert s["sd35_row"] == {"row": "sd35_170000", "decoder": "stock", "fallback": True}
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none

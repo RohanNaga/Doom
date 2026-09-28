@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-28T10:59:39-04:00",
+ "generated_at": "2026-09-28T11:18:02-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1535,6 +1535,95 @@
    "g_train_source": "sd35_200000",
    "g_train_note": null,
    "zero_shot_borrowed": []
+  }
+ },
+ "slim_unet_all": {
+  "n": 13,
+  "n_wanted": 13,
+  "wanted": [
+   1,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17
+  ],
+  "arenas": [
+   1,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17
+  ],
+  "quantity": "raw",
+  "decoded_only": [],
+  "in_progress": [],
+  "headline": 4000,
+  "coarse_grid": false,
+  "psnr_zero_shot": 22.297485141083598,
+  "psnr_4k": 23.601111978292465,
+  "psnr_8k": 23.688441541045904,
+  "ceiling": 27.319409392774105,
+  "lpips_zero_shot": 0.30288498516893014,
+  "lpips_4k": 0.21024158014915884,
+  "lpips_8k": 0.203747603809461,
+  "has_check": true,
+  "g_train": 3.3575854878872633,
+  "budget_final": true,
+  "budgets": {
+   "1": 100,
+   "6": 100,
+   "7": 250,
+   "8": 2000,
+   "9": 150,
+   "10": 50,
+   "11": 2000,
+   "12": 50,
+   "13": 250,
+   "14": 1000,
+   "15": 2000,
+   "16": 100,
+   "17": 150
+  },
+  "budget_middle": [
+   150
+  ],
+  "censored": 0,
+  "gpu_hours_headline_by_card": {
+   "A4000": {
+    "median": 1.0984782326221465,
+    "n": 13,
+    "arenas": [
+     1,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17
+    ]
+   }
   }
  },
  "backbone_panel": {
