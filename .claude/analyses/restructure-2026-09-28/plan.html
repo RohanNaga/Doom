@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DoomShift Restructure Plan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f7f5f0; --ink:#1d1b17; --muted:#5d5850; --rule:#d9d3c7; --panel:#ffffff;
+  --old:#fbeceb; --old-ink:#7a1f1a; --new:#e9f3ec; --new-ink:#1d5a33; --keep:#eef0f4;
+  --accent:#8a3b12; --accent-soft:#f4e6dc; --blue:#0c4c9b; --tag:#e7e2d7;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15140f; --ink:#ebe6da; --muted:#a39c8e; --rule:#3a362e; --panel:#1f1d17;
+    --old:#3a1f1c; --old-ink:#f0a49b; --new:#1c3324; --new-ink:#9fd7b1; --keep:#262a31;
+    --accent:#e0956a; --accent-soft:#3a2a20; --blue:#8fb8f0; --tag:#2c2a24;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15140f; --ink:#ebe6da; --muted:#a39c8e; --rule:#3a362e; --panel:#1f1d17;
+  --old:#3a1f1c; --old-ink:#f0a49b; --new:#1c3324; --new-ink:#9fd7b1; --keep:#262a31;
+  --accent:#e0956a; --accent-soft:#3a2a20; --blue:#8fb8f0; --tag:#2c2a24;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+main{max-width:980px;margin:0 auto;padding:32px 16px 80px}
+h1,h2,h3{font-family:"Source Serif 4",Georgia,serif;text-wrap:balance;line-height:1.2}
+h1{font-size:34px;margin:0 0 6px;font-weight:600}
+h2{font-size:24px;margin:44px 0 12px;padding-top:18px;border-top:1px solid var(--rule)}
+h3{font-size:18px;margin:26px 0 8px}
+p{max-width:72ch}
+.sub{color:var(--muted);margin:0 0 20px;font-size:15px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:14px 0}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.card h4{margin:0 0 6px;font-size:14px;font-family:"IBM Plex Sans";font-weight:600}
+.card p{margin:0;font-size:14px;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0;background:var(--panel)}
+th,td{border:1px solid var(--rule);padding:8px 10px;vertical-align:top;text-align:left}
+th{background:var(--tag);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tablewrap{overflow-x:auto}
+.delta{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--rule);border-radius:6px;overflow:hidden;margin:10px 0 18px}
+.delta>div{padding:12px 14px;font-size:14px}
+.delta .old{background:var(--old);color:var(--old-ink)}
+.delta .new{background:var(--new);color:var(--new-ink)}
+.delta .lab{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.8;margin-bottom:6px;font-weight:600}
+.delta .old s{text-decoration-thickness:1px}
+.keep{background:var(--keep);border-left:3px solid var(--rule);padding:8px 12px;font-size:14px;margin:8px 0}
+.tex{font-family:"IBM Plex Mono",monospace;font-size:13px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:12px 14px;white-space:pre-wrap;overflow-x:auto;margin:8px 0 14px}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;background:var(--tag);color:var(--muted);margin-right:6px;font-weight:500}
+.rec{background:var(--accent-soft);color:var(--accent)}
+.vote{font-size:12px;color:var(--muted)}
+.decision{background:var(--panel);border:1px solid var(--rule);border-left:4px solid var(--accent);border-radius:6px;padding:12px 16px;margin:12px 0}
+.decision h4{margin:0 0 6px;font-size:15px}
+.decision p{margin:4px 0;font-size:14px}
+.blue{color:var(--blue)}
+ul{padding-left:20px}
+li{margin:4px 0}
+.toc{font-size:14px;columns:2;column-gap:24px;margin:0 0 8px}
+.toc a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--rule)}
+a{color:var(--blue)}
+@media (max-width:700px){.delta{grid-template-columns:1fr}.toc{columns:1}}
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">DoomShift · CoRL 2026 PhysWM · deadline Thu Oct 1, 07:59 EDT</p>
+<h1>Restructure plan for your approval</h1>
+<p class="sub">Three independent proposals (Opus 5.5 high, Fable 5.1 high, Astra) merged into one plan, shown as a delta against the Overleaf draft Changliu read (Sep 27, 21:35). Nothing here is applied yet. Sept 28, 8:15 PM.</p>
+
+<div class="toc">
+<a href="#s1">1. What the paper becomes</a><br>
+<a href="#s2">2. Where the three agree and differ</a><br>
+<a href="#s3">3. Decisions I need from you</a><br>
+<a href="#s4">4. Four-page outline</a><br>
+<a href="#s5">5. Contributions, final text</a><br>
+<a href="#s6">6. Delta, section by section</a><br>
+<a href="#s7">7. Supplement fixes</a><br>
+<a href="#s8">8. What stays exactly as you decided</a><br>
+<a href="#s9">9. Risks</a><br>
+<a href="#s10">10. After approval</a>
+</div>
+
+<h2 id="s1">1. What the paper becomes</h2>
+<p><strong>Thesis, in a reviewer's words.</strong> Change only the scene, with the physics and game engine held fixed, and three Doom world models keep their response to the controls but lose the scene's appearance, by the same amount, as a step, and inside the model rather than its decoder. A standard adapter on eight episodes and 2% of the pretraining updates brings most of it back, and the median arena is halfway repaired after 150 updates.</p>
+<p><strong>How this satisfies both of you.</strong> Changliu's order and nouns stay exactly as she wrote them: benchmark, empirical finding, adaptation result. Your excitement goes into the weight and the wording. The benchmark bullet is the shortest and is framed as the instrument that isolates the shift. The finding and the measurement get claim-shaped bold heads that a reviewer will repeat. The abstract answers the title's question with a number before the reader reaches the contributions. The release is one sentence. No paragraph is titled "Method", because no method is claimed; the adapter is presented as a measuring instrument with three dials (updates, episodes, parameters), which is what turns "LoRA works" into a result nobody had.</p>
+<div class="grid">
+<div class="card"><h4>Headline finding</h4><p>A scene shift breaks appearance, not control. Same loss for a U-Net and two transformers from 0.6 to 2.3 B. A step, not a slope. In the model, not the renderer.</p></div>
+<div class="card"><h4>Headline measurement</h4><p>Half the excess gap closes in a median 150 updates. 4k updates (2% of pretraining, 0.49% of parameters, about one A4000 hour) recover 72 / 76 / 77% of the perceptual loss.</p></div>
+<div class="card"><h4>Novelty claim</h4><p>To our knowledge, no published game world model has been scored on recorded frames of held-out maps of its own game, and none of AVID, Vista or AdaWorld reports what one new scene costs.</p></div>
+</div>
+
+<h2 id="s2">2. Where the three agree and differ</h2>
+<p><strong>All three agree on:</strong></p>
+<ul>
+<li>Changliu's three contributions in her order; the finding written as a claim, the adaptation as a measurement, "recipe" and "post-training" gone.</li>
+<li>Prior work becomes one paragraph holding only what the intro does not say, plus where the adapter comes from.</li>
+<li>Section 3 renamed (Study design / Setup / Study protocol) and cut to what makes the results reproducible; the training-setup paragraph, the in-distribution paragraph and the stale four-tic sentence leave the body.</li>
+<li>Figure 2 (method overview), the six-row Table 1 and Table 2 move to the supplement; the body carries Figure 1, one slim table and the shift-and-repair figure.</li>
+<li>Results paragraphs titled by their claims; Future work rewritten as a short conclusion with the limits.</li>
+<li>The current main (the earlier agents' attempt) relabelled rather than reframed: the abstract still says "DoomShift asks how quickly and cheaply a world model can be adapted", bullet 1 still leads with release counts, and Section 2 lost the novelty sentence.</li>
+<li>Every proposal fits the budget on paper (187, 188 and 192 of about 200 lines) but needs a real build.</li>
+</ul>
+<p><strong>They differ on</strong> the title, whether to keep the "to our knowledge" sentence, which figure goes in the body, and whether to add a budget column to the table. Those are the decisions below.</p>
+
+<h2 id="s3">3. Decisions I need from you</h2>
+
+<div class="decision"><h4>D1. Title</h4>
+<p><span class="tag rec">Recommended</span> <strong>How Much Adaptation Do World Models Need? A Study of Domain Shifts in Doom</strong> (Changliu's, verbatim; Opus and Fable). <span class="vote">You accepted it in writing, and the question is the exciting half.</span></p>
+<p><span class="tag">Alternative</span> <strong>What Survives a Scene Change? A Study of World-Model Adaptation in Doom</strong> (Astra). Puts the finding in the title; costs you a change your professor did not ask for.</p></div>
+
+<div class="decision"><h4>D2. The novelty sentence</h4>
+<p><span class="tag rec">Recommended</span> Keep "To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training." in Related work (Opus and Fable). It is the paper's clearest novelty claim and the earlier agents dropped it.</p>
+<p><span class="tag">Alternative</span> Cut it as a fragile universal claim (Astra) and let the conjunction of measurements carry the novelty.</p></div>
+
+<div class="decision"><h4>D3. Body figure</h4>
+<p><span class="tag rec">Recommended</span> The four-panel U-Net shift-and-repair row (1.75 in): per-arena PSNR and LPIPS before and after, plus the two update curves (Astra and Fable). The slim table carries the cross-backbone evidence.</p>
+<p><span class="tag">Alternative</span> The three-backbone strip (1.6 in). Shows all three backbones but no update curve, and the "how much" question needs the curve.</p></div>
+
+<div class="decision"><h4>D4. Budget column in the body table</h4>
+<p><span class="tag rec">Recommended</span> Add one column, "Budget" (150, 150, 250 with a dagger for the first point of SD 3.5's grid) (Opus). It keeps the "how much" thread in the table after Table 2 leaves. The lead must confirm it fits the text width; the table is at 96% now.</p>
+<p><span class="tag">Alternative</span> No column; the budgets stay as one sentence in Results (Fable, Astra).</p></div>
+
+<div class="decision"><h4>D5. Hook sentence before the bullets</h4>
+<p><span class="tag rec">Recommended</span> Two lines that give the answer before the contributions (Opus): "In short, a world model moved to a new arena keeps playing the game but draws the wrong world, and a small adapter trained on eight episodes draws the arena back." The finding reaches the reader before the benchmark does, at a cost of two lines.</p>
+<p><span class="tag">Alternative</span> Go straight from the intro's last sentence to "We make three contributions:".</p></div>
+
+<div class="decision"><h4>D6. Blue numbers</h4>
+<p>The 200k numbers are final. The plan keeps blue in the abstract only (your standing rule) and turns everything else black. Say if you want the abstract black too.</p></div>
+
+<h2 id="s4">4. Four-page outline</h2>
+<p>A CoRL page holds about 50 lines; floats count at their height plus caption. Calibrated against the scenario F preview, which fills four pages at about 198 lines by the same count.</p>
+<div class="tablewrap">
+<table>
+<tr><th>#</th><th>Section</th><th>Job</th><th class="num">Lines</th><th>Carries</th></tr>
+<tr><td></td><td>Title, authors, abstract, keywords</td><td>State the question, the finding and the answer, numbers in blue</td><td class="num">28</td><td></td></tr>
+<tr><td>1</td><td>Introduction</td><td>P1: world models are scored only in domain (6). P2: why a new scene matters, ending on your "We therefore explore" sentence (8). Hook (2). Three bullets (18).</td><td class="num">36</td><td>Figure 1 teaser, 1.5 in, your 35-word caption (14)</td></tr>
+<tr><td>2</td><td>Related work</td><td>What is held out elsewhere, the novelty sentence, where the adapter comes from and that nobody reports a budget</td><td class="num">10</td><td></td></tr>
+<tr><td>3</td><td>Study design</td><td>Arenas and data with the one release sentence (6), three backbones under one recipe (7), measurements including the decoder (10), adaptation as a measurement (8)</td><td class="num">33</td><td>Table 1, slim, five rows, budget column, 4-line caption (13)</td></tr>
+<tr><td>4</td><td>Results</td><td>Four claim-titled paragraphs: the shift breaks the scene, not the controls (6); the same loss in every backbone, and a step (4); the fault is in the model (3); how much adaptation it takes (14); what we cannot forecast yet (2)</td><td class="num">29</td><td>Figure 2, four-panel shift and repair, 1.75 in, 3-line caption (15)</td></tr>
+<tr><td>5</td><td>Conclusion</td><td>Limits, next steps, your closing sentence about the detect-and-repair loop</td><td class="num">7</td><td></td></tr>
+<tr><td></td><td><strong>Total</strong></td><td></td><td class="num"><strong>185 of about 200</strong></td><td></td></tr>
+</table>
+</div>
+<p><strong>Cut order if the build overflows</strong> (each saves one to two lines, none touches a finding): the hardware clause in the full fine-tune sentence; the data-ladder sentence, keeping its pointer; the persistence range, keeping the median; the "what we cannot forecast" paragraph folded into the conclusion as a clause.</p>
+<p><strong>To the supplement:</strong> Figure 2 method overview and the full Table 1 in a new first section "Study overview"; Table 2; the training-setup paragraph; the latent-contract argument and the decoder ablation numbers; the corpus totals; the per-arena ranges, the one-in-five LPIPS statistic, the HUD rows, the right-censoring rule, the transformers' adapter sizes and grids, the forgetting number.</p>
+
+<h2 id="s5">5. Contributions, final text</h2>
+<p>Lead-in and three bullets, ready to paste. Bullet 1 is the instrument, five lines. Bullets 2 and 3 carry the claims. The numbers are the final 200k reads.</p>
+<div class="tex">In short, a world model moved to a new arena keeps playing the game but draws the wrong world, and a small adapter trained on eight episodes draws the arena back (Figure~\ref{fig:teaser}). We make three contributions:
+\begin{itemize}\setlength{\itemsep}{0pt}
+\item \textbf{DoomShift, a benchmark that isolates a scene shift.} Seventeen Doom arenas run on exactly the same physics and game engine and differ only in their surroundings. We train three diffusion world models, initialized from pretrained diffusion image models, on four arenas and score them on the 13 they never saw, zero-shot and after adaptation, against recorded frames and against each decoder's reconstruction upper bound, which separates the model's error from the renderer's. Recordings, models and adapters are released (link withheld).
+\item \textbf{A scene shift breaks appearance, not control.} On the unseen arenas all three models keep their turn response (directional score 0.80 to 0.81, against 0.84 to 0.86 on the training maps) while their perceptual error roughly doubles (LPIPS 0.158 to a median 0.303 for the U-Net) and their scene PSNR drops 2.8 to 3.3~dB. The loss is the same for a U-Net and two transformers from 0.6 to 2.3~B parameters, so it follows what the models were exposed to, not their architecture or scale. It is a step, not a slope: every unseen arena is worse in LPIPS than every training map. And it lives in the model, since the decoder renders the unseen arenas nearly as well as the training maps (Table~\ref{tab:main}, Figure~\ref{fig:teaser}).
+\item \textbf{How much adaptation it takes: very little.} A standard LoRA adapter on the frozen model (0.49 percent of the U-Net's parameters), trained on eight episodes of the new arena, closes half of the extra distance the shift opened to the upper bound in a median 150 updates. By 4k updates, 2 percent of pretraining and about one A4000 GPU-hour, it closes a median 94 percent of that distance and recovers 72 percent of the lost perceptual quality. The same procedure recovers 76 and 77 percent on PixArt-$\alpha$ and SD~3.5. A full fine-tune with 205 times the trainable parameters recovers 87 percent against the adapter's 71 on four arenas (Table~\ref{tab:main}, Figure~\ref{fig:adapt}).
+\end{itemize}</div>
+<p>Number provenance: directional 0.800 to 0.808 unseen and 0.840 to 0.855 training; PSNR drops 2.90, 2.80 and 3.29 dB; LPIPS ratios 1.92, 1.79 and 2.08; per-arena minima verified today from the summary file (excess gap closed at least 55% on every arena for all three backbones, LPIPS rise undone at least 48% on the U-Net).</p>
+
+<h2 id="s6">6. Delta, section by section</h2>
+<p>Left is the Overleaf draft, right is the plan. Grey blocks are kept verbatim.</p>
+
+<h3>Abstract</h3>
+<div class="keep">Kept: sentence 1 ("World models have become capable simulators, ...") and sentence 2 ("A small domain shift, such as a new arena of the same game, ... though the underlying physics and game engine are exactly the same.").</div>
+<div class="delta"><div class="old"><div class="lab">Old, sentence 3</div>DoomShift asks how quickly and cheaply a world model can be adapted across such a shift.</div><div class="new"><div class="lab">New</div>With DoomShift, a controlled version of this shift in Doom, we measure what it breaks and how much adaptation it takes to repair.</div></div>
+<div class="keep">Kept: sentence 4 ("We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 other out-of-distribution maps that it never saw.").</div>
+<div class="delta"><div class="old"><div class="lab">Old, sentence 5</div>On the unseen maps the U-Net's perceptual error (LPIPS) doubles, from 0.158 to a median 0.303, and its scene PSNR drops 2.9 dB, from 25.2 to a median 22.3 dB; its turn response survives, and the other two backbones lose the same way.</div><div class="new"><div class="lab">New</div>All three keep their response to the controls and lose the scene: the U-Net's perceptual error (LPIPS) doubles, from <span class="blue">0.158</span> to a median <span class="blue">0.303</span>, its scene PSNR drops <span class="blue">2.9</span> dB, from <span class="blue">25.2</span> to a median <span class="blue">22.3</span> dB, and two transformers of <span class="blue">0.6</span> and <span class="blue">2.3</span> B parameters lose as much.</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, sentence 6</div>We then train rank-16 adapters on 8 episodes of each unseen map with 2% of the original training updates and recover 72% of the lost perceptual quality and about half of the lost PSNR.</div><div class="new"><div class="lab">New</div>Very little adaptation repairs it: rank-16 adapters trained on <span class="blue">8</span> episodes of each unseen map with <span class="blue">2%</span> of the original training updates recover <span class="blue">72%</span> of the lost perceptual quality and about <span class="blue">half</span> of the lost PSNR on the U-Net, and <span class="blue">76%</span> and <span class="blue">77%</span> of the perceptual loss on the two transformers.</div></div>
+
+<h3>Introduction</h3>
+<div class="delta"><div class="old"><div class="lab">Old, P1 sentence 3</div>Each of these models is evaluated only on held-out rollouts from the environment it was trained on: the reported score is a held-out trajectory drawn from its own training scenes and none has been shown to generalize to a new environment within the same game.</div><div class="new"><div class="lab">New</div>Each is evaluated only on held-out rollouts from the environment it was trained on, and none has been shown to generalize to a new environment within the same game.</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, P1 sentence 4</div>This holds even for MultiGen, which trains a single Doom model across 100 procedurally generated maps with a pre-trained agent: it reports PSNR, SSIM and LPIPS only on its training distribution, with no map held out for evaluation.</div><div class="new"><div class="lab">New</div>Even MultiGen, one Doom model trained across 100 procedurally generated maps, reports PSNR, SSIM and LPIPS only on its training distribution, with no map held out.</div></div>
+<div class="keep">Kept: P2 sentences 1 and 2 ("A learned simulator is useful only where it is faithful ..." and "Game worlds let us pose this question with the engine held fixed ...").</div>
+<div class="delta"><div class="old"><div class="lab">Old, P2 sentence 3, cut</div>Yet unchanged dynamics alone do not guarantee a faithful render: pretrained video and world models are typically moved to a new domain only through a further full fine-tune or a dedicated adapter on the frozen backbone, and a model trained on a handful of maps tends to fall back on the appearance it already knows once the surroundings change.</div><div class="new"><div class="lab">Why</div>Its citations repeat Section 2 (comment 3), and its last clause states the paper's main finding as something already known, which gives the novelty away before the paper earns it. The AVID and AdaWorld citations move to Related work.</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, P2 sentence 4, first half</div>Pretraining one model on every map a deployment might meet is costly and never complete, and fine-tuning a separate model per map is prohibitively costly.</div><div class="new"><div class="lab">New</div>Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map is prohibitively costly.</div></div>
+<div class="keep">Kept verbatim: "We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses, and how few episodes and updates recover the rest."</div>
+<div class="delta"><div class="old"><div class="lab">Old lead-in and bullets</div>We introduce DoomShift, which addresses these concerns and contributes the following: [benchmark bullet with three lines of release counts; "A post-training recipe ..." bullet with a tbd comparator; "A characterization of what the shift breaks" bullet]</div><div class="new"><div class="lab">New</div>The hook and the three bullets in section 5 above. The release becomes six words in bullet 1 and one sentence in Study design. "Recipe" and "post-training" disappear. The full fine-tune comparator is a number.</div></div>
+<div class="keep">Kept: Figure 1 and its 35-word caption.</div>
+
+<h3>Prior work, renamed Related work, one paragraph</h3>
+<div class="delta"><div class="old"><div class="lab">Old, two paragraphs, 19 lines</div>Most Doom and game world models are trained on a set of maps and tested on maps from that same set. Papers that test a world model outside its training data exist, but they keep aside something other than a map from the same game: [...] To our knowledge, no published game world model has been scored [...]<br><br>We take our method from two papers that put a small adapter on a frozen pretrained video model. AVID shows [...] Vista uses [...] Neither tests this on a map kept aside from the same game, and neither reports the budget [...] AdaWorld solves a similar problem with a short full fine-tune [...] DoomShift combines what none of these do [...] Persistence, the last frame copied forward, is the standard reference [...] We also compare every score to the reconstruction upper bound [...]</div><div class="new"><div class="lab">New, 10 lines</div>Held-out evaluation of world models exists, but it holds out something other than a map of the same game: a new robot body, a new game or environment or a new building. Doom maps have been held out, but only to test the agents that play them, and game world models that do show new scenes generate them from an image, with no recorded frames to score against. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training. Our adapter is not new: a small adapter on a frozen video model moves it to a new setting in AVID and adds action control in Vista, and AdaWorld adapts with a short full fine-tune, which we run as the comparator. None of them reports what adapting to one new scene costs in episodes and updates, which is what we measure.<br><br><em>Moved to Measurements:</em> the persistence and reconstruction-upper-bound sentences with their citations. <em>Cut:</em> the opener that repeats intro P1, "We take our method from", and "DoomShift combines what none of these do".</div></div>
+
+<h3>Method, renamed Study design</h3>
+<div class="delta"><div class="old"><div class="lab">Old, Data, 9 lines</div>We collect the data for this research by running experiments with the Arnold agent through ViZDoom deathmatches [...] In total we collect 2,412 episodes, about 96 hours of play and about 12.1 million frames.</div><div class="new"><div class="lab">New, Arenas and data, 6 lines</div>The Arnold agent plays 150-second ViZDoom deathmatches against 8 bots on the 17 Doom maps it ships with, which we call arenas; each has its own layout, textures and lighting. We record every tic (1/35 s): a 320×240 frame and the 19 buttons the engine executed. Four arenas (2 to 5) are the training maps: we train on 500 episodes of each and score on 25 further validation episodes per map (512 windows). The other 13 (1, 6 to 17) are never trained on: we record 24 new episodes on each, 16 for adaptation (8 used here) and 8 held out for scoring (256 windows per arena). The release holds 8,000 episodes on the four maps (6,000 train, 1,000 validation, 1,000 test) and the 24 per unseen arena, with the models, decoders and adapters (link withheld).</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, Three backbones + recipe, 13 lines</div>We pick three pretrained backbones to ask three different questions. [...] architecture turns out not to change what survives the shift: in distribution their scene PSNR differs by 0.02 dB [...] We turn all three into next-tic world models under one shared recipe (Figure 2). [...] a step count we match across backbones, keep an EMA at 0.9999 in fp32 (a bf16 EMA underflows and freezes) and sample with 10-step DDIM, which we found to be a strong balance between quality and efficiency (sampler sweep in the supplement).</div><div class="new"><div class="lab">New, Three backbones, one recipe, 7 lines</div>We turn three pretrained image diffusion models into next-tic world models: the SD 1.4 U-Net (860M parameters), GameNGen's backbone; PixArt-α, a 628M transformer in the same latent space, which changes the architecture at similar scale; and SD 3.5 Medium, a 2.27B MMDiT with 16-channel latents, which changes the scale. All three share one recipe (supplement): 32 context tics, v-prediction, context noise augmentation as in GameNGen, 200k updates at batch 32, an fp32 EMA at 0.9999, and 10-step DDIM, which we found to be a strong balance between quality and efficiency.<br><br><em>The in-domain comparison moves to Results; the bf16 note and the "three questions" framing go.</em></div></div>
+<div class="delta"><div class="old"><div class="lab">Old, Metrics + Decoder, 19 lines</div>We score every predicted frame against four questions: how accurate [...] does it turn the right way when we mirror the controls? [...] Every backbone is trained on latents from its frozen encoder, so the latent space is the contract [...] for 3,486 updates and gating it on held-out training-map frames [...] the LPIPS term is there because MSE alone more than triples scene LPIPS (0.092 to 0.339). We use it for every pixel score of the U-Net and PixArt-α unless stated otherwise; SD 3.5 uses its own stock decoder.</div><div class="new"><div class="lab">New, Measurements, 10 lines</div>We score the scene rows (0 to 207; the HUD below does not change with the map) of each frame predicted one tic ahead against the raw recorded frame, with PSNR and LPIPS. Absolute PSNR alone does not compare arenas, because it rises with how static a recording is: copying the last frame forward, the persistence reference of video prediction, already scores a median 19.8 dB on the unseen arenas (18.5 to 22.5 per arena). We therefore read each score against the <em>reconstruction upper bound</em>, the decoder applied to the ground-truth latent, which is the best a prediction rendered through that decoder can score. An arena's <em>excess gap</em> is how much further below this bound the model sits there than on the training maps. Each decoder is fine-tuned on training-map frames only (MSE plus 0.1 LPIPS; supplement), which changes what we can see, not what the model knows. The <em>directional</em> score is the fraction of turning windows whose predicted view turns the other way when left and right are swapped in the newest control.<br><br><em>To the supplement:</em> the latent-contract argument, the decoder's update count and ablation numbers. <em>Cut as stale:</em> "SD 3.5 uses its own stock decoder" (every backbone now scores through its own fine-tuned decoder).</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, Figure 2, Training setup, In-distribution performance, 12 lines</div>Figure 2 method overview in the body. "We train each backbone on a single RTX A6000 (49 GB) in bf16 with fused AdamW, reaching 1.8 updates per second ..." "On the training maps the three backbones reach a scene PSNR of 25.20, 25.18 and 24.50 dB ... Four tics ahead they reach 21.33, 21.29 and 21.59 dB (stock decoders, full frame; SD 3.5 at 140k)."</div><div class="new"><div class="lab">New</div>Figure 2 and the training-setup paragraph move to the supplement (no throughput claims in the body, per your rule). The in-domain numbers move to the table and the first Results paragraph, with SD 3.5 at its final 25.38 / 0.126 and a 6.5 dB gap. The four-tic sentence is deleted (stale).</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, Post-training, 14 lines</div>To move a trained model to a new arena we keep its weights frozen and train a small adapter [...] score the non-EMA weights at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates, with the control checks [...] 4k updates is the elbow of the curve, and we report it everywhere [...] which is why the recipe costs 2 percent [...] a full fine-tune comparator at 2e-5 is in progress (tbd). An arena's budget is the first grid point [...] arenas that do not by 8k are right-censored.</div><div class="new"><div class="lab">New, Adaptation as a measurement, 8 lines</div>To measure how much adaptation an arena needs, we keep the trained model frozen and train a standard adapter: rank-16 LoRA on every attention projection, with the control MLP, input projection and noise-bucket embedding trained in full (4.2M parameters, 0.49 percent of the U-Net; the same components on the transformers, supplement). It trains on 8 episodes of the arena, about 1 A4000 GPU-hour for 4k updates, and we score held-out episodes at update counts from 50 to 8k. We report 4k updates, 2 percent of pretraining, everywhere: it captures on average 96 percent of the 8k gain, and 8k serves as the check. An arena's <em>budget</em> is the first update count at which it closes half of its excess gap. At the other end of the parameter axis we fine-tune every U-Net parameter on arenas 6, 7, 8 and 16 with the same episodes.</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, Table 1, six rows</div>Model / Maps / PSNR / LPIPS / Upper bound / Directional, training and unseen rows per backbone, SD 3.5 provisional at 170k.</div><div class="new"><div class="lab">New, Table 1, slim, five rows, 4-line caption</div>One row per backbone: in domain, zero-shot, 4k, recovered shares (LPIPS, PSNR, gap), budget. Two rows compare the U-Net adapter and full fine-tune on arenas 6, 7, 8, 16. Caption: "What the shift costs and what adaptation buys. Scene PSNR (dB) and LPIPS one tic ahead against the raw frame, each backbone through its own fine-tuned decoder: in domain (training maps, 512 windows), and zero-shot and after 4k adapter updates on eight episodes (medians over the 13 unseen arenas). Recovered: median per-arena share of the LPIPS rise, the PSNR drop and the excess gap undone at 4k. Budget: median updates to close half the excess gap (dagger: the first point of SD 3.5's grid). Bottom rows: arenas 6, 7, 8 and 16 only." The six-row table goes to the supplement with SD 3.5's final rows.</div></div>
+
+<h3>Results</h3>
+<div class="delta"><div class="old"><div class="lab">Old, opener and "Zero-shot: where the deficit sits", 14 lines</div>We report what a model loses zero-shot, what post-training recovers and with what budget, and what predicts how far an arena gets. What does a model keep and what does it lose when it meets an arena it never saw? On unseen arenas the turn response survives (U-Net directional scores 0.73 to 0.86 per arena ...). The appearance does not: [...] (20.5 to 24.7 per arena) [...] Pooled over the 13 arenas, one predicted frame in five has an LPIPS above 0.4 [...] The decoder is not the limit [...] The three backbones lose the same things [...] It is a step, not a slope [...] What the model keeps is how actions act on the world [...] while the map-independent HUD rows fall 0.2 dB (29.7 to 29.5).</div><div class="new"><div class="lab">New, three claim-titled paragraphs, 13 lines</div><strong>The shift breaks the scene, not the controls.</strong> In domain the three models sit 3.4, 3.4 and 6.5 dB below their decoders' upper bounds; SD 3.5, the best of the three, leaves the most room below its own sharper decoder (Table 1). On the 13 unseen arenas all three keep their turn response: the directional score goes from 0.855, 0.842 and 0.840 to 0.804, 0.808 and 0.800, against 0.885 and 0.892 for the ground-truth frames. They lose the scene: the U-Net's scene PSNR falls from 25.2 to a median 22.3 dB and its LPIPS rises from 0.158 to 0.303. On arena 7 it still fires and advances as in the ground truth but paints the training maps' masonry (Figure 1).<br><br><strong>The same loss in every backbone, and a step.</strong> Scene PSNR drops 2.9, 2.8 and 3.3 dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-α and SD 3.5: neither a transformer in place of the U-Net nor 2.6 times the parameters changes what the shift costs. The loss is a step, not a slope: for all three backbones every unseen arena has a worse LPIPS than every training map (supplement).<br><br><strong>The fault is in the model, not the renderer.</strong> The SD 1 decoder, fine-tuned on training maps only, reconstructs the unseen arenas nearly as well as the training maps (27.3 against 28.6 dB) while the prediction loses 2.9 dB, so the shift lives in what the model predicts.<br><br><em>To the supplement:</em> per-arena ranges, the one-in-five statistic, the HUD rows.</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, "Post-training: what it takes", 16 lines</div>We next adapt a small subset of the U-Net's parameters [...] the 8k check adds little (23.7 dB, 0.204). Most of the PSNR still missing [...] In domain the model sits 3.4 dB below [...] (budgets below 4k tbd). By the same 4k updates it recovers a median 72 percent [...] (over 100 percent on arenas 8, 9 and 10 ...). Data matters less than the first updates [...] The adapters trade some in-distribution skill for it [...] (median 0.59 dB; stock decoder) [...] Neither the model's own latent-space score nor a frame distance [...] predicts how far an arena gets.</div><div class="new"><div class="lab">New, two claim-titled paragraphs, 16 lines</div><strong>How much adaptation: updates, episodes, parameters.</strong> Very little. Half of an arena's excess gap closes in a median 150 updates. By 4k updates on eight episodes the U-Net's median scene PSNR rises from 22.3 to 23.6 dB and its LPIPS falls from 0.303 to 0.210 (Figure 2). Per arena the adapter closes a median 94 percent of the excess gap, at least half on every arena, and undoes a median 72 percent of the LPIPS rise. It regains only 48 percent of the lost PSNR, because the unseen arenas' upper bound is itself lower (27.3 against 28.6 dB). Data matters less than the first updates: on four arenas one episode already gives most of the gain of sixteen (supplement). Parameters matter somewhat more: a full fine-tune of all U-Net parameters, 205 times the adapter's, takes arenas 6, 7, 8 and 16 from 21.71 dB and 0.292 to 23.11 dB and 0.182 at 4k, against the adapter's 22.88 dB and 0.209, recovering 87 rather than 71 percent of the LPIPS rise; it runs on an A6000 (0.83 h per arena) where the adapter fits a 16 GB A4000 (1.10 h). The procedure carries over unchanged: PixArt-α recovers 76 percent of its LPIPS rise and closes a median 101 percent of its excess gap with a median budget of 150 updates, and SD 3.5 recovers 77 percent (0.262 to 0.165) and closes 94 percent, crossing half at 250 updates, the first point of its grid.<br><br><strong>What we cannot forecast yet.</strong> Neither the model's own latent-space score nor a frame distance between an arena and the training maps predicts how far the arena gets (supplement), so an arena's budget has to be measured, not predicted. Because the backbone stays frozen, removing the adapter restores the in-domain model exactly; the adapted weights lose a little on the training maps (supplement).</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, Figure 3 caption, 5 lines</div>On unseen arenas the U-Net loses appearance; eight episodes recover about half in PSNR and most in LPIPS. PSNR (a) and LPIPS (b) per arena zero-shot (open) and after 4k updates (filled); black ticks: reconstruction upper bound; dashed: training maps; (c, d) against updates; colour: group by zero-shot gap to the upper bound (dark: hard). Medians: 2.9 dB lost, 1.3 recovered; LPIPS 0.303 to 0.210. Fine-tuned decoder, raw frame.</div><div class="new"><div class="lab">New, now Figure 2, 3 lines</div>The shift and its repair, per unseen arena (U-Net). (a) Scene PSNR and (b) LPIPS zero-shot (open) and after 4k adapter updates on eight episodes (filled), with each arena's reconstruction upper bound (ticks) and the training maps' level (dashed): every arena loses the scene and every arena recovers. (c, d) The same against updates, coloured by zero-shot gap to the upper bound (dark: hard).</div></div>
+<div class="delta"><div class="old"><div class="lab">Old, Table 2</div>Adaptation cost by arena group, four blocks, in the body.</div><div class="new"><div class="lab">New</div>To the supplement unchanged. The body keeps the median budgets in the table and text.</div></div>
+
+<h3>Future work, renamed Conclusion</h3>
+<div class="delta"><div class="old"><div class="lab">Old, 11 lines</div>On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and 4k adapter updates raise its median scene PSNR from 22.3 to 23.6 dB [...] The claims cover 13 arenas of one game, one agent, one-tic scoring and mostly one seed. One-tic quality does not guarantee stable rollouts: SD 3.5, best at one tic on the full frame with stock decoders, collapses in 23 non-EMA and 9 EMA rollouts of 256 [...] Next are other Doom maps and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot scores so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model. The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.</div><div class="new"><div class="lab">New, 7 lines</div>The claims cover 13 arenas of one game, one agent, one-tic scoring and mostly one seed, and one-tic quality does not guarantee stable rollouts (supplement). Next are other games, detecting a shift from the model's own scores so that it can repair itself, closed-loop evaluation of the adapted models, and agents trained inside them. The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.<br><br><em>Cut:</em> the numerical recap (it repeats bullet 3 word for word) and the SD 3.5 collapse counts (140k checkpoint, withdrawn). Your closing sentence stays verbatim.</div></div>
+
+<h2 id="s7">7. Supplement fixes</h2>
+<ul>
+<li>New first section "Study overview" holding Figure 2 (method overview, panel (c) already relabelled "Adaptation"), the full six-row Table 1 with SD 3.5's final rows, and Table 2.</li>
+<li>Remove the SD 3.5 closed-loop blocks that the body withdrew: the "In SD 3.5's collapsed rollouts ..." paragraph, the collapse table and the collapse figure. Astra found them still present even though a later sentence says SD 3.5 was not evaluated in closed loop.</li>
+<li>Remove the arena-7 latent-skill sentence with its two tbd marks; the adapter-versus-full comparison is reported in raw-frame PSNR and LPIPS.</li>
+<li>Training setup (GPU, precision, optimizer, no throughput claims), the latent-contract argument, the decoder ablation, the corpus totals, the per-arena ranges and the forgetting number land in their existing sections.</li>
+</ul>
+
+<h2 id="s8">8. What stays exactly as you decided</h2>
+<ul>
+<li>"Physics and game engine exactly the same, only the surroundings change" as the description of the shift.</li>
+<li>Three backbones initialized from pretrained diffusion image models; 13 out-of-distribution maps; 8,000 released episodes with the 6,000 / 1,000 / 1,000 split.</li>
+<li>4k updates everywhere with 8k as the check and the 96% reason; "about 1 A4000 GPU-hour"; 10-step DDIM as "a strong balance between quality and efficiency".</li>
+<li>No throughput or fps claims; no "level pack"; keywords "World models, Few-shot adaptation".</li>
+<li>Abstract sentences 1 and 2, the intro's "We therefore explore" sentence, Figure 1 with its 35-word caption, your closing sentence in the conclusion.</li>
+<li>Blue on the abstract's numbers until you say black.</li>
+</ul>
+
+<h2 id="s9">9. Risks</h2>
+<ul>
+<li><strong>Figure 2 leaves the body.</strong> Your Sep 27 figure plan had a method overview in the body. Keeping it costs about 15 lines, paid by the "what we cannot forecast" paragraph, the data-ladder sentence, the hardware clause and part of Measurements, and leaves no reserve. All three proposals moved it.</li>
+<li><strong>Claim-titled paragraphs can overclaim.</strong> "Follows what the models were exposed to" and "lives in the model" rest on three backbones, mostly one seed. Each head sits next to its numbers. If Changliu balks, the softer form is "does not depend on architecture or scale across our three backbones".</li>
+<li><strong>The 48% PSNR number reads weak</strong> unless the lower-upper-bound explanation stays in the same sentence. It does in the plan.</li>
+<li><strong>Changliu may feel the benchmark was demoted.</strong> It is still first and still named, but five lines and framed as an instrument. Say so when you send it.</li>
+<li><strong>The line count is estimated.</strong> About 15 lines of reserve on paper; the real build decides. The cut order above is the fallback and touches no finding.</li>
+<li><strong>Drift on deadline day.</strong> After the edit, one number-consistency pass over 0.158 / 0.303, 2.9 dB, 72 / 76 / 77, 150 / 250, 94 / 101, 205×, 87 / 71.</li>
+</ul>
+
+<h2 id="s10">10. After approval</h2>
+<ol>
+<li>The paper owner (Fable, high) applies the delta to main.tex on top of the current main, with the numbers already there, in one commit, and builds; the figure lead adds the budget column and regenerates the slim table and the supplement tables.</li>
+<li>I check the build against this plan sentence by sentence, run the number-consistency pass, and send you the PDF with the page map.</li>
+<li>You read it; then the Overleaf package goes to Changliu with a two-line note on how her three comments were applied.</li>
+</ol>
+<p class="sub">Sources: proposal_opus.md, proposal_fable.md, proposal_astra.md and the shared brief, all under the session scratchpad restructure/ folder.</p>
+</main>
+</body>
+</html>
