@@ -327,6 +327,38 @@ def test_the_raw_set_switches_sd35_to_200k_through_its_fine_tuned_decoder(tmp_pa
     assert sd35["budget_final"] is True
 
 
+def test_backbone_end_labels_clear_every_mark_and_the_next_panel(tmp_path, monkeypatch):
+    # the shared panel's case: three curves ending within 0.1 dB, two at 4k and the U-Net's at 8k
+    kept = {}
+    save = mrf.fs.save
+
+    def keep(fig, out_dir, stem):
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        px, lx = fig.axes[:2]
+        labels = [t.get_window_extent(r) for t in px.texts if t.get_text().endswith(")")]
+        marks = [px.transData.transform(p) for ln in px.lines if ln.get_marker() not in (None, "None", "", " ")
+                 for p in ln.get_xydata()]
+        right = [lx.yaxis.label.get_window_extent(r)] + [t.get_window_extent(r) for t in lx.get_yticklabels()
+                                                         if t.get_text()]
+        kept[stem] = (labels, marks, right)
+        return save(fig, out_dir, stem)
+    monkeypatch.setattr(mrf.fs, "save", keep)
+    unet = {st: (21.7 + 1.2 * i / 9, 0.29 - 0.09 * i / 9) for i, st in enumerate(mrf.GRID)}
+    unet[4000], unet[8000] = (22.90, 0.21), (22.93, 0.20)
+    pix = {st: (21.9 + 1.07 * i / 8, 0.28 - 0.08 * i / 8) for i, st in enumerate(mrf.GRID[:-1])}
+    sd = {0: (21.2, 0.28), 250: (22.6, 0.19), 500: (22.7, 0.185), 1000: (22.8, 0.18), 2000: (22.85, 0.172),
+          4000: (22.94, 0.167)}
+    curves = [("unet_lora", "U-Net", unet, 4), ("pixart_lora", "PixArt-$\\alpha$", pix, 4),
+              ("sd35_lora", "SD 3.5", sd, 4)]
+    mrf.fig_backbones(curves, {}, str(tmp_path), 4000, stem="raw_backbones_shared")
+    labels, marks, right = kept["raw_backbones_shared"]
+    assert len(labels) == 3
+    assert not [(b, m) for b in labels for m in marks if b.contains(*m)]                 # no label on a mark
+    assert not [(i, j) for i, a in enumerate(labels) for j, b in enumerate(labels) if i < j and a.overlaps(b)]
+    assert not [(a, b) for a in labels for b in right if a.overlaps(b)]                  # clear of panel b
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)

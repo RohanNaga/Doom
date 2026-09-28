@@ -791,7 +791,15 @@ def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_bac
             ax.text(0.01, top, "training maps", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
                     fontsize=fs.MIN_PT, color=fs.TRAINING_LINE, gid="decor")
         if j == 0:
-            fs.end_labels(ax, ends, gap=(ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.09)
+            # every label right of the rightmost end: a curve that stops at 4k would put its label on the
+            # 4k-to-8k stretch of one that runs on, where the curves end within a tenth of a dB of each other
+            x_label = max(x for x, *_ in ends)
+            # the declutter gap is one label line with a little air (1.4 times the label's size) in data units at the
+            # axis's height after the layout engine has run (constrained layout shrinks the axes at draw time)
+            fig.draw_without_rendering()
+            height_pt = ax.get_window_extent().height * 72.0 / fig.dpi
+            gap = 1.4 * fs.ANNOT_PT * (ax.get_ylim()[1] - ax.get_ylim()[0]) / height_pt
+            fs.end_labels(ax, [(x_label, y, text, c) for _, y, text, c in ends], gap=gap)
         ax.set_xlabel("adapter updates (log)")
     px.set_ylabel(PSNR_LABEL)
     lx.set_ylabel(LPIPS_LABEL)
