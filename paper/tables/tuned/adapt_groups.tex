@@ -15,12 +15,12 @@ Easy (1, 6, 12, 16) & 22.69 & 23.56 & 23.58 & 26.54 & 0.344 & 0.210 & 0.201 & 10
 All 13 & 22.30 & 23.60 & 23.69 & 27.32 & 0.303 & 0.210 & 0.204 & 150 \\
 \midrule
 U-Net LoRA (6, 7, 8, 16) & 21.71 & 22.88 & 22.92 & 26.69 & 0.292 & 0.209 & 0.201 & 100--250 \\
-U-Net full fine-tune (1 of 4) & 24.65 & 25.86 & -- & 29.61 & 0.281 & 0.185 & -- & 4k \\
+U-Net full fine-tune (1 of 4) & 24.65 & 25.86 & -- & 29.61 & 0.281 & 0.185 & -- & ${\le}$4k \\
 PixArt-$\alpha$ LoRA (all 13) & 22.38 & 23.72 & -- & 27.32 & 0.285 & 0.205 & -- & 150 \\
-SD 3.5 LoRA (4 of 13) & 21.19 & 22.94 & -- & 30.18 & 0.278 & 0.167 & -- & 250 \\
+SD 3.5 LoRA (5 of 13) & 21.84 & 23.06 & -- & 31.04 & 0.249 & 0.165 & -- & 250 \\
 \bottomrule
 \end{tabular}
 % U-Net LoRA (6, 7, 8, 16): arenas 6, 7, 8, 16; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 4 arenas
-% U-Net full fine-tune (1 of 4): arenas 8; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 1 arenas; zero-shot of arenas 8 from the U-Net LoRA's step 0 (the same checkpoint and windows)
+% U-Net full fine-tune (1 of 4): arenas 8; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 1 arenas; zero-shot of arenas 8 from the U-Net LoRA's step 0 (the same checkpoint and windows); budget grid 0 and 4k only: ${\le}$4k means reached by 4k, the rule cannot resolve finer
 % PixArt-$\alpha$ LoRA (all 13): arenas 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 13 arenas
-% SD 3.5 LoRA (4 of 13): arenas 6, 7, 8, 16; decoder sha256:a8d22f2af42b10dd322ce0fa823403cedbe350b6375150d2e9a22a600add1d05, reads raw, 4 arenas
+% SD 3.5 LoRA (5 of 13): arenas 6, 7, 8, 11, 16; decoder sha256:a8d22f2af42b10dd322ce0fa823403cedbe350b6375150d2e9a22a600add1d05, reads raw, 5 arenas
