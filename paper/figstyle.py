@@ -513,6 +513,11 @@ def _handle_matches(handle, lines, colls, patches=()):
     return True
 
 
+def figure_legends(fig):
+    """The figure-level keys of `fig` and of every subfigure in it, depth first."""
+    return list(fig.legends) + [lg for sub in getattr(fig, "subfigs", []) for lg in figure_legends(sub)]
+
+
 def refuse_degenerate(fig, stem=""):
     """Raise DegenerateFigure when the figure has an empty panel, a single x value, a legend entry that matches no
     drawn series, or text below the 6 pt floor; axes with gid 'decor' (image or label panels) are exempt."""
@@ -538,7 +543,7 @@ def refuse_degenerate(fig, stem=""):
     # a legend may also key what the axes draw as references: dashed lines and grey bands (gid "ref")
     refs = [ln for ax in axes for ln in ax.lines if ln.get_gid() == "ref" and ln.get_visible()]
     patches = [p for ax in axes for p in ax.patches if p.get_visible()]
-    legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None] + list(fig.legends)
+    legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None] + figure_legends(fig)
     for leg in legends:
         for handle, text in zip(leg.legend_handles, leg.get_texts()):
             if not handle.get_visible():         # a text-only entry names the entries after it

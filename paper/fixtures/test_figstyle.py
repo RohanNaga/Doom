@@ -113,6 +113,19 @@ def test_a_legend_may_key_references_colour_swatches_and_a_text_only_label(tmp_p
         fs.save(fig, str(tmp_path), "keys_bad")
 
 
+def test_a_key_inside_a_subfigure_is_checked_like_any_other(tmp_path):
+    from matplotlib.lines import Line2D
+    fs.style()
+    fig = fs.plt.figure(figsize=(3, 3), layout="constrained")
+    top, bottom = fig.subfigures(2, 1)
+    top.subplots().plot([0, 1], [0, 1], color="#0072B2")
+    bottom.subplots().plot([0, 1], [1, 0], color="#D55E00")
+    bottom.legend([Line2D([], [], color="#D55E00"), Line2D([], [], color="#009E73")], ["drawn", "never drawn"],
+                  loc="outside lower center")
+    with pytest.raises(fs.DegenerateFigure, match="never drawn"):
+        fs.save(fig, str(tmp_path), "subfigure_key")
+
+
 def test_text_below_the_six_point_floor_is_refused(tmp_path):
     fs.style()
     fig, (ax,) = fs.new_figure((2, 1.5))
