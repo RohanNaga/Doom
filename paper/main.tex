@@ -37,7 +37,7 @@
 
 \begin{abstract}
 World models have become capable simulators, but they are evaluated almost exclusively on held-out rollouts from the domain they were trained on.
-A small domain shift, such as a new arena of the same game or a new texture, lighting set or weapon in view, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
+A small domain shift, such as a new arena of the same game, a new texture set, a lighting change or a different cast of enemies, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift.
 We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 other out-of-distribution maps that it never saw.
 On the unseen maps the U-Net's perceptual error (LPIPS) roughly doubles, from \prov{0.158} to a median \prov{0.303} and, pooled over the unseen maps, one predicted frame in \prov{five} no longer resembles the recorded one (LPIPS above 0.4, a level reached by one frame in \prov{73} in domain and by \prov{three in five} on the hardest map), and its scene PSNR drops \prov{2.9}~dB; its turn response survives, and the other two backbones lose the same way.
