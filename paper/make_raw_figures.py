@@ -495,15 +495,16 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
 
 
 def block_label(name, b, wanted_all):
-    """"U-Net LoRA, arenas 6, 7, 8, 16 (1 of 4)", "PixArt-$\\alpha$ LoRA, all 13", "SD 3.5 LoRA, 4 of 13 (6, 7, 8, 16)";
-    a dagger when the reads are not raw (against the decoded ground truth)."""
-    if not wanted_all:
-        label = f"{name}, arenas {', '.join(map(str, b['wanted']))}" + (
-            "" if b["n"] in (0, b["n_wanted"]) else f" ({b['n']} of {b['n_wanted']})")
-    elif b["n"] in (0, b["n_wanted"]):
-        label = f"{name}, all {b['n_wanted']}"
+    """A short row label, since the table sets at \\scriptsize in the body: "U-Net LoRA (6, 7, 8, 16)" for a block on
+    a named set that is complete or not started, "(1 of 4)" while partial; "PixArt-$\\alpha$ LoRA (all 13)" or
+    "(11 of 13)" for a block on every arena. The arenas scored are in the table's comment lines. A dagger when the
+    reads are not raw (against the decoded ground truth)."""
+    if b["n"] not in (0, b["n_wanted"]):
+        label = f"{name} ({b['n']} of {b['n_wanted']})"
+    elif wanted_all:
+        label = f"{name} (all {b['n_wanted']})"
     else:
-        label = f"{name}, {b['n']} of {b['n_wanted']} ({', '.join(map(str, b['arenas']))})"
+        label = f"{name} ({', '.join(map(str, b['wanted']))})"
     return label + ("$^\\ddagger$" if b["quantity"] not in (None, "raw") else "")
 
 
@@ -548,7 +549,8 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
     lines += ["\\bottomrule", "\\end{tabular}"]
     for label, b, identity in blocks:
         left = b.get("decoded_only") or []
-        lines.append(f"% {label}: decoder {identity or '--'}, reads {b['quantity'] or 'none'}, {b['n']} arenas"
+        lines.append(f"% {label}: arenas {', '.join(map(str, b['arenas'])) or '--'}; "
+                     f"decoder {identity or '--'}, reads {b['quantity'] or 'none'}, {b['n']} arenas"
                      + (", dagger: against the decoded ground truth" if b["quantity"] not in (None, "raw") else "")
                      + (f"; arenas {', '.join(map(str, left))} read against the decoded ground truth only, left out "
                         "until rescored raw" if left else "")

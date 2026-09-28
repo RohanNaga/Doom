@@ -205,12 +205,17 @@ def test_a_group_budget_between_two_grid_reads_prints_both_reads():
 
 
 def test_block_labels_count_arenas_and_mark_reads_against_the_decoded_ground_truth():
+    # short labels (the table sets at \scriptsize in the body); the arena lists go to the table's comment lines
     full = {"n": 4, "n_wanted": 4, "wanted": [6, 7, 8, 16], "arenas": [6, 7, 8, 16], "quantity": "raw"}
-    assert mrf.block_label("U-Net LoRA", full, False) == "U-Net LoRA, arenas 6, 7, 8, 16"
+    assert mrf.block_label("U-Net LoRA", full, False) == "U-Net LoRA (6, 7, 8, 16)"
+    part = {"n": 1, "n_wanted": 4, "wanted": [6, 7, 8, 16], "arenas": [6], "quantity": "raw"}
+    assert mrf.block_label("U-Net full fine-tune", part, False) == "U-Net full fine-tune (1 of 4)"
     some = {"n": 2, "n_wanted": 13, "wanted": list(range(13)), "arenas": [6, 7], "quantity": "dec"}
-    assert mrf.block_label("SD 3.5 LoRA", some, True) == "SD 3.5 LoRA, 2 of 13 (6, 7)$^\\ddagger$"
+    assert mrf.block_label("SD 3.5 LoRA", some, True) == "SD 3.5 LoRA (2 of 13)$^\\ddagger$"
     none = {"n": 0, "n_wanted": 13, "wanted": list(range(13)), "arenas": [], "quantity": None}
-    assert mrf.block_label("PixArt LoRA", none, True) == "PixArt LoRA, all 13"
+    assert mrf.block_label("PixArt LoRA", none, True) == "PixArt LoRA (all 13)"
+    assert mrf.block_label("PixArt LoRA", {**none, "n": 13, "arenas": list(range(13)), "quantity": "raw"},
+                           True) == "PixArt LoRA (all 13)"
 
 
 def test_a_block_mixing_raw_and_decoded_arenas_reports_the_raw_ones_and_lists_the_rest():
@@ -224,11 +229,11 @@ def test_a_block_mixing_raw_and_decoded_arenas_reports_the_raw_ones_and_lists_th
     b = mrf.block_summary(data, [6, 7, 8, 9], 3.0, "half_excess_gap", 4000)
     assert (b["n"], b["arenas"], b["quantity"], b["decoded_only"]) == (2, [6, 7], "raw", [8, 9])
     assert b["psnr_zero_shot"] == pytest.approx(17.5) and b["psnr_4k"] == pytest.approx(19.5)
-    assert mrf.block_label("SD 3.5 LoRA", b, True) == "SD 3.5 LoRA, 2 of 4 (6, 7)"          # no dagger
+    assert mrf.block_label("SD 3.5 LoRA", b, True) == "SD 3.5 LoRA (2 of 4)"                # no dagger
     empty = {"arenas": [], "n": 0, "budget_middle": None, "censored": None, **dict.fromkeys(
         ("psnr_zero_shot", "psnr_4k", "psnr_8k", "ceiling", "lpips_zero_shot", "lpips_4k", "lpips_8k"))}
     tex = mrf.groups_table({g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}, budgets_final=False,
-                           blocks=[("SD 3.5 LoRA, 2 of 4 (6, 7)", b, "sha256:sd35tuned")])
+                           blocks=[("SD 3.5 LoRA (2 of 4)", b, "sha256:sd35tuned")])
     assert "arenas 8, 9 read against the decoded ground truth only" in tex
     # with no raw arena the block reports them all, daggered
     only_dec = mrf.block_summary({a: data[a] for a in (8, 9)}, [6, 7, 8, 9], 3.0, "half_excess_gap", 4000)
@@ -246,11 +251,11 @@ def test_an_arena_still_training_stays_out_of_its_block_until_it_has_the_headlin
     assert (b["arenas"], b["in_progress"], b["decoded_only"]) == ([6, 7], [10], [])
     assert b["psnr_zero_shot"] == pytest.approx(20.5) and b["psnr_4k"] == pytest.approx(22.5)
     assert b["budget_final"] is True                                     # the two finished arenas have every read
-    assert mrf.block_label("PixArt LoRA", b, True) == "PixArt LoRA, 2 of 3 (6, 7)"
+    assert mrf.block_label("PixArt LoRA", b, True) == "PixArt LoRA (2 of 3)"
     empty = {"arenas": [], "n": 0, "budget_middle": None, "censored": None, **dict.fromkeys(
         ("psnr_zero_shot", "psnr_4k", "psnr_8k", "ceiling", "lpips_zero_shot", "lpips_4k", "lpips_8k"))}
     tex = mrf.groups_table({g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}, budgets_final=False,
-                           blocks=[("PixArt LoRA, 2 of 3 (6, 7)", b, "sha256:sd1tuned")])
+                           blocks=[("PixArt LoRA (2 of 3)", b, "sha256:sd1tuned")])
     assert "arenas 10 still training (no 4k read yet)" in tex
     assert mrf.finished(data[6], 4000) and not mrf.finished(data[10], 4000)
     assert mrf.finished({"grid": [0, 250], "reads": {0: {}, 250: {}}}, 4000)          # a grid that stops before
@@ -378,12 +383,15 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # Table 2's per-backbone blocks at the 4k headline; the full fine-tune column is gone (its rows carry it)
     assert "& fine-tune \\\\" not in tex and "\\tbd{} (6" not in tex
     lines = {line.split(" & ")[0]: line for line in tex.splitlines() if " & " in line}
-    assert "U-Net LoRA, arenas 6, 7, 8, 16 (1 of 4)" in lines
-    assert lines["U-Net full fine-tune, arenas 6, 7, 8, 16"].count("\\tbd{}") == 8         # no runs yet
-    px = next(v for k, v in lines.items() if k.startswith("PixArt-$\\alpha$ LoRA"))
+    assert "U-Net LoRA (1 of 4)" in lines
+    assert lines["U-Net full fine-tune (6, 7, 8, 16)"].count("\\tbd{}") == 8               # no runs yet
+    px = lines["PixArt-$\\alpha$ LoRA (all 2)"]
     assert " & 20.70 & " in px and px.split(" & ")[3] == "--"                         # 4k median; its grid stops at 4k
-    sd = next(v for k, v in lines.items() if k.startswith("SD 3.5 LoRA"))
-    assert "1 of 2 (6)" in sd and " & 19.50 & " in sd and "\\tbd{}" in sd              # budget waits on its grid
+    sd = lines["SD 3.5 LoRA (1 of 2)"]
+    assert " & 19.50 & " in sd and "\\tbd{}" in sd                                    # budget waits on its grid
+    # the arena lists live in the comment lines under the table
+    assert "% SD 3.5 LoRA (1 of 2): arenas 6; decoder sha256:sd35tuned" in tex
+    assert "% U-Net LoRA (1 of 4): arenas 6; decoder" in tex
     blocks = s["blocks"]
     assert blocks["pixart_lora"]["quantity"] == "raw" and blocks["pixart_lora"]["decoder"] == "tuned"
     assert blocks["pixart_lora"]["budget_final"] is True and blocks["pixart_lora"]["budget_middle"] == [4000]
