@@ -4,7 +4,7 @@ the reconstruction ceiling and the in-distribution level as the only references.
 table in the paper; the figures carry the `raw_` prefix and sit beside the current ones until Rohan chooses.
 
     python paper/make_raw_figures.py     # writes paper/figures/raw/ and paper/tables/tuned/{adapt_groups.tex,
-                                         # raw_summary.json}
+                                         # adapt_perarena.tex, results_slim.tex, raw_summary.json}
 
 **Quantities.** Raw scene PSNR and LPIPS compare the rendered prediction D(z_hat) with the raw ground-truth frame x
 on scene rows 0 to 207 (`scene_psnr_raw`, `scene_lpips_raw` in eval_tf's per-window files). A map's reconstruction
@@ -93,7 +93,10 @@ GRID_TICKS = (0, 50, 250, 1000, 4000, 8000)     # and in the two-by-two layout's
 SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_figA_adapt_arenas": (5.5, 3.0),
          "raw_backbones": (5.5, 1.6), "raw_backbones_shared": (5.5, 1.6), "raw_fullft": (5.5, 1.6),
          "raw_fig3a_psnr": (2.25, 1.5),
-         "raw_fig3a_lpips": (2.25, 1.5)}
+         "raw_fig3a_lpips": (2.25, 1.5),
+         # the body candidates (Rohan chooses): the row with the backbones as (e, f) on a line beneath it (1.75 in of
+         # row and 1.35 in of backbone panels with their key), and the separate figure
+         "raw_row_backbones": (5.5, 3.1), "raw_backbones_body": (5.5, 1.6)}
 UPPER = "reconstruction upper bound"             # never "ceiling" in a label
 IN_DISTRIBUTION = "training maps (in distribution)"
 BAND_LABEL = "train vs train $d$"               # the training maps' own d range (tools/family_step.py)
@@ -785,6 +788,12 @@ def curve_panel(ax, curves, key, level, colour_of, steps, named=(), ticks=None, 
     ax.set_xlabel(xlabel)
 
 
+def _text_entry():
+    label = Line2D([], [], ls="none")
+    label.set_visible(False)                     # a text-only entry names the entries after it
+    return label
+
+
 def row_legends(fig, key_colours, headline=HEADLINE_STEP):
     """The row's two keys: above it, what each mark and line means; below it, the colour of the arena groups by
     the zero-shot gap to the upper bound (`key_colours`: [(group, colour)])."""
@@ -796,26 +805,51 @@ def row_legends(fig, key_colours, headline=HEADLINE_STEP):
     fig.legend(marks, ["zero-shot", f"after {fs.step_label(headline)} updates", UPPER, IN_DISTRIBUTION],
                loc="outside upper center",
                ncol=4, handlelength=1.4, columnspacing=1.4, handletextpad=0.4, borderaxespad=0.1)
-    label = Line2D([], [], ls="none")
-    label.set_visible(False)                     # a text-only entry names the swatches after it
-    swatches = [label] + [Patch(facecolor=c, edgecolor="none") for _, c in key_colours]
+    swatches = [_text_entry()] + [Patch(facecolor=c, edgecolor="none") for _, c in key_colours]
     fig.legend(swatches, ["zero-shot gap to the upper bound:"] + [g for g, _ in key_colours],
                loc="outside lower center", ncol=len(swatches), handlelength=1.0, handleheight=0.8,
                columnspacing=1.0, handletextpad=0.35, borderaxespad=0.1)
 
 
+def backbone_row_key(fig, curves):
+    """The key under the backbone panels (e, f): each curve's backbone and the arenas its median covers."""
+    handles, names = backbone_handles(curves)
+    n = curves[0][3]
+    fig.legend([_text_entry()] + handles, [f"(e, f) median over the {n} arenas all three have:" if n else
+                                           "(e, f) medians:"] + names,
+               loc="outside lower center", ncol=len(names) + 1, handlelength=1.6, columnspacing=1.2,
+               handletextpad=0.4, borderaxespad=0.1)
+
+
+def row_backbones_figure(size, row_size):
+    """(figure, the row's four axes, the two backbone axes): the Figure 3 row in a top subfigure of exactly
+    `row_size` (so its panels sit where the row alone puts them), the backbone panels in the rest below it."""
+    fig = fs.plt.figure(figsize=size, layout="constrained")
+    fig.get_layout_engine().set(w_pad=0.02, h_pad=0.02, wspace=0.02, hspace=0.04)
+    top, bottom = fig.subfigures(2, 1, height_ratios=[row_size[1], size[1] - row_size[1]], hspace=0.0)
+    row = top.subplots(1, 4, gridspec_kw={"width_ratios": [1.6, 1.6, 0.8, 0.8]})
+    return fig, (top, bottom), list(row), list(bottom.subplots(1, 2))
+
+
 def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, named, out_dir, layout="row",
-            key_colours=(), headline=HEADLINE_STEP):
+            key_colours=(), headline=HEADLINE_STEP, backbones=None):
     """The merged Figure 3: how much the unseen arenas improve and how fast. (a) before and after `headline`
     updates in raw PSNR (`adapted` holds that step's reads), (b) in LPIPS, (c) and (d) each arena's raw trajectory
     over the adapter reads that exist, sharing its y axis with (a) and (b) so the filled mark is the curve's read at
-    the headline step. `layout` "grid" draws two rows of two (PSNR above, LPIPS below)."""
-    stem = {"row": "raw_row", "grid": "raw_row_grid"}[layout]
+    the headline step. `layout` "grid" draws two rows of two (PSNR above, LPIPS below); "row_backbones" (a body
+    candidate) adds (e) and (f) on a line of their own under the unchanged row (six panels in one 5.5 in row leave
+    the 13 arena numbers overlapping): the median raw PSNR and LPIPS of each backbone's adapter over the arenas they
+    share, on their own y axes, from `backbones` = (curves, levels) as `fig_backbones` takes them, keyed below."""
+    stem = {"row": "raw_row", "grid": "raw_row_grid", "row_backbones": "raw_row_backbones"}[layout]
+    extra, subs = (), None
     if layout == "row":
         fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=4, width_ratios=[1.6, 1.6, 0.8, 0.8], wspace=0.02)
+    elif layout == "row_backbones":
+        fig, subs, (pa, la, pc, lc), extra = row_backbones_figure(SIZES[stem], SIZES["raw_row"])
     else:
         fig, (pa, pc, la, lc) = fs.new_figure(SIZES[stem], ncols=2, nrows=2, width_ratios=[1.5, 1.0], wspace=0.05,
                                               hspace=0.06)
+    in_row = layout != "grid"
     pc.sharey(pa)
     lc.sharey(la)
     for ax, key in ((pa, "psnr"), (la, "lpips")):
@@ -823,8 +857,8 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     steps = sorted({s for c in trajectories.values() for s in c["steps"]})
     for ax, key in ((pc, "psnr"), (lc, "lpips")):
         curve_panel(ax, trajectories, key, level[key], colour_of, steps, named=named if key == "psnr" else (),
-                    xlabel="updates (log)" if layout == "row" else "adapter updates (log)",
-                    ticks=ROW_TICKS if layout == "row" else GRID_TICKS, headline=headline)
+                    xlabel="updates (log)" if in_row else "adapter updates (log)",
+                    ticks=ROW_TICKS if in_row else GRID_TICKS, headline=headline)
     pa.set_ylabel(PSNR_LABEL)
     la.set_ylabel(LPIPS_LABEL)
     if layout == "grid":
@@ -832,10 +866,25 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
             ax.tick_params(axis="y", labelleft=False)
     pa.yaxis.set_major_locator(ticker.MultipleLocator(2))
     la.yaxis.set_major_locator(ticker.MultipleLocator(0.05))
-    for ax, letter in zip((pa, la, pc, lc), "abcd"):
+    if extra:
+        curves, levels = backbones
+        b_steps = sorted({st for _, _, pts, _ in curves for st in pts})
+        for ax, j, label in ((extra[0], 0, PSNR_LABEL), (extra[1], 1, LPIPS_LABEL)):
+            z = fs.step_axis(ax, b_steps, label="adapter updates (log)",
+                             labelled=[t for t in GRID_TICKS if t in b_steps])
+            backbone_curves(ax, curves, j, levels, z, headline)
+            drawn = [levels[k][j] for k, *_ in curves if k in levels and levels[k][j] is not None]
+            if drawn:
+                ax.text(0.01, max(drawn), "training maps", transform=ax.get_yaxis_transform(), ha="left",
+                        va="bottom", fontsize=fs.MIN_PT, color=fs.TRAINING_LINE, gid="decor")
+            ax.set_ylabel(label)
+        extra[0].yaxis.set_major_locator(ticker.MultipleLocator(1))
+        extra[1].yaxis.set_major_locator(ticker.MultipleLocator(0.05))
+        backbone_row_key(subs[1], curves)
+    for ax, letter in zip([pa, la, pc, lc, *extra], "abcdef"):
         fs.panel_letter(ax, letter)
     if key_colours:
-        row_legends(fig, key_colours, headline)
+        row_legends(subs[0] if subs else fig, key_colours, headline)
     return fs.save(fig, out_dir, stem)
 
 
@@ -869,40 +918,80 @@ def panel_points(raw, arenas=None):
                  median([r[st]["lpips"] for r in pick.values() if st in r])) for st in steps}
 
 
-def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_backbones"):
+def backbone_style(key):
+    """(entity, marker, line style) of a Table 2 block's curve: its backbone's colour and marker, the full fine-tune
+    black with round points."""
+    who, ls = BLOCK_STYLE[key]
+    ent = fs.FULL_FINE_TUNE if who == "full" else fs.BACKBONES[who]
+    return ent, ("o" if who == "full" else ent.marker), ls
+
+
+def backbone_curves(ax, curves, j, levels, z, headline=HEADLINE_STEP, marker_size=1.6, headline_size=4.6):
+    """Draw each block's median curve of quantity `j` (0 PSNR, 1 LPIPS) on a step axis whose 0 read sits at `z`:
+    a line with small marks at the reads (the full fine-tune as bare points), a large filled mark at the headline
+    read, and the backbone's training-map level as a thin dashed line in its colour. Returns the curves' right ends
+    [(x, y, label, colour)], the label carrying the arena count when there is one."""
+    ends = []
+    for key, label, pts, n in curves:
+        ent, marker, ls = backbone_style(key)
+        full = BLOCK_STYLE[key][0] == "full"
+        xs = [z if st == 0 else st for st in sorted(pts)]
+        ys = [pts[st][j] for st in sorted(pts)]
+        # the full fine-tune is scored at its two reads only: points, no connector (a line between them would
+        # draw values nobody measured, and it crossed the LoRA curve where neither was read)
+        ax.plot(xs, ys, color=ent.colour, ls="none" if full else ls, lw=fs.DATA_LW, marker=marker,
+                ms=2.6 if full else marker_size, mfc=ent.colour, mec=ent.colour, zorder=3)
+        if headline in pts:
+            ax.plot([headline], [pts[headline][j]], ls="none", marker=marker, ms=headline_size, mfc=ent.colour,
+                    mec="white", mew=0.5, zorder=3.5)
+        ends.append((xs[-1], ys[-1], label if n is None else f"{label} ({n})", ent.colour))
+        if key in levels and levels[key][j] is not None and not full:     # the full FT shares the U-Net's
+            ax.axhline(levels[key][j], color=ent.colour, lw=fs.MIN_LW, ls=fs.TRAINING_DASH, zorder=1.5, gid="ref")
+    return ends
+
+
+def backbone_handles(curves, marker_size=1.6):
+    """Key entries naming each curve's backbone: its line and mark."""
+    out = []
+    for key, *_ in curves:
+        ent, marker, ls = backbone_style(key)
+        out.append(Line2D([], [], color=ent.colour, ls=ls, lw=fs.DATA_LW, marker=marker, ms=marker_size + 1.0,
+                          mfc=ent.colour, mec=ent.colour))
+    return out, [label for _, label, *_ in curves]
+
+
+def backbone_key(fig, curves, headline=HEADLINE_STEP):
+    """The separate body figure's key, above the panels: the backbones, the filled headline mark and the training
+    maps' dashed level (drawn in each backbone's colour; keyed in the first one's)."""
+    handles, labels = backbone_handles(curves)
+    ink = backbone_style(curves[0][0])[0].colour
+    handles += [Line2D([], [], ls="none", marker="o", ms=4.6, mfc=ink, mec="white", mew=0.5),
+                Line2D([], [], color=ink, lw=fs.MIN_LW, ls=fs.TRAINING_DASH)]
+    labels += [f"after {fs.step_label(headline)} updates", IN_DISTRIBUTION]
+    fig.legend(handles, labels, loc="outside upper center", ncol=len(labels), handlelength=1.6, columnspacing=1.4,
+               handletextpad=0.4, borderaxespad=0.1)
+
+
+def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_backbones", keyed=False):
     """The per-backbone adaptation panel: the median over each block's arenas of raw scene PSNR (left) and LPIPS
     (right) against adapter updates (log axis, the 0 read at the left), one curve per block in its backbone's colour
     and marker (the full fine-tune as black points at its reads, no connector), the headline read filled, each
     backbone's training-map level as a short dashed segment at the right edge, each curve labelled at its right end
     with its arena count (none when `n` is None). `curves` is [(key, label, {step: (psnr, lpips)}, n)], `levels`
-    {key: (psnr, lpips)}; `stem` names the variant (the shared one draws every curve over the same arenas)."""
+    {key: (psnr, lpips)}; `stem` names the variant (the shared one draws every curve over the same arenas). With
+    `keyed` (the separate body candidate) a key above the panels names the backbones and the marks instead of the end
+    labels and the "training maps" text; the arena count goes to the caption."""
     fig, (px, lx) = fs.new_figure(SIZES[stem], ncols=2, wspace=0.08)
     steps = sorted({st for _, _, pts, _ in curves for st in pts})
     for ax, j in ((px, 0), (lx, 1)):
         z = fs.step_axis(ax, steps, labelled=[t for t in GRID_TICKS if t in steps] or None)
-        ends = []
-        for key, label, pts, n in curves:
-            who, ls = BLOCK_STYLE[key]
-            ent = fs.FULL_FINE_TUNE if who == "full" else fs.BACKBONES[who]
-            marker = "o" if who == "full" else ent.marker
-            xs = [z if st == 0 else st for st in sorted(pts)]
-            ys = [pts[st][j] for st in sorted(pts)]
-            # the full fine-tune is scored at its two reads only: points, no connector (a line between them would
-            # draw values nobody measured, and it crossed the LoRA curve where neither was read)
-            ax.plot(xs, ys, color=ent.colour, ls="none" if who == "full" else ls, lw=fs.DATA_LW, marker=marker,
-                    ms=2.6 if who == "full" else 1.6, mfc=ent.colour, mec=ent.colour, zorder=3)
-            if headline in pts:
-                ax.plot([headline], [pts[headline][j]], ls="none", marker=marker, ms=4.6, mfc=ent.colour,
-                        mec="white", mew=0.5, zorder=3.5)
-            ends.append((xs[-1], ys[-1], label if n is None else f"{label} ({n})", ent.colour))
-            if key in levels and levels[key][j] is not None and who != "full":     # the full FT shares the U-Net's
-                ax.axhline(levels[key][j], color=ent.colour, lw=fs.MIN_LW, ls=fs.TRAINING_DASH, zorder=1.5, gid="ref")
+        ends = backbone_curves(ax, curves, j, levels, z, headline)
         drawn_levels = [levels[k][j] for k, *_ in curves if k in levels and levels[k][j] is not None]
-        if drawn_levels:
+        if drawn_levels and not keyed:
             top = max(drawn_levels)                  # above the highest level line, clear of the curves
             ax.text(0.01, top, "training maps", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
                     fontsize=fs.MIN_PT, color=fs.TRAINING_LINE, gid="decor")
-        if j == 0:
+        if j == 0 and not keyed:
             # every label right of the rightmost end: a curve that stops at 4k would put its label on the
             # 4k-to-8k stretch of one that runs on, where the curves end within a tenth of a dB of each other
             x_label = max(x for x, *_ in ends)
@@ -919,6 +1008,8 @@ def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_bac
     lx.yaxis.set_major_locator(ticker.MultipleLocator(0.05))
     fs.panel_letter(px, "a")
     fs.panel_letter(lx, "b")
+    if keyed:
+        backbone_key(fig, curves, headline)
     return fs.save(fig, out_dir, stem)
 
 
@@ -1191,8 +1282,8 @@ def main(argv=None):
                              if data[m].get("decoder") == decoder and data[m].get("identity")),
                             loaded.get(key, {}).get("identity"))
         gap_decoder = decoder or ("tuned" if backbone != "sd35" else "stock")
-        g, level = rad.in_distribution_gap(a.fresh_root, zero_rows[backbone], gap_decoder)
-        train_level[key] = level
+        g, block_level = rad.in_distribution_gap(a.fresh_root, zero_rows[backbone], gap_decoder)
+        train_level[key] = block_level
         b = block_summary(data, wanted_list, g, a.budget_rule, a.headline_step)
         b.update({"decoder": decoder, "decoder_identity": identity, "g_train_source": zero_rows[backbone],
                   "g_train_note": None if g is not None else
@@ -1213,7 +1304,7 @@ def main(argv=None):
             continue
         curves.append((key, PANEL_LABELS[key], panel_points(raw), len(raw)))
         panel_arenas[key], panel_raw[key] = sorted(raw), raw
-        levels[key] = level if level else (None, None)
+        levels[key] = block_level if block_level else (None, None)
     with open(table, "w") as f:
         f.write(groups_table(gstats, budgets_final=grid_complete, blocks=block_rows))
     # the slim results table (a candidate to replace Tables 1 and 2 together): one row per backbone over every arena,
@@ -1252,6 +1343,17 @@ def main(argv=None):
                  if ft_points.get(key)]
     if len(ft_curves) == 2:
         written += fig_backbones(ft_curves, levels, a.out_dir, a.headline_step, stem="raw_fullft")
+    # the body candidates: the shared panel's LoRA curves (one per backbone; the full fine-tune has its own panel) as
+    # (e, f) of the merged row, and as a separate keyed figure
+    body_curves = [c for c in shared_curves if c[0].endswith("_lora")]
+    body_stems = []
+    if len(body_curves) >= 2:
+        written += fig_row(arenas, zero[PRIMARY], after, ceilings, level, trajectories, colour_of, named, a.out_dir,
+                           layout="row_backbones", key_colours=key_colours, headline=a.headline_step,
+                           backbones=(body_curves, levels))
+        written += fig_backbones(body_curves, levels, a.out_dir, a.headline_step, stem="raw_backbones_body",
+                                 keyed=True)
+        body_stems = ["raw_row_backbones", "raw_backbones_body"]
 
     s0 = {}
     if os.path.exists(a.family_step):
@@ -1312,6 +1414,8 @@ def main(argv=None):
                          if len(ft_curves) == 2 else {}},
         "backbone_panel_shared": {"arenas": shared, "drawn": [c[0] for c in shared_curves],
                                   "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in shared_curves}},
+        "body_candidates": {"arenas": shared if body_stems else [], "drawn": [c[0] for c in body_curves]
+                            if body_stems else [], "stems": body_stems},
         "per_arena_table": per_arena_rows,
         "named_curves": list(named),
         "g8k_4k_minus_base_4k": {"psnr": diff("psnr"), "lpips": diff("lpips")},

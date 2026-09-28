@@ -507,6 +507,108 @@ def test_the_slim_results_table_has_one_row_per_backbone_and_the_comparison_on_f
     assert waiting.splitlines()[-3].endswith("& 31.38 & \\tbd{} \\\\")
 
 
+def thirteen_arena_row():
+    """The merged row's inputs at the paper's density: 13 arenas on the 8k grid, three LoRA backbones on 8 shared
+    arenas (SD 3.5 without the 50 to 150 reads, the U-Net on to 8k), each with its training maps' level."""
+    arenas = list(ALL_13)
+    zero = {a: {"psnr": 20.5 + 0.35 * i, "lpips": 0.40 - 0.013 * i} for i, a in enumerate(arenas)}
+    adapted = {a: {"psnr": z["psnr"] + 1.3, "lpips": z["lpips"] - 0.09} for a, z in zero.items()}
+    ceilings = {a: {"ceiling_psnr": z["psnr"] + 4.5, "ceiling_lpips": 0.06 + 0.002 * i}
+                for i, (a, z) in enumerate(zero.items())}
+    traj = {a: {"steps": list(mrf.GRID), "psnr": [z["psnr"] + 1.4 * j / 9 for j in range(10)],
+                "lpips": [z["lpips"] - 0.1 * j / 9 for j in range(10)]} for a, z in zero.items()}
+    groups = mrf.group_arenas({a: -z["psnr"] for a, z in zero.items()})
+    shade, key_colours = mrf.group_colours(groups)
+    unet = {st: (22.2 + 1.1 * j / 9, 0.29 - 0.09 * j / 9) for j, st in enumerate(mrf.GRID)}
+    pix = {st: (22.35 + 1.05 * j / 8, 0.28 - 0.08 * j / 8) for j, st in enumerate(mrf.GRID[:-1])}
+    sd = {0: (21.97, 0.26), 250: (23.13, 0.19), 500: (23.18, 0.184), 1000: (23.23, 0.178), 2000: (23.39, 0.172),
+          4000: (23.53, 0.167)}
+    curves = [("unet_lora", "U-Net", unet, 8), ("pixart_lora", "PixArt-α", pix, 8), ("sd35_lora", "SD 3.5", sd, 8)]
+    levels = {"unet_lora": (25.20, 0.158), "pixart_lora": (25.19, 0.159), "sd35_lora": (25.38, 0.126)}
+    return (arenas, zero, adapted, ceilings, {"psnr": 25.2, "lpips": 0.158}, traj, lambda a: shade[a], (7, 16),
+            key_colours), (curves, levels)
+
+
+def capture(monkeypatch):
+    """Keep every figure `fs.save` writes, by stem; `kept[stem]` is (figure, renderer) after a fresh draw at the
+    figure's own dpi (the save's 600 dpi PNG pass leaves pixel-placed labels at 600 dpi coordinates)."""
+    figs = {}
+    save = mrf.fs.save
+
+    def keep(fig, out_dir, stem):
+        figs[stem] = fig
+        return save(fig, out_dir, stem)
+    monkeypatch.setattr(mrf.fs, "save", keep)
+
+    class Drawn(dict):
+        def __missing__(self, stem):
+            fig = figs[stem]
+            fig.canvas.draw()
+            return fig, fig.canvas.get_renderer()
+    return Drawn()
+
+
+def label_boxes(ax, r):
+    """The window boxes of an axes' visible tick labels and axis labels."""
+    ticks = [t for t in ax.get_xticklabels() + ax.get_yticklabels() if t.get_visible() and t.get_text()]
+    labels = [t for t in (ax.xaxis.label, ax.yaxis.label) if t.get_visible() and t.get_text()]
+    return [t.get_window_extent(r) for t in ticks + labels]
+
+
+def test_the_row_with_the_backbones_as_e_and_f_reads_at_print_size(tmp_path, monkeypatch):
+    # six panels in one 5.5 in row do not fit (the 13 arena numbers overlap), so (e, f) sit on a line of their own
+    # under the Figure 3 row, which keeps its panels where the row puts them
+    kept = capture(monkeypatch)
+    row, backbones = thirteen_arena_row()
+    mrf.fig_row(*row[:8], str(tmp_path), layout="row_backbones", key_colours=row[8], backbones=backbones)
+    mrf.fig_row(*row[:8], str(tmp_path), layout="row", key_colours=row[8])
+    fig, r = kept["raw_row_backbones"]
+    assert (fig.get_figwidth(), fig.get_figheight()) == mrf.SIZES["raw_row_backbones"]
+    pa, la, pc, lc, pe, lf = fig.axes[:6]
+    alone, r_alone = kept["raw_row"]
+    for mine, theirs in zip((pa, la, pc, lc), alone.axes[:4]):
+        a, b = mine.get_window_extent(r), theirs.get_window_extent(r_alone)
+        assert (a.width, a.height, a.x0) == (pytest.approx(b.width, abs=3), pytest.approx(b.height, abs=3),
+                                             pytest.approx(b.x0, abs=3))          # within 3 px (0.03 in)
+    assert pe.get_window_extent(r).y1 < pa.get_window_extent(r).y0                 # (e, f) below the row
+    # the 13 arena numbers of (a) and (b) each stand clear of their neighbours
+    for ax in (pa, la):
+        boxes = [t.get_window_extent(r) for t in ax.get_xticklabels() if t.get_text()]
+        assert len(boxes) == 13 and not [(i, j) for i, a in enumerate(boxes) for j, b in enumerate(boxes)
+                                         if i < j and a.overlaps(b)]
+    # no panel's labels run into another panel's labels or plotting area
+    axes = [pa, la, pc, lc, pe, lf]
+    for i, a in enumerate(axes):
+        for j, b in enumerate(axes):
+            if i != j:
+                hits = [box for box in label_boxes(a, r) if box.overlaps(b.get_window_extent(r))
+                        or any(box.overlaps(o) for o in label_boxes(b, r))]
+                assert not hits, (i, j)
+    # (e, f) carry their own y axes, so medians 0.1 to 0.3 dB apart stay apart (not (a)'s 20 to 30 dB)
+    assert pe.get_ylim()[1] - pe.get_ylim()[0] < (pa.get_ylim()[1] - pa.get_ylim()[0]) / 2
+    # both keys fit the page width, and the backbones are named in the key, not at the curves' ends
+    page, keys = fig.bbox, mrf.fs.figure_legends(fig)
+    texts = [t.get_text() for lg in keys for t in lg.get_texts()]
+    assert all(page.x0 <= lg.get_window_extent(r).x0 and lg.get_window_extent(r).x1 <= page.x1 for lg in keys)
+    assert {"U-Net", "PixArt-α", "SD 3.5", "hard", "medium", "easy", "after 4k updates"} <= set(texts)
+    assert not [t for t in pe.texts + lf.texts if t.get_text() in ("U-Net", "PixArt-α", "SD 3.5")]
+
+
+def test_the_separate_body_figure_keys_its_marks_instead_of_labelling_the_curves(tmp_path, monkeypatch):
+    kept = capture(monkeypatch)
+    _, (curves, levels) = thirteen_arena_row()
+    mrf.fig_backbones(curves, levels, str(tmp_path), 4000, stem="raw_backbones_body", keyed=True)
+    fig, r = kept["raw_backbones_body"]
+    assert (fig.get_figwidth(), fig.get_figheight()) == mrf.SIZES["raw_backbones_body"] == (5.5, 1.6)
+    texts = [t.get_text() for lg in fig.legends for t in lg.get_texts()]
+    assert texts[:3] == ["U-Net", "PixArt-α", "SD 3.5"]
+    assert {"after 4k updates", "training maps (in distribution)"} <= set(texts)
+    px, lx = fig.axes[:2]
+    assert not [t.get_text() for t in px.texts + lx.texts if t.get_gid() != "decor"]   # no end labels, no counts
+    assert all(fig.bbox.x0 <= lg.get_window_extent(r).x0 and lg.get_window_extent(r).x1 <= fig.bbox.x1
+               for lg in fig.legends)
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)
@@ -570,7 +672,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     save = mrf.fs.save
 
     def record_legends(fig, out_dir, stem):
-        found = list(fig.legends) + [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
+        found = mrf.fs.figure_legends(fig) + [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
         legends[stem] = [t.get_text() for lg in found for t in lg.get_texts()]
         return save(fig, out_dir, stem)
     monkeypatch.setattr(mrf.fs, "save", record_legends)
@@ -668,8 +770,15 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # no 200k SD 3.5 files: the provisional 170k read through the stock decoder, recorded as the fallback
     assert s["sd35_row"] == {"row": "sd35_170000", "decoder": "stock", "fallback": True}
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
-    # the row, its grid layout, both backbone panels and the full fine-tune panel
-    assert letters == list("abcd") * 2 + list("ab") * 3
+    # the row, its grid layout, both backbone panels and the full fine-tune panel, then the two body candidates: the
+    # row with the backbones as (e, f) and the separate backbone figure
+    assert letters == list("abcd") * 2 + list("ab") * 3 + list("abcdef") + list("ab")
+    body = s["body_candidates"]
+    assert body["arenas"] == [6] and body["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]   # the LoRAs only
+    assert body["stems"] == ["raw_row_backbones", "raw_backbones_body"]
+    for stem in body["stems"]:
+        assert {"U-Net", "PixArt-α", "SD 3.5", "after 4k updates"} <= set(legends[stem]), stem
+        assert "full fine-tune" not in " ".join(legends[stem])
     # the full fine-tune panel: the U-Net LoRA against the full fine-tune on the comparator arenas both have (6)
     ft = s["fullft_panel"]
     assert (ft["arenas"], ft["drawn"]) == ([6], ["unet_lora", "unet_full"])

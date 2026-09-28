@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-28T11:18:02-04:00",
+ "generated_at": "2026-09-28T11:29:16-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1987,6 +1987,27 @@
     ]
    }
   }
+ },
+ "body_candidates": {
+  "arenas": [
+   6,
+   7,
+   8,
+   9,
+   11,
+   13,
+   14,
+   16
+  ],
+  "drawn": [
+   "unet_lora",
+   "pixart_lora",
+   "sd35_lora"
+  ],
+  "stems": [
+   "raw_row_backbones",
+   "raw_backbones_body"
+  ]
  },
  "per_arena_table": {
   "1": {
