@@ -85,6 +85,21 @@ def export(tmp_path):
     # the family-step record's zero-shot latent skill S0 per arena (tools/family_step.py)
     json.dump({"backbones": {"unet200k_ema": {"maps": {"6": {"S0": 1.0}, "9": {"S0": 2.0}}}}},
               open(tmp_path / "family_step.json", "w"))
+    # the guard reads of the 8k-grid runs: directional and the training maps' decoded-reference scene PSNR at 0, 8k
+    adapt = tmp_path / "adapt"
+    for a, (psnr0, psnr8, dir0, dir8) in {6: (25.0, 24.0, 0.80, 0.85), 9: (25.0, 24.5, 0.70, 0.75)}.items():
+        run = adapt / f"unet200k_arenas13_map{a:02d}_r16_k8_s0_g8k"
+        rows = []
+        for step, psnr, frac in ((0, psnr0, dir0), (8000, psnr8, dir8)):
+            stepdir = f"step{step:07d}_live_guard"
+            write_windows(str(run / "scores" / stepdir / "trainmap" / "per_window.csv"),
+                          [{"episode": 6000 + i, "map": 2 + i % 4, "dup_latent": 0, "scene_psnr_dec": psnr + off}
+                           for i, off in enumerate((-0.3, -0.1, 0.1, 0.3))])
+            rows.append({"step": step, "weights": "live", "directional_correct_frac": frac,
+                         "trainmap_per_window": f"/home/x/results/adapt/{run.name}/scores/{stepdir}/trainmap/"
+                                                "per_window.csv"})
+        with open(run / "scores.jsonl", "w") as f:
+            f.write("\n".join(json.dumps(r) for r in rows) + "\n")
     return fresh, dist, tdist
 
 
@@ -187,7 +202,8 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     out, side, tables = tmp_path / "figs", tmp_path / "raw_summary.json", tmp_path / "tables"
     assert mrf.main(["--fresh-root", str(fresh), "--distances", str(dist), "--training-distances", str(tdist),
                      "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
-                     "--family-step", str(tmp_path / "family_step.json")]) == 0
+                     "--family-step", str(tmp_path / "family_step.json"),
+                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k")]) == 0
     for stem, size in mrf.SIZES.items():
         w, h = mediabox(os.path.join(out, f"{stem}.pdf"))
         assert (w, h) == (pytest.approx(size[0], abs=0.01), pytest.approx(size[1], abs=0.01)), stem
@@ -219,6 +235,14 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert "\\tbd" in tex and "upper bound" in tex
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
     assert letters == list("abcd") * 2
+    # the appendix's per-arena table: the gap, its threshold, the reads, the guards
+    per = s["per_arena_table"]
+    assert per["6"]["gap_zero_shot"] == pytest.approx(8.0)
+    assert per["6"]["threshold_gap"] == pytest.approx((8.0 + g_id) / 2)
+    assert per["6"]["forgetting_dec"] == pytest.approx(-1.0) and per["9"]["forgetting_dec"] == pytest.approx(-0.5)
+    assert (per["6"]["directional_0"], per["6"]["directional_8k"]) == (pytest.approx(0.80), pytest.approx(0.85))
+    rows = open(tables / "adapt_perarena.tex").read()
+    assert "\\tbd" in rows and "$-$1.00" in rows and "0.85" in rows and "decoded" in rows
     # legends: the marks and the colour key on the row (both layouts), the backbones and the band on the step panels
     shown = [g for g in ("hard", "medium", "easy") if s["groups"][g]["n"]]      # two arenas: medium only
     assert shown == ["medium"]

@@ -60,7 +60,8 @@ A and M per arena in S0 order for every backbone under `--fresh-root`, stock dec
 same windows, the training maps' reads in a first column, the 4k adapter on the A row), and the appendix variants
 `fig2a_advantage_by_distance` and, with `--with-raw`, `fig2b_margin_by_distance` (one decoder per build, arenas in
 S0 order despite the historical names). In `--tables-dir`, under a
-provenance header: `adapt_cost.tex` (per arena), `adapt_perarena.tex` (the appendix table body), `adapt_table3.tex`
+provenance header: `adapt_cost.tex` (per arena), `adapt_perarena_A.tex` (the A-based per-arena table; the
+appendix's raw table is `paper/make_raw_figures.py`'s `adapt_perarena.tex`), `adapt_table3.tex`
 (Table 3's tabular with arena-bootstrap intervals in brackets), and `adapt_summary.json`, the numbers the text
 quotes.
 """
@@ -2148,7 +2149,7 @@ def main(argv=None):
     ] + [f"  {rel(p)} sha256 {sha256(p)[:16]}" for p in used])
     written = []
     tables = [("adapt_cost.tex", cost_table(records, summary, a.decoder, budget, a.prov, public(stats))),
-              ("adapt_perarena.tex", perarena_table(records, budget, a.prov)),
+              ("adapt_perarena_A.tex", perarena_table(records, budget, a.prov)),
               ("adapt_table3.tex", table3(records, summary, public(stats), home, home_ci, budget, a.prov))]
     for name, body in tables:
         path = os.path.join(a.tables_dir, name)
