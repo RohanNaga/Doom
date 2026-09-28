@@ -36,12 +36,12 @@
 %===============================================================================
 
 \begin{abstract}
-World models have become capable simulators, but they are tested almost only in the domain they were trained on.
-A small domain shift, such as a new arena of the same game, a new texture or lighting set, or a different weapon in view, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
+World models have become capable simulators, but they are evaluated almost exclusively on held-out rollouts from the domain they were trained on.
+A small domain shift, such as a new arena of the same game or a new texture, lighting set or weapon in view, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift.
-We train three diffusion backbones, each initialized from a pretrained image model, on four maps of one Doom level pack and score each on in-domain data and on the 13 other maps of the same pack, which it never saw.
-On the unseen maps the U-Net's scene PSNR falls from 25.2~dB to a median 22.3~dB and its LPIPS rises from 0.158 to 0.303, while its turn response survives; the other two backbones lose the same way.
-Rank-16 adapters trained on eight episodes bring the U-Net back to 23.7~dB and 0.204 within 8k updates, and by 4k updates every unseen map has closed at least half of the gap that the shift opened to the reconstruction upper bound.
+We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 other out-of-distribution maps that it never saw.
+On the unseen maps the U-Net's perceptual error (LPIPS) roughly doubles, from \prov{0.158} to a median \prov{0.303}, one predicted frame in \prov{five} no longer resembles the recorded one (LPIPS above 0.4, a level reached by one frame in \prov{73} in domain), and its scene PSNR drops \prov{2.9}~dB; its turn response survives, and the other two backbones lose the same way.
+Rank-16 adapters trained on eight episodes with \prov{2\%} of the training updates recover \prov{72\%} of the lost perceptual quality and close \prov{94\%} of the extra distance that the shift opened between the model and its reconstruction upper bound, and at least half of it on every map.
 \end{abstract}
 
 \keywords{World models, Domain shift, Few-shot adaptation}
@@ -63,7 +63,7 @@ Training a separate model per map is prohibitively costly, so the open question 
 
 Our paper addresses these concerns and contributes the following:
 \begin{itemize}\setlength{\itemsep}{0pt}
-\item \textbf{DoomShift}, a benchmark that turns this question into a concrete testbed: 17 arenas of one Doom level pack, three pretrained diffusion backbones trained on four of them and the remaining thirteen scored both zero-shot and after post-training. We release every-tic recordings of \prov{6,000} episodes on the four training maps and 24 on each of the 13 unseen arenas (this paper trains on 2,000 of them), along with the three trained models, the decoder fine-tune and the adapter path (Figure~\ref{fig:method}; link withheld for review).
+\item \textbf{DoomShift}, a benchmark that turns this question into a concrete testbed: 17 Doom maps (arenas), three pretrained diffusion backbones trained on four of them and the remaining thirteen scored both zero-shot and after post-training. We release every-tic recordings of \prov{6,000} episodes on the four training maps and 24 on each of the 13 unseen arenas (this paper trains on 2,000 of them), along with the three trained models, the decoder fine-tune and the adapter path (Figure~\ref{fig:method}; link withheld for review).
 \item A post-training recipe that adapts a frozen model to a new arena from just eight episodes with a small adapter, together with the per-arena protocol that scores the budget it requires.
 \item Evidence that this generalizes without heavy retraining: within 8k updates the median scene PSNR on the unseen arenas rises from 22.3 to 23.7~dB and LPIPS falls from 0.303 to 0.204, and all 13 arenas close half of the excess gap over the in-distribution gap by 4k (Figure~\ref{fig:adapt}; full fine-tune comparator \tbd{}).
 \item A characterization of the shift: on unseen arenas all three backbones lose scene PSNR and LPIPS in the same way, while the turn response survives (Table~\ref{tab:unseen}, Figures~\ref{fig:teaser} and~\ref{fig:adapt}).
@@ -90,7 +90,7 @@ We take our method from two papers that put a small adapter on a frozen pretrain
 \section{Method}
 \label{sec:bench}
 
-\textbf{Data.} We collect the data for this research by running experiments with the Arnold agent~\citep{lample2017arnold} through ViZDoom~\citep{kempka2016vizdoom} deathmatches: free-for-all matches where each player scores by killing the others. Arnold's level pack has 17 arenas. A level pack is a single Doom WAD file that bundles a set of maps, and each arena is one of those maps, with its own layout, textures and lighting. For every episode, we let Arnold play against 8 bots for 150 seconds. We record every tic, the engine's 1/35~s simulation step, capturing a 320$\times$240 frame and the 19 buttons the engine executed. We split the 17 arenas into two groups. Four arenas (2 to 5) are our training maps: we train on 500 episodes of each and score on 25 further validation episodes per map (512 windows). The other thirteen arenas (1, 6 to 17) are never trained on: we record 24 new episodes on each, using 16 for adaptation and holding out 8 (256 windows) for scoring. In total we collect 2,412 episodes, about 96 hours of play and about 12.1 million frames.
+\textbf{Data.} We collect the data for this research by running experiments with the Arnold agent~\citep{lample2017arnold} through ViZDoom~\citep{kempka2016vizdoom} deathmatches: free-for-all matches where each player scores by killing the others. Arnold ships with 17 Doom maps, which we call arenas; each has its own layout, textures and lighting. For every episode, we let Arnold play against 8 bots for 150 seconds. We record every tic, the engine's 1/35~s simulation step, capturing a 320$\times$240 frame and the 19 buttons the engine executed. We split the 17 arenas into two groups. Four arenas (2 to 5) are our training maps: we train on 500 episodes of each and score on 25 further validation episodes per map (512 windows). The other thirteen arenas (1, 6 to 17) are never trained on: we record 24 new episodes on each, using 16 for adaptation and holding out 8 (256 windows) for scoring. In total we collect 2,412 episodes, about 96 hours of play and about 12.1 million frames.
 
 \textbf{Three backbones, one training recipe.} We pick three pretrained backbones to ask three different questions. Our anchor is the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters): it is GameNGen's backbone~\citep{valevski2024gamengen}, so our in-distribution numbers come from the same network as the published Doom result. To test how different architectures perform at fixed scale, we swap in PixArt-$\alpha$~\citep{chen2023pixart}, a 628M transformer in the same latent space instead of a U-Net; architecture turns out not to change what survives the shift (in distribution their scene PSNR differs by 0.02~dB; on unseen arenas their median PSNR falls to 22.30 and 22.38~dB and their LPIPS rises to 0.303 and 0.285; Table~\ref{tab:unseen}). To test how performance changes with scale, we use SD~3.5 Medium~\citep{esser2024sd3}, a widely adopted open MMDiT (2.27B parameters, 16-channel latents); its latent space changes along with its scale, so this step compares pretrained packages rather than architectures.
 
@@ -186,9 +186,9 @@ The adapters trade some in-distribution skill for it: the training maps' scene P
 \label{sec:limits}
 
 On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and at most 8k adapter updates raise its median scene PSNR from 22.3 to 23.7~dB and lower its LPIPS from 0.303 to 0.204, closing half of the excess gap over the in-distribution gap on all 13 arenas by 4k.
-The claims cover 13 arenas of one level pack, one agent, one-tic scoring and mostly one seed.
+The claims cover 13 arenas of one game, one agent, one-tic scoring and mostly one seed.
 One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic on the full frame with stock decoders, collapses in 23 non-EMA and 9 EMA rollouts of 256, and the EMA removes checkpoint-specific collapses, not the failure mode (\appref{app:closedloop}).
-Next are other level packs and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot skill score so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
+Next are other Doom maps and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot skill score so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
 The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.
 \label{body-end}
 
