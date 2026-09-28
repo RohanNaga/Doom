@@ -1,6 +1,4 @@
 
-\ifdraftmarks{\color{blue}\noindent\textbf{Draft note.} This appendix still reports several results in the earlier persistence-relative terms (advantage $A$, margin $M$); it is being rewritten in raw scene PSNR and LPIPS to match the main text.}\par\fi
-
 \section{Protocol details}
 \label{app:protocol}
 
@@ -27,7 +25,7 @@ Updates per second & 1.78 to 1.83 & about 1.4 & 0.50 to 0.55 \\
 
 \textbf{Recipe notes.} The 1,000-step linear schedule ($\beta$ from $10^{-4}$ to 0.02) is neither backbone's native schedule: 273 of its timesteps are noisier than anything SD~1.4 saw in pretraining, and SD~3.5 was pretrained with rectified flow. Context noise augmentation blends $\sqrt{1-q}\,c+\sqrt{q}\,\epsilon$ with one level $q$ per example drawn below 0.7 and embedded as one of 10 buckets; inference uses clean context and bucket 0. Fused AdamW runs at $5\times10^{-5}$ after 2,000 linear warmup updates, with no weight decay, gradient clipping at 1.0, bf16 autocast over fp32 parameters, seed 0 and no action dropout. The EMA decays at 0.9999 per update, applied as $0.9999^8$ every eighth update, in fp32. Training sees windows from episodes 0 to 1,999 (500 per training map, 9.66M valid windows); 200k updates at batch 32 cover about two thirds of one pass.
 
-\textbf{The decoder.} We fine-tune the SD~1 decoder $D$ on training-map frames from their ground-truth latents with the encoder frozen, using MSE plus 0.1~LPIPS (3,486 updates, learning rate $10^{-5}$, batch 24, 4.0 hours on one A6000), validate on episodes 6000 to 6099 and keep the terminal checkpoint; it passed its gate at $+4.33$~dB and LPIPS $-0.039$ on the development set. On 200 validation frames its scene rows go from 26.93~dB and LPIPS 0.092 (stock) to 28.44 and 0.060, and the HUD rows from 17.83 to 30.67~dB. An MSE-only objective, the recipe GameNGen describes, reaches 29.09~dB on the scene but roughly triples the full-frame LPIPS (0.094 to 0.285 by 2,000 updates): it sharpens the HUD and blurs the scene. The stock decoders saw no Doom frame; the SD~3.5 decoder's fine-tune is \tbd{} (Monday), so SD~3.5 is rendered through its stock decoder.
+\textbf{The decoder.} We fine-tune the SD~1 decoder $D$ on training-map frames from their ground-truth latents with the encoder frozen, using MSE plus 0.1~LPIPS (3,486 updates, learning rate $10^{-5}$, batch 24, 4.0 hours on one A6000), validate on episodes 6000 to 6099 and keep the terminal checkpoint; it passed its gate at $+4.33$~dB and LPIPS $-0.039$ on the development set. On 200 validation frames its scene rows go from 26.93~dB and LPIPS 0.092 (stock) to 28.44 and 0.060, and the HUD rows from 17.83 to 30.67~dB. An MSE-only objective, the recipe GameNGen describes, reaches 29.09~dB on the scene but roughly triples the full-frame LPIPS (0.094 to 0.285 by 2,000 updates): it sharpens the HUD and blurs the scene. The stock decoders saw no Doom frame; the SD~3.5 decoder, fine-tuned the same way, raises SD~3.5's scene reconstruction on the 512 validation windows from 29.99 to 31.84~dB and lowers its LPIPS from 0.045 to 0.028.
 
 \begin{figure}[ht]
 \centering
