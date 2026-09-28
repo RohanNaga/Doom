@@ -238,10 +238,21 @@ def _by_step(rows, decoder):
     return dict(sorted(out.items()))
 
 
+def run_source(run_dir):
+    """(checkpoint file name, weights) a run adapted, from its `config.json` (`source`, `source_weights`); the file
+    name alone, since the same checkpoint sits at different paths on the two servers. None without a config."""
+    path = os.path.join(run_dir, "config.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        cfg = json.load(f)
+    return (os.path.basename(str(cfg.get("source", ""))), cfg.get("source_weights")) if cfg.get("source") else None
+
+
 def load_blocks(adapt_root, refs, k=8, seed=0):
     """{"<backbone>_<kind>": {backbone, kind, decoder, identity, arenas: {arena: {run, decoder, identity, grid,
-    reads, gpu_hours}}}} over the eight-episode, seed-0 runs under `adapt_root` (the block's decoder "mixed" when
-    its arenas differ); `refs` is {backbone: {decoder: {arena: reference}}}."""
+    reads, gpu_hours, source}}}} over the eight-episode, seed-0 runs under `adapt_root` (the block's decoder "mixed"
+    when its arenas differ; `source` from `run_source`); `refs` is {backbone: {decoder: {arena: reference}}}."""
     runs = {}
     for name in sorted(os.listdir(adapt_root)) if os.path.isdir(adapt_root) else []:
         meta = run_meta(name)
@@ -274,5 +285,5 @@ def load_blocks(adapt_root, refs, k=8, seed=0):
         if block["decoder"] != decoder:
             block["decoder"] = "mixed"
         block["arenas"][arena] = {"run": name, "decoder": decoder, "identity": identity, "grid": grid, "reads": reads,
-                                  "gpu_hours": hours}
+                                  "gpu_hours": hours, "source": run_source(run_dir)}
     return blocks

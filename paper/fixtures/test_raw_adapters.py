@@ -171,6 +171,11 @@ def test_runs_group_into_blocks_with_the_8k_grid_preferred_for_the_u_net(tmp_pat
     assert (px["decoder"], px["identity"], sorted(px["arenas"])) == ("stock", "hub:stock", [7, 16])
     r = px["arenas"][7]
     assert (r["decoder"], r["identity"]) == ("stock", "hub:stock")                   # per arena, for mixed blocks
+    assert r["source"] is None                                                        # no config.json beside it
+    with open(root / "pixart200k_arenas13_map07_r16_k8_s0" / "config.json", "w") as f:
+        json.dump({"source": "/sata2/x/040-unet-nexttic/snap_0200000.pt", "source_weights": "ema"}, f)
+    again = ra.load_blocks(str(root), {"pixart": {"stock": ref}, "unet": {"stock": ref}})
+    assert again["pixart_lora"]["arenas"][7]["source"] == ("snap_0200000.pt", "ema")    # the file name, any server
     assert r["grid"] == [0, 250, 4000] and r["gpu_hours"]["4000"] == pytest.approx(1.0)
     assert r["reads"][4000]["quantity"] == "raw" and r["reads"][4000]["psnr"] == pytest.approx(27.0 - 3.0)
     assert blocks["unet_lora"]["arenas"][7]["run"].endswith("_g8k")          # the 8k grid over the base run

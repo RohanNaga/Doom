@@ -464,6 +464,24 @@ def finished(arena_data, headline=HEADLINE_STEP):
     return headline not in arena_data["grid"] or headline in arena_data["reads"]
 
 
+def borrow_zero_shot(full, lora):
+    """({arena: data}, borrowed arenas): full fine-tune arenas without a step-0 read take the U-Net LoRA's. Before
+    its first update a rank-0 run is the checkpoint it starts from, and so is a LoRA (its B matrix starts at zero), so
+    on the same held-out windows the two step-0 reads are one measurement. Borrowed only when both runs name the same
+    source checkpoint and weights (`raw_adapters.run_source`); the read is marked `borrowed`. The input is not
+    changed."""
+    out, borrowed = {}, []
+    for m, d in full.items():
+        mine = lora.get(m) or {}
+        zero = (mine.get("reads") or {}).get(0)
+        if 0 not in d["reads"] and zero and d.get("source") and d.get("source") == mine.get("source"):
+            out[m] = {**d, "reads": {0: {**zero, "borrowed": "unet_lora"}, **d["reads"]}}
+            borrowed.append(m)
+        else:
+            out[m] = d
+    return out, sorted(borrowed)
+
+
 def split_arenas(arenas_data, wanted, headline=HEADLINE_STEP, check=8000):
     """(reported, decoded_only, in_progress) of the `wanted` arenas with a zero-shot (step 0) read. Arenas still
     training (`finished`) wait. Of the rest an arena is raw when its zero-shot, headline and check reads are raw
@@ -582,7 +600,9 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
                         "until rescored raw" if left else "")
                      + (f"; arenas {', '.join(map(str, b['in_progress']))} still training (no "
                         f"{budget_label([b.get('headline', HEADLINE_STEP)])} read yet), left out"
-                        if b.get("in_progress") else ""))
+                        if b.get("in_progress") else "")
+                     + (f"; zero-shot of arenas {', '.join(map(str, b['zero_shot_borrowed']))} from the U-Net LoRA's "
+                        "step 0 (the same checkpoint and windows)" if b.get("zero_shot_borrowed") else ""))
     return "\n".join(lines) + "\n"
 
 
@@ -1056,13 +1076,16 @@ def main(argv=None):
 
     unet_hours = loaded.get("unet_lora", {}).get("arenas", {})
     unet_data = {m: {"grid": list(GRID), "gpu_hours": unet_hours.get(m, {}).get("gpu_hours", {}),
+                     "source": unet_hours.get(m, {}).get("source"),
                      "reads": {st: {"quantity": "raw", "psnr": p, "lpips": lp, "upper": adaptation[m]["upper_bound"]}
                                for st, p, lp in zip(t["steps"], t["psnr"], t["lpips"])}}
                  for m, t in trajectories.items()}
+    full_data, full_borrowed = borrow_zero_shot(loaded.get("unet_full", {}).get("arenas", {}), unet_data)
     block_rows, block_stats, levels, curves, not_drawn, panel_arenas, panel_raw = [], {}, {}, [], {}, {}, {}
     for key, name, wanted in BLOCKS:
         backbone = key.split("_")[0]
-        data = unet_data if key == "unet_lora" else loaded.get(key, {}).get("arenas", {})
+        data = unet_data if key == "unet_lora" else full_data if key == "unet_full" else \
+            loaded.get(key, {}).get("arenas", {})
         wanted_list = list(wanted) if wanted else arenas
         if key == "unet_lora":
             decoder, identity = "tuned", loaded.get("unet_lora", {}).get("identity") or "fine-tuned SD 1"
@@ -1080,7 +1103,8 @@ def main(argv=None):
         b.update({"decoder": decoder, "decoder_identity": identity, "g_train_source": zero_rows[backbone],
                   "g_train_note": None if g is not None else
                   f"no training-map read of {zero_rows[backbone]} through the {gap_decoder} decoder: "
-                  "no in-distribution gap, so no budget"})
+                  "no in-distribution gap, so no budget",
+                  "zero_shot_borrowed": [m for m in full_borrowed if m in b["arenas"]] if key == "unet_full" else []})
         block_stats[key] = b
         block_rows.append((block_label(name, b, wanted is None), b, identity))
         # the panel: raw reads only, every finished arena the block has
@@ -1098,12 +1122,19 @@ def main(argv=None):
         levels[key] = level if level else (None, None)
     with open(table, "w") as f:
         f.write(groups_table(gstats, budgets_final=grid_complete, blocks=block_rows))
-    if curves:
-        written += fig_backbones(curves, levels, a.out_dir, a.headline_step)
-    # the like-for-like panel: every curve over the arenas all LoRA backbones have finished
+    # the every-arena panel: one LoRA curve per backbone. The full fine-tune runs on a few arenas by design, and its
+    # median beside medians over every arena would compare different arenas; it joins the shared panel instead
+    every = [c for c in curves if c[0].endswith("_lora")]
+    not_drawn.update({c[0]: "a subset of arenas: drawn on the shared panel once it covers the shared arenas"
+                      for c in curves if not c[0].endswith("_lora")})
+    if every:
+        written += fig_backbones(every, levels, a.out_dir, a.headline_step)
+    # the like-for-like panel: every curve over the arenas all LoRA backbones have finished (the full fine-tune too,
+    # once it has all of them)
     shared = shared_arenas(panel_arenas)
     shared_curves = [(key, label, pts, len(shared)) for key, label, *_ in curves
                      for pts in [panel_points(panel_raw[key], shared)] if shared and pts]
+    curves = every
     if shared_curves:
         written += fig_backbones(shared_curves, levels, a.out_dir, a.headline_step, stem="raw_backbones_shared")
 

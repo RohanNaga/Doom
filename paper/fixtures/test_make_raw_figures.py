@@ -119,6 +119,22 @@ def export(tmp_path):
         with open(run / "log.jsonl", "w") as f:
             f.write(json.dumps({"event": "start", "world": 1, "time": 0.0}) + "\n" +
                     json.dumps({"event": "checkpoint", "step": 4000, "time": 5400.0}) + "\n")
+    # the U-Net's full fine-tune on arena 6: its 4k read only (its step-0 checkpoint went before scoring), from the
+    # same checkpoint as the U-Net's 8k-grid LoRA runs (whose configs sit beside them)
+    for a in ARENAS:
+        with open(adapt / f"unet200k_arenas13_map{a:02d}_r16_k8_s0_g8k" / "config.json", "w") as f:
+            json.dump({"source": "/home/x/results_040/snap_0200000.pt", "source_weights": "ema"}, f)
+    run = adapt / "unet200k_arenas13_map06_r0_k8_s0"
+    write_windows(str(run / "scores" / "step0004000_live_ft" / "heldout" / "per_window.csv"),
+                  windows(6, 23.0, 0.18, CEILING[6], "_tuned"))
+    with open(run / "config.json", "w") as f:
+        json.dump({"source": "/sata2/x/040-unet-nexttic/snap_0200000.pt", "source_weights": "ema"}, f)
+    with open(run / "scores.jsonl", "w") as f:
+        f.write(json.dumps({"step": 4000, "weights": "live", "grid": [0, 4000], "heldout_decoders": ["stock", "tuned"],
+                            "decoders": {"stock": {"identity": "hub:stock"}, "tuned": {"identity": "sha256:sd1tuned"}},
+                            "eval_fingerprint": "ft", "scored_at": "t4000",
+                            "heldout_per_window": "/sata2/x/adapt_fullft/map06/scores/step0004000_live_ft/heldout/"
+                                                  "per_window.csv"}) + "\n")
     # PixArt-alpha LoRA on arena 16, still training: its zero-shot read only, far below the others
     run = adapt / "pixart200k_arenas13_map16_r16_k8_s0"
     write_windows(str(run / "scores" / "step0000000_live_px" / "heldout" / "per_window.csv"),
@@ -327,6 +343,23 @@ def test_the_raw_set_switches_sd35_to_200k_through_its_fine_tuned_decoder(tmp_pa
     assert sd35["budget_final"] is True
 
 
+def test_a_full_fine_tune_without_its_step_0_read_borrows_the_lora_one_only_from_the_same_checkpoint():
+    lora = {8: {"grid": [0, 4000], "gpu_hours": {}, "source": ("snap_0200000.pt", "ema"),
+                "reads": {0: {"quantity": "raw", "psnr": 24.6, "lpips": 0.27, "upper": 29.6}}}}
+    full = {8: {"grid": [0, 4000], "gpu_hours": {}, "source": ("snap_0200000.pt", "ema"),
+                "reads": {4000: {"quantity": "raw", "psnr": 26.0, "lpips": 0.2, "upper": 29.6}}},
+            16: {"grid": [0, 4000], "gpu_hours": {}, "source": ("snap_0150000.pt", "ema"),
+                 "reads": {4000: {"quantity": "raw", "psnr": 25.0, "lpips": 0.2, "upper": 26.0}}}}
+    lora[16] = {**lora[8], "reads": {0: {**lora[8]["reads"][0], "psnr": 22.4}}}
+    out, borrowed = mrf.borrow_zero_shot(full, lora)
+    assert borrowed == [8]                                             # 16 names another checkpoint: no borrowing
+    assert out[8]["reads"][0]["psnr"] == pytest.approx(24.6) and out[8]["reads"][0]["borrowed"] == "unet_lora"
+    assert 0 not in out[16]["reads"] and 0 not in full[8]["reads"]     # the input is left as it was
+    b = mrf.block_summary(out, [6, 7, 8, 16], 3.0, "half_excess_gap", 4000)
+    assert (b["n"], b["arenas"]) == (1, [8]) and mrf.block_label("U-Net full fine-tune", b, False) == \
+        "U-Net full fine-tune (1 of 4)"
+
+
 def test_backbone_end_labels_clear_every_mark_and_the_next_panel(tmp_path, monkeypatch):
     # the shared panel's case: three curves ending within 0.1 dB, two at 4k and the U-Net's at 8k
     kept = {}
@@ -467,7 +500,9 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert "& fine-tune \\\\" not in tex and "\\tbd{} (6" not in tex
     lines = {line.split(" & ")[0]: line for line in tex.splitlines() if " & " in line}
     assert "U-Net LoRA (1 of 4)" in lines
-    assert lines["U-Net full fine-tune (6, 7, 8, 16)"].count("\\tbd{}") == 8               # no runs yet
+    # the full fine-tune's arena 6 has its 4k read and the U-Net LoRA's step 0 (the same checkpoint): 1 of 4
+    ft = lines["U-Net full fine-tune (1 of 4)"]
+    assert " & 18.00 & 23.00 & " in ft and "zero-shot of arenas 6 from the U-Net LoRA's step 0" in tex
     px = lines["PixArt-$\\alpha$ LoRA (all 2)"]
     assert " & 20.70 & " in px and px.split(" & ")[3] == "--"                         # 4k median; its grid stops at 4k
     sd = lines["SD 3.5 LoRA (1 of 2)"]
@@ -489,16 +524,19 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert "$^\\ddagger$" not in sd and "arenas 9 read against the decoded ground truth only" in tex
     assert blocks["pixart_lora"]["g_train"] == pytest.approx(28.0 - (22.45 + 0.2)) and not blocks["pixart_lora"].get(
         "g_train_note")
-    assert blocks["unet_full"]["n"] == 0
-    # the per-backbone panel: median raw PSNR and LPIPS against updates, one curve per backbone with raw reads
+    assert (blocks["unet_full"]["n"], blocks["unet_full"]["zero_shot_borrowed"]) == (1, [6])
+    # the every-arena panel: one LoRA curve per backbone; the full fine-tune (a few arenas against medians over
+    # every arena) waits for the shared panel
     assert s["backbone_panel"]["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]
-    assert s["backbone_panel"]["not_drawn"] == {"unet_full": "no runs"}
+    assert list(s["backbone_panel"]["not_drawn"]) == ["unet_full"]
     # PixArt's arena 16 is still training: out of its curve, whose every step is then over the same arenas
     assert s["backbone_panel"]["arenas"]["pixart_lora"] == [6, 9]
     assert s["backbone_panel"]["medians"]["pixart_lora"]["0"][0] == pytest.approx((18.2 + 19.2) / 2)
     # the second panel: every curve over the arenas all three LoRA backbones have finished (SD 3.5 has 6 raw only)
     shared = s["backbone_panel_shared"]
-    assert shared["arenas"] == [6] and shared["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]
+    # the full fine-tune has the shared arena (6), so it is drawn there, over the same arenas as the LoRAs
+    assert shared["arenas"] == [6] and shared["drawn"] == ["unet_lora", "unet_full", "pixart_lora", "sd35_lora"]
+    assert shared["medians"]["unet_full"]["4000"][0] == pytest.approx(23.0)
     assert shared["medians"]["pixart_lora"]["0"][0] == pytest.approx(18.2)
     assert shared["medians"]["unet_lora"]["0"][0] == pytest.approx(18.0)
     assert shared["medians"]["sd35_lora"]["4000"][0] == pytest.approx(19.5)
