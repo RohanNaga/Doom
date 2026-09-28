@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-28T10:34:41-04:00",
+ "generated_at": "2026-09-28T10:38:07-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1647,6 +1647,10 @@
   "drawn": [
    "unet_lora",
    "unet_full"
+  ],
+  "labels": [
+   "U-Net LoRA (4)",
+   "full fine-tune (0, 4k)"
   ],
   "waiting_for": [],
   "medians": {

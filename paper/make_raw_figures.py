@@ -793,6 +793,11 @@ def fullft_arenas(lora_arenas, full_arenas):
     return wanted if wanted and set(wanted) <= set(full_arenas) else None
 
 
+def fullft_label(points):
+    """The full fine-tune's key entry, named by the reads it has: "full fine-tune (0, 4k)"."""
+    return f"full fine-tune ({', '.join(fs.step_label(int(st)) for st in sorted(points))})"
+
+
 def panel_points(raw, arenas=None):
     """{step: (median PSNR, median LPIPS)} over `arenas` (every arena of `raw` when None) of one block's raw reads
     (`raw` is {arena: {step: read}}); None when the block lacks one of `arenas`."""
@@ -807,10 +812,10 @@ def panel_points(raw, arenas=None):
 def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_backbones"):
     """The per-backbone adaptation panel: the median over each block's arenas of raw scene PSNR (left) and LPIPS
     (right) against adapter updates (log axis, the 0 read at the left), one curve per block in its backbone's colour
-    and marker (the full fine-tune black dashed), the headline read filled, each backbone's training-map level as a
-    short dashed segment at the right edge, each curve labelled at its right end with its arena count. `curves` is
-    [(key, label, {step: (psnr, lpips)}, n)], `levels` {key: (psnr, lpips)}; `stem` names the variant (the shared
-    one draws every curve over the same arenas)."""
+    and marker (the full fine-tune as black points at its reads, no connector), the headline read filled, each
+    backbone's training-map level as a short dashed segment at the right edge, each curve labelled at its right end
+    with its arena count (none when `n` is None). `curves` is [(key, label, {step: (psnr, lpips)}, n)], `levels`
+    {key: (psnr, lpips)}; `stem` names the variant (the shared one draws every curve over the same arenas)."""
     fig, (px, lx) = fs.new_figure(SIZES[stem], ncols=2, wspace=0.08)
     steps = sorted({st for _, _, pts, _ in curves for st in pts})
     for ax, j in ((px, 0), (lx, 1)):
@@ -822,12 +827,14 @@ def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_bac
             marker = "o" if who == "full" else ent.marker
             xs = [z if st == 0 else st for st in sorted(pts)]
             ys = [pts[st][j] for st in sorted(pts)]
-            ax.plot(xs, ys, color=ent.colour, ls=ls, lw=fs.DATA_LW, marker=marker, ms=1.6, mfc=ent.colour,
-                    mec=ent.colour, zorder=3)
+            # the full fine-tune is scored at its two reads only: points, no connector (a line between them would
+            # draw values nobody measured, and it crossed the LoRA curve where neither was read)
+            ax.plot(xs, ys, color=ent.colour, ls="none" if who == "full" else ls, lw=fs.DATA_LW, marker=marker,
+                    ms=2.6 if who == "full" else 1.6, mfc=ent.colour, mec=ent.colour, zorder=3)
             if headline in pts:
                 ax.plot([headline], [pts[headline][j]], ls="none", marker=marker, ms=4.6, mfc=ent.colour,
                         mec="white", mew=0.5, zorder=3.5)
-            ends.append((xs[-1], ys[-1], f"{label} ({n})", ent.colour))
+            ends.append((xs[-1], ys[-1], label if n is None else f"{label} ({n})", ent.colour))
             if key in levels and levels[key][j] is not None and who != "full":     # the full FT shares the U-Net's
                 ax.axhline(levels[key][j], color=ent.colour, lw=fs.MIN_LW, ls=fs.TRAINING_DASH, zorder=1.5, gid="ref")
         drawn_levels = [levels[k][j] for k, *_ in curves if k in levels and levels[k][j] is not None]
@@ -1165,8 +1172,11 @@ def main(argv=None):
     # the full fine-tune panel: the U-Net LoRA's whole grid against the full fine-tune's two reads (0 and 4k) on the
     # comparator arenas, drawn once the full fine-tune has every one the LoRA has
     ft_arenas = fullft_arenas(panel_arenas.get("unet_lora", []), panel_arenas.get("unet_full", []))
-    ft_curves = [(key, PANEL_LABELS[key], pts, len(ft_arenas)) for key in ("unet_lora", "unet_full") if ft_arenas
-                 for pts in [panel_points(panel_raw[key], ft_arenas)] if pts]
+    ft_points = {key: panel_points(panel_raw[key], ft_arenas) for key in ("unet_lora", "unet_full") if ft_arenas}
+    ft_curves = [(key, label, ft_points[key], n) for key, label, n in
+                 (("unet_lora", "U-Net LoRA", len(ft_arenas or [])),
+                  ("unet_full", fullft_label(ft_points.get("unet_full") or {}), None))
+                 if ft_points.get(key)]
     if len(ft_curves) == 2:
         written += fig_backbones(ft_curves, levels, a.out_dir, a.headline_step, stem="raw_fullft")
 
@@ -1220,6 +1230,8 @@ def main(argv=None):
         "backbone_panel": {"drawn": [c[0] for c in curves], "not_drawn": not_drawn, "arenas": panel_arenas,
                            "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in curves}},
         "fullft_panel": {"arenas": ft_arenas or [], "drawn": [c[0] for c in ft_curves] if len(ft_curves) == 2 else [],
+                         "labels": [c[1] if c[3] is None else f"{c[1]} ({c[3]})" for c in ft_curves]
+                         if len(ft_curves) == 2 else [],
                          "waiting_for": sorted(set(COMPARATOR_ARENAS) & set(panel_arenas.get("unet_lora", []))
                                                - set(panel_arenas.get("unet_full", []))),
                          "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in ft_curves}

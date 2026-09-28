@@ -398,6 +398,28 @@ def test_the_full_fine_tune_panel_waits_for_every_comparator_arena_the_lora_has(
     assert mrf.fullft_arenas([6, 9], []) is None and mrf.fullft_arenas([9], [9]) is None
 
 
+def test_the_full_fine_tune_is_two_bare_points_keyed_by_its_reads(tmp_path, monkeypatch):
+    from matplotlib.colors import same_color
+    kept = {}
+    save = mrf.fs.save
+
+    def keep(fig, out_dir, stem):
+        px = fig.axes[0]
+        black = [ln for ln in px.lines if same_color(ln.get_color(), mrf.fs.FULL_FINE_TUNE.colour)
+                 and ln.get_gid() not in ("ref", "decor")]                   # data, not the axis-break mark
+        kept[stem] = (black, [t.get_text() for t in px.texts])
+        return save(fig, out_dir, stem)
+    monkeypatch.setattr(mrf.fs, "save", keep)
+    lora = {st: (21.7 + 0.1 * i, 0.29 - 0.01 * i) for i, st in enumerate(mrf.GRID)}
+    full = {0: (21.7, 0.29), 4000: (23.1, 0.18)}
+    mrf.fig_backbones([("unet_lora", "U-Net LoRA", lora, 4), ("unet_full", mrf.fullft_label(full), full, None)], {},
+                      str(tmp_path), 4000, stem="raw_fullft")
+    black, texts = kept["raw_fullft"]
+    assert black and all(ln.get_linestyle() == "None" for ln in black)         # points only: nothing between 0 and 4k
+    assert sorted(x for ln in black for x, _ in ln.get_xydata()) and "full fine-tune (0, 4k)" in texts
+    assert "U-Net LoRA (4)" in texts
+
+
 def test_backbone_end_labels_clear_every_mark_and_the_next_panel(tmp_path, monkeypatch):
     # the shared panel's case: three curves ending within 0.1 dB, two at 4k and the U-Net's at 8k
     kept = {}
@@ -591,6 +613,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert ft["medians"]["unet_full"]["4000"][0] == pytest.approx(23.0)
     assert ft["medians"]["unet_lora"]["0"][0] == pytest.approx(18.0) == ft["medians"]["unet_full"]["0"][0]
     assert len(ft["medians"]["unet_lora"]) > 2                                       # the LoRA's whole grid
+    assert ft["labels"] == ["U-Net LoRA (1)", "full fine-tune (0, 4k)"]
     # the appendix's per-arena table: the gap, its threshold, the reads, the guards
     per = s["per_arena_table"]
     assert per["6"]["gap_zero_shot"] == pytest.approx(8.0)
