@@ -1,6 +1,6 @@
 # Figures and tables of `paper/main.tex` and `paper/appendix.tex`
 
-Inventory as of 2026-09-28 11:55 EDT (figure lead), after SD 3.5 reached 13 of 13 in c0ce991. The submission build (`\withappendixfalse`) is the body plus references; the appendix rows build with `\withappendixtrue`. Figures are drawn by `\figslot{file}{width}{height}{label}` in `main.tex`: when `paper/<file>` exists it is included at its slot size, otherwise a labelled box stands in. Earlier versions of this file (the persistence-based Figures 3 and 4, the Sep 27 draft captions, the 8k headline) are in git history before this commit; nothing below depends on them.
+Inventory as of 2026-09-28 17:30 EDT (figure lead 6), after SD 3.5 reached 13 of 13 in c0ce991 and the slim table gained its recovered shares, its caption and Table 1's generated copy (9467099). The submission build (`\withappendixfalse`) is the body plus references; the appendix rows build with `\withappendixtrue`. Figures are drawn by `\figslot{file}{width}{height}{label}` in `main.tex`: when `paper/<file>` exists it is included at its slot size, otherwise a labelled box stands in. Earlier versions of this file (the persistence-based Figures 3 and 4, the Sep 27 draft captions, the 8k headline) are in git history before this commit; nothing below depends on them.
 
 ## Quantities
 
@@ -23,7 +23,7 @@ Every number drawn or tabled by the generator is in `paper/tables/tuned/raw_summ
 |---|---|---|---|
 | `fig:teaser` (Figure 1) | `figures/fig_teaser_B.pdf`, 5.5 x 1.5 in | `tools/teaser_contact_sheet.py` with `--simple` (provenance below) | in the body |
 | `fig:method` (Figure 2) | `figures/fig1_method.pdf`, 5.5 x 1.8 in | `figures/fig1_method.tex`, images `figures/assets/fig1_*.png` | in the body; panel (d) in raw terms since eb2a050 |
-| `tab:unseen` (Table 1) | hand-set in `main.tex` | `raw_summary.json` (`in_distribution`, `zero_shot`) and the directional reads | SD 3.5 cells `\prov`; SD 3.5 unseen directional `\tbd` |
+| `tab:unseen` (Table 1) | hand-set in `main.tex`; the same table generated as `tables/tuned/results_full.tex` for the supplement (no `\prov` marks; the caption stays the owner's) | `paper/make_raw_figures.py`: `raw_summary.json` (`in_distribution`, `zero_shot`, `directional`), the directional column pooled over each set's windows from `results/directional_fresh/<row>_ema/` and `results/fresh_rescore/directional_fresh/sd35_200000_ema/` | every generated cell equals the hand-set one (checked 17:30 EDT) |
 | `fig:adapt` (Figure 3) | `figures/raw/raw_row.pdf`, 5.5 x 1.75 in | `paper/make_raw_figures.py` | final: 13 arenas, every read of the 8k grid |
 | `tab:cost` (Table 2) | `tables/tuned/adapt_groups.tex`, set at `\scriptsize` with `\tabcolsep` 2.5 pt | `paper/make_raw_figures.py` | final: every block on its full arena set |
 
@@ -49,7 +49,7 @@ Every number drawn or tabled by the generator is in `paper/tables/tuned/raw_summ
 |---|---|---|
 | `figures/raw/raw_row_backbones.pdf` | Body candidate A: the Figure 3 row unchanged, with (e, f) beneath it: each backbone's LoRA median raw PSNR and LPIPS against updates over the arenas all three have (13 arenas), keyed at the bottom. Six panels in one 5.5 in row do not fit (the 13 arena numbers overlap), so (e, f) take a line of their own | 5.5 x 3.1 in |
 | `figures/raw/raw_backbones_body.pdf` | Body candidate B: the same curves as a separate figure, keyed above | 5.5 x 1.6 in |
-| `tables/tuned/results_slim.tex` | Trim option: one table in place of Tables 1 and 2. One row per backbone (training maps, zero-shot and 4k medians over the same arenas, upper bound, budget), then the U-Net LoRA and full fine-tune on arenas 6, 7, 8, 16. At `\footnotesize` with `\tabcolsep` 3.2 pt it spans 92% of the text width; with a two-line caption the float is 10.95 body lines against 31.3 for Tables 1 and 2. It drops Table 1's directional column, the training maps' upper bound and Table 2's 8k column | 9 columns |
+| `tables/tuned/results_slim.tex` with `results_slim_caption.tex` | Trim option: one table in place of Tables 1 and 2, generated with its `\caption` line (the owner `\input`s both inside the float). One row per backbone: in-domain PSNR and LPIPS (the training maps, for reference), zero-shot and 4k medians over the 13 arenas, then the recovered shares in whole percent (`recovery_shares`: the LPIPS rise undone, the lost PSNR regained, the excess gap to the upper bound closed; per arena, then the median); then the U-Net LoRA and full fine-tune on arenas 6, 7, 8, 16 with blank in-domain cells (their checkpoint is the U-Net's; their shares use its level). At `\footnotesize` with `\tabcolsep` 3.2 pt the tabular spans 381 of the 397 pt text width (96%). It drops Table 1's directional column and upper bound and Table 2's upper bound, budget and 8k columns, which stay in the supplement's `results_full.tex` and `adapt_groups.tex` | 10 columns |
 | `figures/raw/raw_row_grid.pdf` | Figure 3 as two rows of two (PSNR above, LPIPS below) | 5.5 x 3.0 in |
 | `figures/raw/raw_backbones.pdf` | Each backbone's LoRA median over every arena it has; with all three on 13 arenas it now draws the same curves as the shared panel | 5.5 x 1.6 in |
 | `figures/raw/raw_backbones_shared.pdf` | The same over the shared arenas, labelled at the curves' ends | 5.5 x 1.6 in |
@@ -60,7 +60,7 @@ Every number drawn or tabled by the generator is in `paper/tables/tuned/raw_summ
 
     python3 paper/make_raw_figures.py
 
-It writes `paper/figures/raw/`, `paper/tables/tuned/{adapt_groups,adapt_perarena,results_slim}.tex` and `raw_summary.json` in about three seconds from a clean checkout (the per-window files it reads are tracked since a1aff0c). Every PDF rewrites byte-identical when its inputs have not changed. PNGs can differ in bytes between machines through the PNG encoder alone; compare pixels before committing one. Tests: `python3 -m pytest paper/fixtures/test_make_raw_figures.py paper/fixtures/test_raw_adapters.py paper/fixtures/test_figstyle.py -q`. After a regeneration, build `main.tex` (`latexmk -pdf main.tex` in `paper/`) and check the log has no overfull box. The review page is `docs/figure_review/index.html`; it prints each PNG at its slot width.
+It writes `paper/figures/raw/`, `paper/tables/tuned/{adapt_groups,adapt_perarena,results_full,results_slim,results_slim_caption}.tex` and `raw_summary.json` in about three seconds from a clean checkout (the per-window files it reads are tracked since a1aff0c; the directional files behind `results_full.tex` are found under `--directional-roots`). Every PDF rewrites byte-identical when its inputs have not changed. PNGs can differ in bytes between machines through the PNG encoder alone; compare pixels before committing one. Tests: `python3 -m pytest paper/fixtures/test_make_raw_figures.py paper/fixtures/test_raw_adapters.py paper/fixtures/test_figstyle.py -q`. After a regeneration, build `main.tex` (`latexmk -pdf main.tex` in `paper/`) and check the log has no overfull box. The review page is `docs/figure_review/index.html`; it prints each PNG at its slot width.
 
 ## Numbers as generated (c0ce991, SD 3.5 on all 13 arenas)
 
@@ -79,6 +79,8 @@ Shared-arena medians (the body candidates; 13 arenas: 1, 6, 7, 8, 9, 10, 11, 12,
 - SD 3.5: PSNR 22.09 to 24.00 dB, LPIPS 0.262 to 0.165.
 
 SD 3.5 per-arena budgets: 1: 250, 6: 250, 7: 250, 8: 500, 9: 250, 10: 250, 11: 2000, 12: 250, 13: 250, 14: 4000, 15: 500, 16: 250, 17: 250.
+
+Recovered shares at 4k (`blocks.<key>.shares` in `raw_summary.json`; medians of per-arena shares, LPIPS / PSNR / excess gap): U-Net 72 / 48 / 94, PixArt-α 76 / 48 / 101, SD 3.5 77 / 50 / 94; on the comparator arenas the U-Net LoRA 71 / 41 / 123 and the full fine-tune 87 / 46 / 144. The text quotes the first three rows and the two LPIPS shares of the comparison; the comparison rows' PSNR and gap shares appear only in the slim table.
 
 Numbers the text quotes that no figure draws: the guard reads of the 8k-grid runs (stock decoder, live weights, steps 0 and 8000): the training maps' scene PSNR against the decoded ground truth falls on every arena, median −0.59 dB (arena 7 −1.65, arena 8 −0.28); the directional check is correct on a median 0.809 of turning windows at step 0 and 0.844 at 8k. Cross-arena control (`results/cross_arena/`, stock decoder): an arena's 4k adapter scored on the next arena's held-out windows lands at that arena's zero-shot level (median paired difference −0.05 dB) and 1.28 dB below its own adapter.
 
