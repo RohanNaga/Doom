@@ -44,7 +44,7 @@ A small domain shift, such as a new arena of the same game, a new texture set, a
 DoomShift asks how quickly and cheaply a world model can be adapted across such a shift.
 We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 other out-of-distribution maps that it never saw.
 On the unseen maps the U-Net's perceptual error (LPIPS) doubles, from \prov{0.158} to a median \prov{0.303}, and its scene PSNR drops \prov{2.9}~dB, from \prov{25.2} to a median \prov{22.3}~dB; its turn response survives, and the other two backbones lose the same way.
-We then train rank-16 adapters on 8 episodes of each unseen map with \prov{2\%} of the original training updates and recover \prov{72\%} of the lost perceptual quality and about \prov{half} of the lost PSNR; the same recipe carries over unchanged to PixArt-$\alpha$, recovering \prov{76\%}, and to SD~3.5, recovering \prov{77\%}.
+We then train rank-16 adapters on 8 episodes of each unseen map with \prov{2\%} of the original training updates and recover \prov{72\%} of the lost perceptual quality and about \prov{half} of the lost PSNR; the same recipe carries over unchanged to PixArt-$\alpha$ and SD~3.5, recovering \prov{76\%} and \prov{77\%}.
 \end{abstract}
 
 \keywords{World models, Few-shot adaptation}
@@ -183,7 +183,7 @@ Neither the model's own latent-space score nor a frame distance between an arena
 
 \begin{table}[tb]
 \centering\footnotesize
-\caption{What closing the gap takes. The U-Net's LoRA by group of unseen arenas, ordered by their zero-shot gap to the reconstruction upper bound, and over all 13; then the U-Net's LoRA and full fine-tune on the four comparator arenas, and the same LoRA recipe on PixArt-$\alpha$ and SD~3.5 on the arenas scored so far. Medians over each row's arenas; non-EMA adapter weights; scene rows against the raw frame, each backbone through its fine-tuned decoder (SD~3.5 through its own, so its upper bound is higher); --: not scored (the PixArt-$\alpha$ and SD~3.5 grids stop at 4k). Budget: the first grid point at which an arena closes half of its excess gap over its backbone's in-distribution gap (${>}$8k: censored; where a row's two middle budgets differ, both are given).}
+\caption{What closing the gap takes. The U-Net's LoRA by group of unseen arenas, ordered by their zero-shot gap to the reconstruction upper bound, and over all 13; then the U-Net's LoRA and full fine-tune on the four comparator arenas, and the same LoRA recipe on PixArt-$\alpha$ and SD~3.5 over all 13 arenas. Medians over each row's arenas; non-EMA adapter weights; scene rows against the raw frame, each backbone through its fine-tuned decoder (SD~3.5 through its own, so its upper bound is higher); --: not scored (the PixArt-$\alpha$ and SD~3.5 grids stop at 4k). Budget: the first grid point at which an arena closes half of its excess gap over its backbone's in-distribution gap (${>}$8k: censored; where a row's two middle budgets differ, both are given).}
 \label{tab:cost}
 {\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/tuned/adapt_groups.tex}}
 \end{table}
