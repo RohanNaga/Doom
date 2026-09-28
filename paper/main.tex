@@ -109,7 +109,7 @@ For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\cit
 \label{fig:method}
 \end{figure}
 
-\textbf{Training setup.} We train each backbone on a single RTX A6000 (49~GB) in bf16 with fused AdamW, reaching 1.8 updates per second for the U-Net, 1.4 for PixArt-$\alpha$ and 0.53 for SD~3.5. We train each adapter on a single RTX A4000 (16~GB), at about 1.0 updates per second.
+\textbf{Training setup.} We train each backbone on a single RTX A6000 (49~GB) in bf16 with fused AdamW, reaching 1.8 updates per second for the U-Net, 1.4 for PixArt-$\alpha$ and 0.53 for SD~3.5. We train the U-Net's adapters on a single RTX A4000 (16~GB) at about 1.0 updates per second and PixArt-$\alpha$'s on an A6000 at about 1.3; SD~3.5's take 1.3 hours to 4k updates on an A6000, or 3.4 hours on an A4000 with gradient checkpointing.
 
 \textbf{Decoder.} Every backbone is trained on latents from its frozen encoder, so the latent space is the contract between encoder, world model and decoder: changing the encoder would move every training target and invalidate the trained backbones, the adapters and the reconstruction upper bound.
 The decoder only renders: it sits after the model, and its own error is what the reconstruction upper bound measures, so fine-tuning it changes what we can see, not what the model knows.
