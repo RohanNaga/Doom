@@ -59,6 +59,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, REPO)
 import figstyle as fs  # noqa: E402
 import make_adapt_figures as maf  # noqa: E402
+import raw_adapters as rad  # noqa: E402
 from score_adapt import DUPLICATE_FLAGS  # noqa: E402
 
 from matplotlib import ticker  # noqa: E402  (maf has already selected the Agg backend)
@@ -76,11 +77,19 @@ TRAINING_MAPS = maf.TRAINING_MAPS
 PRIMARY = "unet200k_ema"
 COMPARATOR_ARENAS = (6, 7, 8, 16)               # the full fine-tune's arenas (Table 2's last column)
 GROUP_NAMES = ("hard", "medium", "easy")
+# Table 2's per-backbone blocks at the headline step, in order: (key in raw_adapters.load_blocks, label, arenas; None
+# for every arena); the U-Net LoRA block is matched to the full fine-tune's arenas
+BLOCKS = (("unet_lora", "U-Net LoRA", COMPARATOR_ARENAS),
+          ("unet_full", "U-Net full fine-tune", COMPARATOR_ARENAS),
+          ("pixart_lora", "PixArt-$\\alpha$ LoRA", None), ("sd35_lora", "SD 3.5 LoRA", None))
+BLOCK_STYLE = {"unet_lora": ("unet", "-"), "unet_full": ("full", (0, (3, 2))), "pixart_lora": ("pixart", "-"),
+               "sd35_lora": ("sd35", "-")}
+PANEL_LABELS = {"unet_lora": "U-Net", "unet_full": "U-Net full", "pixart_lora": "PixArt-\u03b1", "sd35_lora": "SD 3.5"}
 HEADLINE_STEP = 4000                            # the paper's budget (Rohan, Sep 27 evening); 8k is the check
 ROW_TICKS = (0, 100, 1000, 8000)                # labelled steps in the row's narrow curve panels
 GRID_TICKS = (0, 50, 250, 1000, 4000, 8000)     # and in the two-by-two layout's wider ones
 SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_figA_adapt_arenas": (5.5, 3.0),
-         "raw_fig3a_psnr": (2.25, 1.5),
+         "raw_backbones": (5.5, 1.6), "raw_fig3a_psnr": (2.25, 1.5),
          "raw_fig3a_lpips": (2.25, 1.5)}
 UPPER = "reconstruction upper bound"             # never "ceiling" in a label
 IN_DISTRIBUTION = "training maps (in distribution)"
@@ -166,6 +175,16 @@ def home_reads(root, row, sfx, extra=()):
     return {"maps": {m: _renamed(e, cols) for m, e in means_by_map(rows, list(cols.values())).items()},
             "pooled": {**{k: _mean(rows, c) for k, c in cols.items()}, **{c: _mean(rows, c) for c in extra}},
             "n": len(rows), "path": found[0]}
+
+
+def latest_sd35_row(root):
+    """The SD 3.5 zero-shot row with the highest checkpoint under `root` (`sd35_<step>` with per-window files and
+    a home read beside it), or None: its upper bound and persistence are the SD 3.5 blocks' references and its home
+    read their in-distribution gap."""
+    rows = [(int(m.group(1)), d) for d in (os.listdir(root) if os.path.isdir(root) else [])
+            for m in [re.fullmatch(r"sd35_(\d+)", d)] if m and per_window_files(os.path.join(root, d))
+            and os.path.isdir(os.path.join(root, f"home_{d}"))]
+    return max(rows)[1] if rows else None
 
 
 def training_distances(path):
@@ -413,27 +432,79 @@ def _budget_cell(g, final=True):
     return budget_label(g["budget_middle"]) + (f"; {g['censored']} of {g['n']} censored" if g["censored"] else "")
 
 
-def groups_table(stats, comparator=COMPARATOR_ARENAS, stamp="", budgets_final=True):
-    """Table 2's candidate: rows hard, medium, easy (their arenas listed) and all arenas; medians of the raw scene
-    quantities through the fine-tuned decoder at zero-shot, 4k and 8k, the upper bound, the budget (\\tbd cells until
-    `budgets_final`), and a full fine-tune column of \\tbd cells naming the comparator arenas in each row."""
+def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, check=8000):
+    """One per-backbone block of Table 2: over the `wanted` arenas the block has a zero-shot (step 0) read for, the
+    medians of scene PSNR and LPIPS at 0, the headline and the check step (None when the block's grid stops before
+    it), the upper bound, the budget (final only when every arena's grid reads are raw), the quantity the reads are
+    in (`raw_adapters.step_read`) and the median GPU-hours to the headline. `arenas_data` is {arena: {grid, reads:
+    {step: read}, gpu_hours}}."""
+    present = [a for a in wanted if a in arenas_data and 0 in arenas_data[a]["reads"]]
+
+    def get(a, step, key):
+        return (arenas_data[a]["reads"].get(step) or {}).get(key)
+
+    def upper_of(a):
+        return next((r["upper"] for r in arenas_data[a]["reads"].values() if r.get("upper") is not None), None)
+    has_check = any(check in arenas_data[a]["grid"] for a in present)
+    kinds = {r["quantity"] for a in present for st, r in arenas_data[a]["reads"].items() if st in (0, headline, check)}
+    quantity = (kinds.pop() if len(kinds) == 1 else "mixed") if kinds else None
+    final = bool(present) and quantity == "raw" and g_train is not None
+    budgets = []
+    for a in present:
+        reads, grid = arenas_data[a]["reads"], [st for st in arenas_data[a]["grid"] if st > 0]
+        if any(st not in reads or reads[st]["quantity"] != "raw" for st in grid) or upper_of(a) is None:
+            final = False
+            continue
+        threshold = budget_threshold(rule, reads[0]["psnr"], upper_of(a), g_train)
+        budgets.append(budget_step([(st, reads[st]["psnr"]) for st in grid], threshold))
+    hours = [arenas_data[a].get("gpu_hours", {}).get(str(headline)) for a in present]
+    return {"n": len(present), "n_wanted": len(wanted), "wanted": list(wanted), "arenas": present,
+            "quantity": quantity,
+            "psnr_zero_shot": median([get(a, 0, "psnr") for a in present]),
+            "psnr_4k": median([get(a, headline, "psnr") for a in present]),
+            "psnr_8k": median([get(a, check, "psnr") for a in present]) if has_check else None,
+            "ceiling": median([upper_of(a) for a in present]),
+            "lpips_zero_shot": median([get(a, 0, "lpips") for a in present]),
+            "lpips_4k": median([get(a, headline, "lpips") for a in present]),
+            "lpips_8k": median([get(a, check, "lpips") for a in present]) if has_check else None,
+            "has_check": has_check, "g_train": g_train, "budget_final": final,
+            "budgets": {str(a): b for a, b in zip(present, budgets)} if final else None,
+            "budget_middle": middle_reads(budgets) if final else None,
+            "censored": sum(1 for b in budgets if b is None) if final else None,
+            "gpu_hours_headline": median(hours)}
+
+
+def block_label(name, b, wanted_all):
+    """"U-Net LoRA, arenas 6, 7, 8, 16 (1 of 4)", "PixArt-$\\alpha$ LoRA, all 13", "SD 3.5 LoRA, 4 of 13 (6, 7, 8, 16)";
+    a dagger when the reads are not raw (against the decoded ground truth)."""
+    if not wanted_all:
+        label = f"{name}, arenas {', '.join(map(str, b['wanted']))}" + (
+            "" if b["n"] in (0, b["n_wanted"]) else f" ({b['n']} of {b['n_wanted']})")
+    elif b["n"] in (0, b["n_wanted"]):
+        label = f"{name}, all {b['n_wanted']}"
+    else:
+        label = f"{name}, {b['n']} of {b['n_wanted']} ({', '.join(map(str, b['arenas']))})"
+    return label + ("$^\\ddagger$" if b["quantity"] not in (None, "raw") else "")
+
+
+def groups_table(stats, stamp="", budgets_final=True, blocks=()):
+    """Table 2's candidate: rows hard, medium, easy (their arenas listed) and all arenas, medians of the U-Net's raw
+    scene reads through the fine-tuned decoder at zero-shot, 4k and 8k, the upper bound and the budget (\\tbd cells
+    until `budgets_final`); then the per-backbone blocks (`blocks`: [(label, block_summary, decoder identity)]), each
+    \\tbd where it has no arena yet, "--" at 8k where its grid stops at 4k."""
     def num(v, d):
         return "--" if v is None else f"{v:.{d}f}"
-
-    def full(arenas):
-        mine = [a for a in comparator if a in arenas]
-        return f"\\tbd{{}} ({', '.join(map(str, mine))})" if mine else "--"
 
     lines = [f"% generated by paper/make_raw_figures.py{stamp}",
              "% medians per group of the U-Net's raw scene reads (fine-tuned decoder, non-EMA adapter weights);",
              "% groups by the zero-shot gap to the reconstruction upper bound; budget: the first grid read that",
              "% closes half of the excess gap over the training maps' own gap (\\tbd until every grid read exists)",
-             "\\begin{tabular}{lrrrrrrrrr}", "\\toprule",
+             "\\begin{tabular}{lrrrrrrrr}", "\\toprule",
              "& \\multicolumn{4}{c}{Scene PSNR (dB) $\\uparrow$} & \\multicolumn{3}{c}{Scene LPIPS $\\downarrow$} & "
-             "Budget to & Full \\\\",
+             "Budget to \\\\",
              "\\cmidrule(lr){2-5}\\cmidrule(lr){6-8}",
              "Arenas (by zero-shot gap) & zero-shot & 4k & 8k & upper bound & zero-shot & 4k & 8k & half the "
-             "excess gap & fine-tune \\\\",
+             "excess gap \\\\",
              "\\midrule"]
     for name in list(GROUP_NAMES) + ["all"]:
         g = stats[name]
@@ -442,8 +513,22 @@ def groups_table(stats, comparator=COMPARATOR_ARENAS, stamp="", budgets_final=Tr
             lines.append("\\midrule")
         lines.append(f"{label} & {num(g['psnr_zero_shot'], 2)} & {num(g['psnr_4k'], 2)} & {num(g['psnr_8k'], 2)} & "
                      f"{num(g['ceiling'], 2)} & {num(g['lpips_zero_shot'], 3)} & {num(g['lpips_4k'], 3)} & "
-                     f"{num(g['lpips_8k'], 3)} & {_budget_cell(g, budgets_final)} & {full(g['arenas'])} \\\\")
+                     f"{num(g['lpips_8k'], 3)} & {_budget_cell(g, budgets_final)} \\\\")
+    if blocks:
+        lines.append("\\midrule")
+    for label, b, _ in blocks:
+        if not b["n"]:
+            lines.append(f"{label} & " + " & ".join(["\\tbd{}"] * 8) + " \\\\")
+            continue
+        censored = f"; {b['censored']} of {b['n']} censored" if b["budget_final"] and b["censored"] else ""
+        budget = budget_label(b["budget_middle"]) + censored if b["budget_final"] else "\\tbd{}"
+        lines.append(f"{label} & {num(b['psnr_zero_shot'], 2)} & {num(b['psnr_4k'], 2)} & {num(b['psnr_8k'], 2)} & "
+                     f"{num(b['ceiling'], 2)} & {num(b['lpips_zero_shot'], 3)} & {num(b['lpips_4k'], 3)} & "
+                     f"{num(b['lpips_8k'], 3)} & {budget} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
+    for label, b, identity in blocks:
+        lines.append(f"% {label}: decoder {identity or '--'}, reads {b['quantity'] or 'none'}, {b['n']} arenas"
+                     + (", dagger: against the decoded ground truth" if b["quantity"] not in (None, "raw") else ""))
     return "\n".join(lines) + "\n"
 
 
@@ -602,6 +687,49 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     return fs.save(fig, out_dir, stem)
 
 
+def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP):
+    """The per-backbone adaptation panel: the median over each block's arenas of raw scene PSNR (left) and LPIPS
+    (right) against adapter updates (log axis, the 0 read at the left), one curve per block in its backbone's colour
+    and marker (the full fine-tune black dashed), the headline read filled, each backbone's training-map level as a
+    short dashed segment at the right edge, each curve labelled at its right end with its arena count. `curves` is
+    [(key, label, {step: (psnr, lpips)}, n)], `levels` {key: (psnr, lpips)}."""
+    stem = "raw_backbones"
+    fig, (px, lx) = fs.new_figure(SIZES[stem], ncols=2, wspace=0.08)
+    steps = sorted({st for _, _, pts, _ in curves for st in pts})
+    for ax, j in ((px, 0), (lx, 1)):
+        z = fs.step_axis(ax, steps, labelled=[t for t in GRID_TICKS if t in steps] or None)
+        ends = []
+        for key, label, pts, n in curves:
+            who, ls = BLOCK_STYLE[key]
+            ent = fs.FULL_FINE_TUNE if who == "full" else fs.BACKBONES[who]
+            marker = "o" if who == "full" else ent.marker
+            xs = [z if st == 0 else st for st in sorted(pts)]
+            ys = [pts[st][j] for st in sorted(pts)]
+            ax.plot(xs, ys, color=ent.colour, ls=ls, lw=fs.DATA_LW, marker=marker, ms=1.6, mfc=ent.colour,
+                    mec=ent.colour, zorder=3)
+            if headline in pts:
+                ax.plot([headline], [pts[headline][j]], ls="none", marker=marker, ms=4.6, mfc=ent.colour,
+                        mec="white", mew=0.5, zorder=3.5)
+            ends.append((xs[-1], ys[-1], f"{label} ({n})", ent.colour))
+            if key in levels and levels[key][j] is not None and who != "full":     # the full FT shares the U-Net's
+                ax.axhline(levels[key][j], color=ent.colour, lw=fs.MIN_LW, ls=fs.TRAINING_DASH, zorder=1.5, gid="ref")
+        drawn_levels = [levels[k][j] for k, *_ in curves if k in levels and levels[k][j] is not None]
+        if drawn_levels:
+            top = max(drawn_levels)                  # above the highest level line, clear of the curves
+            ax.text(0.01, top, "training maps", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
+                    fontsize=fs.MIN_PT, color=fs.TRAINING_LINE, gid="decor")
+        if j == 0:
+            fs.end_labels(ax, ends, gap=(ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.09)
+        ax.set_xlabel("adapter updates (log)")
+    px.set_ylabel(PSNR_LABEL)
+    lx.set_ylabel(LPIPS_LABEL)
+    px.yaxis.set_major_locator(ticker.MultipleLocator(1))
+    lx.yaxis.set_major_locator(ticker.MultipleLocator(0.05))
+    fs.panel_letter(px, "a")
+    fs.panel_letter(lx, "b")
+    return fs.save(fig, out_dir, stem)
+
+
 def fig_arenas_raw(arenas, trajectories, adaptation, level, colour_of, out_dir, headline=HEADLINE_STEP):
     """Appendix: one small panel per arena, raw scene PSNR against adapter updates (log axis, the 0 read at the
     left) in the arena's group colour, the headline read filled, the budget's threshold (dotted), the arena's
@@ -681,6 +809,8 @@ def build_parser():
     p.add_argument("--distances", default=os.path.join(REPO, "results", "distance_v2", "distances_sd1.json"))
     p.add_argument("--training-distances",
                    default=os.path.join(REPO, "results", "distance_study", "figure_unet_h1", "stats.json"))
+    p.add_argument("--adapt-root", default=os.path.join(REPO, "results", "adapt"),
+                   help="every backbone's adaptation runs: Table 2's per-backbone blocks and the backbone panel")
     p.add_argument("--adapt-glob",
                    default=os.path.join(REPO, "results", "adapt", "unet200k_arenas13_map??_r16_k8_s0_g8k"),
                    help="the 8k-grid run directories whose guard rows give forgetting and the directional check")
@@ -828,6 +958,65 @@ def main(argv=None):
         f.write(groups_table(gstats, budgets_final=grid_complete))
     written.append(table)
 
+    # Table 2's per-backbone blocks and the per-backbone panel: every backbone's adaptation runs
+    names = {n: n + DECODER_SUFFIX[n] for n in BACKBONES}
+    zero_rows = {"unet": names[PRIMARY], "pixart": names["pixart200k_ema"],
+                 "sd35": latest_sd35_row(a.fresh_root) or names["sd35_170000"]}
+    refs = {}
+    for backbone, row in zero_rows.items():
+        files = per_window_files(os.path.join(a.fresh_root, row))
+        refs[backbone] = {dec: rad.zero_shot_refs(files, "" if dec == "stock" else f"_{dec}")
+                          for dec in (("stock", "tuned") if row.endswith("_tuned") else ("stock",))}
+    loaded = rad.load_blocks(a.adapt_root, refs)
+
+    def g_train_for(backbone, decoder):
+        """The training maps' own gap to the upper bound under the block's decoder (pooled validation read)."""
+        row = zero_rows[backbone]
+        sfx = "" if decoder in ("stock", None) or not row.endswith("_tuned") else f"_{decoder}"
+        try:
+            h = home_reads(a.fresh_root, row, sfx)["pooled"]
+        except SystemExit:
+            return None, None
+        if h["ceiling_psnr"] is None or h["psnr"] is None:
+            return None, None
+        return h["ceiling_psnr"] - h["psnr"], (h["psnr"], h["lpips"])
+
+    unet_hours = loaded.get("unet_lora", {}).get("arenas", {})
+    unet_data = {m: {"grid": list(GRID), "gpu_hours": unet_hours.get(m, {}).get("gpu_hours", {}),
+                     "reads": {st: {"quantity": "raw", "psnr": p, "lpips": lp, "upper": adaptation[m]["upper_bound"]}
+                               for st, p, lp in zip(t["steps"], t["psnr"], t["lpips"])}}
+                 for m, t in trajectories.items()}
+    block_rows, block_stats, levels, curves, not_drawn = [], {}, {}, [], {}
+    for key, name, wanted in BLOCKS:
+        backbone = key.split("_")[0]
+        data = unet_data if key == "unet_lora" else loaded.get(key, {}).get("arenas", {})
+        decoder = "tuned" if key == "unet_lora" else loaded.get(key, {}).get("decoder")
+        identity = (loaded.get("unet_lora", {}).get("identity") or "fine-tuned SD 1") if key == "unet_lora" \
+            else loaded.get(key, {}).get("identity")
+        g, level = g_train_for(backbone, decoder or ("tuned" if backbone != "sd35" else "stock"))
+        b = block_summary(data, list(wanted) if wanted else arenas, g, a.budget_rule, a.headline_step)
+        b.update({"decoder": decoder, "decoder_identity": identity, "g_train_source": zero_rows[backbone]})
+        block_stats[key] = b
+        block_rows.append((block_label(name, b, wanted is None), b, identity))
+        # the panel: raw reads only, every arena the block has
+        raw = {m: {st: r for st, r in d["reads"].items() if r["quantity"] == "raw"} for m, d in data.items()}
+        raw = {m: r for m, r in raw.items() if 0 in r}
+        if not data:
+            not_drawn[key] = "no runs"
+            continue
+        if not raw:
+            not_drawn[key] = "no raw reads"
+            continue
+        steps = sorted({st for r in raw.values() for st in r})
+        pts = {st: (median([r[st]["psnr"] for r in raw.values() if st in r]),
+                    median([r[st]["lpips"] for r in raw.values() if st in r])) for st in steps}
+        curves.append((key, PANEL_LABELS[key], pts, len(raw)))
+        levels[key] = level if level else (None, None)
+    with open(table, "w") as f:
+        f.write(groups_table(gstats, budgets_final=grid_complete, blocks=block_rows))
+    if curves:
+        written += fig_backbones(curves, levels, a.out_dir, a.headline_step)
+
     s0 = {}
     if os.path.exists(a.family_step):
         with open(a.family_step) as f:
@@ -872,6 +1061,9 @@ def main(argv=None):
         "adaptation": {"per_arena": {str(m): r for m, r in adaptation.items()}, **counts},
         "groups": gstats,
         "text_numbers": numbers,
+        "blocks": block_stats,
+        "backbone_panel": {"drawn": [c[0] for c in curves], "not_drawn": not_drawn,
+                           "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in curves}},
         "per_arena_table": per_arena_rows,
         "named_curves": list(named),
         "g8k_4k_minus_base_4k": {"psnr": diff("psnr"), "lpips": diff("lpips")},

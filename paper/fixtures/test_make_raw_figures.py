@@ -54,7 +54,8 @@ def windows(map_, psnr, lpips, ceiling, sfx, n=4, dup=None, dec=None):
     for i, off in enumerate((-0.3, -0.1, 0.1, 0.3)[:n]):
         r = {"episode": 100 + i, "map": map_, "dup_raw": int(i == dup), "dup_latent": 0,
              f"scene_psnr_raw{sfx}": psnr + off, f"scene_lpips_raw{sfx}": lpips + off / 100,
-             f"scene_vae_psnr{sfx}": ceiling[0] + off, f"scene_vae_lpips{sfx}": ceiling[1] + off / 100}
+             f"scene_vae_psnr{sfx}": ceiling[0] + off, f"scene_vae_lpips{sfx}": ceiling[1] + off / 100,
+             "scene_persist_lpips_raw": 0.20 + off / 100}
         if dec is not None:
             r.update({"scene_psnr_dec_tuned": dec[0] + off, "scene_lpips_dec_tuned": dec[1] + off / 100})
         out.append(r)
@@ -100,6 +101,33 @@ def export(tmp_path):
                                                 "per_window.csv"})
         with open(run / "scores.jsonl", "w") as f:
             f.write("\n".join(json.dumps(r) for r in rows) + "\n")
+    # PixArt-alpha LoRA on both arenas: per-window raw reads through the fine-tuned decoder at 0, 250 and 4k
+    for a in ARENAS:
+        run = adapt / f"pixart200k_arenas13_map{a:02d}_r16_k8_s0"
+        rows = []
+        for step, lift in ((0, 0.0), (250, 1.0), (4000, 2.0)):
+            stepdir = f"step{step:07d}_live_px"
+            write_windows(str(run / "scores" / stepdir / "heldout" / "per_window.csv"),
+                          windows(a, ZERO[a][0] + 0.2 + lift, ZERO[a][1] - 0.02 * lift, CEILING[a], "_tuned"))
+            recorded = f"/home/x/results/adapt/{run.name}/scores/{stepdir}/heldout/per_window.csv"
+            rows.append({"step": step, "weights": "live", "grid": [0, 250, 4000],
+                         "heldout_decoders": ["stock", "tuned"],
+                         "decoders": {"stock": {"identity": "hub:stock"}, "tuned": {"identity": "sha256:sd1tuned"}},
+                         "eval_fingerprint": "px", "scored_at": f"t{step}", "heldout_per_window": recorded})
+        with open(run / "scores.jsonl", "w") as f:
+            f.write("\n".join(json.dumps(r) for r in rows) + "\n")
+        with open(run / "log.jsonl", "w") as f:
+            f.write(json.dumps({"event": "start", "world": 1, "time": 0.0}) + "\n" +
+                    json.dumps({"event": "checkpoint", "step": 4000, "time": 5400.0}) + "\n")
+    # SD 3.5 LoRA on arena 6 only, rows with the raw margin and gap (no per-window files), two of its six grid reads
+    run = adapt / "sd35_200k_arenas13_map06_r16_k8_s0"
+    os.makedirs(run)
+    with open(run / "scores.jsonl", "w") as f:
+        for step, (b, c) in ((0, (0.10, 8.5)), (4000, (0.05, 6.5))):
+            f.write(json.dumps({"step": step, "weights": "live", "grid": [0, 250, 500, 1000, 2000, 4000],
+                                "heldout_decoders": ["stock"], "decoders": {"stock": {"identity": "hub:sd35"}},
+                                "eval_fingerprint": "sd", "scored_at": f"t{step}", "heldout_B_stock": b,
+                                "heldout_C_stock": c}) + "\n")
     return fresh, dist, tdist
 
 
@@ -142,6 +170,15 @@ def test_a_group_budget_between_two_grid_reads_prints_both_reads():
     assert mrf.budget_label(mrf.middle_reads([None, None])) == "${>}$8k"
 
 
+def test_block_labels_count_arenas_and_mark_reads_against_the_decoded_ground_truth():
+    full = {"n": 4, "n_wanted": 4, "wanted": [6, 7, 8, 16], "arenas": [6, 7, 8, 16], "quantity": "raw"}
+    assert mrf.block_label("U-Net LoRA", full, False) == "U-Net LoRA, arenas 6, 7, 8, 16"
+    some = {"n": 2, "n_wanted": 13, "wanted": list(range(13)), "arenas": [6, 7], "quantity": "dec"}
+    assert mrf.block_label("SD 3.5 LoRA", some, True) == "SD 3.5 LoRA, 2 of 13 (6, 7)$^\\ddagger$"
+    none = {"n": 0, "n_wanted": 13, "wanted": list(range(13)), "arenas": [], "quantity": None}
+    assert mrf.block_label("PixArt LoRA", none, True) == "PixArt LoRA, all 13"
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)
@@ -169,9 +206,9 @@ def test_arenas_group_by_zero_shot_psnr_four_five_four_and_the_table_lists_them(
     assert stats["hard"]["budget"]["value"] == 4000 and stats["hard"]["censored"] == 0
     assert stats["easy"]["budget"]["censored"] is True and stats["easy"]["censored"] == 4
     assert stats["all"]["n"] == 13 and stats["all"]["censored"] == 5
-    tex = mrf.groups_table(stats, comparator=(6, 7, 8, 16), budgets_final=True)
+    tex = mrf.groups_table(stats, budgets_final=True)
     assert "1, 6, 7, 8" in tex and "9, 10, 11, 12, 13" in tex
-    assert "\\tbd{} (6, 7, 8)" in tex and "\\tbd{} (16)" in tex and "\\tbd{} (6, 7, 8, 16)" in tex
+    assert "& fine-tune" not in tex and "Full \\\\" not in tex   # the full fine-tune is a row block now, not a column
     assert "${>}$8k; 4 of 4 censored" in tex
     assert "arena 7" not in tex.lower() and "ceiling" not in tex.lower() and "upper bound" in tex
     # until every grid step has a raw read, the budget cells wait
@@ -213,7 +250,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert mrf.main(["--fresh-root", str(fresh), "--distances", str(dist), "--training-distances", str(tdist),
                      "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
                      "--family-step", str(tmp_path / "family_step.json"),
-                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k")]) == 0
+                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k"), "--adapt-root", str(tmp_path / "adapt")]) == 0
     for stem, size in mrf.SIZES.items():
         w, h = mediabox(os.path.join(out, f"{stem}.pdf"))
         assert (w, h) == (pytest.approx(size[0], abs=0.01), pytest.approx(size[1], abs=0.01)), stem
@@ -246,8 +283,26 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert s["trajectories"]["6"]["psnr"] == [pytest.approx(18.0), pytest.approx(19.0), pytest.approx(22.5)]
     tex = open(tables / "adapt_groups.tex").read()
     assert "\\tbd" in tex and "upper bound" in tex
+    # Table 2's per-backbone blocks at the 4k headline; the full fine-tune column is gone (its rows carry it)
+    assert "& fine-tune \\\\" not in tex and "\\tbd{} (6" not in tex
+    lines = {line.split(" & ")[0]: line for line in tex.splitlines() if " & " in line}
+    assert "U-Net LoRA, arenas 6, 7, 8, 16 (1 of 4)" in lines
+    assert lines["U-Net full fine-tune, arenas 6, 7, 8, 16"].count("\\tbd{}") == 8         # no runs yet
+    px = next(v for k, v in lines.items() if k.startswith("PixArt-$\\alpha$ LoRA"))
+    assert " & 20.70 & " in px and px.split(" & ")[3] == "--"                         # 4k median; its grid stops at 4k
+    sd = next(v for k, v in lines.items() if k.startswith("SD 3.5 LoRA"))
+    assert "1 of 2 (6)" in sd and " & 19.50 & " in sd and "\\tbd{}" in sd              # budget waits on its grid
+    blocks = s["blocks"]
+    assert blocks["pixart_lora"]["quantity"] == "raw" and blocks["pixart_lora"]["decoder"] == "tuned"
+    assert blocks["pixart_lora"]["budget_final"] is True and blocks["pixart_lora"]["budget_middle"] == [4000]
+    assert blocks["pixart_lora"]["gpu_hours_headline"] == pytest.approx(1.5)
+    assert blocks["sd35_lora"]["decoder_identity"] == "hub:sd35" and blocks["sd35_lora"]["budget_final"] is False
+    assert blocks["unet_full"]["n"] == 0
+    # the per-backbone panel: median raw PSNR and LPIPS against updates, one curve per backbone with raw reads
+    assert s["backbone_panel"]["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]
+    assert s["backbone_panel"]["not_drawn"] == {"unet_full": "no runs"}
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
-    assert letters == list("abcd") * 2
+    assert letters == list("abcd") * 2 + list("ab")          # the row, its grid layout, the backbone panel
     # the appendix's per-arena table: the gap, its threshold, the reads, the guards
     per = s["per_arena_table"]
     assert per["6"]["gap_zero_shot"] == pytest.approx(8.0)

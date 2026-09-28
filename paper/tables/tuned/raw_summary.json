@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-27T21:54:43-04:00",
+ "generated_at": "2026-09-27T22:38:43-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1226,6 +1226,209 @@
     "rho": 0.3096598750896103,
     "p": 0.3032035008063852,
     "n": 13
+   }
+  }
+ },
+ "blocks": {
+  "unet_lora": {
+   "n": 4,
+   "n_wanted": 4,
+   "wanted": [
+    6,
+    7,
+    8,
+    16
+   ],
+   "arenas": [
+    6,
+    7,
+    8,
+    16
+   ],
+   "quantity": "raw",
+   "psnr_zero_shot": 21.711679314263165,
+   "psnr_4k": 22.884795425459743,
+   "psnr_8k": 22.921417258679867,
+   "ceiling": 26.68562638014555,
+   "lpips_zero_shot": 0.29239138204138726,
+   "lpips_4k": 0.2093273454665905,
+   "lpips_8k": 0.20132957745227031,
+   "has_check": true,
+   "g_train": 3.3575854878872633,
+   "budget_final": true,
+   "budgets": {
+    "6": 100,
+    "7": 250,
+    "8": 2000,
+    "16": 100
+   },
+   "budget_middle": [
+    100,
+    250
+   ],
+   "censored": 0,
+   "gpu_hours_headline": 1.0991523875130547,
+   "decoder": "tuned",
+   "decoder_identity": "sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646",
+   "g_train_source": "unet200k_ema_tuned"
+  },
+  "unet_full": {
+   "n": 0,
+   "n_wanted": 4,
+   "wanted": [
+    6,
+    7,
+    8,
+    16
+   ],
+   "arenas": [],
+   "quantity": null,
+   "psnr_zero_shot": null,
+   "psnr_4k": null,
+   "psnr_8k": null,
+   "ceiling": null,
+   "lpips_zero_shot": null,
+   "lpips_4k": null,
+   "lpips_8k": null,
+   "has_check": false,
+   "g_train": 3.3575854878872633,
+   "budget_final": false,
+   "budgets": null,
+   "budget_middle": null,
+   "censored": null,
+   "gpu_hours_headline": null,
+   "decoder": null,
+   "decoder_identity": null,
+   "g_train_source": "unet200k_ema_tuned"
+  },
+  "pixart_lora": {
+   "n": 0,
+   "n_wanted": 13,
+   "wanted": [
+    1,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17
+   ],
+   "arenas": [],
+   "quantity": null,
+   "psnr_zero_shot": null,
+   "psnr_4k": null,
+   "psnr_8k": null,
+   "ceiling": null,
+   "lpips_zero_shot": null,
+   "lpips_4k": null,
+   "lpips_8k": null,
+   "has_check": false,
+   "g_train": 3.370827017351985,
+   "budget_final": false,
+   "budgets": null,
+   "budget_middle": null,
+   "censored": null,
+   "gpu_hours_headline": null,
+   "decoder": null,
+   "decoder_identity": null,
+   "g_train_source": "pixart200k_ema_tuned"
+  },
+  "sd35_lora": {
+   "n": 0,
+   "n_wanted": 13,
+   "wanted": [
+    1,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17
+   ],
+   "arenas": [],
+   "quantity": null,
+   "psnr_zero_shot": null,
+   "psnr_4k": null,
+   "psnr_8k": null,
+   "ceiling": null,
+   "lpips_zero_shot": null,
+   "lpips_4k": null,
+   "lpips_8k": null,
+   "has_check": false,
+   "g_train": 5.482597010210156,
+   "budget_final": false,
+   "budgets": null,
+   "budget_middle": null,
+   "censored": null,
+   "gpu_hours_headline": null,
+   "decoder": null,
+   "decoder_identity": null,
+   "g_train_source": "sd35_170000"
+  }
+ },
+ "backbone_panel": {
+  "drawn": [
+   "unet_lora"
+  ],
+  "not_drawn": {
+   "unet_full": "no runs",
+   "pixart_lora": "no runs",
+   "sd35_lora": "no runs"
+  },
+  "medians": {
+   "unet_lora": {
+    "0": [
+     22.297485141083598,
+     0.30288498516893014
+    ],
+    "50": [
+     22.46858099475503,
+     0.27631133946124464
+    ],
+    "100": [
+     22.85766949132085,
+     0.25927117382525466
+    ],
+    "150": [
+     23.100105613470078,
+     0.24347912392113358
+    ],
+    "250": [
+     23.19371623545885,
+     0.23304835832095705
+    ],
+    "500": [
+     23.350992035120726,
+     0.22431581799173728
+    ],
+    "1000": [
+     23.45008233189583,
+     0.22363458410836756
+    ],
+    "2000": [
+     23.518684700131416,
+     0.21488751345896162
+    ],
+    "4000": [
+     23.601111978292465,
+     0.21024158014915884
+    ],
+    "8000": [
+     23.688441541045904,
+     0.203747603809461
+    ]
    }
   }
  },
