@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-28T07:32:22-04:00",
+ "generated_at": "2026-09-28T07:58:39-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1310,7 +1310,7 @@
    "g_train_note": null
   },
   "pixart_lora": {
-   "n": 11,
+   "n": 13,
    "n_wanted": 13,
    "wanted": [
     1,
@@ -1332,21 +1332,21 @@
     6,
     7,
     8,
+    9,
     10,
     11,
     12,
     13,
     14,
     15,
+    16,
     17
    ],
    "quantity": "raw",
    "decoded_only": [],
-   "in_progress": [
-    16
-   ],
+   "in_progress": [],
    "headline": 4000,
-   "psnr_zero_shot": 22.320798199623823,
+   "psnr_zero_shot": 22.378942884504795,
    "psnr_4k": 23.717496056109667,
    "psnr_8k": null,
    "ceiling": 27.319409392774105,
@@ -1361,12 +1361,14 @@
     "6": 50,
     "7": 150,
     "8": 2000,
+    "9": 100,
     "10": 50,
     "11": 500,
     "12": 50,
     "13": 150,
     "14": 1000,
     "15": 500,
+    "16": 50,
     "17": 150
    },
    "budget_middle": [
@@ -1456,12 +1458,14 @@
     6,
     7,
     8,
+    9,
     10,
     11,
     12,
     13,
     14,
     15,
+    16,
     17
    ],
    "sd35_lora": [
@@ -1515,7 +1519,7 @@
    },
    "pixart_lora": {
     "0": [
-     22.320798199623823,
+     22.378942884504795,
      0.2852195681189187
     ],
     "50": [
