@@ -86,6 +86,13 @@ def export(tmp_path):
     # the family-step record's zero-shot latent skill S0 per arena (tools/family_step.py)
     json.dump({"backbones": {"unet200k_ema": {"maps": {"6": {"S0": 1.0}, "9": {"S0": 2.0}}}}},
               open(tmp_path / "family_step.json", "w"))
+    # the U-Net's directional-check reads (tools/directional_check.py) for Table 1's column: the four training maps
+    # and the two arenas, arena 9 on half the windows so the pooled read has to weigh by windows
+    for m, set_name, n_windows, correct in ((2, "val", 128, 0.8), (3, "val", 128, 0.9), (4, "val", 128, 0.8),
+                                            (5, "val", 128, 0.9), (6, "arenas13", 128, 0.7), (9, "arenas13", 64, 0.8)):
+        path = tmp_path / "directional" / "unet200k_ema" / f"directional_map{m:02d}_{set_name}_ema.json"
+        os.makedirs(path.parent, exist_ok=True)
+        json.dump({"summary": {"windows": n_windows, "correct_frac": correct, "ref_raw_frac": 0.9}}, open(path, "w"))
     # the guard reads of the 8k-grid runs: directional and the training maps' decoded-reference scene PSNR at 0, 8k
     adapt = tmp_path / "adapt"
     for a, (psnr0, psnr8, dir0, dir8) in {6: (25.0, 24.0, 0.80, 0.85), 9: (25.0, 24.5, 0.70, 0.75)}.items():
@@ -471,40 +478,81 @@ def test_backbone_end_labels_clear_every_mark_and_the_next_panel(tmp_path, monke
     assert not [(a, b) for a in labels for b in right if a.overlaps(b)]                  # clear of panel b
 
 
-def slim_block(n, wanted, p0, p4, l0, l4, upper, middle, coarse=False, quantity="raw", final=True):
+def slim_block(n, wanted, p0, p4, l0, l4, upper, middle, coarse=False, quantity="raw", final=True, shares=None):
+    """A block summary as `slim_table` reads it; `shares` is (lpips, psnr, gap) as fractions, the medians of
+    `recovery_shares`."""
     return {"n": n, "n_wanted": len(wanted), "wanted": list(wanted), "arenas": list(wanted)[:n], "quantity": quantity,
             "psnr_zero_shot": p0, "psnr_4k": p4, "lpips_zero_shot": l0, "lpips_4k": l4, "ceiling": upper,
-            "budget_middle": middle, "budget_final": final, "censored": 0, "coarse_grid": coarse, "headline": 4000}
+            "budget_middle": middle, "budget_final": final, "censored": 0, "coarse_grid": coarse, "headline": 4000,
+            "shares": {k: {"median": v, "min": v, "n": n} for k, v in zip(("lpips", "psnr", "gap"), shares)}
+            if shares else None}
+
+
+def test_recovery_shares_are_per_arena_medians_against_the_training_maps_level():
+    data = {6: {"reads": {0: {"psnr": 18.0, "lpips": 0.30, "upper": 26.0}, 4000: {"psnr": 19.0, "lpips": 0.22}}},
+            9: {"reads": {0: {"psnr": 19.0, "lpips": 0.26, "upper": 27.0}, 4000: {"psnr": 23.5, "lpips": 0.19}}},
+            # an arena that starts past the training maps in PSNR and LPIPS and inside their gap to the upper bound
+            7: {"reads": {0: {"psnr": 23.0, "lpips": 0.10, "upper": 27.0}, 4000: {"psnr": 23.4, "lpips": 0.09}}}}
+    got = mrf.recovery_shares(data, [6, 9, 7], (22.45, 0.15), 5.55)
+    # arena 6 undoes 0.08 of its 0.15 LPIPS rise, regains 1 of 4.45 dB and closes 1 of the (8 - 5.55) dB excess gap;
+    # arena 9: 0.07 of 0.11, 4.5 of 3.45 (past the training maps: above 1) and 4.5 of 2.45; arena 7 has no
+    # denominator and stays out of all three
+    assert got["lpips"] == {"median": pytest.approx((0.08 / 0.15 + 0.07 / 0.11) / 2),
+                            "min": pytest.approx(0.08 / 0.15), "n": 2}
+    assert got["psnr"] == {"median": pytest.approx((1 / 4.45 + 4.5 / 3.45) / 2), "min": pytest.approx(1 / 4.45),
+                           "n": 2}
+    assert got["gap"] == {"median": pytest.approx((1 / 2.45 + 4.5 / 2.45) / 2), "min": pytest.approx(1 / 2.45),
+                          "n": 2}
+    # no training-map level: no LPIPS or PSNR share; no in-distribution gap: no gap share; no headline read: nothing
+    assert mrf.recovery_shares(data, [6], None, 5.55) == {"lpips": None, "psnr": None,
+                                                          "gap": {"median": pytest.approx(1 / 2.45),
+                                                                  "min": pytest.approx(1 / 2.45), "n": 1}}
+    assert mrf.recovery_shares(data, [6], (22.45, 0.15), None)["gap"] is None
+    assert mrf.recovery_shares({6: {"reads": {0: data[6]["reads"][0]}}}, [6], (22.45, 0.15), 5.55) == {
+        "lpips": None, "psnr": None, "gap": None}
+    assert mrf.share_cell(got["lpips"]) == "58" and mrf.share_cell(None) == "--"
 
 
 def test_the_slim_results_table_has_one_row_per_backbone_and_the_comparison_on_four_arenas():
     four = (6, 7, 8, 16)
-    rows = [("SD 1.4 U-Net", slim_block(13, ALL_13, 22.30, 23.60, 0.303, 0.210, 27.32, [150]), (25.20, 0.158), True),
-            ("PixArt-$\\alpha$", slim_block(13, ALL_13, 22.38, 23.72, 0.285, 0.205, 27.32, [150]), (25.18, 0.159),
-             True),
-            ("SD 3.5 Medium", slim_block(8, ALL_13, 21.97, 23.53, 0.260, 0.167, 31.38, [250]), (25.38, 0.126), True),
-            ("U-Net LoRA", slim_block(4, four, 21.71, 22.88, 0.292, 0.209, 26.69, [100, 250]), None, False),
-            ("U-Net full fine-tune", slim_block(4, four, 21.71, 23.11, 0.292, 0.182, 26.69, [4000], coarse=True),
-             None, False)]
+    rows = [("SD 1.4 U-Net", slim_block(13, ALL_13, 22.30, 23.60, 0.303, 0.210, 27.32, [150],
+                                        shares=(0.72, 0.48, 0.94)), (25.20, 0.158), True),
+            ("PixArt-$\\alpha$", slim_block(13, ALL_13, 22.38, 23.72, 0.285, 0.205, 27.32, [150],
+                                            shares=(0.76, 0.48, 1.01)), (25.18, 0.159), True),
+            ("SD 3.5 Medium", slim_block(8, ALL_13, 21.97, 23.53, 0.260, 0.167, 31.38, [250],
+                                         shares=(0.77, 0.50, 0.94)), (25.38, 0.126), True),
+            ("U-Net LoRA", slim_block(4, four, 21.71, 22.88, 0.292, 0.209, 26.69, [100, 250],
+                                      shares=(0.71, 0.41, 1.23)), None, False),
+            ("U-Net full fine-tune", slim_block(4, four, 21.71, 23.11, 0.292, 0.182, 26.69, [4000], coarse=True,
+                                                shares=(0.87, 0.46, 1.44)), None, False)]
     tex = mrf.slim_table(rows)
     body = [ln for ln in tex.splitlines() if " & " in ln and not ln.startswith("%")][2:]      # after the two headers
     assert [ln.split(" & ")[0] for ln in body] == ["SD 1.4 U-Net", "PixArt-$\\alpha$", "SD 3.5 Medium (8 of 13)",
                                                    "U-Net LoRA (6, 7, 8, 16)", "U-Net full fine-tune (6, 7, 8, 16)"]
     cells = [ln.rstrip(" \\").split(" & ")[1:] for ln in body]
-    assert cells[0] == ["25.20", "0.158", "22.30", "0.303", "23.60", "0.210", "27.32", "150"]
-    assert cells[2][-2:] == ["31.38", "250"]
-    # the comparison rows leave the training maps blank: the source model's read, not theirs after adaptation
-    assert cells[3] == ["", "", "21.71", "0.292", "22.88", "0.209", "26.69", "100--250"]
-    assert cells[4][-1] == "${\\le}$4k"                            # scored at 0 and 4k only
-    assert all(len(c) == 8 for c in cells)
-    # no group rows (they go to the supplement), and nothing waits in a finished table
+    # in domain, zero-shot, the headline, then the recovered shares in whole percent (LPIPS, PSNR, gap)
+    assert cells[0] == ["25.20", "0.158", "22.30", "0.303", "23.60", "0.210", "72", "48", "94"]
+    assert cells[2][-3:] == ["77", "50", "94"]
+    # the comparison rows leave the in-domain columns blank: the source model's read, not theirs after adaptation
+    assert cells[3] == ["", "", "21.71", "0.292", "22.88", "0.209", "71", "41", "123"]
+    assert cells[4] == ["", "", "21.71", "0.292", "23.11", "0.182", "87", "46", "144"]
+    assert all(len(c) == 9 for c in cells)
+    # no upper bound or budget columns (they stay in the supplement's Table 2), no group rows, nothing waiting
+    assert "Upper" not in tex and "Budget" not in tex and "27.32" not in tex
     assert not [ln for ln in tex.splitlines() if ln.startswith(("Hard", "Medium", "Easy", "All"))]
     assert "\\tbd" not in tex
-    assert tex.count("\\midrule") == 2 and "\\begin{tabular}{lrrrrrrrr}" in tex
-    # a budget that is not final yet waits
-    waiting = mrf.slim_table([("SD 3.5 Medium", slim_block(8, ALL_13, 21.97, 23.53, 0.260, 0.167, 31.38, None,
+    assert tex.count("\\midrule") == 2 and "\\begin{tabular}{lrrrrrrrrr}" in tex
+    assert "\\multicolumn{3}{c}{Recovered (\\%)}" in tex and "\\cmidrule(lr){8-10}" in tex
+    # a block with no arena yet waits in every cell after the in-domain ones
+    waiting = mrf.slim_table([("SD 3.5 Medium", slim_block(0, ALL_13, None, None, None, None, None, None,
                                                            final=False), (25.38, 0.126), True)])
-    assert waiting.splitlines()[-3].endswith("& 31.38 & \\tbd{} \\\\")
+    assert waiting.splitlines()[-3] == "SD 3.5 Medium & 25.38 & 0.126 & " + " & ".join(["\\tbd{}"] * 7) + " \\\\"
+    # the caption names the step, the arena count, the windows and the comparator arenas from the rows themselves
+    caption = mrf.slim_caption(rows, 512)
+    assert caption.startswith("\\caption{") and caption.rstrip().endswith("}")
+    for phrase in ("after 4k adapter updates", "scene crop (rows 0 to 207)", "512 validation windows",
+                   "medians over the 13 unseen arenas", "four comparator arenas (6, 7, 8, 16)", "(Gap)"):
+        assert phrase in caption, phrase
 
 
 def thirteen_arena_row():
@@ -680,7 +728,8 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert mrf.main(["--fresh-root", str(fresh), "--distances", str(dist), "--training-distances", str(tdist),
                      "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
                      "--family-step", str(tmp_path / "family_step.json"),
-                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k"), "--adapt-root", str(tmp_path / "adapt")]) == 0
+                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k"), "--adapt-root", str(tmp_path / "adapt"),
+                     "--directional-roots", str(tmp_path / "directional")]) == 0
     for stem, size in mrf.SIZES.items():
         w, h = mediabox(os.path.join(out, f"{stem}.pdf"))
         assert (w, h) == (pytest.approx(size[0], abs=0.01), pytest.approx(size[1], abs=0.01)), stem
@@ -763,10 +812,36 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     slim = open(tables / "results_slim.tex").read()
     lines = {line.split(" & ")[0]: line.rstrip(" \\").split(" & ")[1:] for line in slim.splitlines()
              if " & " in line and not line.startswith("%")}
-    assert lines["SD 1.4 U-Net"][:7] == ["22.45", "0.150", "18.50", "0.280", "21.25", "0.205", "26.50"]
+    # in domain, zero-shot and 4k medians over arenas 6 and 9, then the recovered shares: arena 6 undoes 0.08 of its
+    # 0.15 LPIPS rise, regains 1 of 4.45 dB and closes 1 of its 2.45 dB excess gap (upper bound 26, g_train 5.55);
+    # arena 9: 0.07 of 0.11, 4.5 of 3.45 and 4.5 of 2.45; medians 58, 76 and 112 percent
+    assert lines["SD 1.4 U-Net"] == ["22.45", "0.150", "18.50", "0.280", "21.25", "0.205", "58", "76", "112"]
     assert lines["PixArt-$\\alpha$"][4] == "20.70" and lines["SD 3.5 Medium (1 of 2)"][4] == "19.50"
-    assert lines["U-Net full fine-tune (1 of 4)"][:2] == ["", ""]
-    assert lines["U-Net LoRA (1 of 4)"][2] == "18.00"
+    # the comparison rows leave the in-domain columns blank; their shares are against the U-Net's level: arena 6's
+    # full fine-tune (4k 23.0 dB, LPIPS 0.18, from the borrowed 18.0 and 0.30) undoes 0.12 of 0.15, regains 5 of
+    # 4.45 dB and closes 5 of 2.45 dB
+    assert lines["U-Net full fine-tune (1 of 4)"] == ["", "", "18.00", "0.300", "23.00", "0.180", "80", "112", "204"]
+    assert lines["U-Net LoRA (1 of 4)"][:3] == ["", "", "18.00"]
+    assert s["blocks"]["unet_full"]["shares"]["lpips"] == {"median": pytest.approx(0.8), "min": pytest.approx(0.8),
+                                                           "n": 1}
+    caption = open(tables / "results_slim_caption.tex").read()
+    assert "after 4k adapter updates" in caption and "16 validation windows" in caption      # 4 maps x 4 windows
+    assert "medians over the 2 unseen arenas" in caption and "four comparator arenas (6, 7, 8, 16)" in caption
+    # Table 1's copy: the step check's reads plus the directional column, pooled by windows (arena 9 has 64)
+    full = open(tables / "results_full.tex").read()
+    t1 = [line.rstrip(" \\").split(" & ") for line in full.splitlines() if " & " in line and not line.startswith("%")]
+    assert t1[0] == ["Model", "Maps", "PSNR (dB)", "LPIPS", "Upper bound (dB)", "Directional"]
+    assert t1[1] == ["SD 1.4 U-Net", "training", "22.45", "0.150", "28.00", "0.850"]
+    assert t1[2] == ["", "unseen", "18.50", "0.280", "26.50", "0.733"]
+    assert t1[3][:2] == ["PixArt-$\\alpha$", "training"] and t1[3][-1] == "--"        # no directional read
+    assert t1[5][:2] == ["SD 3.5 Medium", "training"] and t1[6][-1] == "--" and len(t1) == 7
+    assert "% SD 1.4 U-Net unseen: directional over 2 maps (6, 9), 192 windows, ground-truth frames 0.900" in full
+    assert "% PixArt-$\\alpha$ unseen: no directional read of pixart200k_ema under" in full
+    assert s["directional"]["unet200k_ema"]["unseen"] == {"correct": pytest.approx((0.7 * 128 + 0.8 * 64) / 192),
+                                                          "reference": pytest.approx(0.9), "maps": [6, 9],
+                                                          "windows": 192}
+    assert s["directional"]["pixart200k_ema"] == {"training": None, "unseen": None}
+    assert any(p["path"].endswith("directional_map09_arenas13_ema.json") for p in s["inputs"])
     # no 200k SD 3.5 files: the provisional 170k read through the stock decoder, recorded as the fallback
     assert s["sd35_row"] == {"row": "sd35_170000", "decoder": "stock", "fallback": True}
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none

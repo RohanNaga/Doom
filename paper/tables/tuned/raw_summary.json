@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-28T11:49:14-04:00",
+ "generated_at": "2026-09-28T17:08:32-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -420,6 +420,107 @@
     }
    },
    "n": 512
+  }
+ },
+ "directional": {
+  "unet200k_ema": {
+   "training": {
+    "correct": 0.85546875,
+    "reference": 0.884765625,
+    "maps": [
+     2,
+     3,
+     4,
+     5
+    ],
+    "windows": 512
+   },
+   "unseen": {
+    "correct": 0.8040865384615384,
+    "reference": 0.8918269230769231,
+    "maps": [
+     1,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17
+    ],
+    "windows": 1664
+   }
+  },
+  "pixart200k_ema": {
+   "training": {
+    "correct": 0.841796875,
+    "reference": 0.884765625,
+    "maps": [
+     2,
+     3,
+     4,
+     5
+    ],
+    "windows": 512
+   },
+   "unseen": {
+    "correct": 0.8082932692307693,
+    "reference": 0.8918269230769231,
+    "maps": [
+     1,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17
+    ],
+    "windows": 1664
+   }
+  },
+  "sd35_200000": {
+   "training": {
+    "correct": 0.83984375,
+    "reference": 0.884765625,
+    "maps": [
+     2,
+     3,
+     4,
+     5
+    ],
+    "windows": 512
+   },
+   "unseen": {
+    "correct": 0.7998798076923077,
+    "reference": 0.8918269230769231,
+    "maps": [
+     1,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17
+    ],
+    "windows": 1664
+   }
   }
  },
  "d": {
@@ -1265,6 +1366,23 @@
    "has_check": true,
    "g_train": 3.3575854878872633,
    "budget_final": true,
+   "shares": {
+    "lpips": {
+     "median": 0.7110996585384264,
+     "min": 0.5461622145479961,
+     "n": 4
+    },
+    "psnr": {
+     "median": 0.4112275576569766,
+     "min": 0.24080407535555182,
+     "n": 4
+    },
+    "gap": {
+     "median": 1.2253147580564638,
+     "min": 0.5722652865734692,
+     "n": 4
+    }
+   },
    "budgets": {
     "6": 100,
     "7": 250,
@@ -1324,6 +1442,23 @@
    "has_check": false,
    "g_train": 3.3575854878872633,
    "budget_final": true,
+   "shares": {
+    "lpips": {
+     "median": 0.8675709734289437,
+     "min": 0.7819106808089634,
+     "n": 4
+    },
+    "psnr": {
+     "median": 0.46278934394524657,
+     "min": 0.3284220500070481,
+     "n": 4
+    },
+    "gap": {
+     "median": 1.4363904461617634,
+     "min": 0.7051181834411826,
+     "n": 4
+    }
+   },
    "budgets": {
     "6": 4000,
     "7": 4000,
@@ -1405,6 +1540,23 @@
    "has_check": false,
    "g_train": 3.370827017351985,
    "budget_final": true,
+   "shares": {
+    "lpips": {
+     "median": 0.7628685493437575,
+     "min": 0.48178781263000614,
+     "n": 13
+    },
+    "psnr": {
+     "median": 0.48087770455840767,
+     "min": 0.2508736702671881,
+     "n": 13
+    },
+    "gap": {
+     "median": 1.0052411378735457,
+     "min": 0.5605084879322811,
+     "n": 13
+    }
+   },
    "budgets": {
     "1": 100,
     "6": 50,
@@ -1499,6 +1651,23 @@
    "has_check": false,
    "g_train": 6.458797739818692,
    "budget_final": true,
+   "shares": {
+    "lpips": {
+     "median": 0.7716159955454934,
+     "min": 0.5359931497002994,
+     "n": 13
+    },
+    "psnr": {
+     "median": 0.5034309077291419,
+     "min": 0.296114348228589,
+     "n": 13
+    },
+    "gap": {
+     "median": 0.9424838588583325,
+     "min": 0.5550170969500101,
+     "n": 13
+    }
+   },
    "budgets": {
     "1": 250,
     "6": 250,
@@ -1600,6 +1769,23 @@
   "has_check": true,
   "g_train": 3.3575854878872633,
   "budget_final": true,
+  "shares": {
+   "lpips": {
+    "median": 0.7241469173121959,
+    "min": 0.47838950121008234,
+    "n": 13
+   },
+   "psnr": {
+    "median": 0.4830425974065937,
+    "min": 0.24080407535555182,
+    "n": 13
+   },
+   "gap": {
+    "median": 0.9434828025824029,
+    "min": 0.5489521025448597,
+    "n": 13
+   }
+  },
   "budgets": {
    "1": 100,
    "6": 100,
@@ -2713,6 +2899,142 @@
  },
  "inputs": [
   {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map01_arenas13_ema.json",
+   "sha256": "ebe2e5da5cc2626a9835a5b93b1990f7c3bd8c7a03f2fcc2d9dd9338fc17998a"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map02_val_ema.json",
+   "sha256": "b9ef6f0607b83f4bfa3ae8038b471e5e19621742807d89161aa577f7089adecb"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map03_val_ema.json",
+   "sha256": "49e2de0ff11c4d42f6985cb5449b05ed273e8502a5c4e0ae2aae3d63ea13d518"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map04_val_ema.json",
+   "sha256": "159f5c16f9f9c671e13b9679cf478791d930fc8761db24247b56e5c14e66868a"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map05_val_ema.json",
+   "sha256": "a5833cababa4949e38cd923f4f5a946e803807e33603d97eb7e56df08cf1995e"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map06_arenas13_ema.json",
+   "sha256": "24ffef86237a5f93deec0591e31428d7bd970032939782d5ccf1b713867708f0"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map07_arenas13_ema.json",
+   "sha256": "5993a31c69b50ee876c0c34c6b47d83f5b1cb0aa85ca98142ede13a3f986dd4c"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map08_arenas13_ema.json",
+   "sha256": "a052a8e963d9ea61a03e90b92d9201730f1431a7caca4949b0a5e98c7644ae7b"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map09_arenas13_ema.json",
+   "sha256": "0d33a149678d8c9358f7d685ad25cec5adaa15af7fa8ff2633826e627f0a4730"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map10_arenas13_ema.json",
+   "sha256": "ce1a44e08046186f7c83df25cfe10d597467d1e1ae4bf999982e7cb79b181803"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map11_arenas13_ema.json",
+   "sha256": "3e973e18b6400b97503de7d763082c7b8887e881c8edd1710fe2733d9220cdba"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map12_arenas13_ema.json",
+   "sha256": "86d2e946542deacda99c7e2f7f7d18a654737388d0f16a22a18a1e8d46ce4677"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map13_arenas13_ema.json",
+   "sha256": "470d7a01eccffbe19285a73b8113d07cb61c601b15971e21ed609904255e97dd"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map14_arenas13_ema.json",
+   "sha256": "0a32922c128164a883359a1fe6851fa1918735b4401e50ffb9043d774117a7f0"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map15_arenas13_ema.json",
+   "sha256": "7fb59f6aa049653bf3913418b620f15399e5243d3879f0dfe649abc356c4a454"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map16_arenas13_ema.json",
+   "sha256": "f1a7ee0b1aa45fc6b373f4ebd600ffb26caba41d395af3226fc78a47c240666c"
+  },
+  {
+   "path": "results/directional_fresh/pixart200k_ema/directional_map17_arenas13_ema.json",
+   "sha256": "37978712bb8d5ad675db95ac12edab6677a6f470ff2ef6aab58700ba27e26108"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map01_arenas13_ema.json",
+   "sha256": "1925229c6b96e10860a0c75c675cdec4926dc7cd4e49bac99dbe370df55ce461"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map02_val_ema.json",
+   "sha256": "629320f90733c0146fbf2307267014fd59cf5f0bfd39160384715bc6e17438e1"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map03_val_ema.json",
+   "sha256": "84a5dd99ec0c63286dad7b736474c11c052215e8fab9343cb08a9929a4e9059f"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map04_val_ema.json",
+   "sha256": "31c8446a31b087cb2b45c9216765bafdcf6c2c7b86d2eec588dbc18bcc3b7782"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map05_val_ema.json",
+   "sha256": "63a43b64428e05b85aba0826553a06d580122523444731303d31e4a34429b81c"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map06_arenas13_ema.json",
+   "sha256": "694592d76b24bc2f899c142dcbd5fbf72c01f99afe26905619d04be46072184b"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map07_arenas13_ema.json",
+   "sha256": "e056e8abd099de0ae70430a9143c57883338192ca86643971b3933cd79d7cad0"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map08_arenas13_ema.json",
+   "sha256": "e49be4b9c9b0ad74aefde5b55ab68b0e46a345ddea6cc5f426e8eaf161168197"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map09_arenas13_ema.json",
+   "sha256": "18cd74ad5d27478a19a780c91b99b434b819cc751afe847914ac10812cbb506c"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map10_arenas13_ema.json",
+   "sha256": "3d95f3712067d7578b5b462c726118522aca71b507191fe1301531275574ba40"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map11_arenas13_ema.json",
+   "sha256": "339af4757557aef34f677964f8076ab0c29760533df9a4b3ba1cd11285463eaa"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map12_arenas13_ema.json",
+   "sha256": "c3058bf9094eb0f1403d219fc296e9ade04508212808be6266f81c98fc80b9f7"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map13_arenas13_ema.json",
+   "sha256": "3194be4368ba0fc3afc935a5a17fc06d0a17de3927799ff2ba8185d46eb694b4"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map14_arenas13_ema.json",
+   "sha256": "917f7df910aeb9122cd5dbf1023813ec5dbd40a12f262b1ba3ff8a41a35da25b"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map15_arenas13_ema.json",
+   "sha256": "060d4b2d43104004ff543e95bb0329916665719f2a2a1bf7c9d1d2c9a6d6fad0"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map16_arenas13_ema.json",
+   "sha256": "0e08f5cddc0c2f6aa70c5b4458bf4a0bf36b946eb94456b8e1e50cd5eb78345d"
+  },
+  {
+   "path": "results/directional_fresh/unet200k_ema/directional_map17_arenas13_ema.json",
+   "sha256": "305e77c2624d48cbc5c91682c32284fc66acbdb145b229d11e409f4a21a8a2a4"
+  },
+  {
    "path": "results/distance_study/figure_unet_h1/stats.json",
    "sha256": "a8d184d460f80909ded29919101c383719ca08143ca6025534953d67f3f65a9c"
   },
@@ -3243,6 +3565,74 @@
   {
    "path": "results/fresh_rescore/adapt8000_live_tuned/map17/per_window.csv",
    "sha256": "facdf5af703b5cdb1dcc0445a9e3f63b5518f7ee2309fc42340b956005bacf5c"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map01_arenas13_ema.json",
+   "sha256": "34247d3ac46861dcc33d75171650b665661c7b7f5ec53d09c31f358ff00e6ab0"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map02_val_ema.json",
+   "sha256": "693d0898eaa330f8e92208ff87afec19a4774071184c0ac4c0b805e17fbefa39"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map03_val_ema.json",
+   "sha256": "3ad4a623c2629e69aa14812e8665f37ec896f5641ca1a93943e441244c738a36"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map04_val_ema.json",
+   "sha256": "ccf1bc6bad8c3f27f8defc50a08f67b0ce4a3c5b0383961e886133fb00b4e1fa"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map05_val_ema.json",
+   "sha256": "742a49eebdf0891c695e2bbd5661c078a13614c1b974caae29f999063d5f74c1"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map06_arenas13_ema.json",
+   "sha256": "94afa354f8f21a017dc7f862da5fdbdd5b5fed160b1414bd054ce52655cd29aa"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map07_arenas13_ema.json",
+   "sha256": "c680f14f565be055def976eb76f85a4bff28f6c49b42642d00da01ef387f8013"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map08_arenas13_ema.json",
+   "sha256": "079bc578038af1a08340fb32f56b52595a56bae756dabcda99bc05631cbcf498"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map09_arenas13_ema.json",
+   "sha256": "db3c2e44bfe25b2522a880ec91d0a68441126fae04d2268521439e33f2e7e65e"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map10_arenas13_ema.json",
+   "sha256": "193153146864fa09972b4e76206dce25287ac3d0dc809e33dfab02193d084493"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map11_arenas13_ema.json",
+   "sha256": "28d502048df10516d27fc277006606955e133145c0c550c2cd0f5854bc19e2ab"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map12_arenas13_ema.json",
+   "sha256": "4bb419e87c71c1f023c42aa1456f38ee7c8df8ddc53daf5dc4ad3938185c1022"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map13_arenas13_ema.json",
+   "sha256": "f0cf20d87dcc8859997c38bb83b92a49207dcf52b3970e0fbe0d69726b1b4189"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map14_arenas13_ema.json",
+   "sha256": "bcd5174b263ef2c4b230adfb1076f8a23222623b0be164cc8876ebf753f96286"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map15_arenas13_ema.json",
+   "sha256": "7d76f5388defccf1ff20f79e21b3568e9521361c4fd41974bd9bab82b6c2ab08"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map16_arenas13_ema.json",
+   "sha256": "850002bffaceb7cec250bf74946101b2c7a691d01cc1ecc81945cec4cf4364e3"
+  },
+  {
+   "path": "results/fresh_rescore/directional_fresh/sd35_200000_ema/directional_map17_arenas13_ema.json",
+   "sha256": "8e32bc941062afb772819032884285f9b6670bd205ae0a95d6468e0df5d4b3c2"
   },
   {
    "path": "results/fresh_rescore/home_pixart200k_ema_tuned/val/per_window.csv",

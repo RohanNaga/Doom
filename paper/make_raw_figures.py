@@ -4,7 +4,8 @@ the reconstruction ceiling and the in-distribution level as the only references.
 table in the paper; the figures carry the `raw_` prefix and sit beside the current ones until Rohan chooses.
 
     python paper/make_raw_figures.py     # writes paper/figures/raw/ and paper/tables/tuned/{adapt_groups.tex,
-                                         # adapt_perarena.tex, results_slim.tex, raw_summary.json}
+                                         # adapt_perarena.tex, results_full.tex (Table 1), results_slim.tex and
+                                         # results_slim_caption.tex (the four-page table), raw_summary.json}
 
 **Quantities.** Raw scene PSNR and LPIPS compare the rendered prediction D(z_hat) with the raw ground-truth frame x
 on scene rows 0 to 207 (`scene_psnr_raw`, `scene_lpips_raw` in eval_tf's per-window files). A map's reconstruction
@@ -510,12 +511,47 @@ def split_arenas(arenas_data, wanted, headline=HEADLINE_STEP, check=8000):
     return ((raw, [a for a in present if a not in raw]) if raw else (present, [])) + (in_progress,)
 
 
-def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, check=8000):
+def recovery_shares(arenas_data, arenas, level, g_train, headline=HEADLINE_STEP):
+    """{lpips, psnr, gap: {median, min, n}} of what the adapter recovers by the `headline` step, each arena's share
+    computed on its own reads, then the median and minimum over the arenas (fractions, not percent):
+    `lpips`: (LPIPS at 0 - LPIPS at the headline) / (LPIPS at 0 - the training maps' LPIPS), the share of the LPIPS
+    rise over the training maps that is undone; `psnr`: (PSNR at the headline - PSNR at 0) / (the training maps' PSNR
+    - PSNR at 0), the share of the lost scene PSNR that is regained (above 1 when the arena ends past the training
+    maps); `gap`: (gap at 0 - gap at the headline) / (gap at 0 - `g_train`), the share of the extra distance to the
+    reconstruction upper bound that the shift opened and the adapter closes. `level` is the backbone's training-map
+    (PSNR, LPIPS) and `g_train` its in-distribution gap; an arena whose denominator is not positive (it starts at or
+    past the training maps) is left out of that share, and `n` says how many arenas enter it. Entries are None when
+    the block has no level, no gap or no arena."""
+    def summarise(values):
+        v = [x for x in values if x is not None]
+        return {"median": float(statistics.median(v)), "min": float(min(v)), "n": len(v)} if v else None
+
+    def ratio(num, den):
+        return num / den if den > 0 else None
+
+    lpips, psnr, gap = [], [], []
+    for a in arenas:
+        reads = arenas_data[a]["reads"]
+        r0, r4 = reads.get(0), reads.get(headline)
+        if not r0 or not r4:
+            continue
+        if level and level[1] is not None:
+            lpips.append(ratio(r0["lpips"] - r4["lpips"], r0["lpips"] - level[1]))
+        if level and level[0] is not None:
+            psnr.append(ratio(r4["psnr"] - r0["psnr"], level[0] - r0["psnr"]))
+        upper = next((r["upper"] for r in reads.values() if r.get("upper") is not None), None)
+        if g_train is not None and upper is not None:
+            gap.append(ratio(r4["psnr"] - r0["psnr"], (upper - r0["psnr"]) - g_train))
+    return {"lpips": summarise(lpips), "psnr": summarise(psnr), "gap": summarise(gap)}
+
+
+def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, check=8000, level=None):
     """One per-backbone block of Table 2: over the `wanted` arenas it reports (`split_arenas`), the medians of scene
     PSNR and LPIPS at 0, the headline and the check step (None when the block's grid stops before it), the upper
     bound, the budget (final only when every arena's grid reads are raw), the quantity the reads are in
-    (`raw_adapters.step_read`), the arenas left out as decoded only, and the median GPU-hours to the headline per card
-    (`gpu_hours_by_card`). `arenas_data` is {arena: {grid, reads: {step: read}, gpu_hours, card}}."""
+    (`raw_adapters.step_read`), the arenas left out as decoded only, the median GPU-hours to the headline per card
+    (`gpu_hours_by_card`) and, given the backbone's training-map `level` (PSNR, LPIPS), the recovered shares
+    (`recovery_shares`). `arenas_data` is {arena: {grid, reads: {step: read}, gpu_hours, card}}."""
     present, decoded_only, in_progress = split_arenas(arenas_data, wanted, headline, check)
 
     def get(a, step, key):
@@ -548,6 +584,7 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
             "lpips_4k": median([get(a, headline, "lpips") for a in present]),
             "lpips_8k": median([get(a, check, "lpips") for a in present]) if has_check else None,
             "has_check": has_check, "g_train": g_train, "budget_final": final,
+            "shares": recovery_shares(arenas_data, present, level, g_train, headline),
             "budgets": {str(a): b for a, b in zip(present, budgets)} if final else None,
             "budget_middle": middle_reads(budgets) if final else None,
             "censored": sum(1 for b in budgets if b is None) if final else None,
@@ -599,37 +636,147 @@ def slim_label(name, b, every):
         else block_label(name, b, every)
 
 
+def share_cell(share):
+    """A recovered share as a whole percent ("--" when the block has none)."""
+    return "--" if not share else f"{100 * share['median']:.0f}"
+
+
 def slim_table(rows, stamp=""):
-    """The slim results table (a candidate to replace Tables 1 and 2 together): one row per backbone, then the U-Net's
-    LoRA and full fine-tune on the comparator arenas. Columns: the training maps' raw scene PSNR and LPIPS (blank for
-    the comparison rows, whose source is the U-Net's), the zero-shot and headline medians of the block's own reads
-    (paired: the same arenas), the median reconstruction upper bound over them and the budget cell as Table 2 prints
-    it. `rows` is [(name, block_summary, (psnr, lpips) on the training maps or None, covers every arena)]."""
+    """The slim results table (the four-page layout's replacement for Tables 1 and 2): one row per backbone over the
+    unseen arenas, then the U-Net's LoRA and full fine-tune on the comparator arenas. Columns: the backbone's raw scene
+    PSNR and LPIPS on the training maps (in domain, for reference; blank for the comparison rows, whose checkpoint is
+    the U-Net's and whose own in-domain score after adaptation is not measured), the zero-shot and headline medians
+    of the block's own reads (paired: the same arenas), then the recovered shares (`recovery_shares`: LPIPS, PSNR,
+    gap to the upper bound; medians of per-arena shares, in percent). The upper bound and the budget stay in the
+    supplement's table. `rows` is [(name, block_summary, (psnr, lpips) on the training maps or None, covers every
+    arena)]."""
     def num(v, d):
         return "--" if v is None else f"{v:.{d}f}"
 
     head = rows[0][1].get("headline", HEADLINE_STEP) if rows else HEADLINE_STEP
     lines = [f"% generated by paper/make_raw_figures.py{stamp}: raw scene reads, each backbone through its fine-tuned",
-             "% decoder, non-EMA adapter weights; medians over each row's arenas (zero-shot and adapted paired)",
-             "\\begin{tabular}{lrrrrrrrr}", "\\toprule",
-             # group headers no wider than their two columns, which would otherwise take the excess into the
-             # second column; the caption says the last two groups are the unseen arenas
-             "& \\multicolumn{2}{c}{Training maps} & \\multicolumn{2}{c}{Zero-shot} & "
-             f"\\multicolumn{{2}}{{c}}{{{fs.step_label(head)} updates}} & Upper & \\\\",
-             "\\cmidrule(lr){2-3}\\cmidrule(lr){4-5}\\cmidrule(lr){6-7}",
-             "Model & PSNR & LPIPS & PSNR & LPIPS & PSNR & LPIPS & bound & Budget \\\\",
+             "% decoder, non-EMA adapter weights; medians over each row's arenas (zero-shot and adapted paired);",
+             "% recovered: per-arena shares by the headline step, median over the row's arenas, in percent",
+             "\\begin{tabular}{lrrrrrrrrr}", "\\toprule",
+             # group headers no wider than their columns, which would otherwise take the excess into the last one
+             "& \\multicolumn{2}{c}{In domain} & \\multicolumn{2}{c}{Zero-shot} & "
+             f"\\multicolumn{{2}}{{c}}{{{fs.step_label(head)} updates}} & \\multicolumn{{3}}{{c}}{{Recovered (\\%)}} \\\\",
+             "\\cmidrule(lr){2-3}\\cmidrule(lr){4-5}\\cmidrule(lr){6-7}\\cmidrule(lr){8-10}",
+             "Model & PSNR & LPIPS & PSNR & LPIPS & PSNR & LPIPS & LPIPS & PSNR & Gap \\\\",
              "\\midrule"]
     for i, (name, b, level, every) in enumerate(rows):
         if i and not every and rows[i - 1][3]:
             lines.append("\\midrule")
         train = [num(level[0], 2), num(level[1], 3)] if level else ["", ""]
+        shares = b.get("shares") or {}
         if not b["n"]:
-            cells = train + ["\\tbd{}"] * 6
+            cells = train + ["\\tbd{}"] * 7
         else:
             cells = train + [num(b["psnr_zero_shot"], 2), num(b["lpips_zero_shot"], 3), num(b["psnr_4k"], 2),
-                             num(b["lpips_4k"], 3), num(b["ceiling"], 2), block_budget_cell(b)]
+                             num(b["lpips_4k"], 3)] + [share_cell(shares.get(k)) for k in ("lpips", "psnr", "gap")]
         lines.append(" & ".join([slim_label(name, b, every)] + cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
+    return "\n".join(lines) + "\n"
+
+
+def slim_caption(rows, n_train):
+    """The slim table's caption (a `\\caption{...}` line), built from the rows so the arena sets, the step and the
+    window count it states are the table's own. `rows` is `slim_table`'s, `n_train` the training-map windows behind
+    the in-domain columns. The decoders it names are the ones `raw_summary.json` records under `definitions`."""
+    head = rows[0][1].get("headline", HEADLINE_STEP)
+    step = fs.step_label(head)
+    over = next((b for _, b, _, every in rows if every and b["n"]), None)
+    comparison = next((b for _, b, _, every in rows if not every and b["n"]), None)
+    n_over = over["n_wanted"] if over else "the"
+    four = ", ".join(map(str, comparison["wanted"])) if comparison else "--"
+    return ("\\caption{Scene PSNR (dB) and LPIPS one tic ahead, in domain, zero-shot on the unseen arenas and after "
+            f"{step} adapter updates. Every score is on the scene crop (rows 0 to 207) against the raw frame, "
+            "each backbone rendered through its fine-tuned decoder (SD~1's for the U-Net and PixArt-$\\alpha$, "
+            f"SD~3.5's own for SD~3.5). In domain: the four training maps, pooled over "
+            f"{n_train} validation windows, for reference. Zero-shot and {step}: medians over the {n_over} "
+            "unseen arenas, before and after adapting on eight episodes of each arena (rank-16 LoRA, non-EMA weights). "
+            "Recovered, per arena and then the median over arenas: the share of the LPIPS rise over the training maps "
+            "that the adapter undoes (LPIPS), of the lost scene PSNR that it regains (PSNR), and of the shift's extra "
+            "distance to the reconstruction upper bound that it closes (Gap). The last two rows compare the U-Net's "
+            f"adapter with a full fine-tune of all its parameters on the four comparator arenas ({four}) only: both "
+            "start from the same zero-shot read, and their shares are against the U-Net's in-domain level.}\n")
+
+
+TABLE_LABELS = {"unet": "SD 1.4 U-Net", "pixart": "PixArt-$\\alpha$", "sd35": "SD 3.5 Medium"}   # Table 1's names
+DIRECTIONAL_SETS = (("training", "val"), ("unseen", "arenas13"))    # Table 1's map rows and the sets that score them
+DIRECTIONAL_FILE_RE = re.compile(r"directional_map0*(\d+)_([a-z0-9]+)_ema\.json")
+
+
+def directional_files(roots, name):
+    """{(map, set): path} of a backbone's directional-check reads (tools/directional_check.py's
+    `directional_map<NN>_<set>_ema.json`) under the first of `roots` holding a directory `<name>` or `<name>_ema`;
+    empty when none does."""
+    for root in roots:
+        for d in (name, f"{name}_ema"):
+            found = sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, d)), "directional_map*_ema.json")))
+            out = {(int(m.group(1)), m.group(2)): p for p in found
+                   for m in [DIRECTIONAL_FILE_RE.fullmatch(os.path.basename(p))] if m}
+            if out:
+                return out
+    return {}
+
+
+def directional_reads(roots, name):
+    """Table 1's directional column for one backbone: {"training": read, "unseen": read, "files": [paths]}, each read
+    {correct, reference, maps, windows} pooled over the set's windows from the per-map files (`summary.correct_frac`:
+    the fraction of turning windows whose predicted view turns the other way once the newest turn control is
+    swapped; `summary.ref_raw_frac`: the same test on the recorded ground-truth frames), or None for a set with no
+    file. Every map's file weighs by its window count, so unequal maps pool like one run."""
+    files = directional_files(roots, name)
+    out = {"files": sorted(files.values())}
+    for label, set_name in DIRECTIONAL_SETS:
+        reads = []
+        for (m, s), path in sorted(files.items()):
+            if s != set_name:
+                continue
+            with open(path) as f:
+                summary = json.load(f)["summary"]
+            reads.append((m, summary["windows"], summary["correct_frac"], summary.get("ref_raw_frac")))
+        n = sum(w for _, w, _, _ in reads)
+        out[label] = None if not n else {
+            "correct": sum(w * c for _, w, c, _ in reads) / n,
+            "reference": sum(w * r for _, w, _, r in reads) / n if all(r is not None for _, _, _, r in reads)
+            else None,
+            "maps": [m for m, _, _, _ in reads], "windows": n}
+    return out
+
+
+def results_table(names, home, zero, directional, roots, stamp=""):
+    """Table 1 as a tabular (the supplement's copy once the slim table replaces it in the body): per backbone a
+    training row (the validation read pooled over its windows) and an unseen row (medians over the arenas) of raw
+    scene PSNR, LPIPS, the decoder's reconstruction upper bound and the directional score (`directional_reads`;
+    "--" when the backbone has no read). The comment lines give each directional read's maps, windows and the
+    ground-truth frames' own reversal rate. Provisional marks are the paper owner's, not printed here."""
+    def num(v, d):
+        return "--" if v is None else f"{v:.{d}f}"
+
+    lines = [f"% generated by paper/make_raw_figures.py{stamp}: raw scene reads one tic ahead, each backbone through",
+             "% its fine-tuned decoder; training maps pooled over the validation windows, unseen arenas as medians",
+             "% over the arenas; directional pooled over each set's turning windows (files listed below)",
+             "\\begin{tabular}{llcccc}", "\\toprule",
+             "Model & Maps & PSNR (dB) & LPIPS & Upper bound (dB) & Directional \\\\", "\\midrule"]
+    notes = []
+    for name in names:
+        label, arenas = TABLE_LABELS[fs.backbone_of(name)], sorted(zero[name])
+        pooled, d = home[name]["pooled"], directional.get(name) or {}
+        rows = [("training", pooled["psnr"], pooled["lpips"], pooled["ceiling_psnr"], d.get("training")),
+                ("unseen", median([zero[name][m]["psnr"] for m in arenas]),
+                 median([zero[name][m]["lpips"] for m in arenas]),
+                 median([zero[name][m]["ceiling_psnr"] for m in arenas]), d.get("unseen"))]
+        for i, (maps, psnr, lpips, upper, dr) in enumerate(rows):
+            cell = num(dr["correct"] if dr else None, 3)
+            lines.append(f"{label if i == 0 else ''} & {maps} & {num(psnr, 2)} & {num(lpips, 3)} & {num(upper, 2)} & "
+                         f"{cell} \\\\")
+            notes.append(f"% {label} {maps}: " + (
+                f"directional over {len(dr['maps'])} maps ({', '.join(map(str, dr['maps']))}), {dr['windows']} "
+                f"windows, ground-truth frames {num(dr['reference'], 3)}" if dr else
+                f"no directional read of {name} under {', '.join(rel(r) for r in roots)}"))
+    lines += ["\\bottomrule", "\\end{tabular}"] + notes
     return "\n".join(lines) + "\n"
 
 
@@ -1089,6 +1236,10 @@ def rel(path):
 def build_parser():
     p = argparse.ArgumentParser(description="The persistence-free set: raw scene PSNR and LPIPS.")
     p.add_argument("--fresh-root", default=os.path.join(REPO, "results", "fresh_rescore"))
+    p.add_argument("--directional-roots", nargs="+",
+                   default=[os.path.join(REPO, "results", "directional_fresh"),
+                            os.path.join(REPO, "results", "fresh_rescore", "directional_fresh")],
+                   help="where each backbone's directional-check reads live (<row>/ or <row>_ema/), for Table 1")
     p.add_argument("--distances", default=os.path.join(REPO, "results", "distance_v2", "distances_sd1.json"))
     p.add_argument("--training-distances",
                    default=os.path.join(REPO, "results", "distance_study", "figure_unet_h1", "stats.json"))
@@ -1146,6 +1297,15 @@ def main(argv=None):
                       "spearman_d_psnr_arenas": maf.spearman([r["D"] for r in ar], [r["psnr"] for r in ar])["rho"],
                       "spearman_d_lpips_arenas": maf.spearman([r["D"] for r in ar], [r["lpips"] for r in ar])["rho"]}
     written = fig_3a(entries, floor, "psnr", a.out_dir) + fig_3a(entries, floor, "lpips", a.out_dir)
+
+    # Table 1 (the supplement's copy of the body's hand-set table): the same reads plus the directional column
+    directional = {name: directional_reads(a.directional_roots, name) for name in names}
+    inputs += [p for d in directional.values() for p in d["files"]]
+    full = os.path.join(a.tables_dir, "results_full.tex")
+    os.makedirs(a.tables_dir, exist_ok=True)
+    with open(full, "w") as f:
+        f.write(results_table(names, home, zero, directional, a.directional_roots))
+    written.append(full)
 
     # the adapter's raw reads by step, the budget, before and after, the raw trajectories
     rows = adapter_rows(a.fresh_root)
@@ -1284,7 +1444,7 @@ def main(argv=None):
         gap_decoder = decoder or ("tuned" if backbone != "sd35" else "stock")
         g, block_level = rad.in_distribution_gap(a.fresh_root, zero_rows[backbone], gap_decoder)
         train_level[key] = block_level
-        b = block_summary(data, wanted_list, g, a.budget_rule, a.headline_step)
+        b = block_summary(data, wanted_list, g, a.budget_rule, a.headline_step, level=block_level)
         b.update({"decoder": decoder, "decoder_identity": identity, "g_train_source": zero_rows[backbone],
                   "g_train_note": None if g is not None else
                   f"no training-map read of {zero_rows[backbone]} through the {gap_decoder} decoder: "
@@ -1309,15 +1469,22 @@ def main(argv=None):
         f.write(groups_table(gstats, budgets_final=grid_complete, blocks=block_rows))
     # the slim results table (a candidate to replace Tables 1 and 2 together): one row per backbone over every arena,
     # then the U-Net's LoRA and full fine-tune on the comparator arenas; the groups stay in Table 2's candidate
-    unet_all = block_summary(unet_data, arenas, block_stats["unet_lora"]["g_train"], a.budget_rule, a.headline_step)
+    unet_all = block_summary(unet_data, arenas, block_stats["unet_lora"]["g_train"], a.budget_rule, a.headline_step,
+                             level=train_level.get("unet_lora"))
     slim = os.path.join(a.tables_dir, "results_slim.tex")
+    slim_rows = [("SD 1.4 U-Net", unet_all, train_level.get("unet_lora"), True),
+                 ("PixArt-$\\alpha$", block_stats["pixart_lora"], train_level.get("pixart_lora"), True),
+                 ("SD 3.5 Medium", block_stats["sd35_lora"], train_level.get("sd35_lora"), True),
+                 # the comparison rows leave the in-domain columns blank: their checkpoint is the U-Net's, and their
+                 # own in-domain score after adaptation is not measured (the shares still use the U-Net's level)
+                 ("U-Net LoRA", block_stats["unet_lora"], None, False),
+                 ("U-Net full fine-tune", block_stats["unet_full"], None, False)]
     with open(slim, "w") as f:
-        f.write(slim_table([("SD 1.4 U-Net", unet_all, train_level.get("unet_lora"), True),
-                            ("PixArt-$\\alpha$", block_stats["pixart_lora"], train_level.get("pixart_lora"), True),
-                            ("SD 3.5 Medium", block_stats["sd35_lora"], train_level.get("sd35_lora"), True),
-                            ("U-Net LoRA", block_stats["unet_lora"], None, False),
-                            ("U-Net full fine-tune", block_stats["unet_full"], None, False)]))
-    written.append(slim)
+        f.write(slim_table(slim_rows))
+    slim_caption_path = os.path.join(a.tables_dir, "results_slim_caption.tex")
+    with open(slim_caption_path, "w") as f:
+        f.write(slim_caption(slim_rows, home[PRIMARY]["n"]))
+    written += [slim, slim_caption_path]
     # the every-arena panel: one LoRA curve per backbone. The full fine-tune runs on a few arenas by design, and its
     # median beside medians over every arena would compare different arenas; it joins the shared panel instead
     every = [c for c in curves if c[0].endswith("_lora")]
@@ -1394,6 +1561,7 @@ def main(argv=None):
         "zero_shot": {n: {str(m): e for m, e in zero[n].items()} for n in names},
         "in_distribution": {n: {"pooled": home[n]["pooled"], "maps": {str(m): e for m, e in home[n]["maps"].items()},
                                 "n": home[n]["n"]} for n in names},
+        "directional": {n: {k: v for k, v in d.items() if k != "files"} for n, d in directional.items()},
         "d": {"arenas": {str(m): v for m, v in arena_d.items()}, "training": {str(m): v for m, v in train_d.items()},
               "floor": floor},
         "step": step,
