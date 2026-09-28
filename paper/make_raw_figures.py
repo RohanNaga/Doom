@@ -383,19 +383,34 @@ def group_stats(groups, per):
         rs = [per[a] for a in arenas]
         out[name] = {"arenas": list(arenas), "n": len(rs), **{k: median([r[v] for r in rs]) for k, v in keys.items()},
                      "budget": maf.censored_median_entry(rs, "budget", 8000),
+                     "budget_middle": middle_reads([r["budget"] for r in rs]),
                      "censored": sum(1 for r in rs if r["budget"] is None)}
     return out
 
 
+def middle_reads(budgets):
+    """The middle budget read(s) of a group, a censored arena (None) ranked above every crossing: one read for an
+    odd group, the two middle reads for an even one (equal pairs collapse to one). Budgets are reads on a log grid,
+    so their mean is a value no arena can have; the pair says what is known (the paper owner, Sep 27)."""
+    ranked = sorted(budgets, key=lambda b: (b is None, b or 0))
+    n = len(ranked)
+    if not n:
+        return []
+    pair = [ranked[n // 2]] if n % 2 else [ranked[n // 2 - 1], ranked[n // 2]]
+    return pair[:1] if len(pair) == 2 and pair[0] == pair[1] else pair
+
+
+def budget_label(reads):
+    """A budget cell as printed: grid labels, ">8k" in math mode for censored, a pair joined by an en dash."""
+    if not reads:
+        return "--"
+    return "--".join("${>}$8k" if r is None else fs.step_label(int(r)) for r in reads)
+
+
 def _budget_cell(g, final=True):
-    b = g["budget"]
     if not final:
         return "\\tbd{}"
-    if b["value"] is None and not b["censored"]:
-        return "--"
-    head = "${>}$8k" if b["censored"] else fs.step_label(int(b["value"])) if b["value"] == int(b["value"]) \
-        else f"{b['value'] / 1000:g}k"
-    return head + (f"; {g['censored']} of {g['n']} censored" if g["censored"] else "")
+    return budget_label(g["budget_middle"]) + (f"; {g['censored']} of {g['n']} censored" if g["censored"] else "")
 
 
 def groups_table(stats, comparator=COMPARATOR_ARENAS, stamp="", budgets_final=True):

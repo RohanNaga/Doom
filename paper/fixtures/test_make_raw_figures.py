@@ -132,6 +132,16 @@ def test_arenas_are_coloured_by_their_group_and_the_key_uses_the_same_three_shad
     assert lum["hard"] < lum["medium"] < lum["easy"]                                # dark = hard
 
 
+def test_a_group_budget_between_two_grid_reads_prints_both_reads():
+    # budgets are reads on a log grid: an even group whose two middle reads differ prints the pair, not their mean
+    assert mrf.middle_reads([250, 2000, 1000, 2000]) == [1000, 2000]
+    assert mrf.budget_label([1000, 2000]) == "1k--2k"
+    assert mrf.budget_label(mrf.middle_reads([150, 150, 100, 2000])) == "150"         # equal middle reads: one
+    assert mrf.budget_label(mrf.middle_reads([50, 100, 150])) == "100"                # odd: the middle read
+    assert mrf.budget_label(mrf.middle_reads([4000, None, 250, None])) == "4k--${>}$8k"   # censored counts as >8k
+    assert mrf.budget_label(mrf.middle_reads([None, None])) == "${>}$8k"
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)
