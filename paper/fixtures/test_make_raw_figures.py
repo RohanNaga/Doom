@@ -256,6 +256,21 @@ def test_an_arena_still_training_stays_out_of_its_block_until_it_has_the_headlin
     assert mrf.finished({"grid": [0, 250], "reads": {0: {}, 250: {}}}, 4000)          # a grid that stops before
 
 
+def test_the_shared_panel_averages_the_arenas_every_lora_backbone_has_finished():
+    sets = {"unet_lora": [1, 6, 7, 8, 16], "pixart_lora": [6, 7, 8, 10], "sd35_lora": [6, 7, 8], "unet_full": [6]}
+    assert mrf.shared_arenas(sets) == [6, 7, 8]                  # the full fine-tune does not shrink the set
+    assert mrf.shared_arenas({"unet_lora": [6, 7]}) == [6, 7]
+    assert mrf.shared_arenas({}) == []
+    # a curve is drawn on the shared set only when it has every shared arena
+    raw = {6: {0: {"psnr": 20.0, "lpips": 0.3}, 4000: {"psnr": 22.0, "lpips": 0.2}},
+           7: {0: {"psnr": 21.0, "lpips": 0.4}, 4000: {"psnr": 24.0, "lpips": 0.1}},
+           9: {0: {"psnr": 10.0, "lpips": 0.9}}}
+    assert mrf.panel_points(raw, [6, 7]) == {0: (pytest.approx(20.5), pytest.approx(0.35)),
+                                             4000: (pytest.approx(23.0), pytest.approx(0.15))}
+    assert mrf.panel_points(raw, [6, 8]) is None
+    assert mrf.panel_points(raw)[0][0] == pytest.approx(20.0)                   # every arena when no set is given
+
+
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
     # zero-shot 18, ceiling 26 (gap 8), the training maps' own gap to the ceiling 3
     assert mrf.budget_threshold("half_ceiling_gap", 18.0, 26.0, 3.0) == pytest.approx(22.0)
@@ -390,8 +405,14 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # PixArt's arena 16 is still training: out of its curve, whose every step is then over the same arenas
     assert s["backbone_panel"]["arenas"]["pixart_lora"] == [6, 9]
     assert s["backbone_panel"]["medians"]["pixart_lora"]["0"][0] == pytest.approx((18.2 + 19.2) / 2)
+    # the second panel: every curve over the arenas all three LoRA backbones have finished (SD 3.5 has 6 raw only)
+    shared = s["backbone_panel_shared"]
+    assert shared["arenas"] == [6] and shared["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]
+    assert shared["medians"]["pixart_lora"]["0"][0] == pytest.approx(18.2)
+    assert shared["medians"]["unet_lora"]["0"][0] == pytest.approx(18.0)
+    assert shared["medians"]["sd35_lora"]["4000"][0] == pytest.approx(19.5)
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
-    assert letters == list("abcd") * 2 + list("ab")          # the row, its grid layout, the backbone panel
+    assert letters == list("abcd") * 2 + list("ab") * 2      # the row, its grid layout, both backbone panels
     # the appendix's per-arena table: the gap, its threshold, the reads, the guards
     per = s["per_arena_table"]
     assert per["6"]["gap_zero_shot"] == pytest.approx(8.0)

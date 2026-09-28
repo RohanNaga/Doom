@@ -89,7 +89,7 @@ HEADLINE_STEP = 4000                            # the paper's budget (Rohan, Sep
 ROW_TICKS = (0, 100, 1000, 8000)                # labelled steps in the row's narrow curve panels
 GRID_TICKS = (0, 50, 250, 1000, 4000, 8000)     # and in the two-by-two layout's wider ones
 SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_figA_adapt_arenas": (5.5, 3.0),
-         "raw_backbones": (5.5, 1.6), "raw_fig3a_psnr": (2.25, 1.5),
+         "raw_backbones": (5.5, 1.6), "raw_backbones_shared": (5.5, 1.6), "raw_fig3a_psnr": (2.25, 1.5),
          "raw_fig3a_lpips": (2.25, 1.5)}
 UPPER = "reconstruction upper bound"             # never "ceiling" in a label
 IN_DISTRIBUTION = "training maps (in distribution)"
@@ -713,13 +713,31 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     return fs.save(fig, out_dir, stem)
 
 
-def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP):
+def shared_arenas(arena_sets):
+    """The arenas every LoRA block (one per backbone) has finished, sorted: the like-for-like set of the second
+    backbone panel. The full fine-tune runs on a subset by design, so it does not shrink the set."""
+    lora = [set(v) for k, v in arena_sets.items() if k.endswith("_lora")]
+    return sorted(set.intersection(*lora)) if lora else []
+
+
+def panel_points(raw, arenas=None):
+    """{step: (median PSNR, median LPIPS)} over `arenas` (every arena of `raw` when None) of one block's raw reads
+    (`raw` is {arena: {step: read}}); None when the block lacks one of `arenas`."""
+    if arenas is not None and any(m not in raw for m in arenas):
+        return None
+    pick = {m: raw[m] for m in (raw if arenas is None else arenas)}
+    steps = sorted({st for r in pick.values() for st in r})
+    return {st: (median([r[st]["psnr"] for r in pick.values() if st in r]),
+                 median([r[st]["lpips"] for r in pick.values() if st in r])) for st in steps}
+
+
+def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_backbones"):
     """The per-backbone adaptation panel: the median over each block's arenas of raw scene PSNR (left) and LPIPS
     (right) against adapter updates (log axis, the 0 read at the left), one curve per block in its backbone's colour
     and marker (the full fine-tune black dashed), the headline read filled, each backbone's training-map level as a
     short dashed segment at the right edge, each curve labelled at its right end with its arena count. `curves` is
-    [(key, label, {step: (psnr, lpips)}, n)], `levels` {key: (psnr, lpips)}."""
-    stem = "raw_backbones"
+    [(key, label, {step: (psnr, lpips)}, n)], `levels` {key: (psnr, lpips)}; `stem` names the variant (the shared
+    one draws every curve over the same arenas)."""
     fig, (px, lx) = fs.new_figure(SIZES[stem], ncols=2, wspace=0.08)
     steps = sorted({st for _, _, pts, _ in curves for st in pts})
     for ax, j in ((px, 0), (lx, 1)):
@@ -1000,7 +1018,7 @@ def main(argv=None):
                      "reads": {st: {"quantity": "raw", "psnr": p, "lpips": lp, "upper": adaptation[m]["upper_bound"]}
                                for st, p, lp in zip(t["steps"], t["psnr"], t["lpips"])}}
                  for m, t in trajectories.items()}
-    block_rows, block_stats, levels, curves, not_drawn, panel_arenas = [], {}, {}, [], {}, {}
+    block_rows, block_stats, levels, curves, not_drawn, panel_arenas, panel_raw = [], {}, {}, [], {}, {}, {}
     for key, name, wanted in BLOCKS:
         backbone = key.split("_")[0]
         data = unet_data if key == "unet_lora" else loaded.get(key, {}).get("arenas", {})
@@ -1034,16 +1052,19 @@ def main(argv=None):
         if not raw:
             not_drawn[key] = "no raw reads"
             continue
-        steps = sorted({st for r in raw.values() for st in r})
-        pts = {st: (median([r[st]["psnr"] for r in raw.values() if st in r]),
-                    median([r[st]["lpips"] for r in raw.values() if st in r])) for st in steps}
-        curves.append((key, PANEL_LABELS[key], pts, len(raw)))
-        panel_arenas[key] = sorted(raw)
+        curves.append((key, PANEL_LABELS[key], panel_points(raw), len(raw)))
+        panel_arenas[key], panel_raw[key] = sorted(raw), raw
         levels[key] = level if level else (None, None)
     with open(table, "w") as f:
         f.write(groups_table(gstats, budgets_final=grid_complete, blocks=block_rows))
     if curves:
         written += fig_backbones(curves, levels, a.out_dir, a.headline_step)
+    # the like-for-like panel: every curve over the arenas all LoRA backbones have finished
+    shared = shared_arenas(panel_arenas)
+    shared_curves = [(key, label, pts, len(shared)) for key, label, *_ in curves
+                     for pts in [panel_points(panel_raw[key], shared)] if shared and pts]
+    if shared_curves:
+        written += fig_backbones(shared_curves, levels, a.out_dir, a.headline_step, stem="raw_backbones_shared")
 
     s0 = {}
     if os.path.exists(a.family_step):
@@ -1092,6 +1113,8 @@ def main(argv=None):
         "blocks": block_stats,
         "backbone_panel": {"drawn": [c[0] for c in curves], "not_drawn": not_drawn, "arenas": panel_arenas,
                            "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in curves}},
+        "backbone_panel_shared": {"arenas": shared, "drawn": [c[0] for c in shared_curves],
+                                  "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in shared_curves}},
         "per_arena_table": per_arena_rows,
         "named_curves": list(named),
         "g8k_4k_minus_base_4k": {"psnr": diff("psnr"), "lpips": diff("lpips")},
