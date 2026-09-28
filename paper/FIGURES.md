@@ -1,32 +1,88 @@
-# Figures and tables of `paper/main.tex` (and `paper/appendix.tex`)
+# Figures and tables of `paper/main.tex` and `paper/appendix.tex`
 
-Status as of 2026-09-27 (after the joint review; `REVIEW_LOG.md`). The submission build (`\withappendixfalse`) is body plus references; the appendix rows below build with `\withappendixtrue`. The quantities, in the paper's names and in the cost-target decision's (`.claude/analyses/cost-target-decision-2026-09-26.md`):
+Inventory as of 2026-09-28 11:55 EDT (figure lead), after SD 3.5 reached 13 of 13 in c0ce991. The submission build (`\withappendixfalse`) is the body plus references; the appendix rows build with `\withappendixtrue`. Figures are drawn by `\figslot{file}{width}{height}{label}` in `main.tex`: when `paper/<file>` exists it is included at its slot size, otherwise a labelled box stands in. Earlier versions of this file (the persistence-based Figures 3 and 4, the Sep 27 draft captions, the 8k headline) are in git history before this commit; nothing below depends on them.
 
-| Paper | Decision memo | Per window |
+## Quantities
+
+Every figure and generated table in the paper reports raw scene quantities (Rohan, Sep 27 evening); persistence appears in none of them.
+
+- **Scene PSNR and scene LPIPS**: the rendered prediction D(ẑ) against the raw ground-truth frame x on scene rows 0 to 207 (`scene_psnr_raw`, `scene_lpips_raw` in eval_tf's per-window files), one tic ahead.
+- **Reconstruction upper bound**: the same comparison for D(z), the decoder on the ground-truth latent.
+- **Training maps (in distribution)**: the validation read, 512 windows over the four training maps, pooled.
+- **Decoders**: each backbone renders through its own fine-tuned decoder. U-Net and PixArt-α use the fine-tuned SD 1 decoder (the `_tuned` columns); SD 3.5 at 200k uses the fine-tuned SD 3.5 decoder, whose upper bound is higher.
+- **Steps**: 4k adapter updates is the headline (filled marks); 8k is the check. Adapter reads use non-EMA weights.
+- **Groups**: arenas sorted by the zero-shot gap to the upper bound, split 4, 5, 4: hard 7, 11, 14, 15; medium 8, 9, 10, 13, 17; easy 1, 6, 12, 16.
+- **Budget**: the first grid read that closes half of an arena's excess gap over its backbone's in-distribution gap (`budget_threshold`, rule `half_excess_gap`). A block scored only at 0 and 4k prints "≤4k".
+- **GPU-hours** are reported per card (A6000 on Spiderman, A4000 on Superman), never as one median (`gpu_hours_headline_by_card`).
+
+Every number drawn or tabled by the generator is in `paper/tables/tuned/raw_summary.json`, with the sha256 of every input file.
+
+## In the paper: body
+
+| Label | File, slot | Produced by | Status |
+|---|---|---|---|
+| `fig:teaser` (Figure 1) | `figures/fig_teaser_B.pdf`, 5.5 x 1.5 in | `tools/teaser_contact_sheet.py` with `--simple` (provenance below) | in the body |
+| `fig:method` (Figure 2) | `figures/fig1_method.pdf`, 5.5 x 1.8 in | `figures/fig1_method.tex`, images `figures/assets/fig1_*.png` | in the body; panel (d) in raw terms since eb2a050 |
+| `tab:unseen` (Table 1) | hand-set in `main.tex` | `raw_summary.json` (`in_distribution`, `zero_shot`) and the directional reads | SD 3.5 cells `\prov`; SD 3.5 unseen directional `\tbd` |
+| `fig:adapt` (Figure 3) | `figures/raw/raw_row.pdf`, 5.5 x 1.75 in | `paper/make_raw_figures.py` | final: 13 arenas, every read of the 8k grid |
+| `tab:cost` (Table 2) | `tables/tuned/adapt_groups.tex`, set at `\scriptsize` with `\tabcolsep` 2.5 pt | `paper/make_raw_figures.py` | final: every block on its full arena set |
+
+## In the paper: appendix
+
+| Label | File, slot | Produced by | Status |
+|---|---|---|---|
+| `tab:recipe` | hand-set in `appendix.tex` | dossier section 3; `backbones.py` | the paper owner's (not generated) |
+| `fig:training-curves` | `figures/figA_training_curves.pdf`, 5.5 x 1.8 in | `tools/training_curves.py` | stock decoders, full frame; SD 3.5 to 155k (its caption says so) |
+| `tab:perarena` | hand-set in `appendix.tex` | fresh-rescore reads, U-Net 200k EMA, fine-tuned decoder | the paper owner's (not generated) |
+| `tab:stockrows` | hand-set in `appendix.tex` | `results/fresh_rescore/{unet200k_ema,pixart200k_ema}` scene keys | the paper owner's (not generated) |
+| `fig:step-lpips` | `figures/raw/raw_fig3a_lpips.pdf`, 2.25 x 1.5 in | `paper/make_raw_figures.py` | final |
+| `tab:checks` | hand-set in `appendix.tex` | `results/distance_study/distances_sd1.json`, the amended assessment | the paper owner's (30-map set) |
+| `tab:collapse` | hand-set in `appendix.tex` | `results/sd35_stability/collapse_rates_50k_130k.md` | the paper owner's (not generated) |
+| `fig:collapse` | `figures/sd35_70k_live_vs_ema_rollout_strip.jpg`, 5.5 x 3.2 in | `tools/collapse_strip.py` at 42a4688 | in the appendix |
+| `tab:perarena-adapt` | `tables/tuned/adapt_perarena.tex` | `paper/make_raw_figures.py` | final; its forgetting column is a decoded-reference, stock-decoder read (daggered) until a raw guard rescore exists |
+| `fig:adapt-arenas` | `figures/raw/raw_figA_adapt_arenas.pdf`, 5.5 x 3.0 in | `paper/make_raw_figures.py` | final |
+| `fig:adapt-ladder` | `figures/fig_adapt_ladder.pdf`, 2.7 x 1.6 in | `paper/make_adapt_figures.py` | stock decoder, against the decoded ground truth (gain over each arena's 0 read, where persistence cancels) |
+
+## Candidates on the review page, not in the paper (Rohan chooses)
+
+| File | What it is | Size |
 |---|---|---|
-| decoded advantage `A` | A | PSNR(D(ẑ), D(z)) − PSNR(D(z_last), D(z)); `psnr_dec − copy_psnr_dec` in `eval_tf.py` |
-| perceptual margin `M` | B | LPIPS(D(ẑ), x) − LPIPS(x_last, x); `lpips_raw − persist_lpips_raw` |
-| gap to the ceiling `G` | C | PSNR(D(z), x) − PSNR(D(ẑ), x); `vae_psnr − psnr_raw` |
-| latent skill `S` | latent skill | 10 · mean log10(copy-last latent MSE / model latent MSE) |
+| `figures/raw/raw_row_backbones.pdf` | Body candidate A: the Figure 3 row unchanged, with (e, f) beneath it: each backbone's LoRA median raw PSNR and LPIPS against updates over the arenas all three have (13 arenas), keyed at the bottom. Six panels in one 5.5 in row do not fit (the 13 arena numbers overlap), so (e, f) take a line of their own | 5.5 x 3.1 in |
+| `figures/raw/raw_backbones_body.pdf` | Body candidate B: the same curves as a separate figure, keyed above | 5.5 x 1.6 in |
+| `tables/tuned/results_slim.tex` | Trim option: one table in place of Tables 1 and 2. One row per backbone (training maps, zero-shot and 4k medians over the same arenas, upper bound, budget), then the U-Net LoRA and full fine-tune on arenas 6, 7, 8, 16. At `\footnotesize` with `\tabcolsep` 3.2 pt it spans 92% of the text width; with a two-line caption the float is 10.95 body lines against 31.3 for Tables 1 and 2. It drops Table 1's directional column, the training maps' upper bound and Table 2's 8k column | 9 columns |
+| `figures/raw/raw_row_grid.pdf` | Figure 3 as two rows of two (PSNR above, LPIPS below) | 5.5 x 3.0 in |
+| `figures/raw/raw_backbones.pdf` | Each backbone's LoRA median over every arena it has; with all three on 13 arenas it now draws the same curves as the shared panel | 5.5 x 1.6 in |
+| `figures/raw/raw_backbones_shared.pdf` | The same over the shared arenas, labelled at the curves' ends | 5.5 x 1.6 in |
+| `figures/raw/raw_fullft.pdf` | The U-Net LoRA's whole grid against the full fine-tune's two reads (0 and 4k, bare points) on arenas 6, 7, 8, 16 | 5.5 x 1.6 in |
+| `figures/raw/raw_fig3a_psnr.pdf` | Zero-shot raw PSNR against the frame distance d (the step fails in PSNR: arenas 8, 9, 10 score above training maps 3 and 5) | 2.25 x 1.5 in |
 
-Status words: **exists** (the file or every number is in the repo today), **provisional** (numbers exist but will be replaced: fresh-set rescore, tuned SD 1 decoder, scene rows, final 200k checkpoints), **pending** (nothing exists yet).
-Figures are drawn by `\figslot{file}{width}{height}{label}` in `main.tex`: when `paper/<file>` exists it is included, otherwise a labelled box stands in. Dropping the file into `paper/figures/` under the name below is all a figure needs.
+## Regenerating
 
-## Body captions as set in `main.tex` (paper owner, 2026-09-27; synced to main af1de44)
+    python3 paper/make_raw_figures.py
 
-Superseded on Sep 27 evening: the body is now Figure 1 (teaser, `--simple`), Figure 2 (method) and Figure 3 (`fig:adapt`, the merged raw row), with Tables 1 (`tab:unseen`) and 2 (`tab:cost`, the grouped raw table); the captions below are the older set, and `main.tex` holds the current ones.
+It writes `paper/figures/raw/`, `paper/tables/tuned/{adapt_groups,adapt_perarena,results_slim}.tex` and `raw_summary.json` in about three seconds from a clean checkout (the per-window files it reads are tracked since a1aff0c). Every PDF rewrites byte-identical when its inputs have not changed. PNGs can differ in bytes between machines through the PNG encoder alone; compare pixels before committing one. Tests: `python3 -m pytest paper/fixtures/test_make_raw_figures.py paper/fixtures/test_raw_adapters.py paper/fixtures/test_figstyle.py -q`. After a regeneration, build `main.tex` (`latexmk -pdf main.tex` in `paper/`) and check the log has no overfull box. The review page is `docs/figure_review/index.html`; it prints each PNG at its slot width.
 
-These are the captions of the four-page body; the draft captions below are the longer reading notes they were cut from, and where the two differ these win. Figure 1 is the two-row teaser (forward and attack, 16-step holds; the section below has its numbers and provenance). Figure 3's caption no longer describes the band in (a), so the figure labels it itself ("train vs train $d$").
+## Numbers as generated (c0ce991, SD 3.5 on all 13 arenas)
 
-**Figure 1** (`fig:teaser`, `figures/fig_teaser_B.pdf`, 5.5 x 1.5 in). Off its training maps the U-Net keeps moving and firing but renders the arena in training-map masonry; eight episodes restore it. Selected windows, 16 tics after the context frame, the row's button held throughout; arena 7 zero-shot and after 4k adapter updates on 8 episodes; fine-tuned decoder, raw ground truth, scene PSNR; persistence scores 16 to 19~dB on these windows. (As in `main.tex` at 46c8940; it holds for the maps 5 and 3 in-domain block, whose persistence is 16.1 and 15.7 dB.)
+U-Net (Figure 3, Table 2 "All 13"): training maps 25.20 dB and LPIPS 0.158; zero-shot 22.30 and 0.303; after 4k 23.60 and 0.210; the 8k check 23.69 and 0.204; upper bound 27.32. 3 of 13 arenas reach the training maps' PSNR at 4k and 0 their LPIPS.
 
-**Figure 2** (`fig:method`, `figures/fig1_method.pdf`, 5.5 x 1.8 in). What we built: (a) the benchmark, (b) three backbones under one recipe, (c) post-training, (d) evaluation. Prediction, ground truth and persistence are all rendered by the one fine-tuned decoder $D$.
+| Table 2 block | arenas | PSNR 0 / 4k | LPIPS 0 / 4k | upper bound | budget | GPU-hours to 4k |
+|---|---|---|---|---|---|---|
+| U-Net LoRA | 4 of 4 (6, 7, 8, 16) | 21.71 / 22.88 | 0.292 / 0.209 | 26.69 | 100–250 | A4000 1.10 (n 4) |
+| U-Net full fine-tune | 4 of 4 (6, 7, 8, 16) | 21.71 / 23.11 | 0.292 / 0.182 | 26.69 | ≤4k | A6000 0.83 (n 4) |
+| PixArt-α LoRA | 13 of 13 (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) | 22.38 / 23.72 | 0.285 / 0.205 | 27.32 | 150 | A6000 0.88 (n 13) |
+| SD 3.5 LoRA | 13 of 13 (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) | 22.09 / 24.00 | 0.262 / 0.165 | 30.61 | 250 | A4000 3.35 (n 9); A6000 1.33 (n 4) |
 
-**Figure 3** (`fig:shift`, `figures/fig2d_family_step.pdf`, 2.25 x 1.5 in, beside `figures/tuned/fig3b_zero_shot_absolute.pdf`, 3.15 x 1.5 in). (a) The shift is a gap, not a slope: every unseen arena has lower zero-shot latent skill $S_0$ than every training map for all three backbones, and among the arenas $S_0$ does not follow $d$ (Spearman −0.05, −0.15, −0.17). (b) Every model beats persistence (grey bars) in PSNR on all 13 arenas and loses to it in LPIPS on 13 of 13. Scene rows, one tic, 95% episode-bootstrap intervals; filled: fine-tuned SD 1 decoder (U-Net, PixArt-α); open: SD 3.5's own (provisional 170k).
+Shared-arena medians (the body candidates; 13 arenas: 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17), zero-shot to 4k:
+- U-Net: PSNR 22.30 to 23.60 dB, LPIPS 0.303 to 0.210.
+- PixArt-α: PSNR 22.38 to 23.72 dB, LPIPS 0.285 to 0.205.
+- SD 3.5: PSNR 22.09 to 24.00 dB, LPIPS 0.262 to 0.165.
 
-**Figure 4** (`fig:adapt`, `figures/tuned/fig4_dots.pdf`, 5.5 x 1.4 in). Eight episodes and 4k updates lift the median $A$ from 2.04 to 3.80 dB, most of it by 250 updates (a); 9 of 13 arenas close half of their gap to $A_\text{train}$ (b; budgets above dots; grey: censored).
+SD 3.5 per-arena budgets: 1: 250, 6: 250, 7: 250, 8: 500, 9: 250, 10: 250, 11: 2000, 12: 250, 13: 250, 14: 4000, 15: 500, 16: 250, 17: 250.
 
-## Figure 1 (two rows, 16-step holds; reviewed by the coordinator and Astra, in the Figure 1 slot)
+Numbers the text quotes that no figure draws: the guard reads of the 8k-grid runs (stock decoder, live weights, steps 0 and 8000): the training maps' scene PSNR against the decoded ground truth falls on every arena, median −0.59 dB (arena 7 −1.65, arena 8 −0.28); the directional check is correct on a median 0.809 of turning windows at step 0 and 0.844 at 8k. Cross-arena control (`results/cross_arena/`, stock decoder): an arena's 4k adapter scored on the next arena's held-out windows lands at that arena's zero-shot level (median paired difference −0.05 dB) and 1.28 dB below its own adapter.
+
+## Figure 1 provenance (the teaser, `fig:teaser`)
 
 Since Sep 27 evening the slot holds the `--simple` version (main): headers and column names only (no horizon, adapter, held-button or map notes), "prediction" for the in-domain model column, "in distribution" in the header; it is the command below plus `--simple` (stem `fig_teaser_C_hold16_pick_restart_nopersistence_simple`). The annotated version described below is `fig_teaser_B_labels.pdf`. The caption in `main.tex` is 35 words; the 16-tic, decoder and persistence facts live in Method and Results.
 
@@ -51,135 +107,7 @@ Unseen block (unchanged): arena 7 episode 210 from row 2888 tic 217 (forward) an
 
 Provenance: restarted rollouts in `results/teaser_restart/`. The figure is composed by `tools/teaser_contact_sheet.py --root results/teaser --home-root results/teaser_maps345 --restart-root results/teaser_restart --hold-steps 16 --hold-rows forward:2,attack:1 --home-moments forward:train_map05_ep6059_s4104_t239 --max-height 1.5 --no-persistence --review-dir paper/figures/review/maps345` (output `fig_teaser_C_hold16_pick_restart_nopersistence`, copied into the slot). The map-2 version (`fig_teaser_B_map2.pdf`): map 2 episode 6092 row 2440 tic 139 (forward, U-Net 21.0, persistence 15.6) and episode 6064 row 2312 tic 229 (attack, 21.1, 17.9). Review threads: Astra 01a0e3f9-60a8-7c02-a644-f5e7e52c6715 (map-2 round).
 
-## Draft captions (figure lead, round 2, 2026-09-27; for the paper owner to paste and trim)
-
-Each caption states the finding first, then how to read the marks, then provenance. The terms follow item 13 of `paper/diffs/2026-09-27-sunday-adaptation.md`: persistence (the copy-last baseline), in-distribution, non-EMA, budget, reconstruction upper bound, $d$ for the frame distance, fine-tuned decoder, control checks. Unless a caption says otherwise, $A$ ("ΔPSNR vs persistence" on the axes) is the one-tic, scene-crop (rows 0 to 207) PSNR of the decoded prediction minus that of decoded persistence, both against the decoded truth, in dB. $M$ is LPIPS(prediction, raw frame) minus LPIPS(persistence, raw frame); lower is better while `figstyle.M_POSITIVE_IS_BETTER` is off. $A_\text{train}$ is $A$ on the training maps' 512 validation windows (99 episodes): 5.06 dB [4.75, 5.38], an episode-bootstrap interval. It is an in-distribution reference, not an arena's own ceiling. Numbers come from `paper/tables/tuned/adapt_summary.json`, `results/family_step/family_step.json` and the figures' JSON sidecars, and must be re-read after the 8k rerun.
-
-**Figure 1a, method** (`fig1_method.tex`, owned by opus-method-fixes). We build a 17-arena Doom benchmark: 4 training maps with 500 episodes each and 13 unseen arenas with 24 episodes each. We train three pretrained image backbones under one next-tic recipe, fine-tune the decoder on the training maps, and adapt the U-Net to a new arena with a rank-16 adapter. The context and the noisy next latent are stacked on channels, and a 10-step DDIM sampler turns the predicted $v$ into the next latent. The decoder is frozen at evaluation and is not part of the dynamics. We score $A$, $M$ and the directional check; $G$ (gap to the reconstruction upper bound) and the zero-shot latent skill $S_0$ are defined in Section 3. The Arnold agent plays against 8 bots in 150 s episodes; parameter counts are in Table 1.
-
-**Figure 1b, training** (`fig1_curves.pdf`, EMA only; `figA_training_curves.pdf` in the appendix adds the non-EMA weights dotted). Every backbone ends above persistence on the training maps: U-Net +0.92 dB and PixArt-α +0.91 dB at 200k updates, and SD 3.5 +1.75 dB at 155k. Each point is the mean one-tic full-frame PSNR minus raw persistence (21.57 dB) on the 512 training-map validation windows, with EMA weights, stock decoders, raw frames, a 10-step DDIM sampler and seed 0. The reads are means; these curve files carry no intervals. The U-Net's and PixArt-α's markers alternate because their curves nearly coincide; every marker is open because all reads use the stock decoders. The unjoined SD 3.5 marker is a provisional 170k read from another scorer (+1.79 dB); the joined SD 3.5 line ends at 155k. EMA reads below −1 dB (5k to 20k updates, 6.7 to 20.4 dB PSNR, while the 0.9999 EMA still averages the pretrained start) are clipped at the axis floor.
-
-**Figure 2, rollouts** (`fig2_rollouts.pdf`, stacked, 4.3 × 6.1 in; the side-by-side version is `fig2_rollouts_wide.pdf`). Under a held control the zero-shot model keeps the camera motion on arena 7 but loses the arena's appearance within a few tics: floors and walls drift toward the training maps' grey stone. After 8 adaptation episodes and 4k updates the arena's colours hold at most of the tics shown, but drift is not removed. Under the held left turn at tic 32 the adapted model scores 13.0 dB, below both the zero-shot model (14.5) and raw persistence (15.1). On map 2 (training) the U-Net stays above persistence at every tic shown: 23.7/20.8/19.1/17.1 dB against 19.4/15.1/14.6/13.8 at tics 1/4/16/32 under the turn, and 27.3/25.6/21.9/16.4 against 21.8/20.9/19.6/14.6 moving forward. Column 0* is the last ground-truth context frame, the same raw image in every row; raw persistence copies it at every later tic, so persistence has no row of its own. The other columns are tics +1 to +32 of a 32-tic closed-loop rollout from 32 ground-truth context tics under the recorded held control. Model rows go through the fine-tuned SD 1 decoder and ground-truth rows show the raw frame, all cropped to the scene rows 0 to 207. Numbers below model frames are scene PSNR against the raw ground-truth frame (dB). The model is the U-Net 200k EMA; "LoRA 4k" is its rank-16 adapter (non-EMA) after 4k updates on 8 adaptation episodes of arena 7. The sampler uses 10 steps and seed 0. Windows: map 2 turn left, episode 6008 from row 2208; map 2 forward, episode 6024 from row 4562; arena 7 turn left, episode 41 from row 269; arena 7 forward, episode 41 from row 209. The map 2 windows are the brightest held windows of matched control that the steward re-picked, since map 2 is a dark map (mean scene luma 40 to 55 of 255); the arena 7 windows were picked with a start tic of at least 200 (VERIFY the exact selection rule with the steward).
-
-**Figure 3a, the family step** (`fig2d_family_step.pdf`). Every unseen arena lies farther from the training recordings than any training map, and for all three backbones every arena sits below every training map in zero-shot latent skill; within the arenas, $d$ shows no detected ordering (Spearman −0.05, −0.15, −0.17). Markers are maps (4 training, 13 unseen) and backbones. PixArt-α is drawn as a larger open square behind the U-Net's filled circle so that both stay visible where they coincide; in this latent-space panel open does not mean a decoder. Horizontal segments are each backbone's family medians across each family's $d$ range: U-Net 2.85 → 1.42, PixArt-α 2.83 → 1.51, SD 3.5 3.84 → 1.46 dB. The grey band is the empirical train-versus-train $d$ range [0.022, 0.093]. It is a min-max range, not an interval, and the training maps lie inside it. Zero-shot latent skill $S_0$ is the mean over windows of −10 log10 of the model's latent MSE over persistence's, computed in latent space with no decoder: 256 windows per arena (8 held-out episodes) and the validation windows of each training map. The values are point estimates without intervals. U-Net and PixArt-α are 200k EMA; SD 3.5 is a provisional 170k EMA.
-
-**Figure 3b, primary: absolute form** (`fig3b_zero_shot_absolute.pdf`; `fig3b_zero_shot_absolute_stock.pdf` and the paired-difference `fig3b_zero_shot_paired.pdf` go to the appendix). Per unseen arena, absolute scene PSNR and LPIPS of the three zero-shot models against the persistence baseline (grey bar). Every model beats persistence in PSNR on all 13 arenas. In LPIPS all three are worse than persistence on 13 of 13 arenas, while on the training maps they beat it (0.16 against 0.24). Arenas are in number order, and the first column holds each model's pooled read on the training maps (in-distribution, grey band). Filled markers use the fine-tuned SD 1 decoder; SD 3.5 goes through its own stock decoder (open), since no fine-tuned SD 3.5 decoder exists yet. Alternate columns are tinted only to group each arena's marks. Both metrics are against the raw ground-truth frame on scene rows 0 to 207, one tic, 256 windows per arena; PSNR is in dB, the arrows in the axis labels point the better way, and vertical lines are 95% episode-bootstrap intervals. U-Net and PixArt-α are 200k EMA; SD 3.5 is a provisional 170k EMA. The adapter's per-arena endpoint is in Figure 4b.
-
-**Figure 3b, appendix: paired differences** (`fig3b_zero_shot_paired.pdf`). The fine-tuned decoder raises $A$ (U-Net median +0.22 dB, 12 of 13 arenas; PixArt-α +0.25 dB, 13 of 13) and lowers $M$ on 13 of 13, but it does not close the gap to the training maps. Arenas are in the U-Net's zero-shot-skill order. Open markers use the stock decoder and filled markers the fine-tuned decoder on the same windows, joined by a grey segment; the first column is each model's pooled training-map read.
-
-**Figure 4, primary candidate** (`fig4_dots.pdf`; the IQM and attainment version `fig4_adaptation.pdf` and the gap-share curve `fig4a_gapshare.pdf` go to the appendix). (a) Eight adaptation episodes lift $A$ on every unseen arena, most of it by 250 updates, from a median of 2.04 to 3.80 dB. The interquartile mean (the mean of the middle half of the arenas) rises from 2.03 to 3.79 dB [3.52, 4.27]. (b) By 4k updates 9 of 13 arenas (0.69 [0.46, 0.92]) have closed half of their gap to the in-distribution reference, and arena 9 closes all of it. Arenas 1, 8, 12 and 16 never reach half by 4k: each closes 0.44 to 0.47 of its gap. In (a) the light lines are the 13 arenas and the bold line with markers is their median; the grey band and dashed line are the training maps (in-distribution, $A_\text{train}$ = 5.06 dB [4.75, 5.38]), and 0 is persistence. In (b) each dot is one arena's share of its gap closed at 4k, $(A - A_0)/(A_\text{train} - A_0)$, a share of the gap in dB and not a fraction of the prediction error. Arenas are ordered by the U-Net's zero-shot latent skill. The number above a dot is the budget at which the arena first reached half of its gap; "never" marks an open dot censored at 4k. The lines at 0, 0.5 and 1 are zero-shot, half of the gap, and in-distribution. Intervals come from a 10,000-draw nested bootstrap (arenas, then each arena's held-out episodes, paired across budgets, with $A_\text{train}$ held fixed). Setup: U-Net 200k EMA source; rank-16 adapter, non-EMA, seed 0; 8 adaptation and 8 held-out episodes per arena, 32 scheduled windows per held-out episode with duplicates removed; fine-tuned SD 1 decoder; one tic; scene rows 0 to 207. All claims are about these 13 arenas of one WAD.
-
-**Figure 4, IQM and attainment version** (`fig4_adaptation.pdf`, 5.5 × 1.6 in). (a) The IQM of $A$ rises from 2.03 to 3.79 dB [3.52, 4.27] (pointwise nested band); faint lines are the arenas, with 7, 9 and 12 labelled. (b) The solid step curve is the fraction of arenas that have reached their half-gap threshold $(A_0 + A_\text{train})/2$, one minus Kaplan-Meier, with its filled band: 9 of 13 by 4k [0.46, 0.92]. The dark dashed curve is the fixed threshold $A \geq 3.5$ dB, with its bounds dotted. It coincides with the half-gap curve except at 1k (6 against 7 arenas). Ticks above mark each arena's first crossing, and open ticks mark arenas censored at 4k. The row under the axis counts the arenas at risk just before each read. Setup as in the primary candidate.
-
-**Figure 4a, appendix: share of the gap** (`fig4a_gapshare.pdf`). The line is the IQM of the per-arena shares of the gap closed, 0.607 [0.514, 0.734] at 4k, under the same nested resampling with $A_\text{train}$ fixed. Shares above one are allowed (arena 9: 1.023). The dotted line is half of the in-distribution gap. The dashed line at 1 is a normalised fixed reference, not an uncertainty-free estimate of training performance. Zero on this axis is zero-shot, not persistence.
-
-**Appendix: per-arena adaptation** (`figA_adapt_arenas.pdf`). Gains differ between arenas; the four arenas that miss their half-gap line by 4k do so by at most 0.15 dB. Each panel shows one arena's $A$ against adapter updates, with diamonds at the measured budgets and the 95% episode-bootstrap band (8 held-out episodes). The dotted line is the arena's half-gap line, the tick its first crossing, and the key in the empty slot names the reference marks. Arenas 1, 8, 12 and 16 are censored at 4k: a missing tick means no crossing within the grid, not missing data.
-
-**Appendix: performance profiles** (`figA_adapt_profiles.pdf`). Adaptation shifts the whole arena distribution upward, but only one arena exceeds the training maps at 4k: all 13 arenas are above 3.0 dB, 9 above 3.5 and 4 above 4.0. Each curve is the fraction of the 13 arenas at or above the threshold τ at 0 (zero-shot), 500 and 4k updates, shaded light to dark by budget, with pointwise nested 95% bands. The black line at 0 is persistence and the grey band is the training maps.
-
-**Appendix: A at 4k against zero-shot skill** (`fig2c_outcomes_by_skill.pdf`). Where an arena ends up is ordered by its zero-shot latent skill (Spearman 0.90, 95% interval [0.53, 0.94] with $A$ resampled by arena and episode); how much it gains is not (0.18). Each diamond is one arena with its 95% episode interval; labels of nearby arenas stand off with leaders.
-
-**Appendix: A at 4k against the skill deficit** (`fig2e_deficit.pdf`, from `tools/family_step.py`). The motion-matched latent skill deficit Δ orders the arenas' endpoints (Spearman ρ = −0.896; no interval is computed yet) and their budgets (+0.62). Δ passes the training maps' floor, and $d$ does not. Δ is the U-Net's mean skill shortfall against the training maps' reference skill, conditioned on the persistence-error decile (10 bins). It is not $A_\text{train} - A_0$. The y axis is decoded scene $A$ at 4k for the 13 U-Net adapters (non-EMA, seed 0, fine-tuned decoder), each with its episode-bootstrap interval. The grey band is the training maps. Nearby arenas (7, 13, 17 and 1, 6, 12) have separate labels with leaders because they are unequal observations.
-
-**Appendix: seeds** (`fig3_adaptation_seeds.pdf`, stock decoder until the seed-1 fine-tuned rows land). A second training seed moves $A$ at 4k by 0.02 to 0.06 dB on arenas 6, 7, 8 and 16, about a tenth of the spread between arenas. (a) Each arena's curve for seed 0 (solid) and seed 1 (dashed). (b) Seed 1 minus seed 0 per budget, with dotted lines at the largest spread at 4k.
-
-**Appendix: data ladder** (`fig_adapt_ladder.pdf`, stock decoder). One adaptation episode already gives most of the sixteen-episode endpoint: 3.20 against 3.43 dB (arena 7), 2.87 against 2.86 (8), 2.31 against 2.56 (12) and 2.95 against 3.00 (16). The four arenas were chosen before the runs, so there is no population interval.
-
-**Appendix: recipe tests** (`fig_adapt_recipe.pdf`, stock decoder). Nothing in the recipe moves the endpoint. Learning rates of 3e-4 and 5e-4 and the 8k grid change $A$ at 4k by at most +0.06 dB on arenas 12 and 16, which is within the seed spread.
-
-**Teaser candidates** (`fig_teaser_A.pdf` on arena 7 episode 210 from row 2888, with alternates `fig_teaser_A_ep158.pdf` and `fig_teaser_A_ep288.pdf`; the single-action layout is `fig_teaser_B.pdf`). Off its training maps the model keeps playing, but the arena turns into the training maps' stone within a few tics; eight episodes of adaptation keep the arena. Columns are moments where the executed control changes, headed by the control (the always-held run button omitted) and the tic of the 256-tic closed-loop rollout. Rows are zero-shot, after 8 episodes (rank-16 adapter, 4k updates, 1.1 GPU-hours), and the ground-truth frames, shown small. The first column shows the model on training map 2 (episode 6008) as the in-distribution reference. Mean scene PSNR over the 256 tics is 13.8 dB zero-shot and 16.8 dB adapted. Frames go through the fine-tuned decoder, scene rows only.
-
-## Raw-quantity options: the merged Figure 3, Table 2, the supplement's step (figure lead, 2026-09-27, 19:00)
-
-Rohan's direction: raw scene PSNR and scene LPIPS are the only quantities (the rendered prediction against the raw frame, scene rows 0 to 207); persistence appears nowhere; the references are the reconstruction upper bound (the fine-tuned decoder applied to the ground-truth latent, per arena) and the training maps' level. The main session's decisions: arenas grouped and coloured by the zero-shot gap to the reconstruction upper bound, G0 (hard 7, 11, 14, 15; medium 8, 9, 10, 13, 17; easy 1, 6, 12, 16, matching the paper owner's list); the budget is the first grid read that closes half of the arena's excess gap over the training maps' own gap (3.36 dB). Built by `paper/make_raw_figures.py` (defaults), every number in `paper/tables/tuned/raw_summary.json`. None of it replaces a figure or table in the draft until Rohan chooses.
-
-| Candidate | File, size | Status |
-|---|---|---|
-| Merged Figure 3, one row: (a, b) before and after in raw PSNR and LPIPS per arena (upper bound as a black tick, zero-shot open, 8k filled, connector, training maps dashed); (c, d) each arena's raw trajectory, y axes shared with (a, b) so each curve ends on its filled mark; coloured by G0 (dark = largest), arenas 7 and 16 named | `figures/raw/raw_row.pdf`, 5.5 x 1.75 in (legends above and below the panels) | drawn; the one I would print (every label 6 pt or more at print size). The curve panels have three raw reads (0, 4k, 8k) until item 13 scores 50 to 2k |
-| The same as two rows of two (PSNR above, LPIPS below) | `figures/raw/raw_row_grid.pdf`, 5.5 x 3.0 in | drawn; easier to read, 1.4 in more of the page |
-| Table 2 candidate: groups by G0, medians of raw PSNR (zero-shot, 4k, 8k, upper bound) and LPIPS (zero-shot, 4k, 8k), the budget, a full fine-tune column naming the comparator arenas (6, 7, 8, 16); the arena-7 column is gone | `tables/tuned/adapt_groups.tex` | numbers final for 0, 4k, 8k; budget cells `\tbd` until item 13 |
-| Supplement 3a without persistence: zero-shot raw PSNR (and LPIPS) against d per map, three backbones | `figures/raw/raw_fig3a_psnr.pdf`, `raw_fig3a_lpips.pdf`, 2.25 x 1.5 in each | drawn |
-
-Numbers for the caption (U-Net, fine-tuned decoder, non-EMA adapter, medians over 13 arenas). Raw scene PSNR: training maps 25.20 dB, zero-shot 22.30, after 8k 23.69, upper bound 27.32; the drop from the training maps to zero-shot is 2.90 dB and the recovery to 8k is +1.35 dB, leaving 1.51 dB; 3 of 13 arenas (8, 9, 10) reach the training maps' level. Raw scene LPIPS: training maps 0.158, zero-shot 0.303, after 8k 0.204, upper bound 0.075; zero-shot is 0.145 worse than the training maps, 8k recovers 0.100 of it, leaving 0.046; no arena reaches the training maps' level. The median gap to the upper bound at 8k is 3.38 dB against the training maps' 3.36.
-
-Table 2 candidate (medians; PSNR zero-shot / 4k / 8k / upper bound, LPIPS zero-shot / 4k / 8k): hard (7, 11, 14, 15) 21.97 / 23.37 / 23.43 / 27.74, 0.290 / 0.199 / 0.193; medium (8, 9, 10, 13, 17) 24.65 / 25.57 / 25.68 / 29.23, 0.281 / 0.214 / 0.209; easy (1, 6, 12, 16) 22.69 / 23.56 / 23.58 / 26.54, 0.344 / 0.210 / 0.201; all 13 22.30 / 23.60 / 23.69 / 27.32, 0.303 / 0.210 / 0.204.
-
-Budgets on the 4k and 8k reads alone (provisional; the grid's early reads decide them): half of the excess gap, 13 of 13 by 4k (so every budget is at most 4k and item 13 places it); the rules kept for the record: half of the zero-shot gap to the upper bound, 0 of 13 by 8k; the training maps' gap itself, 5 of 13 by 8k.
-
-Numbers the text waits on (the paper owner's list; `text_numbers` in `raw_summary.json`, arena-bootstrap 95% intervals over the 13 arenas). The median gap to the upper bound at 8k is 3.38 dB [2.99, 4.01], against the training maps' 3.36. On average 96% of each arena's 0-to-8k raw PSNR gain is already in place at 4k; the step by which most of it arrives needs item 13's raw reads at 50 to 2k (pending). Past half of the excess gap: 13 of 13 by 4k and by 8k [13, 13]. The median budget is 4k [4k, 4k] with 0 censored, provisional, since only 4k and 8k have raw reads. Spearman of the zero-shot latent skill S0 with the 8k gap is +0.38 (p 0.20) and with the 8k raw gain +0.43 (p 0.14); with the budget it is undefined until item 13 separates the budgets. Forgetting in raw terms needs a raw rescore of the training maps' guard reads (pending; the stock-decoder guard reads are in the 8k block below).
-
-The step without persistence (supplement 3a). In LPIPS it survives for all three backbones: every arena scores worse than every training map, by a margin of 0.050 (U-Net), 0.049 (PixArt-α) and 0.083 (SD 3.5). In raw PSNR it does not: arenas 8, 9 and 10 (24.7 dB) score above training maps 3 and 5 (24.5 and 23.5 dB) for every backbone (margins −1.17, −1.26, −1.34 dB), though the family medians still differ by 2.6 dB (U-Net 24.9 against 22.3). Raw PSNR carries each map's own difficulty, which the persistence normalisation removed. Within the arenas d orders nothing (Spearman with PSNR −0.07, −0.16, −0.28; with LPIPS −0.19, −0.21, +0.14).
-
-What the data can and cannot give yet. The adaptation runs' per-step files compare the prediction with the decoded ground truth (D(z) rather than the raw frame), so raw curves exist only where the adapters were rescored against raw frames: 0 (the zero-shot read, the same 256 windows per arena), 4k and 8k (items 11 and 13). All reads score identical windows, with equal upper bounds.
-
-## The 8k grid as the headline (figure lead, 2026-09-27 evening)
-
-Built by `paper/make_adapt_figures.py --headline-variant g8k --with-raw` twice: tuned decoder (`--decoder tuned --home-json results/home_unet_tuned/metrics.json`, into `figures/tuned/` and `tables/tuned/`) and stock (`--home-json results/fresh_rescore/home_unet200k_ema/val/metrics.json`, into `figures/` and `tables/`). Inputs: the 13 `results/adapt/unet200k_arenas13_map??_r16_k8_s0_g8k/` runs, non-EMA weights, 256 held-out windows per arena, reads at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k. Figure 4 keeps its 5.5 x 1.4 in slot and the per-arena appendix figure its 5.5 x 3.0 in. The zero-shot figures (3b and its variants) came out byte-identical. In panel (b) the half-gap line's label now reads "half gap" (Table 3's words) and is placed where no dot or budget label meets it (`half_gap_x`): at 8k arena 8 crosses at the last read with 0.51, and its "8k" ran into the old "half of the gap" label.
-
-What moved against the 4k headline (tuned decoder, the body's; medians over 13 arenas with 95% arena-bootstrap intervals):
-
-| | 4k headline (base runs) | 8k grid |
-|---|---|---|
-| arenas past half gap by 4k | 9 of 13 [6, 12] | 9 of 13 (same arenas crossing by 4k) |
-| arenas past half gap by 8k | n/a | 11 of 13 [8, 13]; arenas 1 and 8 cross at 8k |
-| censored at the budget | 1, 8, 12, 16 | 12, 16 |
-| median budget to half gap | 1,000 [250, >4,000]; 4 censored | 1,000 [250, 8,000]; 2 censored |
-| median A at 0 / 4k / 8k (dB) | 2.04 / 3.80 [3.45, 4.39] / n/a | 2.04 / 3.80 [3.46, 4.33] / 3.94 [3.56, 4.47] |
-| share of the gap closed at the budget | 0.58 [0.49, 0.74] at 4k | 0.62 [0.52, 0.78] at 8k |
-| arena 7: budget / share / A at the budget | 250 / 0.70 / 3.86 | 150 / 0.74 / 4.02 (150 is a read the 4k grid did not have; its first read after 0 was 250) |
-| past $A_\text{train}$ | arena 9 only | arena 9 only |
-| Spearman S0 with A at the budget | 0.90 | 0.88 |
-
-The last 4k updates add little: A rises 0.10 dB on average from 4k to 8k, on all 13 arenas. By 250 updates the arenas reach 0.66 of their 0-to-8k gain on average (0.69 of the 0-to-4k gain in the 4k set). Stock decoder: 9 of 13 past half gap by 8k (8 by 4k within this grid; the 4k set had 9 by 4k), censored 1, 8, 12, 16; median A 1.80 to 3.14 at 4k and 3.23 [2.88, 3.76] at 8k; median budget 2,000.
-
-Guard reads (the score_adapt guard rows at steps 0 and 8000, stock decoder, live weights, 256 windows each; the 4k set had them on arena 7 only). Forgetting: every arena loses on the training maps, whose A falls from 4.12 dB unadapted to 2.46 to 3.83 dB at 8k (median change −0.59 dB, range −1.65 on arena 7 to −0.28 on arena 8). Directional: correct on a median of 0.809 of turning windows at step 0 and 0.844 at 8k (range 0.770 to 0.898), at or above step 0 on all 13 arenas. The stock Table 3 carries these (−0.59 / 0.84; arena 7 −1.65 / 0.84). The tuned Table 3 leaves forgetting and directional as `\tbd`: the tuned rescore rows did not score the training maps or the directional check.
-
-M and G at 8k (item 11: the 8k-grid adapters rescored against the raw frames through the fine-tuned decoder, `results/fresh_rescore/adapt8000_live_tuned/` and `adapt4000g8k_live_tuned/`; `make_adapt_figures.py` now fills G, like M, from the adapter's raw-frame read at the budget). Median M at 8k −0.026 [−0.047, −0.020]; the model's scene LPIPS is below raw persistence's on 12 of 13 arenas (11 at 4k), and arena 6 ties it at +0.001 (0.1961 against 0.1949). The steward's count of 13 compares with persistence rendered through the decoder, not the raw frame that M uses. Median G at 8k 3.38 dB (2.62 to 4.54); the training maps' own G is 3.36. Arena 7: M −0.034 [−0.041, −0.028], G 4.54. The 8k-grid adapter at 4k against the base run's 4k adapter, per arena: A +0.01 dB median (−0.06 to +0.08), M 0.000 (−0.003 to +0.004), G −0.01 dB (−0.05 to +0.05), inside episode noise, so the two 4k reads are interchangeable.
-
-Cross-arena control (`results/cross_arena/adapter_mapXX_on_mapYY/`, each arena's 4k adapter scored on the next arena's held-out windows, stock decoder): the foreign adapter scores at the target's zero-shot level, median paired difference −0.05 dB (range −0.91 to +1.44; above zero-shot on 6 of 13), and 1.28 dB below the target's own adapter. The gain is specific to the arena adapted on.
-
-## Body
-
-| Label | What it shows | Produced by | File the slot expects | Status |
-|---|---|---|---|---|
-| `fig:teaser` (Figure 1) | Two rows (forward, attack), each button held on all 16 steps: in-domain block from training maps 5 (forward, ep6059 t239) and 3 (attack, ep6037 t55) (context, prediction, ground truth) and arena 7 block (context, zero-shot, adapted, ground truth) from rollouts restarted after 32 ground-truth context tics. Since Sep 27 evening the slot holds main's `--simple` version (headers and column names only: no horizon, adapter, held-button or map notes; "prediction" for the in-domain model column; "in distribution"); the annotated version is `fig_teaser_B_labels.pdf`. The caption is 35 words; the 16-tic, decoder and persistence facts live in Method and Results | the Figure 1 section's command plus `--simple` (stem gains `_simple`), copied into the slot | `figures/fig_teaser_B.pdf`, 5.5 x 1.5 in | drawn (simple); annotated: `fig_teaser_B_labels.pdf`; the map-2 version `fig_teaser_B_map2.pdf` |
-| `fig:method` (Figure 2) | Method overview: data with a real gameplay frame, three backbones under one next-tic recipe, post-training as world-model adaptation and decoder fine-tune, evaluation against the raw frame with the reconstruction upper bound and the directional check | `paper/figures/fig1_method.tex` and its assets | `figures/fig1_method.pdf`, 5.5 x 1.8 in | drawn; panel (d) in raw terms since eb2a050 |
-| `fig:adapt` (Figure 3) | The merged figure: (a, b) raw scene PSNR and LPIPS per arena before (open) and after 8k updates (filled), the reconstruction upper bound as a black tick, the training maps dashed; (c, d) each arena's raw trajectory on shared y axes; arenas coloured by group (hard, medium, easy by the zero-shot gap to the upper bound); keys above and below | `paper/make_raw_figures.py` | `figures/raw/raw_row.pdf`, 5.5 x 1.75 in | drawn; panels (c, d) have the 0, 4k and 8k raw reads until item 13 adds 50 to 2k |
-| `tab:indomain` (no longer in the body; its rows merged into Table 1) | Three rows in domain: one- and four-tic PSNR / LPIPS against persistence, 256-tic rollout PSNR against copy-seed, directional score | U-Net: dossier 5.1 and 4.5 (200k EMA; frozen reads). PixArt: `RESEARCH_CONTEXT.md` 2026-09-26 12:00 and 12:10 (155k TF, 150k rollout and directional). SD 3.5: 2026-09-26 17:10 (140k) | table in `main.tex` | U-Net exists (stock decoder); PixArt and SD 3.5 provisional until their 200k reads (PixArt Sep 26 night, SD 3.5 about Sep 28 00:30); tuned-decoder and scene-only columns pending (`scripts/spiderman/rescore_tuned_decoder.sh`) |
-| `tab:unseen` (Table 1) | Scene PSNR and LPIPS one tic ahead against the raw frame, the reconstruction upper bound of each backbone's decoder and the directional score, training maps against unseen arenas per backbone (hand-set in main.tex) | the fresh-rescore reads (`paper/tables/tuned/raw_summary.json` for the U-Net and PixArt-α rows) | table in `main.tex` | SD 3.5 rows provisional until its 200k read |
-| `tab:cost` (Table 2) | Arenas grouped by the zero-shot gap to the upper bound (hard, medium, easy, all 13): medians of raw scene PSNR (zero-shot, 4k, 8k, upper bound) and LPIPS (zero-shot, 4k, 8k) and the budget to close half the excess gap | `paper/make_raw_figures.py` | `tables/tuned/adapt_groups.tex` | numbers exist for 0, 4k and 8k; budgets \tbd until item 13; the LoRA / full fine-tune / SD 3.5 row blocks are queued for Monday |
-
-## Appendix
-
-| Label | What it shows | Produced by | Status |
-|---|---|---|---|
-| `tab:recipe` | Architecture, latent space, parameters, control path, memory, throughput of the three rows | dossier section 3 table; `backbones.py` | exists |
-| `tab:perarena` | Per arena (17): D, persistence, ceiling, `A` (1 and 4 tics), `M`, `G`, raw gain, directional | rows generated from the frozen `*_h{1,4}/metrics.json` and `distances_sd1.json` (primary entries), not typed | provisional (fresh-set rescore); directional pending except arena 6 (0.789) |
-| `fig:step-lpips` | The step without persistence: zero-shot raw scene LPIPS against the frame distance d for the 4 training maps and 13 arenas, three backbones; every arena worse than every training map, d orders nothing within the arenas | `paper/make_raw_figures.py` | `figures/raw/raw_fig3a_lpips.pdf`, 2.25 x 1.5 in | drawn (no panel letter since 8b72da9) |
-| `tab:checks` | The five pre-declared validation checks of D and their results | `results/distance_study/distances_sd1.json` checks; `figure_unet_h1_amended/stats.json` amended assessment | exists (on the 30-map set) |
-| `tab:collapse` | SD 3.5 collapse events (a)/(b)/(c), live against EMA, same 16 windows, 55k to 130k, with and without 70k | recomputed from `results/sd35_stability/collapse_rates_50k_130k.md` | exists; PixArt 200k rows pending |
-| `fig:collapse` | SD 3.5 70k live versus EMA rollout strip, two validation windows, tics 1 to 256 | `tools/collapse_strip.py` at `42a4688` | exists: `paper/figures/sd35_70k_live_vs_ema_rollout_strip.jpg` |
-| `tab:perarena-adapt` | Per unseen arena: zero-shot gap to the upper bound, the budget's threshold gap, the budget, raw scene PSNR and LPIPS at 0, 4k and 8k, forgetting (decoded reference, stock decoder, daggered) and the directional check at 8k | `paper/make_raw_figures.py` | `tables/tuned/adapt_perarena.tex` (raw since b1e2e69; the persistence-based table is `adapt_perarena_A.tex`) | budgets \tbd until item 13; raw forgetting needs a raw guard rescore |
-| `fig:adapt-margin` (Figure 5) | `M` against LoRA updates, one line per unseen arena coloured by D, with zero and the training maps' margin, censored arenas open, full fine-tune on arena 7 in black | `score_adapt.py score` rows (live weights) | `figures/fig5_adaptation_margin.pdf`; pending with the 13-arena runs |
-| `tab:stockrows` | The stock-decoder rows of body Table 2 (U-Net and PixArt-α, training maps and unseen arenas) | `results/fresh_rescore/{unet200k_ema,pixart200k_ema}` scene keys (paper owner, 2026-09-27) | exists |
-| `fig:training-curves` | Training curves of the three backbones, EMA solid and non-EMA dotted, absolute full-frame PSNR against the raw frame (stock decoder), no persistence; the EMA warm-up below the axis floor is listed in the sidecar | `tools/training_curves.py` | `figures/figA_training_curves.pdf`, 5.5 x 1.8 in; absolute since b5c6d30 (SD 3.5 to 200k Monday) |
-| `fig:adapt-arenas` | Per-arena adaptation curves with episode-bootstrap bands and half-gap thresholds | `paper/make_adapt_figures.py` | `figures/tuned/figA_adapt_arenas.pdf`; the raw redraw (raw PSNR per arena with the half-excess-gap threshold line, 5.5 x 3.0 in) waits on item 13's raw grid reads |
-| `fig:adapt-ladder` | Data ladder: the PSNR gain over each arena's own 0-update read (A minus A0; stock decoder, decoded ground truth) at 4k against adaptation episodes on arenas 7, 8, 12, 16 | `paper/make_adapt_figures.py` | `figures/fig_adapt_ladder.pdf`, 2.7 x 1.6 in; gain form since the ladder commit |
-
-## Numbers in the text that are not in a table
-
-| Where | Number | Source | Status |
-|---|---|---|---|
-| Introduction, Section 2 | persistence 19.4 to 23.2 dB on the unseen arenas; model PSNR tracks it at Spearman 0.95; raw gain tracks it at −0.77 | recomputed from the frozen h1 metrics (13 unseen arenas) | provisional |
-| Section 2, Appendix B | HUD share of the ceiling's squared error per window, geometric mean over windows, 39 to 68 %; persistence HUD PSNR 88 to 96 dB | (32/240) × 10^((mean `vae_psnr` − mean `hud_vae_psnr`)/10) per arena, and `persist_hud_psnr_raw`, from the 17 h1 `metrics.json` | provisional |
-| Section 3 | D ranges, within-arena Spearman of `A` on D −0.23, of raw gain −0.02 | recomputed from the frozen h1 metrics and `distances_sd1.json` | provisional |
-| Section 3 | 30-map partial Spearman −0.73 [−0.84, −0.32] | `results/distance_study/figure_unet_h1/stats.json` | exists |
-| Section 3 | collapse counts 23 / 256 against 9 / 256, 11 against 8 without 70k | `results/sd35_stability/collapse_rates_50k_130k.md` | exists |
-| Appendix A (removed from Section 3 by review item F26) | sampler trade 10 to 50 steps: −0.25 dB, −0.024 LPIPS | dossier 4.2 (U-Net 200k live) | exists |
-| Section 4 | cost line 3.60 dB; step-0 `A` 0.72 to 2.68 dB; 5 arenas already past half the line (9, 11, 13, 15, 16) | recomputed from the frozen h1 metrics | provisional; the tuned-decoder, scene-row line replaces it |
-| Section 4 | 4.2M trained parameters, 0.49 % | `RESEARCH_CONTEXT.md` 2026-09-26 20:10 (`lora.parameter_counts`) | exists |
-
-## Figure 1 (method)
+## Figure 2 provenance (the method figure, `fig:method`)
 
 File: `figures/fig1_method.pdf`, 5.5 x 1.8 in, included at scale 1 (`\includegraphics{figures/fig1_method.pdf}`); source `figures/fig1_method.tex`, images `figures/assets/fig1_*.png`. Terms follow the Sunday diff's terminology table (section 13 of `paper/diffs/2026-09-27-sunday-adaptation.md`).
 
@@ -191,14 +119,4 @@ Panel (d) redrawn in the raw terms (figure lead, 2026-09-27 evening; same 5.5 x 
 
 Review items this version closes (round 1, `review_figures_round1_fable.md`, agreed set): Fable 8 (a separate stock-decoder input to the decoder fine-tune), 9 (hatched output frames removed; real frames in (a)), 10 (stacking note), 11 (colour only on the three backbone outlines; two thumbnail stacks), 12 (agent, bots and episode length moved to this caption; parameter counts left to `tab:recipe`); Astra 8 as changed (full 5.5 in width kept so nothing prints under 6 pt), 10, 11, 12, 13 (the adapter arrow leaves the U-Net box only), 14 (10-step DDIM sampler between $\hat v$ and $\hat z_{t+1}$), 15 (episode counts per map and per arena), 16 (endpoints $A$, $M$, directional; $G$ and $S_0$ here), 17 (this caption). Astra 9 not applied (Times kept, the paper's text font).
 
-## Placeholders (what each blue mark in the paper waits on; the sources carry no comments)
-
-| where | waits on | when |
-|---|---|---|
-| Contribution (3), Section 4 protocol, Table 3 "Full fine-tune" column | the full fine-tune comparator on every arena at 2e-5 | Monday |
-| Table 3 forgetting and directional cells; the same two columns of the per-arena adaptation table | stock-decoder guard reads exist for all 13 arenas (the 8k block above); the tuned table needs a tuned guard rescore, or a decision to quote the stock reads | decision |
-| Table 3, Figure 4, every 4k adaptation number in Sections 4 and 5 | the 8k set replaces the 4k set, numbers only: tables and figures regenerated (the 8k block above); the text edits are the paper owner's | now |
-| Table 2's SD 3.5 rows (170k, provisional), SD 3.5's four-tic 21.59 (140k), the SD 3.5 marks in Figure 3 and the training curves | the SD 3.5 200k read and fresh-set rescore | Monday, from 00:30 |
-| Appendix decoder paragraph | the SD 3.5 decoder fine-tune (gate about 14:05 today, column Monday) | Monday |
-| Appendix latent-skill section, S at 4k for adapter against full fine-tune | the full fine-tune comparator | Monday |
-| Appendix pre-registered test, family-covariate interval [-0.63, +0.13] | a rerun of the structural controls with the per-window files | not scheduled |
+The caption quoted above predates the SD 3.5 decoder fine-tune (its reads have gone through the fine-tuned SD 3.5 decoder since Sep 28 09:00) and the raw panel (d); `main.tex` holds the caption as set.
