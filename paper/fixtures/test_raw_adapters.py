@@ -170,6 +170,7 @@ def test_runs_group_into_blocks_with_the_8k_grid_preferred_for_the_u_net(tmp_pat
     px = blocks["pixart_lora"]
     assert (px["decoder"], px["identity"], sorted(px["arenas"])) == ("stock", "hub:stock", [7, 16])
     r = px["arenas"][7]
+    assert (r["decoder"], r["identity"]) == ("stock", "hub:stock")                   # per arena, for mixed blocks
     assert r["grid"] == [0, 250, 4000] and r["gpu_hours"]["4000"] == pytest.approx(1.0)
     assert r["reads"][4000]["quantity"] == "raw" and r["reads"][4000]["psnr"] == pytest.approx(27.0 - 3.0)
     assert blocks["unet_lora"]["arenas"][7]["run"].endswith("_g8k")          # the 8k grid over the base run

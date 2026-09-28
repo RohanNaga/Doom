@@ -239,9 +239,9 @@ def _by_step(rows, decoder):
 
 
 def load_blocks(adapt_root, refs, k=8, seed=0):
-    """{"<backbone>_<kind>": {backbone, kind, decoder, identity, arenas: {arena: {run, decoder, grid, reads,
-    gpu_hours}}}} over the eight-episode, seed-0 runs under `adapt_root`; `refs` is {backbone: {decoder: {arena:
-    reference}}}."""
+    """{"<backbone>_<kind>": {backbone, kind, decoder, identity, arenas: {arena: {run, decoder, identity, grid,
+    reads, gpu_hours}}}} over the eight-episode, seed-0 runs under `adapt_root` (the block's decoder "mixed" when
+    its arenas differ); `refs` is {backbone: {decoder: {arena: reference}}}."""
     runs = {}
     for name in sorted(os.listdir(adapt_root)) if os.path.isdir(adapt_root) else []:
         meta = run_meta(name)
@@ -273,5 +273,6 @@ def load_blocks(adapt_root, refs, k=8, seed=0):
                                                          "identity": identity, "arenas": {}})
         if block["decoder"] != decoder:
             block["decoder"] = "mixed"
-        block["arenas"][arena] = {"run": name, "decoder": decoder, "grid": grid, "reads": reads, "gpu_hours": hours}
+        block["arenas"][arena] = {"run": name, "decoder": decoder, "identity": identity, "grid": grid, "reads": reads,
+                                  "gpu_hours": hours}
     return blocks

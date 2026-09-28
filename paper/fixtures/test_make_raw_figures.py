@@ -135,6 +135,22 @@ def export(tmp_path):
                      "heldout_per_window": f"/sata2/x/adapt/{run.name}/scores/{stepdir}/heldout/per_window.csv"})
     with open(run / "scores.jsonl", "w") as f:
         f.write("\n".join(json.dumps(r) for r in rows) + "\n")
+    # SD 3.5 LoRA on arena 9 as Superman's runs arrive before Monday's rescore: the stock decoder, per-window files
+    # against the decoded ground truth only (no raw columns)
+    run = adapt / "sd35_200k_arenas13_map09_r16_k8_s0"
+    rows = []
+    for step in (0, 4000):
+        stepdir = f"step{step:07d}_live_sm"
+        write_windows(str(run / "scores" / stepdir / "heldout" / "per_window.csv"),
+                      [{"episode": 100 + i, "map": 9, "dup_raw": 0, "dup_latent": 0,
+                        "scene_psnr_dec": 30.0 + step / 4000 + off, "scene_lpips_dec": 0.10 + off / 100}
+                       for i, off in enumerate((-0.3, -0.1, 0.1, 0.3))])
+        rows.append({"step": step, "weights": "live", "grid": sd_grid, "heldout_decoders": ["stock"],
+                     "decoders": {"stock": {"identity": "hub:sd35"}}, "eval_fingerprint": "sm",
+                     "scored_at": f"t{step}",
+                     "heldout_per_window": f"/home/x/adapt/{run.name}/scores/{stepdir}/heldout/per_window.csv"})
+    with open(run / "scores.jsonl", "w") as f:
+        f.write("\n".join(json.dumps(r) for r in rows) + "\n")
     return fresh, dist, tdist
 
 
@@ -184,6 +200,28 @@ def test_block_labels_count_arenas_and_mark_reads_against_the_decoded_ground_tru
     assert mrf.block_label("SD 3.5 LoRA", some, True) == "SD 3.5 LoRA, 2 of 13 (6, 7)$^\\ddagger$"
     none = {"n": 0, "n_wanted": 13, "wanted": list(range(13)), "arenas": [], "quantity": None}
     assert mrf.block_label("PixArt LoRA", none, True) == "PixArt LoRA, all 13"
+
+
+def test_a_block_mixing_raw_and_decoded_arenas_reports_the_raw_ones_and_lists_the_rest():
+    def arena(p0, p4, quantity):
+        reads = {st: {"quantity": quantity, "psnr": p, "lpips": 0.3 - 0.01 * p, "upper": 26.0 if quantity == "raw"
+                      else None} for st, p in ((0, p0), (4000, p4))}
+        return {"grid": [0, 4000], "reads": reads, "gpu_hours": {}}
+    # Spiderman's two arenas read raw; Superman's two only against the decoded ground truth (30 dB and up)
+    data = {6: arena(17.0, 19.0, "raw"), 7: arena(18.0, 20.0, "raw"), 8: arena(30.0, 31.0, "dec"),
+            9: arena(31.0, 32.0, "dec")}
+    b = mrf.block_summary(data, [6, 7, 8, 9], 3.0, "half_excess_gap", 4000)
+    assert (b["n"], b["arenas"], b["quantity"], b["decoded_only"]) == (2, [6, 7], "raw", [8, 9])
+    assert b["psnr_zero_shot"] == pytest.approx(17.5) and b["psnr_4k"] == pytest.approx(19.5)
+    assert mrf.block_label("SD 3.5 LoRA", b, True) == "SD 3.5 LoRA, 2 of 4 (6, 7)"          # no dagger
+    empty = {"arenas": [], "n": 0, "budget_middle": None, "censored": None, **dict.fromkeys(
+        ("psnr_zero_shot", "psnr_4k", "psnr_8k", "ceiling", "lpips_zero_shot", "lpips_4k", "lpips_8k"))}
+    tex = mrf.groups_table({g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}, budgets_final=False,
+                           blocks=[("SD 3.5 LoRA, 2 of 4 (6, 7)", b, "sha256:sd35tuned")])
+    assert "arenas 8, 9 read against the decoded ground truth only" in tex
+    # with no raw arena the block reports them all, daggered
+    only_dec = mrf.block_summary({a: data[a] for a in (8, 9)}, [6, 7, 8, 9], 3.0, "half_excess_gap", 4000)
+    assert (only_dec["arenas"], only_dec["quantity"], only_dec["decoded_only"]) == ([8, 9], "dec", [])
 
 
 def test_the_budget_rules_set_their_thresholds_in_raw_psnr():
@@ -308,6 +346,9 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     sd35 = blocks["sd35_lora"]
     assert (sd35["decoder"], sd35["decoder_identity"]) == ("tuned", "sha256:sd35tuned")
     assert sd35["g_train"] is None and sd35["budget_final"] is False and "tuned" in sd35["g_train_note"]
+    # Superman's decoded-only arena 9 stays out of the raw medians until it is rescored raw, and the table says so
+    assert (sd35["arenas"], sd35["decoded_only"], sd35["quantity"]) == ([6], [9], "raw")
+    assert "$^\\ddagger$" not in sd and "arenas 9 read against the decoded ground truth only" in tex
     assert blocks["pixart_lora"]["g_train"] == pytest.approx(28.0 - (22.45 + 0.2)) and not blocks["pixart_lora"].get(
         "g_train_note")
     assert blocks["unet_full"]["n"] == 0

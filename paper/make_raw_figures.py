@@ -432,13 +432,24 @@ def _budget_cell(g, final=True):
     return budget_label(g["budget_middle"]) + (f"; {g['censored']} of {g['n']} censored" if g["censored"] else "")
 
 
-def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, check=8000):
-    """One per-backbone block of Table 2: over the `wanted` arenas the block has a zero-shot (step 0) read for, the
-    medians of scene PSNR and LPIPS at 0, the headline and the check step (None when the block's grid stops before
-    it), the upper bound, the budget (final only when every arena's grid reads are raw), the quantity the reads are
-    in (`raw_adapters.step_read`) and the median GPU-hours to the headline. `arenas_data` is {arena: {grid, reads:
-    {step: read}, gpu_hours}}."""
+def split_arenas(arenas_data, wanted, headline=HEADLINE_STEP, check=8000):
+    """(reported, decoded_only) of the `wanted` arenas with a zero-shot (step 0) read. An arena is raw when its
+    zero-shot, headline and check reads are raw wherever they exist. When any arena is raw the block reports the raw
+    ones and lists the rest, which wait for a raw rescore: a median across raw reads and reads against the decoded
+    ground truth mixes two quantities. With no raw arena it reports them all (against the decoded ground truth)."""
     present = [a for a in wanted if a in arenas_data and 0 in arenas_data[a]["reads"]]
+    raw = [a for a in present if all(r["quantity"] == "raw" for st, r in arenas_data[a]["reads"].items()
+                                     if st in (0, headline, check))]
+    return (raw, [a for a in present if a not in raw]) if raw else (present, [])
+
+
+def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, check=8000):
+    """One per-backbone block of Table 2: over the `wanted` arenas it reports (`split_arenas`), the medians of scene
+    PSNR and LPIPS at 0, the headline and the check step (None when the block's grid stops before it), the upper
+    bound, the budget (final only when every arena's grid reads are raw), the quantity the reads are in
+    (`raw_adapters.step_read`), the arenas left out as decoded only, and the median GPU-hours to the headline.
+    `arenas_data` is {arena: {grid, reads: {step: read}, gpu_hours}}."""
+    present, decoded_only = split_arenas(arenas_data, wanted, headline, check)
 
     def get(a, step, key):
         return (arenas_data[a]["reads"].get(step) or {}).get(key)
@@ -459,7 +470,7 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
         budgets.append(budget_step([(st, reads[st]["psnr"]) for st in grid], threshold))
     hours = [arenas_data[a].get("gpu_hours", {}).get(str(headline)) for a in present]
     return {"n": len(present), "n_wanted": len(wanted), "wanted": list(wanted), "arenas": present,
-            "quantity": quantity,
+            "quantity": quantity, "decoded_only": decoded_only,
             "psnr_zero_shot": median([get(a, 0, "psnr") for a in present]),
             "psnr_4k": median([get(a, headline, "psnr") for a in present]),
             "psnr_8k": median([get(a, check, "psnr") for a in present]) if has_check else None,
@@ -527,8 +538,11 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
                      f"{num(b['lpips_8k'], 3)} & {budget} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     for label, b, identity in blocks:
+        left = b.get("decoded_only") or []
         lines.append(f"% {label}: decoder {identity or '--'}, reads {b['quantity'] or 'none'}, {b['n']} arenas"
-                     + (", dagger: against the decoded ground truth" if b["quantity"] not in (None, "raw") else ""))
+                     + (", dagger: against the decoded ground truth" if b["quantity"] not in (None, "raw") else "")
+                     + (f"; arenas {', '.join(map(str, left))} read against the decoded ground truth only, left out "
+                        "until rescored raw" if left else ""))
     return "\n".join(lines) + "\n"
 
 
@@ -978,12 +992,20 @@ def main(argv=None):
     for key, name, wanted in BLOCKS:
         backbone = key.split("_")[0]
         data = unet_data if key == "unet_lora" else loaded.get(key, {}).get("arenas", {})
-        decoder = "tuned" if key == "unet_lora" else loaded.get(key, {}).get("decoder")
-        identity = (loaded.get("unet_lora", {}).get("identity") or "fine-tuned SD 1") if key == "unet_lora" \
-            else loaded.get(key, {}).get("identity")
+        wanted_list = list(wanted) if wanted else arenas
+        if key == "unet_lora":
+            decoder, identity = "tuned", loaded.get("unet_lora", {}).get("identity") or "fine-tuned SD 1"
+        else:
+            # the decoder of the arenas the block reports, not of those it leaves out as decoded only
+            reported, _ = split_arenas(data, wanted_list, a.headline_step)
+            decs = sorted({data[m].get("decoder") for m in reported} - {None})
+            decoder = decs[0] if len(decs) == 1 else "mixed" if decs else loaded.get(key, {}).get("decoder")
+            identity = next((data[m]["identity"] for m in reported
+                             if data[m].get("decoder") == decoder and data[m].get("identity")),
+                            loaded.get(key, {}).get("identity"))
         gap_decoder = decoder or ("tuned" if backbone != "sd35" else "stock")
         g, level = rad.in_distribution_gap(a.fresh_root, zero_rows[backbone], gap_decoder)
-        b = block_summary(data, list(wanted) if wanted else arenas, g, a.budget_rule, a.headline_step)
+        b = block_summary(data, wanted_list, g, a.budget_rule, a.headline_step)
         b.update({"decoder": decoder, "decoder_identity": identity, "g_train_source": zero_rows[backbone],
                   "g_train_note": None if g is not None else
                   f"no training-map read of {zero_rows[backbone]} through the {gap_decoder} decoder: "
