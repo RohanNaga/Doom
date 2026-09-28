@@ -14,7 +14,7 @@
 % \figslot{file}{width}{height}{what it will show}: the figure when its file exists, a labelled box otherwise
 \newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][\dimexpr#3-2\fboxsep-2\fboxrule\relax][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
 
-\title{How Much Adaptation Do World Models Need? A Study of Domain Shifts in Doom}
+\title{How Much Adaptation Do World Models Need?\\A Study of Domain Shifts in Doom}
 
 \author{
   Rohan Nagabhirava\\
