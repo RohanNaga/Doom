@@ -72,7 +72,7 @@ Our paper addresses these concerns and contributes the following:
 \begin{figure}[t]
 \centering
 \figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, two rows}
-\caption{On an unseen arena the U-Net keeps moving and firing but renders the arena in training-map masonry; eight episodes restore it. Left, training maps 5 and 3 (in distribution); right, unseen arena 7 zero-shot and after 4k adapter updates on 8 episodes. Selected windows, rolled out 16 tics past the context frame with the row's button held throughout; fine-tuned decoder, raw ground truth, scene PSNR.}
+\caption{On an unseen arena the U-Net still moves and fires but renders the training maps' masonry; eight adaptation episodes restore the arena. Left: training maps (in distribution). Right: unseen arena 7, zero-shot and after adaptation. Each row holds one button for 16 tics; scene PSNR against the recorded frame.}
 \label{fig:teaser}
 \end{figure}
 
