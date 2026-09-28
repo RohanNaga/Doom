@@ -118,7 +118,6 @@ On 200 validation frames it raises the scene reconstruction from 26.9 to 28.4~dB
 We use it for every pixel score of the U-Net and PixArt-$\alpha$ unless stated otherwise; SD~3.5 uses its own decoder, fine-tuned the same way.
 
 \textbf{In-distribution performance.} On the training maps the three backbones reach a scene PSNR of 25.20, 25.18 and \prov{25.38}~dB and an LPIPS of 0.158, 0.159 and \prov{0.126} one tic ahead, 3.4, 3.4 and \prov{6.5}~dB below their decoders' reconstruction upper bounds, so SD~3.5 is the best of the three in distribution while leaving the most room below its own bound, and they turn the right way (directional 0.84 to 0.86 against 0.885 for the ground-truth frames; Table~\ref{tab:unseen}).
-Four tics ahead they reach 21.33, 21.29 and \prov{21.59}~dB (stock decoders, full frame; \prov{SD~3.5 at 140k}).
 
 \textbf{Post-training.} To move a trained model to a new arena we keep its weights frozen and train a small adapter on a few episodes of that arena, then score the adapted model on held-out episodes at each update budget.
 For each unseen arena we adapt each backbone's 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent of the U-Net; 25.9M, 4.1 percent, of PixArt-$\alpha$; 40.6M, 1.8 percent, of SD~3.5)~\citep{xie2023difffit}.
@@ -195,7 +194,7 @@ Neither the model's own latent-space score nor a frame distance between an arena
 
 On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and 4k adapter updates raise its median scene PSNR from 22.3 to 23.6~dB and lower its LPIPS from 0.303 to 0.210, closing at least half of the extra distance the shift opened to the reconstruction upper bound on every arena.
 The claims cover 13 arenas of one game, one agent, one-tic scoring and mostly one seed.
-One-tic quality does not guarantee stable rollouts: SD~3.5, the best of the three at one tic, collapses in 23 non-EMA and 9 EMA rollouts of 256, and the EMA removes checkpoint-specific collapses, not the failure mode (\appref{app:closedloop}).
+One-tic quality does not guarantee stable rollouts (\appref{app:closedloop}).
 Next are other Doom maps and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot scores so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
 The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.
 \label{body-end}
