@@ -323,6 +323,8 @@ def test_seed_ladder_and_recipe_runs_get_their_own_figures_and_summary_entries(t
     assert seeds[6]["A_budget"] == {"0": pytest.approx(3.0), "1": pytest.approx(3.2)}
     assert seeds[6]["spread_budget"] == pytest.approx(0.2)
     assert s["ladder"]["6"] == {"2": pytest.approx(2.2), "8": pytest.approx(3.0)}
+    # the ladder is drawn as the gain over the arena's own 0-update read (A - A0 = the PSNR gain; copy-last cancels)
+    assert s["ladder_gain"]["6"] == {"2": pytest.approx(2.2 - 1.0), "8": pytest.approx(3.0 - 1.0)}
     recipe = {(e["arena"], e["variant"]): e for e in s["recipe"]}
     assert recipe[(6, "lr5e4")]["A_budget"] == pytest.approx(3.6)
     assert recipe[(6, "lr5e4")]["delta_vs_base"] == pytest.approx(0.6)

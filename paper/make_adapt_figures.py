@@ -1646,36 +1646,40 @@ def fig_seeds(entries, anchors, seeds, decoder, budget, variant, out_dir, spread
     return fs.save(fig, out_dir, "fig3_adaptation_seeds")
 
 
+def ladder_gains(ladder, anchors_step0):
+    """{arena: {k: A_k - A0}}: each ladder rung's gain over the arena's own 0-update read. Copy-last is the same
+    on both reads, so this is the rung's PSNR gain against the decoded ground truth."""
+    return {str(arena): {str(k): v - anchors_step0[int(arena)] for k, v in byk.items() if v is not None}
+            for arena, byk in ladder.items() if anchors_step0.get(int(arena)) is not None}
+
+
 def fig_ladder(ladder, records, anchors_step0, home, out_dir, band=None):
-    """Appendix: A against adaptation episodes (log scale) per arena, dark grey with the arena labelled at its
-    right end; each arena's step-0 A dotted and labelled 'step 0' once; the training maps' line."""
+    """Appendix: the PSNR gain over the arena's own 0-update read (A - A0) against adaptation episodes (log scale)
+    per arena, dark grey with the arena labelled at its right end, the zero line labelled "0 updates". Absolute
+    reads are not drawn: the ladder runs carry only the decoded-reference quantity through the stock decoder."""
     fig, (ax,) = fs.new_figure(HALF_SIZE)
-    ks = sorted({int(k) for v in ladder.values() for k in v})
+    gains = ladder_gains(ladder, anchors_step0)
+    ks = sorted({int(k) for v in gains.values() for k in v})
     ax.set_xscale("log", base=2)
     ax.xaxis.set_major_locator(ticker.FixedLocator(ks))
     ax.xaxis.set_major_formatter(ticker.FixedFormatter([str(k) for k in ks]))
     ax.xaxis.set_minor_locator(ticker.NullLocator())
-    labelled = False
-    vals, ends = [], []
-    for i, (arena, byk) in enumerate(sorted(ladder.items(), key=lambda kv: int(kv[0]))):
-        pts = sorted((int(k), v) for k, v in byk.items() if v is not None)
+    vals, ends = [0.0], []
+    for i, (arena, byk) in enumerate(sorted(gains.items(), key=lambda kv: int(kv[0]))):
+        pts = sorted((int(k), v) for k, v in byk.items())
         vals += [v for _, v in pts]
         ax.plot([k for k, _ in pts], [v for _, v in pts], color=fs.CONTEXT_INK, lw=0.8, ls=arena_line_style(i),
                 marker="o", ms=2.5, mfc=fs.CONTEXT_INK, mec="white", mew=fs.MARKER_EDGE)
         ends.append((pts[-1][0], pts[-1][1], str(arena)))
-        a0 = anchors_step0.get(int(arena))
-        if a0 is not None:
-            vals.append(a0)
-            ax.plot([ks[0], ks[-1]], [a0, a0], color=fs.FAINT, lw=fs.MIN_LW, ls=(0, (1, 1.5)), zorder=1, gid="ref")
-            if not labelled:
-                ax.text(ks[0], a0, "step 0", ha="left", va="bottom", fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
-                labelled = True
+    ax.axhline(0.0, color=fs.BLACK, lw=fs.REF_LW, zorder=1.5, gid="ref")
+    ax.text(0.0, 0.0, " 0 updates", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
+            fontsize=fs.ANNOT_PT, color=fs.INK, gid="decor")
     fs.end_labels(ax, ends, gap=0.16)
-    fs.training_line(ax, home, where=0.0, band=band)
     ax.set_xlim(ks[0] / 1.3, ks[-1] * 1.6)
     ax.set_xlabel("adaptation episodes (log scale)")
-    a_axis(ax, min(vals + [0.0]), max(vals + [home]))
-    ax.set_ylim(bottom=min(vals) - 0.4)
+    ax.set_ylabel("PSNR gain over\n0 updates (dB)")
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1.0))
+    ax.set_ylim(min(vals) - 0.3, max(vals) + 0.4)
     return fs.save(fig, out_dir, "fig_adapt_ladder")
 
 
@@ -2126,6 +2130,7 @@ def main(argv=None):
                "budget": budget, "headline_variant": a.headline_variant, "weights": a.weights, **summary,
                "across_arenas": public(stats),
                "per_arena": records, "seeds": seed_summary, "ladder": ladder_summary,
+               "ladder_gain": ladder_gains(ladder_summary, {r["arena"]: r["A0"] for r in records}),
                "recipe": recipe_entries(anchors, base, recipe, records_of, seed_summary),
                "zero_shot": {k: {**v, "maps": without_paths(v["maps"])} for k, v in zero_shot.items()},
                "zero_shot_absolute": {k: {d: {"source": e[d]["source"], "home": e[d]["home"],
