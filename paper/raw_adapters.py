@@ -150,6 +150,25 @@ def zero_shot_refs(per_window_files, sfx):
     return out
 
 
+def in_distribution_gap(fresh_root, row, decoder):
+    """(gap, (psnr, lpips)): the training maps' own gap to the reconstruction upper bound through `decoder` (pooled
+    over the validation windows of the zero-shot row's home read, `home_<row>` or its `_tuned` twin) and their raw
+    scene PSNR and LPIPS; (None, None) when no home read carries that decoder's columns. The gap is never borrowed
+    from another decoder, whose upper bound is a different one."""
+    sfx = "" if decoder == STOCK else f"_{decoder}"
+    base = row[:-len("_tuned")] if row.endswith("_tuned") else row
+    for name in ((f"{base}_tuned", base) if decoder == "tuned" else (base, f"{base}_tuned")):
+        found = glob.glob(os.path.join(glob.escape(fresh_root), f"home_{name}", "**", "per_window.csv"),
+                          recursive=True)
+        if len(found) != 1:
+            continue
+        windows = read_windows(found[0])
+        upper, psnr = mean_of(windows, f"scene_vae_psnr{sfx}"), mean_of(windows, f"scene_psnr_raw{sfx}")
+        if upper is not None and psnr is not None:
+            return upper - psnr, (psnr, mean_of(windows, f"scene_lpips_raw{sfx}"))
+    return None, None
+
+
 def step_read(rows, run_dir, decoder, ref, step=None, weights="live"):
     """One scored step's read (the module docstring's order), or None when the run carries nothing usable. `rows`
     is the step's rows, latest scored first (or one row); with `step` the step's other held-out files count too."""

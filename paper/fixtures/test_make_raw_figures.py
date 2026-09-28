@@ -119,15 +119,22 @@ def export(tmp_path):
         with open(run / "log.jsonl", "w") as f:
             f.write(json.dumps({"event": "start", "world": 1, "time": 0.0}) + "\n" +
                     json.dumps({"event": "checkpoint", "step": 4000, "time": 5400.0}) + "\n")
-    # SD 3.5 LoRA on arena 6 only, rows with the raw margin and gap (no per-window files), two of its six grid reads
+    # SD 3.5 LoRA on arena 6 only, as the overnight runs leave it: every read of its six-step grid through the
+    # fine-tuned SD 3.5 decoder (`tuned`), per-window raw files under scores/, while the only SD 3.5 training-map read
+    # is the stock decoder's
     run = adapt / "sd35_200k_arenas13_map06_r16_k8_s0"
-    os.makedirs(run)
+    sd_grid = [0, 250, 500, 1000, 2000, 4000]
+    rows = []
+    for step in sd_grid:
+        stepdir = f"step{step:07d}_live_sd"
+        write_windows(str(run / "scores" / stepdir / "heldout" / "per_window.csv"),
+                      windows(6, 17.5 + 2.0 * step / 4000, 0.30 - 0.05 * step / 4000, CEILING[6], "_tuned"))
+        rows.append({"step": step, "weights": "live", "grid": sd_grid, "heldout_decoders": ["stock", "tuned"],
+                     "decoders": {"stock": {"identity": "hub:sd35"}, "tuned": {"identity": "sha256:sd35tuned"}},
+                     "eval_fingerprint": "sd", "scored_at": f"t{step}",
+                     "heldout_per_window": f"/sata2/x/adapt/{run.name}/scores/{stepdir}/heldout/per_window.csv"})
     with open(run / "scores.jsonl", "w") as f:
-        for step, (b, c) in ((0, (0.10, 8.5)), (4000, (0.05, 6.5))):
-            f.write(json.dumps({"step": step, "weights": "live", "grid": [0, 250, 500, 1000, 2000, 4000],
-                                "heldout_decoders": ["stock"], "decoders": {"stock": {"identity": "hub:sd35"}},
-                                "eval_fingerprint": "sd", "scored_at": f"t{step}", "heldout_B_stock": b,
-                                "heldout_C_stock": c}) + "\n")
+        f.write("\n".join(json.dumps(r) for r in rows) + "\n")
     return fresh, dist, tdist
 
 
@@ -296,7 +303,13 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert blocks["pixart_lora"]["quantity"] == "raw" and blocks["pixart_lora"]["decoder"] == "tuned"
     assert blocks["pixart_lora"]["budget_final"] is True and blocks["pixart_lora"]["budget_middle"] == [4000]
     assert blocks["pixart_lora"]["gpu_hours_headline"] == pytest.approx(1.5)
-    assert blocks["sd35_lora"]["decoder_identity"] == "hub:sd35" and blocks["sd35_lora"]["budget_final"] is False
+    # SD 3.5's own fine-tuned decoder has no training-map read: no in-distribution gap and no budget, never the stock
+    # decoder's gap (whose upper bound is another decoder's)
+    sd35 = blocks["sd35_lora"]
+    assert (sd35["decoder"], sd35["decoder_identity"]) == ("tuned", "sha256:sd35tuned")
+    assert sd35["g_train"] is None and sd35["budget_final"] is False and "tuned" in sd35["g_train_note"]
+    assert blocks["pixart_lora"]["g_train"] == pytest.approx(28.0 - (22.45 + 0.2)) and not blocks["pixart_lora"].get(
+        "g_train_note")
     assert blocks["unet_full"]["n"] == 0
     # the per-backbone panel: median raw PSNR and LPIPS against updates, one curve per backbone with raw reads
     assert s["backbone_panel"]["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]

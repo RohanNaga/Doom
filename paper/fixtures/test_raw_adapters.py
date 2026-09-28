@@ -127,6 +127,22 @@ def test_a_step_takes_its_best_read_across_every_row_and_per_window_file_of_that
     assert 8000 not in ra.load_blocks(str(root), {})["pixart_lora"]["arenas"][7]["reads"]
 
 
+def test_the_in_distribution_gap_needs_a_training_map_read_through_the_blocks_decoder(tmp_path):
+    fresh = tmp_path / "fresh"
+    home = [{"episode": 1, "map": 2, "dup_raw": 0, "dup_latent": 0, "scene_vae_psnr": 28.0, "scene_psnr_raw": 24.0,
+             "scene_lpips_raw": 0.15}]
+    write_csv(str(fresh / "home_sd35_170000" / "val" / "per_window.csv"), home)
+    gap, level = ra.in_distribution_gap(str(fresh), "sd35_170000", "stock")
+    assert gap == pytest.approx(4.0) and level == (pytest.approx(24.0), pytest.approx(0.15))
+    # the fine-tuned SD 3.5 decoder has no training-map read yet: no gap, so no budget, rather than the stock one's
+    assert ra.in_distribution_gap(str(fresh), "sd35_170000", "tuned") == (None, None)
+    home_t = [{**home[0], "scene_vae_psnr_tuned": 29.0, "scene_psnr_raw_tuned": 25.5, "scene_lpips_raw_tuned": 0.12}]
+    write_csv(str(fresh / "home_sd35_200000_tuned" / "val" / "per_window.csv"), home_t)
+    gap, _ = ra.in_distribution_gap(str(fresh), "sd35_200000", "tuned")               # a `_tuned` twin counts
+    assert gap == pytest.approx(3.5)
+    assert ra.in_distribution_gap(str(fresh), "sd35_200000_tuned", "tuned")[0] == pytest.approx(3.5)
+
+
 def test_gpu_hours_to_a_step_come_from_the_training_log():
     log = [{"event": "start", "world": 1, "time": 1000.0}, {"event": "checkpoint", "step": 0, "time": 1003.0},
            {"event": "checkpoint", "step": 4000, "time": 1000.0 + 3960.0}]

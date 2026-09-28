@@ -450,7 +450,7 @@ def block_summary(arenas_data, wanted, g_train, rule, headline=HEADLINE_STEP, ch
     quantity = (kinds.pop() if len(kinds) == 1 else "mixed") if kinds else None
     final = bool(present) and quantity == "raw" and g_train is not None
     budgets = []
-    for a in present:
+    for a in present if g_train is not None else ():
         reads, grid = arenas_data[a]["reads"], [st for st in arenas_data[a]["grid"] if st > 0]
         if any(st not in reads or reads[st]["quantity"] != "raw" for st in grid) or upper_of(a) is None:
             final = False
@@ -969,18 +969,6 @@ def main(argv=None):
                           for dec in (("stock", "tuned") if row.endswith("_tuned") else ("stock",))}
     loaded = rad.load_blocks(a.adapt_root, refs)
 
-    def g_train_for(backbone, decoder):
-        """The training maps' own gap to the upper bound under the block's decoder (pooled validation read)."""
-        row = zero_rows[backbone]
-        sfx = "" if decoder in ("stock", None) or not row.endswith("_tuned") else f"_{decoder}"
-        try:
-            h = home_reads(a.fresh_root, row, sfx)["pooled"]
-        except SystemExit:
-            return None, None
-        if h["ceiling_psnr"] is None or h["psnr"] is None:
-            return None, None
-        return h["ceiling_psnr"] - h["psnr"], (h["psnr"], h["lpips"])
-
     unet_hours = loaded.get("unet_lora", {}).get("arenas", {})
     unet_data = {m: {"grid": list(GRID), "gpu_hours": unet_hours.get(m, {}).get("gpu_hours", {}),
                      "reads": {st: {"quantity": "raw", "psnr": p, "lpips": lp, "upper": adaptation[m]["upper_bound"]}
@@ -993,9 +981,13 @@ def main(argv=None):
         decoder = "tuned" if key == "unet_lora" else loaded.get(key, {}).get("decoder")
         identity = (loaded.get("unet_lora", {}).get("identity") or "fine-tuned SD 1") if key == "unet_lora" \
             else loaded.get(key, {}).get("identity")
-        g, level = g_train_for(backbone, decoder or ("tuned" if backbone != "sd35" else "stock"))
+        gap_decoder = decoder or ("tuned" if backbone != "sd35" else "stock")
+        g, level = rad.in_distribution_gap(a.fresh_root, zero_rows[backbone], gap_decoder)
         b = block_summary(data, list(wanted) if wanted else arenas, g, a.budget_rule, a.headline_step)
-        b.update({"decoder": decoder, "decoder_identity": identity, "g_train_source": zero_rows[backbone]})
+        b.update({"decoder": decoder, "decoder_identity": identity, "g_train_source": zero_rows[backbone],
+                  "g_train_note": None if g is not None else
+                  f"no training-map read of {zero_rows[backbone]} through the {gap_decoder} decoder: "
+                  "no in-distribution gap, so no budget"})
         block_stats[key] = b
         block_rows.append((block_label(name, b, wanted is None), b, identity))
         # the panel: raw reads only, every arena the block has
