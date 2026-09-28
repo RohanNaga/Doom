@@ -53,7 +53,7 @@ We then train rank-16 adapters on 8 episodes of each unseen map with \prov{2\%} 
 
 Game world models now render playable worlds from pixels and controls.
 GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond} and Matrix-Game~2 scales the recipe to open worlds~\citep{he2025matrixgame2}.
-Each of these models is evaluated only in the environment it was trained on: the reported score is a held-out trajectory drawn from its own training scenes and none has been shown to generalize to a new environment within the same game.
+Each of these models is evaluated only on held-out rollouts from the environment it was trained on: the reported score is a held-out trajectory drawn from its own training scenes and none has been shown to generalize to a new environment within the same game.
 This holds even for MultiGen, which trains a single Doom model across 100 procedurally generated maps with a pre-trained agent~\citep{po2026multigen}: it reports PSNR, SSIM and LPIPS only on its training distribution, with no map held out for evaluation.
 
 A learned simulator is useful only where it is faithful, and a robot or an agent moving to a new room, level or workspace needs to know how much of its world model still holds there and what it costs to make the rest hold.
@@ -98,8 +98,6 @@ We turn all three into next-tic world models under one shared recipe (Figure~\re
 \textbf{Metrics.} We score every predicted frame against four questions: how accurate is it against the raw ground-truth frame, how realistic does it look, how far is it from the best the decoder could possibly render and does it turn the right way when we mirror the controls? We score the part of each frame that shows the world (rows 0 to 207) and leave out the HUD rows below it, which do not change with the map.
 
 For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\citep{zhang2018lpips}. Absolute PSNR alone does not compare arenas, because it rises with how static a recording is: copying the last context frame forward, the persistence baseline of video prediction~\citep{mathieu2016deep}, already scores 19.8~dB on the unseen arenas (18.5 to 22.5 per arena). For distance from the best render, we read every arena against two references: the \emph{reconstruction upper bound}, the decoder $D$ applied to the ground-truth latent, which is in practice the best a prediction rendered through $D$ can score (median 27.3~dB on the unseen arenas, 28.6 on the training maps), and the in-distribution level, the same model on the training maps; the \emph{gap to the upper bound} is the upper bound's PSNR minus the prediction's. For turning, we compute the \emph{directional} score: the fraction of turning windows whose predicted view turns the other way once we swap left and right in the newest control.
-
-We also ask a fifth question before any decoding happens: how good is the model in its own latent space? We answer it with the \emph{zero-shot latent skill score} $S_0$ (\appref{app:skill}).
 
 \begin{figure}[t]
 \centering
@@ -149,12 +147,12 @@ SD 3.5 Medium & training & \prov{24.50} & \prov{0.146} & \prov{29.99} & \prov{0.
 
 We report what a model loses zero-shot, what post-training recovers and with what budget, and what predicts how far an arena gets.
 
-\textbf{Zero-shot: where the deficit sits.} What does a model keep and what does it lose when it meets an arena it never saw? On unseen arenas the turn response survives (U-Net reversal rates 0.73 to 0.86 per arena against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
+\textbf{Zero-shot: where the deficit sits.} What does a model keep and what does it lose when it meets an arena it never saw? On unseen arenas the turn response survives (U-Net directional scores 0.73 to 0.86 per arena against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
 The appearance does not: the U-Net's scene PSNR falls from 25.2~dB on the training maps to a median 22.3~dB (20.5 to 24.7 per arena), its LPIPS rises from 0.158 to 0.303 (0.229 to 0.401), and its gap to the reconstruction upper bound grows from 3.4 to a median 5.0~dB (3.7 to 6.9).
 Pooled over the 13 arenas, one predicted frame in five has an LPIPS above 0.4, against one in 73 on the training maps; such frames concentrate in arenas 16, 17, 13 and 1 (32 to 59 percent of their windows), while seven arenas stay below 10 percent.
 The decoder is not the limit: it reconstructs the unseen arenas nearly as well as the training maps (median 27.3 against 28.6~dB, LPIPS 0.05 to 0.09).
 The three backbones lose the same things (Table~\ref{tab:unseen}; \appref{app:distance}): the shift looks like a property of the task, not of the architecture or the scale.
-It is a step, not a slope: every unseen arena has a lower zero-shot skill score $S_0$ and a worse LPIPS than every training map for all three backbones (\appref{app:distance}).
+It is a step, not a slope: every unseen arena has a worse LPIPS than every training map for all three backbones (\appref{app:distance}).
 What the model keeps is how actions act on the world: zero-shot on arena 7 the weapon fires and the view advances as in the ground truth (Figure~\ref{fig:teaser}) and the turn response holds; the loss sits in the scene, whose rows fall 2.9~dB (25.2 to a median 22.3) while the map-independent HUD rows fall 0.2~dB (29.7 to 29.5).
 
 \begin{figure}[t]
@@ -172,7 +170,7 @@ By the same 4k updates it recovers a median 72 percent of each arena's rise in L
 Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 The adapters trade some in-distribution skill for it: the training maps' scene PSNR against the decoded ground truth falls on all 13 arenas (median 0.59~dB; stock decoder), while the directional score rises from 0.81 to 0.84.
 
-\textbf{What predicts the outcome.} Neither the zero-shot skill score nor a registered distance orders how far an arena gets in raw terms: $S_0$ correlates only weakly with the 8k gap to the reconstruction upper bound ($+0.38$, $p=0.20$) and with the PSNR gain ($+0.43$, $p=0.14$), and a frame distance $d$ between an arena's recordings and the nearest training map, registered before any scoring, separates the training maps from every unseen arena but orders none of the 13 (Spearman $-0.07$ with the zero-shot PSNR; \appref{app:distance}).
+Neither the model's own latent-space score nor a frame distance between an arena's recordings and the training maps predicts how far an arena gets (\appref{app:distance}).
 
 \begin{table}[tb]
 \centering\footnotesize
@@ -189,7 +187,7 @@ The adapters trade some in-distribution skill for it: the training maps' scene P
 On unseen arenas a Doom world model keeps its turn response and its action effects and loses the arena's appearance; eight episodes and at most 8k adapter updates raise its median scene PSNR from 22.3 to 23.7~dB and lower its LPIPS from 0.303 to 0.204, closing half of the excess gap over the in-distribution gap on all 13 arenas by 4k.
 The claims cover 13 arenas of one game, one agent, one-tic scoring and mostly one seed.
 One-tic quality does not guarantee stable rollouts: SD~3.5, best at one tic on the full frame with stock decoders, collapses in 23 non-EMA and 9 EMA rollouts of 256, and the EMA removes checkpoint-specific collapses, not the failure mode (\appref{app:closedloop}).
-Next are other Doom maps and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot skill score so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
+Next are other Doom maps and other games, to see whether the same recipe transfers; detecting a shift from the model's own zero-shot scores so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
 The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.
 \label{body-end}
 
