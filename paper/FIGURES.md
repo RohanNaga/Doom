@@ -32,7 +32,7 @@ Every number drawn or tabled by the generator is in `paper/tables/tuned/raw_summ
 | Label | File, slot | Produced by | Status |
 |---|---|---|---|
 | `tab:recipe` | hand-set in `appendix.tex` | dossier section 3; `backbones.py` | the paper owner's (not generated) |
-| `fig:training-curves` | `figures/figA_training_curves.pdf`, 5.5 x 1.8 in | `tools/training_curves.py` | stock decoders, full frame; SD 3.5 to 155k (its caption says so) |
+| `fig:training-curves` | `figures/figA_training_curves.pdf`, 5.5 x 1.8 in | `tools/training_curves.py` | stock decoders, full frame; SD 3.5 curve to 155k plus an unjoined 200k marker, no 140k or 170k reads left (its caption says so) |
 | `tab:perarena` | hand-set in `appendix.tex` | fresh-rescore reads, U-Net 200k EMA, fine-tuned decoder | the paper owner's (not generated) |
 | `tab:stockrows` | hand-set in `appendix.tex` | `results/fresh_rescore/{unet200k_ema,pixart200k_ema}` scene keys | the paper owner's (not generated) |
 | `fig:step-lpips` | `figures/raw/raw_fig3a_lpips.pdf`, 2.25 x 1.5 in | `paper/make_raw_figures.py` | final |
