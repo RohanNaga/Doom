@@ -1,4 +1,4 @@
-% Figure 1, the method overview: data, the shared recipe over three backbones, post-training, and the evaluation.
+% Figure 1, the method overview: data, the shared recipe over three backbones, adaptation, and the evaluation.
 % Drawn at the printed width of the text column (5.5 in, \linewidth in main.tex) and included at scale 1, so every
 % label prints at its nominal size: 7 pt text, 8 pt bold panel letters, 6 pt math sub- and superscripts, nothing
 % smaller (paper/FIGURE_STANDARDS.md section 2).
@@ -108,13 +108,13 @@
 \node[box, text width=0.64in] (ddim) at (3.78,1.206) {10-step DDIM\\sampler};
 \draw[flow] (3.26,1.206) -- node[above, inner sep=1pt] {$\hat v$} (ddim.west);
 
-% ============================================================================ (c) post-training
+% ============================================================================ (c) adaptation
 % lora.py:44-46 and backbones.py:170-174 (rank-16 LoRA on attention, control path in full); adapt_wm.py:84, :88,
 % :504-507 (rank 16, alpha 16, lr 1e-4, 4k updates); adapt_split.py:69 (k = 8 episodes); source weights = the
 % U-Net's 200k snapshot EMA (results/adapt/unet200k_arenas13_map07_r16_k8_s0/config.json);
 % finetune_decoder.py:60-74 (encoder frozen, decoder trained) and :601-613 (z = E(x), MSE + w LPIPS), w = 0.1 per
 % RESEARCH_CONTEXT 2026-09-27 01:10 and 03:30 (vae_decoder_sd1x_mse_lpips, the paper's tuned decoder)
-\node[anchor=north west, inner sep=0pt] at (1.52,0.80) {\panel{c}{Post-training}};
+\node[anchor=north west, inner sep=0pt] at (1.52,0.80) {\panel{c}{Adaptation}};
 \draw[flow] (unet.south) -- (2.84,0.66);
 \node[anchor=west, lab] at (2.87,0.78) {200k EMA weights};
 \node[box, anchor=north, text width=1.20in] (adapt) at (2.84,0.66)

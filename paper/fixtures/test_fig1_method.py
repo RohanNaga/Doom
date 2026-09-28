@@ -102,7 +102,7 @@ def test_the_backbone_outlines_carry_the_only_colour_and_nothing_is_filled_with_
 def test_the_panels_carry_the_agreed_labels(pdf):
     text = pdf_text(pdf)
     for phrase in ("4 training maps,", "500 episodes each", "13 unseen arenas,", "24 each", "19 executed buttons",
-                   "context and the noisy next latent stacked on channels", "10-step DDIM", "Post-training",
+                   "context and the noisy next latent stacked on channels", "10-step DDIM", "Adaptation",
                    "world model:", "arena adaptation", "rank-16 LoRA,", "8 episodes)", "renderer:",
                    "decoder fine-tune", "(MSE + 0.1 LPIPS)", "decoder D (stock)", "directional"):
         assert phrase in text, phrase
