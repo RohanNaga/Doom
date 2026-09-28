@@ -152,6 +152,7 @@ We report what a model loses zero-shot, what post-training recovers and with wha
 
 \textbf{Zero-shot: where the deficit sits.} What does a model keep and what does it lose when it meets an arena it never saw? On unseen arenas the turn response survives (U-Net reversal rates 0.73 to 0.86 per arena against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
 The appearance does not: the U-Net's scene PSNR falls from 25.2~dB on the training maps to a median 22.3~dB (20.5 to 24.7 per arena), its LPIPS rises from 0.158 to 0.303 (0.229 to 0.401), and its gap to the reconstruction upper bound grows from 3.4 to a median 5.0~dB (3.7 to 6.9).
+Pooled over the 13 arenas, one predicted frame in five has an LPIPS above 0.4, against one in 73 on the training maps; such frames concentrate in arenas 16, 17, 13 and 1 (32 to 59 percent of their windows), while seven arenas stay below 10 percent.
 The decoder is not the limit: it reconstructs the unseen arenas nearly as well as the training maps (median 27.3 against 28.6~dB, LPIPS 0.05 to 0.09).
 The three backbones lose the same things (Table~\ref{tab:unseen}; \appref{app:distance}): the shift looks like a property of the task, not of the architecture or the scale.
 It is a step, not a slope: every unseen arena has a lower zero-shot skill score $S_0$ and a worse LPIPS than every training map for all three backbones (\appref{app:distance}).
@@ -167,7 +168,7 @@ What the model keeps is how actions act on the world: zero-shot on arena 7 the w
 \textbf{Post-training: what it takes.} We next adapt a small subset of the U-Net's parameters on each unseen arena and ask what it takes to recover what was lost.
 Eight episodes and 8k updates raise the median scene PSNR from 22.3 to 23.7~dB and lower the median LPIPS from 0.303 to 0.204, and the median gap to the reconstruction upper bound falls from 5.0 to 3.4~dB, the in-distribution level (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}).
 Most of the PSNR still missing against the training maps (1.5~dB) reflects the arenas' lower upper bound (27.3 against 28.6~dB), not the model.
-All 13 arenas close half of their excess gap over the in-distribution gap by 4k, the first budget scored against the raw frame (budgets below 4k \tbd{}), and on average 96 percent of each arena's 8k gain is in place by 4k.
+By 4k updates, 2 percent of the backbone's 200k, the adapters recover a median 72 percent of each arena's rise in LPIPS over the training maps (at least 48 percent) and close a median 94 percent of its excess gap over the in-distribution gap to the reconstruction upper bound, at least half on every arena (budgets below 4k \tbd{}); on average 96 percent of each arena's 8k gain is in place by 4k.
 Data matters less than the first updates: on the four arenas of the data ladder, one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 The adapters trade some in-distribution skill for it: the training maps' scene PSNR against the decoded ground truth falls on all 13 arenas (median 0.59~dB; stock decoder), while the directional score rises from 0.81 to 0.84.
 
