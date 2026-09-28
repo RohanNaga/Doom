@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-27T22:38:43-04:00",
+ "generated_at": "2026-09-28T07:12:38-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1246,6 +1246,9 @@
     16
    ],
    "quantity": "raw",
+   "decoded_only": [],
+   "in_progress": [],
+   "headline": 4000,
    "psnr_zero_shot": 21.711679314263165,
    "psnr_4k": 22.884795425459743,
    "psnr_8k": 22.921417258679867,
@@ -1270,7 +1273,8 @@
    "gpu_hours_headline": 1.0991523875130547,
    "decoder": "tuned",
    "decoder_identity": "sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646",
-   "g_train_source": "unet200k_ema_tuned"
+   "g_train_source": "unet200k_ema_tuned",
+   "g_train_note": null
   },
   "unet_full": {
    "n": 0,
@@ -1283,6 +1287,9 @@
    ],
    "arenas": [],
    "quantity": null,
+   "decoded_only": [],
+   "in_progress": [],
+   "headline": 4000,
    "psnr_zero_shot": null,
    "psnr_4k": null,
    "psnr_8k": null,
@@ -1299,10 +1306,11 @@
    "gpu_hours_headline": null,
    "decoder": null,
    "decoder_identity": null,
-   "g_train_source": "unet200k_ema_tuned"
+   "g_train_source": "unet200k_ema_tuned",
+   "g_train_note": null
   },
   "pixart_lora": {
-   "n": 0,
+   "n": 11,
    "n_wanted": 13,
    "wanted": [
     1,
@@ -1319,28 +1327,60 @@
     16,
     17
    ],
-   "arenas": [],
-   "quantity": null,
-   "psnr_zero_shot": null,
-   "psnr_4k": null,
+   "arenas": [
+    1,
+    6,
+    7,
+    8,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    17
+   ],
+   "quantity": "raw",
+   "decoded_only": [],
+   "in_progress": [
+    16
+   ],
+   "headline": 4000,
+   "psnr_zero_shot": 22.320798199623823,
+   "psnr_4k": 23.717496056109667,
    "psnr_8k": null,
-   "ceiling": null,
-   "lpips_zero_shot": null,
-   "lpips_4k": null,
+   "ceiling": 27.319409392774105,
+   "lpips_zero_shot": 0.2852195681189187,
+   "lpips_4k": 0.20526435476494953,
    "lpips_8k": null,
    "has_check": false,
    "g_train": 3.370827017351985,
-   "budget_final": false,
-   "budgets": null,
-   "budget_middle": null,
-   "censored": null,
-   "gpu_hours_headline": null,
-   "decoder": null,
-   "decoder_identity": null,
-   "g_train_source": "pixart200k_ema_tuned"
+   "budget_final": true,
+   "budgets": {
+    "1": 100,
+    "6": 50,
+    "7": 150,
+    "8": 2000,
+    "10": 50,
+    "11": 500,
+    "12": 50,
+    "13": 150,
+    "14": 1000,
+    "15": 500,
+    "17": 150
+   },
+   "budget_middle": [
+    150
+   ],
+   "censored": 0,
+   "gpu_hours_headline": 0.8759480004178153,
+   "decoder": "tuned",
+   "decoder_identity": "sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646",
+   "g_train_source": "pixart200k_ema_tuned",
+   "g_train_note": null
   },
   "sd35_lora": {
-   "n": 0,
+   "n": 3,
    "n_wanted": 13,
    "wanted": [
     1,
@@ -1357,35 +1397,78 @@
     16,
     17
    ],
-   "arenas": [],
-   "quantity": null,
-   "psnr_zero_shot": null,
-   "psnr_4k": null,
+   "arenas": [
+    6,
+    7,
+    8
+   ],
+   "quantity": "raw",
+   "decoded_only": [],
+   "in_progress": [],
+   "headline": 4000,
+   "psnr_zero_shot": 20.300364047288895,
+   "psnr_4k": 22.82265968248248,
    "psnr_8k": null,
-   "ceiling": null,
-   "lpips_zero_shot": null,
-   "lpips_4k": null,
+   "ceiling": 31.043906018137932,
+   "lpips_zero_shot": 0.24896483050542884,
+   "lpips_4k": 0.16517935146111995,
    "lpips_8k": null,
    "has_check": false,
-   "g_train": 5.482597010210156,
+   "g_train": null,
    "budget_final": false,
    "budgets": null,
    "budget_middle": null,
    "censored": null,
-   "gpu_hours_headline": null,
-   "decoder": null,
-   "decoder_identity": null,
-   "g_train_source": "sd35_170000"
+   "gpu_hours_headline": 1.3299204846885468,
+   "decoder": "tuned",
+   "decoder_identity": "sha256:a8d22f2af42b10dd322ce0fa823403cedbe350b6375150d2e9a22a600add1d05",
+   "g_train_source": "sd35_170000",
+   "g_train_note": "no training-map read of sd35_170000 through the tuned decoder: no in-distribution gap, so no budget"
   }
  },
  "backbone_panel": {
   "drawn": [
-   "unet_lora"
+   "unet_lora",
+   "pixart_lora",
+   "sd35_lora"
   ],
   "not_drawn": {
-   "unet_full": "no runs",
-   "pixart_lora": "no runs",
-   "sd35_lora": "no runs"
+   "unet_full": "no runs"
+  },
+  "arenas": {
+   "unet_lora": [
+    1,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17
+   ],
+   "pixart_lora": [
+    1,
+    6,
+    7,
+    8,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    17
+   ],
+   "sd35_lora": [
+    6,
+    7,
+    8
+   ]
   },
   "medians": {
    "unet_lora": {
@@ -1428,6 +1511,70 @@
     "8000": [
      23.688441541045904,
      0.203747603809461
+    ]
+   },
+   "pixart_lora": {
+    "0": [
+     22.320798199623823,
+     0.2852195681189187
+    ],
+    "50": [
+     22.745710134506226,
+     0.2614773381501436
+    ],
+    "100": [
+     23.160877399146557,
+     0.24763254410936497
+    ],
+    "150": [
+     23.2981547228992,
+     0.23622456891462207
+    ],
+    "250": [
+     23.386872589588165,
+     0.22589605196844786
+    ],
+    "500": [
+     23.58565118163824,
+     0.217778889084002
+    ],
+    "1000": [
+     23.641434133052826,
+     0.21271613152930513
+    ],
+    "2000": [
+     23.648092191666365,
+     0.2072023355285637
+    ],
+    "4000": [
+     23.717496056109667,
+     0.20526435476494953
+    ]
+   },
+   "sd35_lora": {
+    "0": [
+     20.300364047288895,
+     0.24896483050542884
+    ],
+    "250": [
+     22.564375430345535,
+     0.19006461964454502
+    ],
+    "500": [
+     22.60832055285573,
+     0.18240469084412325
+    ],
+    "1000": [
+     22.710395462810993,
+     0.17785403606831096
+    ],
+    "2000": [
+     22.744271904230118,
+     0.1715961743175285
+    ],
+    "4000": [
+     22.82265968248248,
+     0.16517935146111995
     ]
    }
   }
