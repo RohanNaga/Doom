@@ -35,6 +35,7 @@
 
 \begin{document}
 \raggedbottom
+\setlength{\textfloatsep}{12pt plus 2pt minus 4pt}
 \maketitle
 
 %===============================================================================
@@ -55,23 +56,21 @@ Very little adaptation repairs it: rank-16 adapters trained on 8 episodes of eac
 \section{Introduction}
 \label{sec:intro}
 
-Game world models now render playable worlds.
-GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond} and Matrix-Game~2 scales the recipe to open worlds~\citep{he2025matrixgame2}.
+Game world models now render playable worlds~\citep{valevski2024gamengen,alonso2024diamond,bruce2024genie}.
 Each is evaluated only on held-out rollouts from its own environment, and none has been shown to generalize to a new environment within the same game.
-This holds even for MultiGen, a single Doom model trained across 100 procedurally generated maps~\citep{po2026multigen}: it reports PSNR, SSIM and LPIPS only on its training distribution, with no map held out.
 
 A learned simulator is useful only where it is faithful, and an agent or a robot moving to a new room or level needs to know how much of its world model still holds and what it costs to make the rest hold.
 Game worlds let us pose this question with the engine held fixed: a new map of the same game preserves the physics and the controls exactly, and only the layout, textures and lighting differ.
-Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that a new map opens: what the model retains, what it loses, and how few episodes and updates recover the rest.
+Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses, and how few episodes and updates recover the rest.
 
 \begin{figure}[b]
 \centering
 \figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, two rows}
-\caption{On an unseen map the U-Net still moves and fires but renders the training maps' masonry; eight adaptation episodes restore the map. Left: training maps. Right: unseen map 7, zero-shot and adapted.}
+\caption{On an unseen map (right, map 7) the U-Net still moves and fires but renders the training maps' masonry; eight adaptation episodes restore the map.}
 \label{fig:teaser}
 \end{figure}
 
-In short, a world model moved to a new map keeps playing the game but draws the wrong world, and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). We make three contributions:
+In short, a world model moved to a new map keeps playing the game but draws the wrong world, and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item \textbf{DoomShift, a benchmark that isolates a scene shift.} We build the pipeline end to end (\appref{app:overview}): every-tic recordings, three diffusion world models initialized from pretrained image models and trained on four maps under one recipe, a fine-tuned decoder and a standard adapter, scored on the 13 maps the models never saw, zero-shot and after adaptation. Recordings, models, decoders and adapters are released.
 \item \textbf{A scene shift breaks appearance, not control.} On the unseen maps all three models keep their turn response while their perceptual error roughly doubles and their scene PSNR drops 2.8 to 3.3~dB. The loss is the same for a U-Net and two transformers from 0.6 to 2.3~B parameters, so across our three backbones it follows what the models were exposed to, not their architecture or scale. It is a step, not a slope: every unseen map is worse in LPIPS than every training map. And it lives in the model, since the decoder renders the unseen maps nearly as well as the training maps (Table~\ref{tab:unseen}, Figure~\ref{fig:teaser}).
@@ -84,7 +83,9 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 \section{Related work}
 \label{sec:related}
 
-Held-out evaluation of world models holds out a new robot body~\citep{chen2026xeworld}, a new game~\citep{rigter2024avid,gao2025adaworld} or a new building~\citep{koh2021pathdreamer}, not a map of the same game; Doom maps are held out only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom}, and game world models that show new scenes generate them from an image, with no recorded frames to score against~\citep{tong2026scope,bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training. Our adapter is not new: a small adapter on a frozen video model moves it to a new setting in AVID~\citep{rigter2024avid} and adds action control in Vista~\citep{gao2024vista}, and AdaWorld adapts with a short full fine-tune~\citep{gao2025adaworld}, which we run as the comparator. None reports what adapting to one new scene costs in episodes and updates, which we measure.
+\textbf{Game world models.} GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen} and DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond}; both are evaluated only on rollouts from their own environment. MultiGen trains a single Doom model across 100 procedurally generated maps~\citep{po2026multigen} and still reports its metrics only on its training distribution. Held-out evaluation of world models holds out a new game~\citep{rigter2024avid,gao2025adaworld} or a new building~\citep{koh2021pathdreamer}, not a map of the same game; Doom maps are held out only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom}, and game world models that show new scenes generate them from an image, with no recorded frames to score against~\citep{bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training.
+
+\textbf{Adaptation.} Our adapter is not new: a small adapter on a frozen video model moves it to a new setting in AVID~\citep{rigter2024avid} and adds action control in Vista~\citep{gao2024vista}, and AdaWorld adapts with a short full fine-tune~\citep{gao2025adaworld}, which we run as the comparator. None reports what adapting to one new scene costs in episodes and updates, which we measure.
 
 %===============================================================================
 
@@ -121,7 +122,7 @@ Held-out evaluation of world models holds out a new robot body~\citep{chen2026xe
 
 \begin{figure}[t]
 \centering
-\figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{1.45in}{Figure 3: the shift and its repair}
+\figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{1.8in}{Figure 3: the shift and its repair}
 \caption{The shift and its repair, per unseen map and per backbone. (a) Scene PSNR and (b) LPIPS zero-shot (open) to 4k adapter updates (filled) for the U-Net, PixArt-$\alpha$ and SD~3.5, with each backbone's in-distribution level on the training maps (dashed); (c, d) medians over the 13 unseen maps against updates.}
 \label{fig:adapt}
 \end{figure}
