@@ -878,10 +878,11 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
                                     "full fine-tune (1 of 2)", "PixArt-$\\alpha$, training maps",
                                     "unseen maps (all 2)", "SD 3.5 Medium, training maps", "unseen maps (1 of 2)"]
     assert body[0][1:] == ["22.45", "", "", "0.150", "", "", "0.850", "", "", "", ""]
-    assert body[1][1:] == ["18.50", "21.25", "23.25", "0.280", "0.205", "0.190", "0.733", "0.800", "58", "76",
-                           "\\tbd{}"]                                                # the budget waits on the grid
+    assert body[1][1:] == ["18.50", "21.25", "23.25", "0.280", "0.205", "0.190", "0.733", "0.800", "76", "58",
+                           "\\tbd{}"]                       # shares PSNR then LPIPS; the budget waits on the grid
     assert body[2][7:9] == ["0.750", "0.800"]
-    assert body[3][1:] == ["18.00", "23.00", "--", "0.300", "0.180", "--", "--", "--", "80", "112", "${\\le}$4k"]
+    assert body[3][1:] == ["18.00", "23.00", "--", "0.300", "0.180", "--", "--", "--", "112", "80", "${\\le}$4k"]
+    assert "& 0 & 8k & PSNR & LPIPS & half the rise" in merged                      # the score columns' order
     assert body[4][1:8] == ["22.65", "", "", "0.150", "", "", "--"]                 # no directional read: "--"
     assert body[5][1:4] == ["18.70", "20.70", "--"] and body[5][-1] == "${>}$4k; 2 of 2 censored"   # maps 6, 9
     assert body[6][1] == "21.95" and body[7][-1] == "\\tbd{}"

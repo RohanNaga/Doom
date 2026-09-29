@@ -818,7 +818,7 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                  stamp=""):
     """Tables 1 and 2 as one full-width table (Rohan, Sep 29: nothing in the supplement that was in the body, and
     Table 1 used three quarters of the width). Columns: the row's maps; scene PSNR at 0, 4k, 8k; scene LPIPS at 0,
-    4k, 8k; the directional score at 0 and 8k; the recovered shares (LPIPS, PSNR; per map, then the median); the
+    4k, 8k; the directional score at 0 and 8k; the recovered shares (PSNR, LPIPS, the score columns' order; per map, then the median); the
     budget. Rows per backbone: its training maps (the in-distribution reads in the 0 columns, Table 1's training
     directional), then the unseen maps over all 13 (Table 1's unseen directional at 0, the guards' median at 8k);
     the U-Net adds its three groups and its full fine-tune (`block_stats["unet_full"]`, directional from its own
@@ -846,7 +846,7 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
              "& \\multicolumn{3}{c}{Scene PSNR (dB) $\\uparrow$} & \\multicolumn{3}{c}{Scene LPIPS $\\downarrow$} & "
              "\\multicolumn{2}{c}{Directional} & \\multicolumn{2}{c}{Recovered (\\%)} & Budget to \\\\",
              "\\cmidrule(lr){2-4}\\cmidrule(lr){5-7}\\cmidrule(lr){8-9}\\cmidrule(lr){10-11}",
-             "Model, maps & 0 & 4k & 8k & 0 & 4k & 8k & 0 & 8k & LPIPS & PSNR & half the rise \\\\"]
+             "Model, maps & 0 & 4k & 8k & 0 & 4k & 8k & 0 & 8k & PSNR & LPIPS & half the rise \\\\"]
     keys = {"unet": "unet_lora", "pixart": "pixart_lora", "sd35": "sd35_lora"}
     for name in names:
         who = fs.backbone_of(name)
@@ -863,7 +863,7 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
             lines.append(f"unseen maps (all {g['n']}) & {num(g['psnr_zero_shot'], 2)} & {num(g['psnr_4k'], 2)} & "
                          f"{num(g['psnr_8k'], 2)} & {num(g['lpips_zero_shot'], 3)} & {num(g['lpips_4k'], 3)} & "
                          f"{num(g['lpips_8k'], 3)} & {unseen_dir} & {num(eight, 3)} & "
-                         f"{share_cell(g['lpips_share_4k'])} & {share_cell(g['psnr_share_4k'])} & "
+                         f"{share_cell(g['psnr_share_4k'])} & {share_cell(g['lpips_share_4k'])} & "
                          f"{_budget_cell(g, budgets_final)} \\\\")
             for gname in GROUP_NAMES:
                 g = gstats[gname]
@@ -874,7 +874,7 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                              f"{num(g['lpips_4k'], 3)} & {num(g['lpips_8k'], 3)} & "
                              f"{num(unet_guard_median(g['arenas'], 'directional_0'), 3)} & "
                              f"{num(unet_guard_median(g['arenas'], 'directional_8k'), 3)} & "
-                             f"{share_cell(g['lpips_share_4k'])} & {share_cell(g['psnr_share_4k'])} & "
+                             f"{share_cell(g['psnr_share_4k'])} & {share_cell(g['lpips_share_4k'])} & "
                              f"{_budget_cell(g, budgets_final)} \\\\")
             full = block_stats.get("unet_full")
             if full and full["n"]:
@@ -883,15 +883,15 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                              f"{num(full['psnr_4k'], 2)} & {num(full['psnr_8k'], 2)} & "
                              f"{num(full['lpips_zero_shot'], 3)} & {num(full['lpips_4k'], 3)} & "
                              f"{num(full['lpips_8k'], 3)} & {num(guard_median(full, 0), 3)} & "
-                             f"{num(guard_median(full, 8000), 3)} & {share_cell(shares.get('lpips'))} & "
-                             f"{share_cell(shares.get('psnr'))} & {block_budget_cell(full)} \\\\")
+                             f"{num(guard_median(full, 8000), 3)} & {share_cell(shares.get('psnr'))} & "
+                             f"{share_cell(shares.get('lpips'))} & {block_budget_cell(full)} \\\\")
         elif block.get("n"):
             shares = block.get("shares") or {}
             lines.append(f"{block_label('unseen maps', block, True)} & {num(block['psnr_zero_shot'], 2)} & "
                          f"{num(block['psnr_4k'], 2)} & {num(block['psnr_8k'], 2)} & "
                          f"{num(block['lpips_zero_shot'], 3)} & {num(block['lpips_4k'], 3)} & "
                          f"{num(block['lpips_8k'], 3)} & {unseen_dir} & {num(guard_median(block, 8000), 3)} & "
-                         f"{share_cell(shares.get('lpips'))} & {share_cell(shares.get('psnr'))} & "
+                         f"{share_cell(shares.get('psnr'))} & {share_cell(shares.get('lpips'))} & "
                          f"{block_budget_cell(block)} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"] + block_comment_lines(blocks)
     return "\n".join(lines) + "\n"
