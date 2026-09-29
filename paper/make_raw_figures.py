@@ -99,7 +99,10 @@ SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_figA_adapt_are
          # row and 1.35 in of backbone panels with their key), and the separate figure
          "raw_row_backbones": (5.5, 3.1), "raw_backbones_body": (5.5, 1.6),
          # the row again at the 1.5 in height the page-4 fit may need (Rohan, Sep 28 evening): same panels and type
-         "raw_row_150": (5.5, 1.5)}
+         "raw_row_150": (5.5, 1.5),
+         # Figure 3 rebuilt per backbone (Rohan, Sep 28 night): (a, b) every backbone per arena, (c, d) the medians
+         # against updates; one row of four, and two rows of two when the per-arena panels need the width
+         "raw_row_v2": (5.5, 1.75), "raw_row_v2_tall": (5.5, 3.0)}
 UPPER = "reconstruction upper bound"             # never "ceiling" in a label
 IN_DISTRIBUTION = "training maps (in distribution)"
 BAND_LABEL = "train vs train $d$"               # the training maps' own d range (tools/family_step.py)
@@ -1163,6 +1166,100 @@ def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_bac
     return fs.save(fig, out_dir, stem)
 
 
+def per_arena_backbone_panel(ax, arenas, backbones, key, levels, marker_size, offset=0.27, headline=HEADLINE_STEP):
+    """(a) or (b) of the per-backbone row: one slot per arena in number order; inside it each backbone at its own
+    small horizontal offset, in its encoding colour and marker: its reconstruction upper bound as a short tick,
+    zero-shot open, the `headline` read filled, a thin connector between them; each backbone's training-map level
+    as a thin dashed line in its colour. `backbones` is [(block key, zero-shot reads {arena: {psnr, lpips,
+    ceiling_psnr, ceiling_lpips}}, headline reads {arena: {psnr, lpips}})], `levels` {block key: (psnr, lpips)}."""
+    pos = {a: i for i, a in enumerate(arenas)}
+    j = 0 if key == "psnr" else 1
+    for k, (bkey, zero, after) in enumerate(backbones):
+        ent, marker, _ = backbone_style(bkey)
+        dx = (k - (len(backbones) - 1) / 2) * offset
+        if bkey in levels and levels[bkey][j] is not None:
+            ax.axhline(levels[bkey][j], color=ent.colour, lw=fs.MIN_LW, ls=fs.TRAINING_DASH, zorder=1.4, gid="ref")
+        for a in arenas:
+            if a not in zero:
+                continue
+            x = pos[a] + dx
+            upper = zero[a].get(f"ceiling_{key}")
+            if upper is not None:
+                ax.plot([x - 0.45 * offset, x + 0.45 * offset], [upper, upper], color=ent.colour, lw=CEILING_LW,
+                        zorder=2.6, solid_capstyle="butt")
+            z, d = zero[a][key], after.get(a, {}).get(key)
+            if d is not None:
+                ax.plot([x, x], [z, d], color=ent.colour, lw=0.7, solid_capstyle="butt", zorder=2.7)
+                ax.plot([x], [d], ls="none", marker=marker, ms=marker_size, mfc=ent.colour, mec=ent.colour, mew=0.5,
+                        zorder=3.2)
+            ax.plot([x], [z], ls="none", marker=marker, ms=marker_size, mfc="white", mec=ent.colour, mew=0.7,
+                    zorder=3.1)
+    ax.set_xticks([pos[a] for a in arenas], [str(a) for a in arenas])
+    ax.tick_params(axis="x", length=0, labelsize=fs.MIN_PT, pad=1.0)
+    ax.set_xlim(-0.6, len(arenas) - 0.4)
+    ax.set_xlabel("unseen arena")
+
+
+def row_v2_keys(fig, backbones, headline=HEADLINE_STEP):
+    """The per-backbone row's two keys: above, each backbone's colour and marker, then what open and filled mean;
+    below, the reference marks. The panels draw the marks and references in each backbone's colour; the key shows
+    them in the first backbone's (as `backbone_key` does), and its labels say so."""
+    handles, labels = [], []
+    for bkey, *_ in backbones:
+        ent, marker, _ = backbone_style(bkey)
+        handles.append(Line2D([], [], color=ent.colour, ls="none", marker=marker, ms=fs.MARKER_SIZE,
+                              mfc=ent.colour, mec=ent.colour))
+        labels.append(ent.label)
+    grey = backbone_style(backbones[0][0])[0].colour
+    handles += [Line2D([], [], color=grey, ls="none", marker="o", ms=fs.MARKER_SIZE, mfc="white", mec=grey, mew=0.8),
+                Line2D([], [], color=grey, ls="none", marker="o", ms=fs.MARKER_SIZE, mfc=grey, mec=grey, mew=0.6)]
+    labels += ["zero-shot", f"after {fs.step_label(headline)} updates"]
+    fig.legend(handles, labels, loc="outside upper center", ncol=len(labels), handlelength=1.2, columnspacing=1.2,
+               handletextpad=0.4, borderaxespad=0.1)
+    refs = [Line2D([], [], color=grey, lw=CEILING_LW), Line2D([], [], color=grey, lw=fs.MIN_LW, ls=fs.TRAINING_DASH)]
+    fig.legend(refs, [f"{UPPER} (each backbone's colour)", f"{IN_DISTRIBUTION}, per backbone"],
+               loc="outside lower center", ncol=2, handlelength=1.4, columnspacing=1.4, handletextpad=0.4,
+               borderaxespad=0.1)
+
+
+def fig_row_v2(arenas, backbones, curves, levels, out_dir, headline=HEADLINE_STEP, tall=False):
+    """Figure 3 rebuilt per backbone (Rohan, Sep 28 night): (a) raw scene PSNR and (b) LPIPS per unseen arena,
+    zero-shot (open) to the `headline` read (filled), for every backbone in its colour at its own offset inside the
+    arena's slot, with each backbone's reconstruction upper bound (ticks) and training-map level (dashed); (c, d)
+    the shared panel's median curves against adapter updates (`curves` and `levels` as `fig_backbones` takes them).
+    One row of four at the slot height, or with `tall` two rows of two (a, b above c, d) with the per-arena panels
+    at twice the width and full-size marks."""
+    stem = "raw_row_v2_tall" if tall else "raw_row_v2"
+    if tall:
+        fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=2, nrows=2, wspace=0.08, hspace=0.08)
+    else:
+        fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=4, width_ratios=[1.6, 1.6, 0.8, 0.8], wspace=0.02)
+    # three marks per arena slot: full-size marks fit only when the panel is two rows' width
+    marker = fs.MARKER_SIZE if tall else 2.8
+    for ax, key in ((pa, "psnr"), (la, "lpips")):
+        per_arena_backbone_panel(ax, arenas, backbones, key, levels, marker, headline=headline)
+    pa.set_ylabel(PSNR_LABEL)
+    la.set_ylabel(LPIPS_LABEL)
+    pa.yaxis.set_major_locator(ticker.MultipleLocator(2))
+    la.yaxis.set_major_locator(ticker.MultipleLocator(0.05))
+    b_steps = sorted({st for _, _, pts, _ in curves for st in pts})
+    for ax, j, label in ((pc, 0, PSNR_LABEL), (lc, 1, LPIPS_LABEL)):
+        z = fs.step_axis(ax, b_steps, label="adapter updates (log)" if tall else "updates (log)",
+                         labelled=[t for t in (GRID_TICKS if tall else ROW_TICKS) if t in b_steps])
+        backbone_curves(ax, curves, j, levels, z, headline)
+        drawn = [levels[k][j] for k, *_ in curves if k in levels and levels[k][j] is not None]
+        if drawn:
+            ax.text(0.01, max(drawn), "training maps", transform=ax.get_yaxis_transform(), ha="left", va="bottom",
+                    fontsize=fs.MIN_PT, color=fs.TRAINING_LINE, gid="decor")
+        ax.set_ylabel(label)
+    pc.yaxis.set_major_locator(ticker.MultipleLocator(1))
+    lc.yaxis.set_major_locator(ticker.MultipleLocator(0.05))
+    for ax, letter in zip((pa, la, pc, lc), "abcd"):
+        fs.panel_letter(ax, letter)
+    row_v2_keys(fig, backbones, headline)
+    return fs.save(fig, out_dir, stem)
+
+
 def fig_arenas_raw(arenas, trajectories, adaptation, level, colour_of, out_dir, headline=HEADLINE_STEP):
     """Appendix: one small panel per arena, raw scene PSNR against adapter updates (log axis, the 0 read at the
     left) in the arena's group colour, the headline read filled, the budget's threshold (dotted), the arena's
@@ -1524,6 +1621,20 @@ def main(argv=None):
         written += fig_backbones(body_curves, levels, a.out_dir, a.headline_step, stem="raw_backbones_body",
                                  keyed=True)
         body_stems = ["raw_row_backbones", "raw_backbones_body"]
+    # Figure 3 per backbone (Rohan, Sep 28 night): (a, b) every backbone's per-arena zero-shot and headline reads
+    # (the U-Net's from the fresh-rescore adapter row, the others' from their LoRA runs' raw files, the same reads
+    # as the medians) with its own upper bound, (c, d) the body candidates' median curves
+    zero_of = {"unet_lora": PRIMARY, "pixart_lora": "pixart200k_ema", "sd35_lora": sd35_name}
+    heads = {"unet_lora": after}
+    heads.update({k: {m: r[a.headline_step] for m, r in panel_raw[k].items() if a.headline_step in r}
+                  for k in ("pixart_lora", "sd35_lora") if k in panel_raw})
+    v2_backbones = [(c[0], zero[zero_of[c[0]]], heads[c[0]]) for c in body_curves
+                    if c[0] in heads and zero_of.get(c[0]) in zero]
+    v2_stems = []
+    if len(v2_backbones) >= 2:
+        for tall in (False, True):
+            written += fig_row_v2(arenas, v2_backbones, body_curves, levels, a.out_dir, a.headline_step, tall=tall)
+        v2_stems = ["raw_row_v2", "raw_row_v2_tall"]
 
     s0 = {}
     if os.path.exists(a.family_step):
@@ -1587,6 +1698,11 @@ def main(argv=None):
                                   "medians": {c[0]: {str(st): v for st, v in c[2].items()} for c in shared_curves}},
         "body_candidates": {"arenas": shared if body_stems else [], "drawn": [c[0] for c in body_curves]
                             if body_stems else [], "stems": body_stems},
+        "row_v2": {"stems": v2_stems, "backbones": [b[0] for b in v2_backbones],
+                   "headline": {b[0]: {str(m): (r["psnr"], r["lpips"]) for m, r in sorted(b[2].items())}
+                                for b in v2_backbones},
+                   "upper_bound": {b[0]: {str(m): (b[1][m]["ceiling_psnr"], b[1][m]["ceiling_lpips"])
+                                          for m in arenas if m in b[1]} for b in v2_backbones}},
         "per_arena_table": per_arena_rows,
         "named_curves": list(named),
         "g8k_4k_minus_base_4k": {"psnr": diff("psnr"), "lpips": diff("lpips")},

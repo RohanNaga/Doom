@@ -847,7 +847,19 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
     # the row, its grid layout, both backbone panels and the full fine-tune panel, then the two body candidates: the
     # row with the backbones as (e, f) and the separate backbone figure
-    assert letters == list("abcd") * 3 + list("ab") * 3 + list("abcdef") + list("ab")     # row, row_150, grid
+    # row, row_150, grid; the three backbone panels; the two body candidates; the per-backbone row and its tall form
+    assert letters == list("abcd") * 3 + list("ab") * 3 + list("abcdef") + list("ab") + list("abcd") * 2
+    # the per-backbone row: every LoRA backbone's per-arena reads with its own upper bound, keyed by backbone
+    v2 = s["row_v2"]
+    assert v2["stems"] == ["raw_row_v2", "raw_row_v2_tall"]
+    assert v2["backbones"] == ["unet_lora", "pixart_lora", "sd35_lora"]
+    assert v2["headline"]["unet_lora"]["6"] == [pytest.approx(19.0), pytest.approx(0.22)]      # adapt4000 row
+    assert v2["headline"]["pixart_lora"]["6"] == [pytest.approx(20.2), pytest.approx(0.26)]    # its LoRA's 4k read
+    assert v2["headline"]["sd35_lora"] == {"6": [pytest.approx(19.5), pytest.approx(0.25)]}    # arena 6 only
+    assert v2["upper_bound"]["unet_lora"]["9"] == [pytest.approx(27.0), pytest.approx(0.07)]
+    for stem in v2["stems"]:
+        assert {"U-Net", "PixArt-α", "SD 3.5", "zero-shot", "after 4k updates"} <= set(legends[stem]), stem
+        assert any(t.startswith("reconstruction upper bound") for t in legends[stem])
     body = s["body_candidates"]
     assert body["arenas"] == [6] and body["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]   # the LoRAs only
     assert body["stems"] == ["raw_row_backbones", "raw_backbones_body"]
