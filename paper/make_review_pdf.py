@@ -47,6 +47,8 @@ STATUS = [
     ("\\textbf{Models and training.}", DONE),                        # simplified on his wording, approved
     ("We turn all three into next-tic world models", DONE),
     ("We train each backbone for 200k updates", DONE),
+    ("\\textbf{Metrics.}", DONE),                                    # read Sep 29
+    ("For accuracy, we compute PSNR", DONE),                         # persistence sentence cut on his word
     ("For turning, we compute the \\emph{directional} score", CONFIRM),
     ("Architecture does not change what survives the shift", CONFIRM),
 ]
