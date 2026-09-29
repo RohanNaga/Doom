@@ -1,16 +1,4 @@
 
-\section{The pipeline}
-\label{app:overview}
-
-Figure~\ref{fig:method} draws the benchmark, the three backbones, the adaptation and the evaluation.
-
-\begin{figure}[ht]
-\centering
-\figslot{figures/fig1_method.pdf}{\linewidth}{1.8in}{Figure 2: method overview}
-\caption{What we built: (a) the benchmark, (b) three backbones under one recipe, (c) adaptation, (d) evaluation against the raw ground-truth frame and the reconstruction upper bound.}
-\label{fig:method}
-\end{figure}
-
 \section{Protocol details}
 \label{app:protocol}
 
@@ -39,7 +27,7 @@ Updates per second & 1.78 to 1.83 & about 1.4 & 0.50 to 0.55 \\
 
 \textbf{Training setup.} We train each backbone on a single RTX A6000 (49~GB) in bf16 with fused AdamW, reaching 1.8 updates per second for the U-Net, 1.4 for PixArt-$\alpha$ and 0.53 for SD~3.5. We train the U-Net's adapters on a single RTX A4000 (16~GB) at about 1.0 updates per second and PixArt-$\alpha$'s on an A6000 at about 1.3; SD~3.5's take 1.3 hours to 4k updates on an A6000, or 3.4 hours on an A4000 with gradient checkpointing.
 
-\textbf{The decoder.} We fine-tune the SD~1 decoder $D$ on training-map frames from their ground-truth latents with the encoder frozen, using MSE plus 0.1~LPIPS (3,486 updates, learning rate $10^{-5}$, batch 24, 4.0 hours on one A6000), validate on episodes 6000 to 6099 and keep the terminal checkpoint; it passed its gate at $+4.33$~dB and LPIPS $-0.039$ on the development set. On 200 validation frames its scene rows go from 26.93~dB and LPIPS 0.092 (stock) to 28.44 and 0.060, and the HUD rows from 17.83 to 30.67~dB. An MSE-only objective, the recipe GameNGen describes, reaches 29.09~dB on the scene but roughly triples the full-frame LPIPS (0.094 to 0.285 by 2,000 updates) and more than triples the scene LPIPS (0.092 to 0.339): it sharpens the HUD and blurs the scene. The stock decoders saw no Doom frame; the SD~3.5 decoder, fine-tuned the same way, raises SD~3.5's scene reconstruction on the 512 validation windows from 29.99 to 31.84~dB and lowers its LPIPS from 0.045 to 0.028.
+\textbf{The decoder.} We fine-tune the SD~1 decoder $D$ on training-map frames from their ground-truth latents with the encoder frozen, using MSE plus 0.1~LPIPS (3,486 updates, learning rate $10^{-5}$, batch 24, 4.0 hours on one A6000), validate on episodes 6000 to 6099 and keep the terminal checkpoint; it passed its gate at $+4.33$~dB and LPIPS $-0.039$ on the development set. On 200 validation frames its scene rows go from 26.93~dB and LPIPS 0.092 (stock) to 28.44 and 0.060, and the HUD rows from 17.83 to 30.67~dB. An MSE-only objective, the recipe GameNGen describes, reaches 29.09~dB on the scene but roughly triples the full-frame LPIPS (0.094 to 0.285 by 2,000 updates): it sharpens the HUD and blurs the scene. The stock decoders saw no Doom frame; the SD~3.5 decoder, fine-tuned the same way, raises SD~3.5's scene reconstruction on the 512 validation windows from 29.99 to 31.84~dB and lowers its LPIPS from 0.045 to 0.028.
 
 \begin{figure}[ht]
 \centering
@@ -50,11 +38,8 @@ Updates per second & 1.78 to 1.83 & about 1.4 & 0.50 to 0.55 \\
 
 \textbf{Sampler.} Fewer DDIM steps land nearer the conditional mean, which wins PSNR and loses LPIPS. U-Net 200k, non-EMA weights, one tic, training-map windows, linear spacing: 4 steps 22.35~dB / 0.272, 8 steps 22.34 / 0.199, 10 steps 22.29 / 0.186, 16 steps 22.20 / 0.171, 50 steps 22.04 / 0.162. Every number in the paper uses 10 steps.
 
-\section{Per-map zero-shot scores}
+\section{Per-arena zero-shot scores}
 \label{app:perarena}
-
-\textbf{In-distribution performance.} On the training maps the three backbones reach a scene PSNR of 25.20, 25.18 and 25.38~dB and an LPIPS of 0.158, 0.159 and 0.126 one tic ahead, 3.4, 3.4 and 6.5~dB below their decoders' reconstruction upper bounds, so SD~3.5 is the best of the three in distribution while leaving the most room below its own bound, and they turn the right way (directional 0.84 to 0.86 against 0.885 for the ground-truth frames; Table~\ref{tab:unseen}).
-
 
 \begin{table}[ht]
 \centering\scriptsize\setlength{\tabcolsep}{2.5pt}
@@ -99,7 +84,7 @@ PixArt-$\alpha$ & training & 24.49 & 0.194 & 27.08 \\
 \end{tabular}
 \end{table}
 
-\textbf{What the variation between maps follows.} Across the 13 unseen maps the model's absolute scene PSNR tracks how static the recordings are (Spearman 0.95 with the PSNR of the last frame copied forward), while its gap to the reconstruction upper bound does not ($-0.21$), which is why every map is read against its upper bound. On the full frame the 32 HUD rows, which the stock decoder renders at about 18~dB and which barely change from one tic to the next (the previous frame matches them at 88 to 99~dB), carry 37 to 62 percent of the stock decoder's reconstruction error per map; every pixel score in the paper therefore uses the scene rows. The fine-tuned decoder raises the model's raw scene PSNR by 0.24 to 0.71~dB (median 0.35) and lowers its LPIPS on all 13 unseen maps (by 0.019 to 0.044). Per map the U-Net's zero-shot scene PSNR spans 20.5 to 24.7~dB, its LPIPS 0.229 to 0.401 and its gap to the upper bound 3.7 to 6.9~dB (Table~\ref{tab:perarena}), and its directional score 0.73 to 0.86 against 0.79 to 0.91 on the training maps. Pooled over the 13 unseen maps, one predicted frame in five has an LPIPS above 0.4, against one in 73 on the training maps; such frames concentrate in maps 16, 17, 13 and 1 (32 to 59 percent of their windows), while seven maps stay below 10 percent.
+\textbf{What the variation between maps follows.} Across the 13 unseen maps the model's absolute scene PSNR tracks how static the recordings are (Spearman 0.95 with the PSNR of the last frame copied forward), while its gap to the reconstruction upper bound does not ($-0.21$), which is why every map is read against its upper bound. On the full frame the 32 HUD rows, which the stock decoder renders at about 18~dB and which barely change from one tic to the next (the previous frame matches them at 88 to 99~dB), carry 37 to 62 percent of the stock decoder's reconstruction error per map; every pixel score in the paper therefore uses the scene rows. The fine-tuned decoder raises the model's raw scene PSNR by 0.24 to 0.71~dB (median 0.35) and lowers its LPIPS on all 13 unseen maps (by 0.019 to 0.044).
 
 \section{The distance}
 \label{app:distance}
@@ -168,7 +153,7 @@ EMA & 9 / 256 & 4 / 256 & 4 / 256 & 8 / 240 & 3 / 240 & 4 / 240 \\
 
 The zero-shot latent skill score $S_0=10\,\overline{\log_{10}(\text{persistence latent MSE}/\text{model latent MSE})}$ is the mean log error ratio in dB, computed without a decoder. It gives equal weight to windows on the log scale, but near-zero persistence error can still make individual terms extreme; zero-error windows require an explicit handling rule. It compares predictions only within one backbone, because the latent spaces differ. Zero-shot, the U-Net scores 2.55 to 3.56~dB on the training maps and 1.14 to 1.96~dB on the maps, and PixArt-$\alpha$ 2.44 to 3.47 and 1.28 to 2.21; $S_0$ was not computed for SD~3.5. In raw terms $S_0$ does not order the endpoints: its Spearman correlation is $+0.38$ with the gap to the reconstruction upper bound at 4k ($p=0.20$), $+0.43$ with the 4k PSNR gain ($p=0.14$) and $+0.31$ with the budget ($p=0.30$; $n=13$). A motion-matched skill deficit $\Delta$, the U-Net's mean skill shortfall against training-map windows of matched persistence error (10 quantile bins), passes the training maps' floor ($-0.62$ to $+0.46$ on the training maps, 0.92 to 1.86 on the maps), and its Spearman with $d$ is $+0.05$; it does not order the raw outcomes either ($-0.31$ with the 4k gap to the upper bound, $p=0.31$; $-0.24$ with the budget, $p=0.44$; $n=13$). Because a full fine-tune also moves the input projection and every layer the decoder's input depends on, the adapter-against-full comparison is reported in $S$ as well: on map 7, $S$ at 4,000 updates is \tbd{} for the adapter and \tbd{} for the full fine-tune.
 
-\section{Per-map adaptation}
+\section{Per-arena adaptation}
 \label{app:perarena-adapt}
 
 \begin{table}[ht]
@@ -180,12 +165,10 @@ The zero-shot latent skill score $S_0=10\,\overline{\log_{10}(\text{persistence 
 
 \begin{figure}[ht]
 \centering
-\figslot{figures/raw/raw_figA_adapt_arenas.pdf}{\linewidth}{3.0in}{Per-map adaptation curves}
+\figslot{figures/raw/raw_figA_adapt_arenas.pdf}{\linewidth}{3.0in}{Per-arena adaptation curves}
 \caption{Every map closes at least half of the extra distance the shift opened to its reconstruction upper bound by 4k updates. Each panel is one map's scene PSNR against the raw frame at each grid read from 0 to 8k adapter updates (large filled mark: 4k), with its reconstruction upper bound (solid), the PSNR at which half of that extra distance is closed (dotted) and the training maps' level (dashed); colour: group by zero-shot gap to the upper bound (dark: hard). U-Net, non-EMA adapter weights, seed 0, fine-tuned decoder, 256 held-out windows per map.}
 \label{fig:adapt-arenas}
 \end{figure}
-
-\textbf{Control checks.} The adapters trade some in-distribution skill for the map: the training maps' scene PSNR against the decoded ground truth falls on all 13 unseen maps at the 8k check (median 0.59~dB; stock decoder), while the directional score rises from 0.81 to 0.84.
 
 \textbf{Data, seeds and training configuration.} These checks use the stock decoder and score against the decoded ground truth, where persistence cancels, so a difference between two runs is a difference in scene PSNR. One adaptation episode already gives most of the sixteen-episode endpoint: at 4k, one episode against sixteen changes scene PSNR by $-0.23$~dB on map 7, $+0.01$ on map 8, $-0.25$ on map 12 and $-0.05$ on map 16 (75 to 101 percent of the sixteen-episode gain); the four maps were chosen before the runs, so there is no population interval. A second training seed moves the 4k PSNR by 0.02 to 0.06~dB on maps 6, 7, 8 and 16. Learning rates of $3\times10^{-4}$ and $5\times10^{-4}$ and the 8k grid change the 4k PSNR by at most $+0.06$~dB on maps 12 and 16, inside that seed spread, so the base learning rate of $10^{-4}$ stands. Against the raw frame with the fine-tuned decoder, running on from 4k to 8k adds 0.06~dB on average, on every map.
 
