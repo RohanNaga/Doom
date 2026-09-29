@@ -43,7 +43,9 @@ STATUS = [
     ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),
     # method and results: single passages written for him
     ("\\textbf{Data.}", DONE),                                       # read Sep 29, no edits
-    ("\\textbf{Models and training.}", CONFIRM),                     # simplified on his wording
+    ("\\textbf{Models and training.}", DONE),                        # simplified on his wording, approved
+    ("We turn all three into next-tic world models", DONE),
+    ("We train each backbone for 200k updates", DONE),
     ("For turning, we compute the \\emph{directional} score", CONFIRM),
     ("Architecture does not change what survives the shift", CONFIRM),
 ]

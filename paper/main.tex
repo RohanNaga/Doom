@@ -6,7 +6,7 @@
 \usepackage{amsmath}
 
 \newif\ifdraftmarks \draftmarksfalse
-\newif\ifwithappendix \withappendixfalse % submission: body plus references; \withappendixtrue for the camera-ready or an anonymous supplement
+\newif\ifwithappendix \withappendixtrue % the appendix follows the references and pointers read "Appendix A" (CoRL: the appendix does not count toward the page limit); \withappendixfalse builds body plus references, with pointers to "the supplementary material"
 \newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplementary material\fi}
 \newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[tbd]}\else[tbd]\fi}
 \newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[#1]}\else[#1]\fi}
