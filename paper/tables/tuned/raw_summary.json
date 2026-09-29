@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-29T00:02:59-04:00",
+ "generated_at": "2026-09-29T08:32:11-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1181,6 +1181,26 @@
    "lpips_zero_shot": 0.29239138204138726,
    "lpips_4k": 0.2093273454665905,
    "lpips_8k": 0.20132957745227031,
+   "n_8k": 4,
+   "maps_8k": [
+    6,
+    7,
+    8,
+    16
+   ],
+   "grid_sources": {
+    "6": null,
+    "7": null,
+    "8": null,
+    "16": null
+   },
+   "runs": {
+    "6": null,
+    "7": null,
+    "8": null,
+    "16": null
+   },
+   "guards": {},
    "has_check": true,
    "level": [
     25.196385307237506,
@@ -1210,6 +1230,7 @@
     250
    ],
    "budget_at_first_read": [],
+   "incomplete_grid": [],
    "censored": 0,
    "gpu_hours_headline_by_card": {
     "A4000": {
@@ -1230,18 +1251,30 @@
    "zero_shot_borrowed": []
   },
   "unet_full": {
-   "n": 4,
-   "n_wanted": 4,
+   "n": 7,
+   "n_wanted": 13,
    "wanted": [
+    1,
     6,
     7,
     8,
-    16
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17
    ],
    "arenas": [
     6,
     7,
     8,
+    9,
+    10,
+    11,
     16
    ],
    "quantity": "raw",
@@ -1249,15 +1282,125 @@
    "in_progress": [],
    "headline": 4000,
    "coarse_grid": true,
-   "last_read": 4000,
+   "last_read": 8000,
    "first_read": 4000,
-   "psnr_zero_shot": 21.711679314263165,
-   "psnr_4k": 23.114286733791232,
-   "psnr_8k": null,
-   "lpips_zero_shot": 0.29239138204138726,
-   "lpips_4k": 0.182274653139757,
-   "lpips_8k": null,
-   "has_check": false,
+   "psnr_zero_shot": 22.297485141083598,
+   "psnr_4k": 23.977396547794342,
+   "psnr_8k": 26.50607141852379,
+   "lpips_zero_shot": 0.2774262332241051,
+   "lpips_4k": 0.17192973906639963,
+   "lpips_8k": 0.1456963371601887,
+   "n_8k": 3,
+   "maps_8k": [
+    9,
+    10,
+    11
+   ],
+   "grid_sources": {
+    "6": "coarse",
+    "7": "coarse",
+    "8": "coarse",
+    "9": "g8k",
+    "10": "g8k",
+    "11": "g8k",
+    "16": "coarse"
+   },
+   "runs": {
+    "6": "unet200k_arenas13_map06_r0_k8_s0",
+    "7": "unet200k_arenas13_map07_r0_k8_s0",
+    "8": "unet200k_arenas13_map08_r0_k8_s0",
+    "9": "map09",
+    "10": "map10",
+    "11": "map11",
+    "16": "unet200k_arenas13_map16_r0_k8_s0"
+   },
+   "guards": {
+    "6": {
+     "4000": {
+      "directional": 0.8515625,
+      "directional_ref": 0.875,
+      "trainmap_psnr": 21.513229876756668,
+      "trainmap_lpips": 0.2044818790454883,
+      "trainmap_psnr_dec": 23.83310367912054
+     }
+    },
+    "7": {
+     "4000": {
+      "directional": 0.84765625,
+      "directional_ref": 0.88671875,
+      "trainmap_psnr": 21.053045943379402,
+      "trainmap_lpips": 0.20309200836345553,
+      "trainmap_psnr_dec": 23.066163308918476
+     }
+    },
+    "8": {
+     "4000": {
+      "directional": 0.90234375,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 22.359786719083786,
+      "trainmap_lpips": 0.20262380130589008,
+      "trainmap_psnr_dec": 25.51932494342327
+     }
+    },
+    "9": {
+     "4000": {
+      "directional": 0.8984375,
+      "directional_ref": 0.9375,
+      "trainmap_psnr": 22.23498696833849,
+      "trainmap_lpips": 0.2145019538293127,
+      "trainmap_psnr_dec": 25.185059390962124
+     },
+     "8000": {
+      "directional": 0.875,
+      "directional_ref": 0.9375,
+      "trainmap_psnr": 21.98051906004548,
+      "trainmap_lpips": 0.24019359346129932,
+      "trainmap_psnr_dec": 24.68367126584053
+     }
+    },
+    "10": {
+     "4000": {
+      "directional": 0.84765625,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 22.13418935984373,
+      "trainmap_lpips": 0.20685082918498665,
+      "trainmap_psnr_dec": 25.008183546364307
+     },
+     "8000": {
+      "directional": 0.86328125,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 21.89546613022685,
+      "trainmap_lpips": 0.22727088985266164,
+      "trainmap_psnr_dec": 24.51413058489561
+     }
+    },
+    "11": {
+     "4000": {
+      "directional": 0.87109375,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 22.060093879699707,
+      "trainmap_lpips": 0.1979233957536053,
+      "trainmap_psnr_dec": 24.844185508787632
+     },
+     "8000": {
+      "directional": 0.87890625,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 21.844026312232018,
+      "trainmap_lpips": 0.21049721917370334,
+      "trainmap_psnr_dec": 24.43565734475851
+     }
+    },
+    "16": {
+     "4000": {
+      "directional": 0.875,
+      "directional_ref": 0.90625,
+      "trainmap_psnr": 22.196812212467194,
+      "trainmap_lpips": 0.1846744893118739,
+      "trainmap_psnr_dec": 25.126963108778
+     }
+    }
+   },
+   "has_check": true,
    "level": [
     25.196385307237506,
     0.1580457560630748
@@ -1265,40 +1408,71 @@
    "budget_final": true,
    "shares": {
     "lpips": {
-     "median": 0.8675709734289437,
+     "median": 0.8893395859215643,
      "min": 0.7819106808089634,
-     "n": 4
+     "n": 7
     },
     "psnr": {
-     "median": 0.46278934394524657,
+     "median": 0.6049797539779426,
      "min": 0.3284220500070481,
-     "n": 4
+     "n": 7
     }
    },
    "budgets": {
     "6": 4000,
     "7": 4000,
     "8": 4000,
+    "9": 4000,
+    "10": 4000,
+    "11": 4000,
     "16": 4000
    },
    "budget_middle": [
     4000
    ],
    "budget_at_first_read": [
-    6,
-    7,
-    8,
-    16
+    [
+     6,
+     4000
+    ],
+    [
+     7,
+     4000
+    ],
+    [
+     8,
+     4000
+    ],
+    [
+     9,
+     4000
+    ],
+    [
+     10,
+     4000
+    ],
+    [
+     11,
+     4000
+    ],
+    [
+     16,
+     4000
+    ]
    ],
+   "incomplete_grid": [],
    "censored": 0,
    "gpu_hours_headline_by_card": {
     "A6000": {
-     "median": 0.8310704880952835,
-     "n": 4,
+     "median": 0.9413402789831161,
+     "n": 7,
      "arenas": [
       6,
       7,
       8,
+      9,
+      10,
+      11,
       16
      ]
     }
@@ -1311,31 +1485,38 @@
     6,
     7,
     8,
+    9,
+    10,
+    11,
     16
    ],
    "matched_adapter": {
-    "psnr_4k": 22.884795425459743,
-    "lpips_4k": 0.2093273454665905,
+    "psnr_4k": 23.601111978292465,
+    "lpips_4k": 0.18870700389379635,
+    "psnr_8k": 23.688441541045904,
+    "lpips_8k": 0.1827172608464025,
     "shares": {
      "lpips": {
-      "median": 0.7110996585384264,
+      "median": 0.7654233428231767,
       "min": 0.5461622145479961,
-      "n": 4
+      "n": 7
      },
      "psnr": {
-      "median": 0.4112275576569766,
+      "median": 0.4832859975219142,
       "min": 0.24080407535555182,
-      "n": 4
+      "n": 7
      }
     },
     "budget_middle": [
-     150,
-     250
+     150
     ],
     "arenas": [
      6,
      7,
      8,
+     9,
+     10,
+     11,
      16
     ]
    }
@@ -1378,15 +1559,298 @@
    "in_progress": [],
    "headline": 4000,
    "coarse_grid": false,
-   "last_read": 4000,
+   "last_read": 8000,
    "first_read": 50,
    "psnr_zero_shot": 22.378942884504795,
    "psnr_4k": 23.717496056109667,
-   "psnr_8k": null,
+   "psnr_8k": 23.313037730753422,
    "lpips_zero_shot": 0.2852195681189187,
-   "lpips_4k": 0.20526435476494953,
-   "lpips_8k": null,
-   "has_check": false,
+   "lpips_4k": 0.2035779895959422,
+   "lpips_8k": 0.20305332052521408,
+   "n_8k": 5,
+   "maps_8k": [
+    1,
+    6,
+    13,
+    14,
+    15
+   ],
+   "grid_sources": {
+    "1": "full",
+    "6": "full",
+    "7": "coarse",
+    "8": "coarse",
+    "9": "coarse",
+    "10": "coarse",
+    "11": "coarse",
+    "12": "coarse",
+    "13": "full",
+    "14": "full",
+    "15": "full",
+    "16": "coarse",
+    "17": "coarse"
+   },
+   "runs": {
+    "1": "pixart200k_full_arenas13_map01_r16_k8_s0",
+    "6": "pixart200k_full_arenas13_map06_r16_k8_s0",
+    "7": "pixart200k_arenas13_map07_r16_k8_s0",
+    "8": "pixart200k_arenas13_map08_r16_k8_s0",
+    "9": "pixart200k_arenas13_map09_r16_k8_s0",
+    "10": "pixart200k_arenas13_map10_r16_k8_s0",
+    "11": "pixart200k_arenas13_map11_r16_k8_s0",
+    "12": "pixart200k_arenas13_map12_r16_k8_s0",
+    "13": "pixart200k_full_arenas13_map13_r16_k8_s0",
+    "14": "pixart200k_full_arenas13_map14_r16_k8_s0",
+    "15": "pixart200k_full_arenas13_map15_r16_k8_s0",
+    "16": "pixart200k_arenas13_map16_r16_k8_s0",
+    "17": "pixart200k_arenas13_map17_r16_k8_s0"
+   },
+   "guards": {
+    "1": {
+     "0": {
+      "directional": 0.7265625,
+      "directional_ref": 0.82421875,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.77734375,
+      "directional_ref": 0.82421875,
+      "trainmap_psnr": 22.052292082458735,
+      "trainmap_lpips": 0.19656319191562943,
+      "trainmap_psnr_dec": 24.877146996557713
+     },
+     "8000": {
+      "directional": 0.77734375,
+      "directional_ref": 0.82421875,
+      "trainmap_psnr": 21.887813363224268,
+      "trainmap_lpips": 0.20456304447725415,
+      "trainmap_psnr_dec": 24.533225417137146
+     }
+    },
+    "6": {
+     "0": {
+      "directional": 0.76953125,
+      "directional_ref": 0.875,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.8203125,
+      "directional_ref": 0.875,
+      "trainmap_psnr": 22.265580382198095,
+      "trainmap_lpips": 0.19333145103882998,
+      "trainmap_psnr_dec": 25.309418827295303
+     },
+     "8000": {
+      "directional": 0.8203125,
+      "directional_ref": 0.875,
+      "trainmap_psnr": 22.090590115636587,
+      "trainmap_lpips": 0.19969779657549225,
+      "trainmap_psnr_dec": 24.95880137383938
+     }
+    },
+    "7": {
+     "0": {
+      "directional": 0.76171875,
+      "directional_ref": 0.88671875,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.85546875,
+      "directional_ref": 0.88671875,
+      "trainmap_psnr": 22.06418790668249,
+      "trainmap_lpips": 0.1901413902232889,
+      "trainmap_psnr_dec": 24.909467190504074
+     }
+    },
+    "8": {
+     "0": {
+      "directional": 0.87890625,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.8671875,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 22.411684419959784,
+      "trainmap_lpips": 0.19695703592151403,
+      "trainmap_psnr_dec": 25.701819270849228
+     }
+    },
+    "9": {
+     "0": {
+      "directional": 0.91015625,
+      "directional_ref": 0.9375,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.8984375,
+      "directional_ref": 0.9375,
+      "trainmap_psnr": 22.406515412032604,
+      "trainmap_lpips": 0.19866851274855435,
+      "trainmap_psnr_dec": 25.597505405545235
+     }
+    },
+    "10": {
+     "0": {
+      "directional": 0.84375,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.85546875,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 22.3548130877316,
+      "trainmap_lpips": 0.19367302866885439,
+      "trainmap_psnr_dec": 25.528228513896465
+     }
+    },
+    "11": {
+     "0": {
+      "directional": 0.82421875,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.85546875,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 22.20766281336546,
+      "trainmap_lpips": 0.19842576220980845,
+      "trainmap_psnr_dec": 25.17545796185732
+     }
+    },
+    "12": {
+     "0": {
+      "directional": 0.79296875,
+      "directional_ref": 0.85546875,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.8125,
+      "directional_ref": 0.85546875,
+      "trainmap_psnr": 22.35652332007885,
+      "trainmap_lpips": 0.19505249400390312,
+      "trainmap_psnr_dec": 25.54072093218565
+     }
+    },
+    "13": {
+     "0": {
+      "directional": 0.7890625,
+      "directional_ref": 0.8984375,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.83984375,
+      "directional_ref": 0.8984375,
+      "trainmap_psnr": 22.111309610307217,
+      "trainmap_lpips": 0.1935165861796122,
+      "trainmap_psnr_dec": 25.025264479219913
+     },
+     "8000": {
+      "directional": 0.83203125,
+      "directional_ref": 0.8984375,
+      "trainmap_psnr": 21.994121741503477,
+      "trainmap_lpips": 0.19985887993243523,
+      "trainmap_psnr_dec": 24.775950215756893
+     }
+    },
+    "14": {
+     "0": {
+      "directional": 0.7265625,
+      "directional_ref": 0.84765625,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.7734375,
+      "directional_ref": 0.84765625,
+      "trainmap_psnr": 22.36735900864005,
+      "trainmap_lpips": 0.2027053221827373,
+      "trainmap_psnr_dec": 25.56093866378069
+     },
+     "8000": {
+      "directional": 0.78515625,
+      "directional_ref": 0.84765625,
+      "trainmap_psnr": 22.24184635654092,
+      "trainmap_lpips": 0.2139348947093822,
+      "trainmap_psnr_dec": 25.287750348448753
+     }
+    },
+    "15": {
+     "0": {
+      "directional": 0.82421875,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.83984375,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 22.35461999848485,
+      "trainmap_lpips": 0.1934012996207457,
+      "trainmap_psnr_dec": 25.52300848811865
+     },
+     "8000": {
+      "directional": 0.85546875,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 22.289540499448776,
+      "trainmap_lpips": 0.1987050277821254,
+      "trainmap_psnr_dec": 25.3727819994092
+     }
+    },
+    "16": {
+     "0": {
+      "directional": 0.8203125,
+      "directional_ref": 0.90625,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.875,
+      "directional_ref": 0.90625,
+      "trainmap_psnr": 22.335239734500647,
+      "trainmap_lpips": 0.1854246839939151,
+      "trainmap_psnr_dec": 25.495601199567318
+     }
+    },
+    "17": {
+     "0": {
+      "directional": 0.7890625,
+      "directional_ref": 0.9296875,
+      "trainmap_psnr": 22.560567766427994,
+      "trainmap_lpips": 0.1772625455923844,
+      "trainmap_psnr_dec": 26.037940502166748
+     },
+     "4000": {
+      "directional": 0.85546875,
+      "directional_ref": 0.9296875,
+      "trainmap_psnr": 22.181829690933228,
+      "trainmap_lpips": 0.20956939307507128,
+      "trainmap_psnr_dec": 25.142943769693375
+     }
+    }
+   },
+   "has_check": true,
    "level": [
     25.183143777772784,
     0.15862315600679722
@@ -1395,7 +1859,7 @@
    "shares": {
     "lpips": {
      "median": 0.7628685493437575,
-     "min": 0.48178781263000614,
+     "min": 0.4856304743989033,
      "n": 13
     },
     "psnr": {
@@ -1405,7 +1869,7 @@
     }
    },
    "budgets": {
-    "1": null,
+    "1": 8000,
     "6": 250,
     "7": 150,
     "8": 1000,
@@ -1423,7 +1887,8 @@
     250
    ],
    "budget_at_first_read": [],
-   "censored": 1,
+   "incomplete_grid": [],
+   "censored": 0,
    "gpu_hours_headline_by_card": {
     "A6000": {
      "median": 0.8759480004178153,
@@ -1489,15 +1954,274 @@
    "in_progress": [],
    "headline": 4000,
    "coarse_grid": false,
-   "last_read": 4000,
-   "first_read": 250,
+   "last_read": 8000,
+   "first_read": 50,
    "psnr_zero_shot": 22.08873654715717,
-   "psnr_4k": 24.003133557736874,
-   "psnr_8k": null,
+   "psnr_4k": 23.832074780017138,
+   "psnr_8k": 23.58208996243775,
    "lpips_zero_shot": 0.2622547024220694,
-   "lpips_4k": 0.16496755369007587,
-   "lpips_8k": null,
-   "has_check": false,
+   "lpips_4k": 0.16517935146111995,
+   "lpips_8k": 0.1493140280508669,
+   "n_8k": 2,
+   "maps_8k": [
+    11,
+    16
+   ],
+   "grid_sources": {
+    "1": "coarse",
+    "6": "coarse",
+    "7": "coarse",
+    "8": "coarse",
+    "9": "coarse",
+    "10": "coarse",
+    "11": "full",
+    "12": "coarse",
+    "13": "coarse",
+    "14": "coarse",
+    "15": "partial",
+    "16": "full",
+    "17": "coarse"
+   },
+   "runs": {
+    "1": "sd35_200k_arenas13_map01_r16_k8_s0",
+    "6": "sd35_200k_arenas13_map06_r16_k8_s0",
+    "7": "sd35_200k_arenas13_map07_r16_k8_s0",
+    "8": "sd35_200k_arenas13_map08_r16_k8_s0",
+    "9": "sd35_200k_arenas13_map09_r16_k8_s0",
+    "10": "sd35_200k_arenas13_map10_r16_k8_s0",
+    "11": "sd35_200k_full_arenas13_map11_r16_k8_s0",
+    "12": "sd35_200k_arenas13_map12_r16_k8_s0",
+    "13": "sd35_200k_arenas13_map13_r16_k8_s0",
+    "14": "sd35_200k_arenas13_map14_r16_k8_s0",
+    "15": "sd35_200k_full_arenas13_map15_r16_k8_s0",
+    "16": "sd35_200k_full_arenas13_map16_r16_k8_s0",
+    "17": "sd35_200k_arenas13_map17_r16_k8_s0"
+   },
+   "guards": {
+    "1": {
+     "0": {
+      "directional": 0.72265625,
+      "directional_ref": 0.8359375,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.75390625,
+      "directional_ref": 0.8359375,
+      "trainmap_psnr": 23.122938089072704,
+      "trainmap_lpips": 0.1398272176302271,
+      "trainmap_psnr_dec": 24.937739357352257
+     }
+    },
+    "6": {
+     "0": {
+      "directional": 0.75390625,
+      "directional_ref": 0.890625,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.8046875,
+      "directional_ref": 0.890625,
+      "trainmap_psnr": 23.13367822766304,
+      "trainmap_lpips": 0.14638348831795156,
+      "trainmap_psnr_dec": 24.96644826978445
+     }
+    },
+    "7": {
+     "0": {
+      "directional": 0.79296875,
+      "directional_ref": 0.8828125,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.84765625,
+      "directional_ref": 0.8828125,
+      "trainmap_psnr": 23.173077769577503,
+      "trainmap_lpips": 0.13245712526259013,
+      "trainmap_psnr_dec": 25.020419597625732
+     }
+    },
+    "8": {
+     "0": {
+      "directional": 0.83984375,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.8671875,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 23.313438281416893,
+      "trainmap_lpips": 0.13324081820610445,
+      "trainmap_psnr_dec": 25.333719082176685
+     }
+    },
+    "9": {
+     "0": {
+      "directional": 0.87890625,
+      "directional_ref": 0.9375,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.9140625,
+      "directional_ref": 0.9375,
+      "trainmap_psnr": 23.304900497198105,
+      "trainmap_lpips": 0.14346331672277302,
+      "trainmap_psnr_dec": 25.24800219386816
+     }
+    },
+    "10": {
+     "0": {
+      "directional": 0.8125,
+      "directional_ref": 0.8984375,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.85546875,
+      "directional_ref": 0.8984375,
+      "trainmap_psnr": 23.292414151132107,
+      "trainmap_lpips": 0.1392177014495246,
+      "trainmap_psnr_dec": 25.248841144144535
+     }
+    },
+    "11": {
+     "0": {
+      "directional": 0.8359375,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.85546875,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 23.082189619541168,
+      "trainmap_lpips": 0.1399483431596309,
+      "trainmap_psnr_dec": 24.904444187879562
+     },
+     "8000": {
+      "directional": 0.84375,
+      "directional_ref": 0.9140625,
+      "trainmap_psnr": 23.02975343167782,
+      "trainmap_lpips": 0.1448966991447378,
+      "trainmap_psnr_dec": 24.821511015295982
+     }
+    },
+    "12": {
+     "0": {
+      "directional": 0.77734375,
+      "directional_ref": 0.875,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.78515625,
+      "directional_ref": 0.875,
+      "trainmap_psnr": 23.26490056142211,
+      "trainmap_lpips": 0.13732554529269692,
+      "trainmap_psnr_dec": 25.25597606599331
+     }
+    },
+    "13": {
+     "0": {
+      "directional": 0.78125,
+      "directional_ref": 0.89453125,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.8359375,
+      "directional_ref": 0.89453125,
+      "trainmap_psnr": 23.093858413398266,
+      "trainmap_lpips": 0.1418581127654761,
+      "trainmap_psnr_dec": 24.900382593274117
+     }
+    },
+    "14": {
+     "0": {
+      "directional": 0.7265625,
+      "directional_ref": 0.84765625,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.7578125,
+      "directional_ref": 0.84765625,
+      "trainmap_psnr": 23.31868451833725,
+      "trainmap_lpips": 0.14259803979075514,
+      "trainmap_psnr_dec": 25.3108698874712
+     }
+    },
+    "15": {
+     "0": {
+      "directional": 0.81640625,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.80078125,
+      "directional_ref": 0.90234375,
+      "trainmap_psnr": 23.33560035377741,
+      "trainmap_lpips": 0.13272239980869927,
+      "trainmap_psnr_dec": 25.30307413637638
+     }
+    },
+    "16": {
+     "0": {
+      "directional": 0.8046875,
+      "directional_ref": 0.93359375,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.83203125,
+      "directional_ref": 0.93359375,
+      "trainmap_psnr": 23.26633733510971,
+      "trainmap_lpips": 0.1341406591818668,
+      "trainmap_psnr_dec": 25.205986239016056
+     },
+     "8000": {
+      "directional": 0.828125,
+      "directional_ref": 0.93359375,
+      "trainmap_psnr": 23.184908587485552,
+      "trainmap_lpips": 0.1370615985360928,
+      "trainmap_psnr_dec": 25.027228828519583
+     }
+    },
+    "17": {
+     "0": {
+      "directional": 0.82421875,
+      "directional_ref": 0.953125,
+      "trainmap_psnr": 23.535159431397915,
+      "trainmap_lpips": 0.12341036243014969,
+      "trainmap_psnr_dec": 25.74579617381096
+     },
+     "4000": {
+      "directional": 0.8984375,
+      "directional_ref": 0.953125,
+      "trainmap_psnr": 23.07385168597102,
+      "trainmap_lpips": 0.1548884139629081,
+      "trainmap_psnr_dec": 24.873543314635754
+     }
+    }
+   },
+   "has_check": true,
    "level": [
     25.38341777585447,
     0.12628015151858563
@@ -1505,13 +2229,13 @@
    "budget_final": true,
    "shares": {
     "lpips": {
-     "median": 0.7716159955454934,
+     "median": 0.7588394085906437,
      "min": 0.5359931497002994,
      "n": 13
     },
     "psnr": {
      "median": 0.5034309077291419,
-     "min": 0.296114348228589,
+     "min": 0.2755756668028909,
      "n": 13
     }
    },
@@ -1522,27 +2246,45 @@
     "8": 1000,
     "9": 250,
     "10": 250,
-    "11": 250,
+    "11": 100,
     "12": 250,
     "13": 500,
     "14": 500,
     "15": 250,
-    "16": 250,
+    "16": 150,
     "17": 250
    },
    "budget_middle": [
     250
    ],
    "budget_at_first_read": [
-    6,
-    7,
-    9,
-    10,
-    11,
-    12,
-    15,
-    16,
-    17
+    [
+     6,
+     250
+    ],
+    [
+     7,
+     250
+    ],
+    [
+     9,
+     250
+    ],
+    [
+     10,
+     250
+    ],
+    [
+     12,
+     250
+    ],
+    [
+     17,
+     250
+    ]
+   ],
+   "incomplete_grid": [
+    15
    ],
    "censored": 0,
    "gpu_hours_headline_by_card": {
@@ -1562,7 +2304,7 @@
      ]
     },
     "A6000": {
-     "median": 1.3302527933981683,
+     "median": 1.3307920051283306,
      "n": 4,
      "arenas": [
       6,
@@ -1625,6 +2367,53 @@
   "lpips_zero_shot": 0.30288498516893014,
   "lpips_4k": 0.21024158014915884,
   "lpips_8k": 0.203747603809461,
+  "n_8k": 13,
+  "maps_8k": [
+   1,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17
+  ],
+  "grid_sources": {
+   "1": null,
+   "6": null,
+   "7": null,
+   "8": null,
+   "9": null,
+   "10": null,
+   "11": null,
+   "12": null,
+   "13": null,
+   "14": null,
+   "15": null,
+   "16": null,
+   "17": null
+  },
+  "runs": {
+   "1": null,
+   "6": null,
+   "7": null,
+   "8": null,
+   "9": null,
+   "10": null,
+   "11": null,
+   "12": null,
+   "13": null,
+   "14": null,
+   "15": null,
+   "16": null,
+   "17": null
+  },
+  "guards": {},
   "has_check": true,
   "level": [
    25.196385307237506,
@@ -1662,6 +2451,7 @@
    250
   ],
   "budget_at_first_read": [],
+  "incomplete_grid": [],
   "censored": 0,
   "gpu_hours_headline_by_card": {
    "A4000": {
@@ -1714,6 +2504,9 @@
     6,
     7,
     8,
+    9,
+    10,
+    11,
     16
    ],
    "pixart_lora": [
@@ -1797,7 +2590,7 @@
     ],
     "50": [
      22.745710134506226,
-     0.2614773381501436
+     0.26150676811812446
     ],
     "100": [
      23.160877399146557,
@@ -1821,11 +2614,11 @@
     ],
     "2000": [
      23.648092191666365,
-     0.2072023355285637
+     0.20682265298091806
     ],
     "4000": [
      23.717496056109667,
-     0.20526435476494953
+     0.2035779895959422
     ]
    },
    "sd35_lora": {
@@ -1834,24 +2627,24 @@
      0.2622547024220694
     ],
     "250": [
-     23.59269129112363,
+     23.585294295102358,
      0.19229207388707437
     ],
     "500": [
-     23.62322660535574,
+     23.644508212804794,
      0.18544237237074412
     ],
     "1000": [
-     23.6155763566494,
+     23.62868943065405,
      0.17822585024987347
     ],
     "2000": [
-     23.849586956202984,
+     23.74350044503808,
      0.1715961743175285
     ],
     "4000": [
-     24.003133557736874,
-     0.16496755369007587
+     23.832074780017138,
+     0.16517935146111995
     ]
    }
   }
@@ -1998,7 +2791,7 @@
     ],
     "50": [
      22.745710134506226,
-     0.2614773381501436
+     0.26150676811812446
     ],
     "100": [
      23.160877399146557,
@@ -2022,11 +2815,11 @@
     ],
     "2000": [
      23.648092191666365,
-     0.2072023355285637
+     0.20682265298091806
     ],
     "4000": [
      23.717496056109667,
-     0.20526435476494953
+     0.2035779895959422
     ]
    },
    "sd35_lora": {
@@ -2035,24 +2828,24 @@
      0.2622547024220694
     ],
     "250": [
-     23.59269129112363,
+     23.585294295102358,
      0.19229207388707437
     ],
     "500": [
-     23.62322660535574,
+     23.644508212804794,
      0.18544237237074412
     ],
     "1000": [
-     23.6155763566494,
+     23.62868943065405,
      0.17822585024987347
     ],
     "2000": [
-     23.849586956202984,
+     23.74350044503808,
      0.1715961743175285
     ],
     "4000": [
-     24.003133557736874,
-     0.16496755369007587
+     23.832074780017138,
+     0.16517935146111995
     ]
    }
   }
@@ -2150,12 +2943,12 @@
    },
    "pixart_lora": {
     "1": [
-     24.12868592888117,
-     0.269856900034938
+     24.166077248752117,
+     0.2690320764086209
     ],
     "6": [
-     22.641503740102053,
-     0.1957797596405726
+     22.62566715478897,
+     0.19656085871974938
     ],
     "7": [
      22.874449282884598,
@@ -2182,16 +2975,16 @@
      0.18217235905467533
     ],
     "13": [
-     22.189069259911776,
-     0.24042633731733076
+     22.189539343118668,
+     0.23911480311653577
     ],
     "14": [
-     24.01100968942046,
-     0.20526435476494953
+     24.049913231283426,
+     0.2035779895959422
     ],
     "15": [
-     23.293307695537806,
-     0.2067016668152064
+     23.308746945112944,
+     0.20627047852030955
     ],
     "16": [
      23.082443054765463,
@@ -2228,8 +3021,8 @@
      0.14411465512239374
     ],
     "11": [
-     24.003133557736874,
-     0.13000766615732573
+     23.832074780017138,
+     0.13245610703597777
     ],
     "12": [
      24.194798331707716,
@@ -2244,12 +3037,12 @@
      0.17137436900520697
     ],
     "15": [
-     23.439395908266306,
-     0.16496755369007587
+     23.34935138374567,
+     0.1672730621357914
     ],
     "16": [
-     23.064338931813836,
-     0.17632861994206905
+     22.996670523658395,
+     0.18011518463026732
     ],
     "17": [
      22.138004578649998,

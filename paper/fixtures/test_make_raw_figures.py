@@ -190,6 +190,12 @@ def export(tmp_path):
     return fresh, dist, tdist
 
 
+def no_full_grid(tmp_path):
+    """The full-grid roots pointed at empty folders: the defaults are the repo's real results."""
+    return ["--sd35-full-root", str(tmp_path / "none_sd35"), "--pixart-full-root", str(tmp_path / "none_pixart"),
+            "--fullft-g8k-root", str(tmp_path / "none_fullft")]
+
+
 def test_means_by_map_leave_duplicates_out_and_group_by_the_map_column(tmp_path):
     path = str(tmp_path / "pw.csv")
     write_windows(path, windows(2, 20.0, 0.2, (28.0, 0.06), "_tuned", dup=0) +
@@ -345,7 +351,8 @@ def test_the_raw_set_switches_sd35_to_200k_through_its_fine_tuned_decoder(tmp_pa
     assert mrf.main(["--fresh-root", str(fresh), "--distances", str(dist), "--training-distances", str(tdist),
                      "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
                      "--family-step", str(tmp_path / "family_step.json"),
-                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k"), "--adapt-root", str(tmp_path / "adapt")]) == 0
+                     "--adapt-glob", str(tmp_path / "adapt" / "*_g8k"), "--adapt-root", str(tmp_path / "adapt"),
+                     *no_full_grid(tmp_path)]) == 0
     s = json.load(open(side))
     # the step panels, the zero-shot and in-distribution reads: SD 3.5 at 200k through its fine-tuned decoder
     assert sorted(s["step"]) == ["pixart200k_ema", "sd35_200000", "unet200k_ema"]
@@ -409,7 +416,7 @@ def test_a_block_scored_only_at_0_and_4k_prints_its_budget_as_at_most_4k():
         return b, row.split(" & ")[-1].rstrip(" \\"), tex
     b, budget, tex = cell({8: arena(0.22)})
     assert b["coarse_grid"] is True and budget == "${\\le}$4k"
-    assert "budget grid 0 and 4k only" in tex
+    assert "budget grid starts at 4k" in tex
     _, budget, _ = cell({8: arena(0.23)})
     assert budget == "${>}$4k; 1 of 1 censored"                    # not reached by 4k: above 4k, never above 8k
     _, budget, _ = cell({8: arena(0.22), 16: arena(0.22), 6: arena(0.23)})
@@ -418,8 +425,13 @@ def test_a_block_scored_only_at_0_and_4k_prints_its_budget_as_at_most_4k():
     fine = {8: {**arena(0.22), "grid": [0, 250, 4000]}}
     fine[8]["reads"][250] = {"quantity": "raw", "psnr": 21.8, "lpips": 0.22}
     b, budget, tex = cell(fine)
-    assert b["coarse_grid"] is False and budget == "250" and "budget grid 0 and 4k only" not in tex
-    assert b["budget_at_first_read"] == [8] and "first point of its grid (250) for maps 8" in tex
+    assert b["coarse_grid"] is False and budget == "250" and "budget grid starts at 4k" not in tex
+    assert b["budget_at_first_read"] == [(8, 250)] and "first point of its grid for maps 8 (250)" in tex
+    # a run whose grid stops short still gives a budget when it crosses on the reads it has
+    short = {8: {**arena(0.22), "grid": [0, 250, 4000, 8000]}}
+    short[8]["reads"][250] = {"quantity": "raw", "psnr": 21.8, "lpips": 0.25}
+    b, budget, _ = cell(short)
+    assert b["incomplete_grid"] == [8] and b["budget_final"] is True and budget == "4k"
 
 
 def test_the_full_fine_tune_panel_waits_for_every_comparator_arena_the_lora_has():
@@ -731,7 +743,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
                      "--out-dir", str(out), "--summary", str(side), "--tables-dir", str(tables),
                      "--family-step", str(tmp_path / "family_step.json"),
                      "--adapt-glob", str(tmp_path / "adapt" / "*_g8k"), "--adapt-root", str(tmp_path / "adapt"),
-                     "--directional-roots", str(tmp_path / "directional")]) == 0
+                     "--directional-roots", str(tmp_path / "directional"), *no_full_grid(tmp_path)]) == 0
     for stem, size in mrf.SIZES.items():
         w, h = mediabox(os.path.join(out, f"{stem}.pdf"))
         assert (w, h) == (pytest.approx(size[0], abs=0.01), pytest.approx(size[1], abs=0.01)), stem
@@ -774,7 +786,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     lines = {line.split(" & ")[0]: line for line in tex.splitlines() if " & " in line}
     assert "U-Net LoRA (1 of 4)" not in lines                          # the adapter row left Table 2 (Sep 29)
     # the full fine-tune's arena 6 has its 4k read and the U-Net LoRA's step 0 (the same checkpoint): 1 of 4
-    ft = lines["U-Net full fine-tune (1 of 4)"]
+    ft = lines["U-Net full fine-tune (1 of 2)"]      # every map it has, of the fixture's two
     assert " & 18.00 & 23.00 & " in ft and "zero-shot of maps 6 from the U-Net LoRA's step 0" in tex
     assert ft.endswith(" & ${\\le}$4k \\\\")                          # scored at 0 and 4k only
     # the caption's comparison: the adapter's own reads on the same maps, in the table's comment line
@@ -834,7 +846,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # the comparison rows leave the in-domain columns blank; their shares are against the U-Net's level: map 6's
     # full fine-tune (4k 23.0 dB, LPIPS 0.18, from the borrowed 18.0 and 0.30) undoes 0.12 of 0.15 and regains 5 of
     # 4.45 dB
-    assert lines["U-Net full fine-tune (1 of 4)"] == ["", "", "18.00", "0.300", "23.00", "0.180", "80", "112"]
+    assert lines["U-Net full fine-tune (1 of 2)"] == ["", "", "18.00", "0.300", "23.00", "0.180", "80", "112"]
     assert lines["U-Net LoRA (1 of 4)"][:3] == ["", "", "18.00"]
     assert s["blocks"]["unet_full"]["shares"]["lpips"] == {"median": pytest.approx(0.8), "min": pytest.approx(0.8),
                                                            "n": 1}

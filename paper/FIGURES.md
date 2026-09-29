@@ -61,6 +61,10 @@ Every number drawn or tabled by the generator is in `paper/tables/tuned/raw_summ
 | `figures/raw/raw_fullft.pdf` | The U-Net LoRA's whole grid against the full fine-tune's two reads (0 and 4k, bare points) on maps 6, 7, 8, 16 | 5.5 x 1.6 in |
 | `figures/raw/raw_fig3a_psnr.pdf` | Zero-shot raw PSNR against the frame distance d (the step fails in PSNR: maps 8, 9, 10 score above training maps 3 and 5) | 2.25 x 1.5 in |
 
+## Full-grid reruns (Sep 29)
+
+`raw_adapters.load_blocks` prefers, per map, a full-grid rerun (ten reads 0 to 8k) over the coarse-grid run: SD 3.5's under `results/adapt_sd35_full/`, PixArt-α's under `results/adapt_pixart_full/` (`--sd35-full-root`, `--pixart-full-root`); a map's rerun is taken when it has every read of its grid, else when it has more reads than the coarse run (map 15's SD 3.5 seed-0 run, nine points; the seed-0 rerun `_s0rerun` is preferred when complete, then the seed-1 run, `FULL_GRID_PREFERENCE`). The U-Net's full fine-tunes on the 8k grid under `results/adapt_fullft_g8k/map<NN>/` (`--fullft-g8k-root`; rows at 4k and 8k, step 0 borrowed from the LoRA of the same checkpoint) replace the 4k-only originals for the maps they cover, and the full fine-tune block now spans every map it has ("7 of 13"), with the adapter's matched numbers recomputed over those maps in the comment line. `raw_summary.json` records per block `grid_sources` (coarse, full, partial, g8k), `runs`, `maps_8k`, `incomplete_grid` and `guards` (directional and training-map PSNR/LPIPS at 0, 4k and 8k from the rows that carry them). The backbone medians against updates use only the steps every map of the set has, so the 50 to 150 reads join the SD 3.5 and PixArt-α curves once every map has them. Regeneration once the last score is on main is the one command below.
+
 ## Regenerating
 
     python3 paper/make_raw_figures.py

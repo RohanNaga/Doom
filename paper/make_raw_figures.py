@@ -83,7 +83,9 @@ GROUP_NAMES = ("hard", "medium", "easy")
 # Table 2's per-backbone blocks at the headline step, in order: (key in raw_adapters.load_blocks, label, arenas; None
 # for every arena); the U-Net LoRA block is matched to the full fine-tune's arenas
 BLOCKS = (("unet_lora", "U-Net LoRA", COMPARATOR_ARENAS),
-          ("unet_full", "U-Net full fine-tune", COMPARATOR_ARENAS),
+          # every map the full fine-tune has: the four 4k-only originals plus the 8k-grid runs landing on main
+          # (Sep 29); the caption's adapter comparison is recomputed over the block's own maps
+          ("unet_full", "U-Net full fine-tune", None),
           ("pixart_lora", "PixArt-$\\alpha$ LoRA", None), ("sd35_lora", "SD 3.5 LoRA", None))
 BLOCK_STYLE = {"unet_lora": ("unet", "-"), "unet_full": ("full", (0, (3, 2))), "pixart_lora": ("pixart", "-"),
                "sd35_lora": ("sd35", "-")}
@@ -576,19 +578,28 @@ def block_summary(arenas_data, wanted, level, headline=HEADLINE_STEP, check=8000
     quantity = (kinds.pop() if len(kinds) == 1 else "mixed") if kinds else None
     has_level = bool(level) and level[1] is not None
     final = bool(present) and quantity == "raw" and has_level
-    budgets, at_first = [], []
+    budgets, at_first, incomplete = [], [], []
     grids = [st for a in present for st in arenas_data[a]["grid"] if st > 0]
     for a in present if has_level else ():
         reads, grid = arenas_data[a]["reads"], [st for st in arenas_data[a]["grid"] if st > 0]
-        if any(st not in reads or reads[st]["quantity"] != "raw" for st in grid):
+        # a run whose grid stops short (map 15's SD 3.5 rerun diverged before 8k) still gives a budget when it
+        # crosses on the reads it has; only a map that never crosses on an incomplete grid is undecided
+        have = [st for st in grid if st in reads]
+        if any(reads[st]["quantity"] != "raw" for st in have) or not have:
             final = False
             continue
-        b = budget_step([(st, reads[st]["lpips"]) for st in grid], lpips_threshold(reads[0]["lpips"], level[1]))
+        b = budget_step([(st, reads[st]["lpips"]) for st in have], lpips_threshold(reads[0]["lpips"], level[1]))
+        if len(have) < len(grid):
+            incomplete.append(a)
+            if b is None:
+                final = False
+                continue
         budgets.append(b)
         if b is not None and b == min(grid):
-            at_first.append(a)
-    # scored only at 0 and the headline: a budget is "by the headline" or "beyond it", nothing finer
-    coarse = bool(present) and all({st for st in arenas_data[a]["grid"] if st > 0} == {headline} for a in present)
+            at_first.append((a, min(grid)))
+    # every map's grid starts at the headline (scored at 0 and 4k, or 0, 4k and 8k): a budget is "by the headline"
+    # or "beyond it", nothing finer
+    coarse = bool(present) and all(min(st for st in arenas_data[a]["grid"] if st > 0) == headline for a in present)
     return {"n": len(present), "n_wanted": len(wanted), "wanted": list(wanted), "arenas": present,
             "quantity": quantity, "decoded_only": decoded_only, "in_progress": in_progress, "headline": headline,
             "coarse_grid": coarse, "last_read": max(grids) if grids else check,
@@ -599,11 +610,17 @@ def block_summary(arenas_data, wanted, level, headline=HEADLINE_STEP, check=8000
             "lpips_zero_shot": median([get(a, 0, "lpips") for a in present]),
             "lpips_4k": median([get(a, headline, "lpips") for a in present]),
             "lpips_8k": median([get(a, check, "lpips") for a in present]) if has_check else None,
+            "n_8k": sum(1 for a in present if get(a, check, "psnr") is not None),
+            "maps_8k": [a for a in present if get(a, check, "psnr") is not None],
+            "grid_sources": {str(a): arenas_data[a].get("grid_source") for a in present},
+            "runs": {str(a): arenas_data[a].get("run") for a in present},
+            "guards": {str(a): arenas_data[a].get("guards") for a in present if arenas_data[a].get("guards")},
             "has_check": has_check, "level": list(level) if level else None, "budget_final": final,
             "shares": recovery_shares(arenas_data, present, level, headline),
             "budgets": {str(a): b for a, b in zip(present, budgets)} if final else None,
             "budget_middle": middle_reads(budgets) if final else None,
             "budget_at_first_read": at_first if final else None,
+            "incomplete_grid": incomplete,
             "censored": sum(1 for b in budgets if b is None) if final else None,
             "gpu_hours_headline_by_card": gpu_hours_by_card({a: arenas_data[a] for a in present}, headline)}
 
@@ -846,8 +863,10 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
         lines.append(f"% {label}: maps {', '.join(map(str, b['arenas'])) or '--'}; "
                      f"decoder {identity or '--'}, reads {b['quantity'] or 'none'}, {b['n']} maps"
                      + (", dagger: against the decoded ground truth" if b["quantity"] not in (None, "raw") else "")
-                     + (f"; budget at the first point of its grid ({fs.step_label(int(b['first_read']))}) for maps "
-                        f"{', '.join(map(str, first))}, where the rule cannot resolve finer" if first else "")
+                     + ("; budget at the first point of its grid for maps " + " and ".join(
+                         f"{', '.join(str(a) for a, s in first if s == step)} ({fs.step_label(int(step))})"
+                         for step in sorted({s for _, s in first})) + ", where the rule cannot resolve finer"
+                        if first else "")
                      + (f"; against the adapter's {ma['psnr_4k']:.2f} dB / {ma['lpips_4k']:.3f} and "
                         f"{share_cell(ma['shares'].get('lpips'))} percent (LPIPS) / "
                         f"{share_cell(ma['shares'].get('psnr'))} percent (PSNR) recovered on the same maps "
@@ -860,8 +879,14 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
                         if b.get("in_progress") else "")
                      + (f"; zero-shot of maps {', '.join(map(str, b['zero_shot_borrowed']))} from the U-Net LoRA's "
                         "step 0 (the same checkpoint and windows)" if b.get("zero_shot_borrowed") else "")
-                     + ("; budget grid 0 and 4k only: ${\\le}$4k means reached by 4k, the rule cannot resolve finer"
-                        if b.get("coarse_grid") else ""))
+                     + ("; budget grid starts at 4k: ${\\le}$4k means reached by 4k, the rule cannot resolve finer"
+                        if b.get("coarse_grid") else "")
+                     + (f"; 8k over the {b['n_8k']} maps scored there so far "
+                        f"({', '.join(map(str, b['maps_8k']))})" if 0 < b.get("n_8k", 0) < b["n"] else "")
+                     + (f"; full grid (every read 0 to 8k) on maps {', '.join(a for a, s in (b.get('grid_sources') or {}).items() if s == 'full')}"
+                        if any(s == "full" for s in (b.get("grid_sources") or {}).values()) else "")
+                     + (f"; partial rerun on maps {', '.join(a for a, s in (b.get('grid_sources') or {}).items() if s == 'partial')}"
+                        if any(s == "partial" for s in (b.get("grid_sources") or {}).values()) else ""))
     return "\n".join(lines) + "\n"
 
 
@@ -1080,13 +1105,16 @@ def fullft_label(points):
 
 def panel_points(raw, arenas=None):
     """{step: (median PSNR, median LPIPS)} over `arenas` (every arena of `raw` when None) of one block's raw reads
-    (`raw` is {arena: {step: read}}); None when the block lacks one of `arenas`."""
+    (`raw` is {arena: {step: read}}), at the steps every one of those maps has (a median over the maps that happen
+    to carry a step would mix populations while the full-grid reruns land); None when the block lacks one of
+    `arenas`."""
     if arenas is not None and any(m not in raw for m in arenas):
         return None
     pick = {m: raw[m] for m in (raw if arenas is None else arenas)}
-    steps = sorted({st for r in pick.values() for st in r})
-    return {st: (median([r[st]["psnr"] for r in pick.values() if st in r]),
-                 median([r[st]["lpips"] for r in pick.values() if st in r])) for st in steps}
+    steps = sorted({st for r in pick.values() for st in r} & set.intersection(*(set(r) for r in pick.values()))) \
+        if pick else []
+    return {st: (median([r[st]["psnr"] for r in pick.values()]),
+                 median([r[st]["lpips"] for r in pick.values()])) for st in steps}
 
 
 def backbone_style(key):
@@ -1360,6 +1388,12 @@ def build_parser():
                    default=os.path.join(REPO, "results", "distance_study", "figure_unet_h1", "stats.json"))
     p.add_argument("--adapt-root", default=os.path.join(REPO, "results", "adapt"),
                    help="every backbone's adaptation runs: Table 2's per-backbone blocks and the backbone panel")
+    p.add_argument("--sd35-full-root", default=os.path.join(REPO, "results", "adapt_sd35_full"),
+                   help="SD 3.5's full-grid reruns (ten reads 0 to 8k), preferred over the coarse-grid runs")
+    p.add_argument("--pixart-full-root", default=os.path.join(REPO, "results", "adapt_pixart_full"),
+                   help="PixArt-alpha's full-grid reruns, preferred over the coarse-grid runs")
+    p.add_argument("--fullft-g8k-root", default=os.path.join(REPO, "results", "adapt_fullft_g8k"),
+                   help="the U-Net full fine-tunes on the 8k grid (map<NN>/), preferred over the 4k-only originals")
     p.add_argument("--adapt-glob",
                    default=os.path.join(REPO, "results", "adapt", "unet200k_arenas13_map??_r16_k8_s0_g8k"),
                    help="the 8k-grid run directories whose guard rows give forgetting and the directional check")
@@ -1535,7 +1569,8 @@ def main(argv=None):
         tuned = row.endswith("_tuned") or _carries_tuned(a.fresh_root, row)
         refs[backbone] = {dec: rad.zero_shot_refs(files, "" if dec == "stock" else f"_{dec}")
                           for dec in (("stock", "tuned") if tuned else ("stock",))}
-    loaded = rad.load_blocks(a.adapt_root, refs)
+    loaded = rad.load_blocks(a.adapt_root, refs, full_roots={"sd35": a.sd35_full_root, "pixart": a.pixart_full_root},
+                             fullft_root=a.fullft_g8k_root)
 
     unet_hours = loaded.get("unet_lora", {}).get("arenas", {})
     unet_data = {m: {"grid": list(GRID), "gpu_hours": unet_hours.get(m, {}).get("gpu_hours", {}),
@@ -1570,11 +1605,13 @@ def main(argv=None):
                   f"no training-map read of {zero_rows[backbone]} through the {level_decoder} decoder: "
                   "no in-distribution level, so no budget and no shares",
                   "zero_shot_borrowed": [m for m in full_borrowed if m in b["arenas"]] if key == "unet_full" else []})
-        if key == "unet_full" and "unet_lora" in block_stats:
-            # the caption's comparison: the adapter's own numbers on the same four maps (Rohan, Sep 29 00:30: the
-            # "U-Net LoRA (6, 7, 8, 16)" row leaves Table 2, the full fine-tune stays as the comparison)
-            lora = block_stats["unet_lora"]
+        if key == "unet_full" and b["arenas"]:
+            # the caption's comparison: the adapter's own numbers on the same maps (Rohan, Sep 29 00:30: the
+            # "U-Net LoRA (6, 7, 8, 16)" row leaves Table 2, the full fine-tune stays as the comparison), over
+            # whatever maps the full fine-tune has (the 8k-grid runs landing on main widen the set)
+            lora = block_summary(unet_data, b["arenas"], block_level, a.headline_step)
             b["matched_adapter"] = {"psnr_4k": lora["psnr_4k"], "lpips_4k": lora["lpips_4k"],
+                                    "psnr_8k": lora["psnr_8k"], "lpips_8k": lora["lpips_8k"],
                                     "shares": lora["shares"], "budget_middle": lora["budget_middle"],
                                     "arenas": lora["arenas"]}
         block_stats[key] = b
