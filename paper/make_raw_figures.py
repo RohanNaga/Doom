@@ -854,8 +854,8 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
         block = block_stats.get(keys[who]) or {}
         lines.append("\\midrule")
         train_dir = num((d.get("training") or {}).get("correct"), 3)
-        lines.append(f"{label}, training maps & {num(pooled['psnr'], 2)} & & & {num(pooled['lpips'], 3)} & & & "
-                     f"{train_dir} & & & & \\\\")
+        lines.append(" & ".join([f"{label}, training maps", num(pooled["psnr"], 2), "", "", num(pooled["lpips"], 3),
+                                 "", "", train_dir, "", "", "", ""]) + " \\\\")
         unseen_dir = num((d.get("unseen") or {}).get("correct"), 3)
         if who == "unet":
             g = gstats["all"]
@@ -911,13 +911,14 @@ def merged_caption(names, home, directional, gstats, block_stats):
                                            [fs.backbone_of(n)]) or {}).get("n") and 0 < b.get("n_8k", 0) < b["n"]]
     if full.get("n") and 0 < full.get("n_8k", 0) < full["n"]:
         partial_8k.append("the full fine-tune")
-    return ("\\caption{Scene PSNR and LPIPS one tic ahead against the raw frame, fine-tuned decoders; training maps "
-            f"pooled over {n_train} windows, unseen maps as medians over the {gstats['all']['n']} at 0, 4k and 8k "
-            "adapter updates (groups: terciles of the zero-shot LPIPS rise"
-            + ("; 8k: maps scored so far" if partial_8k else "") + "). Directional: turn-reversal rate "
-            f"(ground truth {ref_train:.3f} / {ref_unseen:.3f}). Recovered: share of the LPIPS rise and lost PSNR "
-            "regained, per map then median. Budget: first grid point recovering half of the LPIPS rise"
-            + (" (full fine-tune scored from 4k)" if full.get("n") else "") + ".}\n")
+    # four lines at \footnotesize (the coordinator, Sep 29): what is measured, the medians' maps, the shares'
+    # per-map-then-median rule, the budget rule and the directional references; the 8k note in three words
+    return ("\\caption{One tic ahead against the raw frame; training maps pooled over "
+            f"{n_train} windows, unseen maps as medians over the {gstats['all']['n']} at 0, 4k and 8k updates "
+            "(groups: terciles of the zero-shot LPIPS rise"
+            + ("; 8k: over the maps scored there" if partial_8k else "") + "). Directional "
+            f"(ground truth {ref_train:.3f} / {ref_unseen:.3f}). Recovered: LPIPS rise and lost PSNR regained, "
+            "per map then median. Budget: first grid read recovering half the rise.}\n")
 
 
 def groups_table(stats, stamp="", budgets_final=True, blocks=()):

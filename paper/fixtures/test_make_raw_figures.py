@@ -868,6 +868,30 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
                                                           "windows": 192}
     assert s["directional"]["pixart200k_ema"] == {"training": None, "unseen": None}
     assert any(p["path"].endswith("directional_map09_arenas13_ema.json") for p in s["inputs"])
+    # Tables 1 and 2 merged: one row block per backbone; the training row carries the in-distribution reads and
+    # Table 1's training directional in the 0 columns, the unseen row Table 1's unseen directional at 0 and the
+    # guards' median at 8k (maps 6 and 9: 0.85 and 0.75), the group row the guards' medians at both
+    merged = open(tables / "results_merged.tex").read()
+    body = [[c.strip() for c in line.rstrip("\\ ").split("&")] for line in merged.splitlines()
+            if " & " in line and not line.startswith("%")][2:]                   # after the two header rows
+    assert [r[0] for r in body] == ["SD 1.4 U-Net, training maps", "unseen maps (all 2)", "unseen medium (6, 9)",
+                                    "full fine-tune (1 of 2)", "PixArt-$\\alpha$, training maps",
+                                    "unseen maps (all 2)", "SD 3.5 Medium, training maps", "unseen maps (1 of 2)"]
+    assert body[0][1:] == ["22.45", "", "", "0.150", "", "", "0.850", "", "", "", ""]
+    assert body[1][1:] == ["18.50", "21.25", "23.25", "0.280", "0.205", "0.190", "0.733", "0.800", "58", "76",
+                           "\\tbd{}"]                                                # the budget waits on the grid
+    assert body[2][7:9] == ["0.750", "0.800"]
+    assert body[3][1:] == ["18.00", "23.00", "--", "0.300", "0.180", "--", "--", "--", "80", "112", "${\\le}$4k"]
+    assert body[4][1:8] == ["22.65", "", "", "0.150", "", "", "--"]                 # no directional read: "--"
+    assert body[5][1:4] == ["18.70", "20.70", "--"] and body[5][-1] == "${>}$4k; 2 of 2 censored"   # maps 6, 9
+    assert body[6][1] == "21.95" and body[7][-1] == "\\tbd{}"
+    assert "% SD 3.5 LoRA (1 of 2): maps 6; decoder sha256:sd35tuned" in merged            # the comment lines
+    assert "upper bound" not in merged and "arena" not in merged.lower()
+    cap = open(tables / "results_merged_caption.tex").read()
+    for phrase in ("pooled over 16 windows", "medians over the 2", "terciles of the zero-shot LPIPS rise",
+                   "ground truth 0.900 / 0.900", "per map then median", "half the rise"):
+        assert phrase in cap, phrase
+    assert "8k: over the maps scored there" not in cap                 # every fixture map has its 8k read or none
     # no 200k SD 3.5 files: the provisional 170k read through the stock decoder, recorded as the fallback
     assert s["sd35_row"] == {"row": "sd35_170000", "decoder": "stock", "fallback": True}
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none

@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-29T09:02:38-04:00",
+ "generated_at": "2026-09-29T09:08:43-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
