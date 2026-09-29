@@ -33,7 +33,7 @@ STATUS = [
     ("Yet unchanged dynamics alone", DONE),                          # his sentence, restored on his word
     ("Pretraining one model on every map", DONE),
     ("In short, a world model moved to a new map", DONE),
-    ("On an unseen map the U-Net's zero-shot prediction", CONFIRM),  # the high-level caption he asked for
+    ("\\textbf{Zero-shot vs.", CONFIRM),                             # his title, the high-level body he asked for
     # related work: rewritten on his direction
     ("\\textbf{Game world models.}", CONFIRM),
     ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),
@@ -87,11 +87,14 @@ def mark(tex):
             out.append(line)
             continue
         status = status_of(text)
+        tail = ""
         if head == "\\caption{":
-            out.append(head + wrap(text[:-1], status) + "}")
-        elif text.startswith("\\textbf{") and status:        # keep the run-in heading outside the highlight
+            text, tail = text[:-1], "}"
+        if text.startswith("\\textbf{") and status:          # keep a bold title or run-in heading outside the highlight
             h = re.match(r"(\\textbf\{[^}]*\}) ?(.*)$", text)
-            out.append(head + h.group(1) + " " + wrap(h.group(2), status))
+            out.append(head + h.group(1) + " " + wrap(h.group(2), status) + tail)
+        elif tail:
+            out.append(head + wrap(text, status) + tail)
         else:
             # several sentences can share a source line, each with its own status: split on the known starts
             out.append(head + wrap(text, status))
