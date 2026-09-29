@@ -42,9 +42,9 @@
 \begin{abstract}
 World models have become capable simulators, but they are evaluated almost exclusively on held-out rollouts from the domain they were trained on.
 A small domain shift, such as a new map of the same game, a new texture set, a lighting change or a different cast of enemies, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
-With DoomShift, a controlled version of this shift in Doom, we measure what it breaks and how much adaptation it takes to repair.
-We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 other out-of-distribution maps that it never saw.
-All three keep their response to the controls and lose the scene: SD~3.5's perceptual error (LPIPS) doubles, from 0.126 to a median 0.262, and its scene PSNR drops 3.3~dB, from 25.4 to a median 22.1~dB; the SD~1.4 U-Net, GameNGen's backbone, and PixArt-$\alpha$ lose the same way.
+With DoomShift, a controlled version of this domain shift in Doom, we measure what it breaks and how much adaptation it takes to repair.
+We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 out-of-distribution maps that it never saw.
+All three keep their response to controls and lose the scene: SD~3.5's perceptual error (LPIPS) doubles, from 0.126 to a median 0.262, and its scene PSNR drops 3.3~dB, from 25.4 to a median 22.1~dB; the SD~1.4 U-Net, GameNGen's backbone, and PixArt-$\alpha$ lose the same way.
 Very little adaptation repairs it: rank-16 adapters trained on 8 episodes of each unseen map with 2\% of the original training updates recover 77\% of SD~3.5's lost perceptual quality and half of its lost PSNR, and 72\% and 76\% of the perceptual loss on the other two backbones.
 \end{abstract}
 
@@ -55,14 +55,14 @@ Very little adaptation repairs it: rank-16 adapters trained on 8 episodes of eac
 \section{Introduction}
 \label{sec:intro}
 
-Game world models now render playable worlds from pixels and controls.
+Game world models now render playable worlds.
 GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond} and Matrix-Game~2 scales the recipe to open worlds~\citep{he2025matrixgame2}.
 Each is evaluated only on held-out rollouts from its own environment, and none has been shown to generalize to a new environment within the same game.
-This holds even for MultiGen, one Doom model trained across 100 procedurally generated maps~\citep{po2026multigen}: it reports PSNR, SSIM and LPIPS only on its training distribution, with no map held out.
+This holds even for MultiGen, a single Doom model trained across 100 procedurally generated maps~\citep{po2026multigen}: it reports PSNR, SSIM and LPIPS only on its training distribution, with no map held out.
 
-A learned simulator is useful only where it is faithful, and an agent moving to a new room or level needs to know how much of its world model still holds and what it costs to make the rest hold.
+A learned simulator is useful only where it is faithful, and an agent or a robot moving to a new room or level needs to know how much of its world model still holds and what it costs to make the rest hold.
 Game worlds let us pose this question with the engine held fixed: a new map of the same game preserves the physics and the controls exactly, and only the layout, textures and lighting differ.
-Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses, and how few episodes and updates recover the rest.
+Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that a new map opens: what the model retains, what it loses, and how few episodes and updates recover the rest.
 
 \begin{figure}[b]
 \centering
