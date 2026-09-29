@@ -119,10 +119,10 @@ We report 4k updates throughout, 2 percent of pretraining, since it gives on ave
 As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (\appref{app:perarena-adapt}).
 
 \begin{table}[t]
-\centering\footnotesize\setlength{\tabcolsep}{3.2pt}
-\caption{\textbf{In-distribution vs.\ out-of-distribution zero-shot results.} Scene PSNR, LPIPS and directional score one tic ahead, on the training maps and on the 13 unseen maps (medians).}
+\centering\footnotesize
+\caption{\textbf{In-distribution vs.\ out-of-distribution results, zero-shot and adapted.} Scene PSNR and LPIPS as medians over each row's maps, zero-shot (0) and after 4k updates; the directional score is read at 0 and 8k. Easy, medium and hard are terciles of the zero-shot LPIPS rise. Recovered: share of the zero-shot loss regained at 4k. Budget: updates needed to recover half of the LPIPS rise.}
 \label{tab:unseen}
-\input{tables/tuned/results_full.tex}
+{\footnotesize\setlength{\tabcolsep}{2.6pt}\input{tables/tuned/results_merged.tex}}
 \end{table}
 
 %===============================================================================
@@ -143,7 +143,7 @@ The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\
 \end{figure}
 
 \textbf{Adaptation cost.}
-Eight episodes and 4k updates raise the median scene PSNR from 22.3 to 23.6~dB and lower the median LPIPS from 0.303 to 0.210 (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}); the 8k check adds little (23.7~dB, 0.204).
+Eight episodes and 4k updates raise the median scene PSNR from 22.3 to 23.6~dB and lower the median LPIPS from 0.303 to 0.210 (Figure~\ref{fig:adapt}, Table~\ref{tab:unseen}); the 8k check adds little (23.7~dB, 0.204).
 A map's budget, the first of the grid reads (50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates) at which it recovers half of its zero-shot rise in LPIPS over the training maps, has a median of 250 updates (100 to 8k per map, none censored; 12 of the 13 maps cross by 4k), and half of each map's 8k gain arrives within 100 updates on average.
 By the same 4k updates it recovers a median 72 percent of each map's rise in LPIPS over the training maps (at least 48 percent) and a median 48 percent of its lost scene PSNR (over 100 percent on maps 8, 9 and 10, whose static recordings already sit near the training maps' PSNR).
 About a decibel of the PSNR still missing against the training maps is the decoder's own reconstruction drop on the unseen maps (27.3 against 28.6~dB), which no adapter of the world model can recover.
@@ -155,12 +155,6 @@ A full fine-tune of all 860M parameters on the same eight episodes does better o
 Data matters less than the first updates: in the ablation over the number of episodes (four maps), one episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 The adapters trade some in-distribution skill for it: the training maps' scene PSNR against the decoded ground truth falls on all 13 unseen maps at the 8k check (median 0.59~dB; stock decoder), while the directional score rises from 0.81 to 0.84.
 
-\begin{table}[tb]
-\centering\footnotesize
-\caption{What closing the gap takes. The U-Net's LoRA by group of unseen maps, terciles of their zero-shot LPIPS rise over the training maps (hard: the largest rise), and over all 13 unseen maps; then the U-Net's full fine-tune on the four maps 6, 7, 8 and 16 (against the adapter's 22.88~dB / 0.209 and 71 percent on the same maps), and the same LoRA procedure on PixArt-$\alpha$ and SD~3.5 over all 13 unseen maps. Medians over each row's maps; non-EMA adapter weights; scene rows against the raw frame, each backbone through its fine-tuned decoder. Recovered: the share of the lost scene PSNR that the adapter regains and of the zero-shot LPIPS rise that it undoes, shares per map, then the median. --: not scored (the PixArt-$\alpha$ and SD~3.5 grids stop at 4k). Budget: the first grid point at which a map recovers at least half of its zero-shot LPIPS rise (${>}$4k: censored at the grid's last read; the full fine-tune is scored at 0 and 4k only, so ${\le}$4k; nine of SD~3.5's maps cross at 250, the first point of its grid; where a group's two middle budgets differ, both are given).}
-\label{tab:cost}
-{\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/tuned/adapt_groups.tex}}
-\end{table}
 
 %===============================================================================
 

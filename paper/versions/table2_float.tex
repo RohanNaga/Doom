@@ -1,0 +1,7 @@
+% Table 2 as a separate float, before the two tables were combined on Sep 29 2026 (Rohan)
+\begin{table}[tb]
+\centering\footnotesize
+\caption{What closing the gap takes. The U-Net's LoRA by group of unseen maps, terciles of their zero-shot LPIPS rise over the training maps (hard: the largest rise), and over all 13 unseen maps; then the U-Net's full fine-tune on the four maps 6, 7, 8 and 16 (against the adapter's 22.88~dB / 0.209 and 71 percent on the same maps), and the same LoRA procedure on PixArt-$\alpha$ and SD~3.5 over all 13 unseen maps. Medians over each row's maps; non-EMA adapter weights; scene rows against the raw frame, each backbone through its fine-tuned decoder. Recovered: the share of the lost scene PSNR that the adapter regains and of the zero-shot LPIPS rise that it undoes, shares per map, then the median. --: not scored (the PixArt-$\alpha$ and SD~3.5 grids stop at 4k). Budget: the first grid point at which a map recovers at least half of its zero-shot LPIPS rise (${>}$4k: censored at the grid's last read; the full fine-tune is scored at 0 and 4k only, so ${\le}$4k; nine of SD~3.5's maps cross at 250, the first point of its grid; where a group's two middle budgets differ, both are given).}
+\label{tab:cost}
+{\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/tuned/adapt_groups.tex}}
+\end{table}

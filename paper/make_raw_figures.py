@@ -80,6 +80,7 @@ TRAINING_MAPS = maf.TRAINING_MAPS
 PRIMARY = "unet200k_ema"
 COMPARATOR_ARENAS = (6, 7, 8, 16)               # the full fine-tune's arenas (Table 2's last column)
 GROUP_NAMES = ("hard", "medium", "easy")
+TABLE_GROUP_ORDER = ("easy", "medium", "hard")   # the tables' row order (Rohan, Sep 29): easiest first
 # Table 2's per-backbone blocks at the headline step, in order: (key in raw_adapters.load_blocks, label, arenas; None
 # for every arena); the U-Net LoRA block is matched to the full fine-tune's arenas
 BLOCKS = (("unet_lora", "U-Net LoRA", COMPARATOR_ARENAS),
@@ -815,7 +816,7 @@ def results_table(names, home, zero, directional, roots, stamp=""):
 
 
 def merged_table(names, home, zero, directional, gstats, block_stats, unet_guards, budgets_final, blocks=(),
-                 stamp=""):
+                 stamp="", with_8k=True):
     """Tables 1 and 2 as one full-width table (Rohan, Sep 29: nothing in the supplement that was in the body, and
     Table 1 used three quarters of the width). Columns: the row's maps; scene PSNR at 0, 4k, 8k; scene LPIPS at 0,
     4k, 8k; the directional score at 0 and 8k; the recovered shares (PSNR, LPIPS, the score columns' order; per map, then the median); the
@@ -824,7 +825,9 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
     the U-Net adds its three groups and its full fine-tune (`block_stats["unet_full"]`, directional from its own
     guards). Every number Table 1 and Table 2 print appears here; the comment lines carry what Table 2's do.
     `unet_guards` is `guard_reads`' {map: {directional_0, directional_8k}}; the other backbones' guards come from
-    their blocks (`guards` per map and step)."""
+    their blocks (`guards` per map and step). The groups' rows run easy, medium, hard (`TABLE_GROUP_ORDER`).
+    Without `with_8k` the PSNR and LPIPS columns at 8k are left out (the body reports 4k; the per-map table in
+    the appendix keeps 8k) and the directional score keeps its two reads, 0 and 8k."""
     def num(v, d):
         return "--" if v is None else f"{v:.{d}f}"
 
@@ -865,7 +868,7 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                          f"{num(g['lpips_8k'], 3)} & {unseen_dir} & {num(eight, 3)} & "
                          f"{share_cell(g['psnr_share_4k'])} & {share_cell(g['lpips_share_4k'])} & "
                          f"{_budget_cell(g, budgets_final)} \\\\")
-            for gname in GROUP_NAMES:
+            for gname in TABLE_GROUP_ORDER:
                 g = gstats[gname]
                 if not g["n"]:
                     continue
@@ -893,8 +896,27 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                          f"{num(block['lpips_8k'], 3)} & {unseen_dir} & {num(guard_median(block, 8000), 3)} & "
                          f"{share_cell(shares.get('psnr'))} & {share_cell(shares.get('lpips'))} & "
                          f"{block_budget_cell(block)} \\\\")
+    if not with_8k:
+        lines = [_without_8k(line) for line in lines]
     lines += ["\\bottomrule", "\\end{tabular}"] + block_comment_lines(blocks)
     return "\n".join(lines) + "\n"
+
+
+def _without_8k(line):
+    """One line of the merged table without its two 8k score columns (cells 3 and 6 of 12); the header lines are
+    rewritten for ten columns."""
+    if line.startswith("\\begin{tabular}"):
+        return "\\begin{tabular}{lrrrrrrrrr}"
+    if line.startswith("& \\multicolumn{3}{c}{Scene PSNR"):
+        # two-column groups are narrower than their headings: the headings drop "Scene" (the caption says it)
+        return (line.replace("\\multicolumn{3}{c}", "\\multicolumn{2}{c}")
+                .replace("{Scene PSNR (dB)", "{PSNR (dB)").replace("{Scene LPIPS", "{LPIPS"))
+    if line.startswith("\\cmidrule"):
+        return "\\cmidrule(lr){2-3}\\cmidrule(lr){4-5}\\cmidrule(lr){6-7}\\cmidrule(lr){8-9}"
+    if line.startswith("%") or line.count(" & ") != 11:
+        return line
+    cells = line[:-len(" \\\\")].split(" & ")
+    return " & ".join(c for i, c in enumerate(cells) if i not in (3, 6)) + " \\\\"
 
 
 def merged_caption(names, home, directional, gstats, block_stats):
@@ -945,7 +967,7 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
              "Unseen maps (by zero-shot LPIPS rise) & zero-shot & 4k & 8k & zero-shot & 4k & 8k & PSNR & LPIPS & "
              "half the rise \\\\",
              "\\midrule"]
-    for name in list(GROUP_NAMES) + ["all"]:
+    for name in list(TABLE_GROUP_ORDER) + ["all"]:
         g = stats[name]
         label = f"{name.capitalize()} ({', '.join(map(str, g['arenas']))})" if name != "all" else f"All {g['n']}"
         if name == "all":
@@ -1829,7 +1851,7 @@ def main(argv=None):
     merged = os.path.join(a.tables_dir, "results_merged.tex")
     with open(merged, "w") as f:
         f.write(merged_table(names, home, zero, directional, gstats, block_stats, guards, grid_complete,
-                             blocks=block_rows))
+                             blocks=block_rows, with_8k=False))
     merged_caption_path = os.path.join(a.tables_dir, "results_merged_caption.tex")
     with open(merged_caption_path, "w") as f:
         f.write(merged_caption(names, home, directional, gstats, block_stats))

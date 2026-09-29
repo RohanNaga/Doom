@@ -56,7 +56,7 @@ STATUS = [
     ("We train on 8 episodes of the map", DONE),
     ("We report 4k updates throughout", DONE),
     ("As a baseline, we fine-tune all of the U-Net", DONE),
-    ("\\textbf{In-distribution vs.", DONE),
+    ("\\textbf{In-distribution vs.", CONFIRM),                       # the combined table's caption
     ("\\textbf{Zero-shot vs.\\ adapted results per unseen map.}", DONE),   # Figure 3 caption, his title                          # Table 1 caption, his title
     ("\\textbf{Zero-shot evaluation on unseen maps.}", DONE),      # condensed on his outline
     ("Control survives:", DONE),
