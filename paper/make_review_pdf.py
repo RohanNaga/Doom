@@ -56,6 +56,13 @@ STATUS = [
     ("We train on 8 episodes of the map", DONE),
     ("We report 4k updates throughout", DONE),
     ("As a baseline, we fine-tune all of the U-Net", DONE),
+    ("\\textbf{Adaptation cost.}", CONFIRM),                         # condensed on his decisions
+    ("After 4k updates on eight episodes", CONFIRM),
+    ("Part of the remaining PSNR gap", CONFIRM),
+    ("Most of the gain comes early", CONFIRM),
+    ("Fine-tuning all of the U-Net", CONFIRM),
+    ("One episode already gives most", CONFIRM),
+    ("Adaptation costs some in-distribution", CONFIRM),
     ("\\textbf{Zero-shot vs.\\ adapted results on training", DONE),   # the combined table's caption, his title
     ("\\textbf{Zero-shot vs.\\ adapted results per unseen map.}", DONE),   # Figure 3 caption, his title                          # Table 1 caption, his title
     ("\\textbf{Zero-shot evaluation on unseen maps.}", DONE),      # condensed on his outline
