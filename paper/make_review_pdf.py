@@ -40,7 +40,7 @@ STATUS = [
     # related work: rewritten on his direction
     ("\\textbf{Game world models.}", CONFIRM),
     ("\\textbf{Generalization of world models.}", CONFIRM),
-    ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),
+    ("\\textbf{Adaptation.} Pretrained video and world models", CONFIRM),
     # method and results: single passages written for him
     ("\\textbf{Data.}", DONE),                                       # read Sep 29, no edits
     ("\\textbf{Models and training.}", DONE),                        # simplified on his wording, approved
