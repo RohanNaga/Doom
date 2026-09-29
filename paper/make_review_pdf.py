@@ -38,9 +38,9 @@ STATUS = [
     ("We measure how much adaptation repairs", DONE),
     ("\\textbf{Zero-shot vs.", DONE),                                # his title and his chosen ending
     # related work: rewritten on his direction
-    ("\\textbf{Game world models.}", CONFIRM),
-    ("\\textbf{Generalization of world models.}", CONFIRM),
-    ("\\textbf{Adaptation.} Pretrained video and world models", CONFIRM),
+    ("\\textbf{Game world models.}", DONE),
+    ("\\textbf{Generalization of world models.}", DONE),
+    ("\\textbf{Adaptation.} Pretrained video and world models", DONE),
     # method and results: single passages written for him
     ("\\textbf{Data.}", DONE),                                       # read Sep 29, no edits
     ("\\textbf{Models and training.}", DONE),                        # simplified on his wording, approved
