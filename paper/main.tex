@@ -131,7 +131,7 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (
 \label{sec:results}
 
 \textbf{Zero-shot evaluation on unseen maps.} All three models do poorly on the unseen maps (Table~\ref{tab:unseen}).
-Control survives: the directional score goes from 0.84 to 0.86 on the training maps to 0.80 to 0.81 on the unseen maps, which is 90\% of its ceiling of 0.89.
+Control survives: the directional score goes from 0.84 to 0.86 on the training maps to 0.79 to 0.81 on the unseen maps, which is about 90\% of its ceiling of 0.89.
 The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5, and every unseen map has a worse LPIPS than every training map (\appref{app:distance}).
 The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
 
@@ -144,7 +144,7 @@ The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\
 
 \textbf{Adaptation cost.} Adaptation recovers most of what the shift took (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
 After 4k updates on eight episodes, the adapter recovers 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100\% where the adapted model passes the training-map level), and training to 8k adds little.
-Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
+The directional score returns to the training-map level (0.83 to 0.85). Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
 Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k; per map in \appref{app:perarena-adapt}).
 Fine-tuning all of the U-Net's parameters recovers more, 88\% of the LPIPS rise against the adapter's 73\% on the same maps, but trains 205 times as many parameters.
 One episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).

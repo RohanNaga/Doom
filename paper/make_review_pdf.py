@@ -59,6 +59,7 @@ STATUS = [
     ("As a baseline, we fine-tune all of the U-Net", DONE),
     ("\\textbf{Adaptation cost.}", CONFIRM),                         # condensed on his decisions
     ("After 4k updates on eight episodes", CONFIRM),
+    ("The directional score returns to the training-map level", CONFIRM),
     ("Part of the remaining PSNR gap", CONFIRM),
     ("Most of the gain comes early", CONFIRM),
     ("Fine-tuning all of the U-Net", CONFIRM),
@@ -75,7 +76,7 @@ STATUS = [
     ("The scene does not:", DONE),
     ("The loss is nearly the same for all three", DONE),
 ]
-SPLIT_BEFORE = ["To test control, we swap turn-left", "This raises the scene reconstruction", "A model that ignores actions scores 0"]   # a status change inside one source line
+SPLIT_BEFORE = ["To test control, we swap turn-left", "This raises the scene reconstruction", "A model that ignores actions scores 0", "Part of the remaining PSNR gap"]   # a status change inside one source line
 COLORS = {DONE: "reviewdone", CONFIRM: "reviewconfirm"}
 PREAMBLE = r"""
 \usepackage{xcolor}

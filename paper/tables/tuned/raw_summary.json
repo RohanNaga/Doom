@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-29T18:01:26-04:00",
+ "generated_at": "2026-09-29T18:46:54-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -1291,11 +1291,11 @@
    "first_read": 4000,
    "psnr_zero_shot": 22.203990562818944,
    "psnr_4k": 23.772958481684327,
-   "psnr_8k": 24.134262116625905,
+   "psnr_8k": 24.031640328466892,
    "lpips_zero_shot": 0.29188799593248405,
    "lpips_4k": 0.18197309090464842,
-   "lpips_8k": 0.17384159396169707,
-   "n_8k": 10,
+   "lpips_8k": 0.1778334837872535,
+   "n_8k": 11,
    "maps_8k": [
     7,
     8,
@@ -1306,6 +1306,7 @@
     13,
     14,
     15,
+    16,
     17
    ],
    "grid_sources": {
@@ -1319,7 +1320,7 @@
     "13": "g8k",
     "14": "g8k",
     "15": "g8k",
-    "16": "coarse",
+    "16": "g8k",
     "17": "g8k"
    },
    "runs": {
@@ -1333,7 +1334,7 @@
     "13": "map13",
     "14": "map14",
     "15": "map15",
-    "16": "unet200k_arenas13_map16_r0_k8_s0",
+    "16": "map16",
     "17": "map17"
    },
    "guards": {
@@ -1492,11 +1493,18 @@
     },
     "16": {
      "4000": {
-      "directional": 0.875,
+      "directional": 0.87109375,
       "directional_ref": 0.90625,
-      "trainmap_psnr": 22.196812212467194,
-      "trainmap_lpips": 0.1846744893118739,
-      "trainmap_psnr_dec": 25.126963108778
+      "trainmap_psnr": 22.186674691736698,
+      "trainmap_lpips": 0.18602907500462607,
+      "trainmap_psnr_dec": 25.10879372805357
+     },
+     "8000": {
+      "directional": 0.8828125,
+      "directional_ref": 0.90625,
+      "trainmap_psnr": 22.057360403239727,
+      "trainmap_lpips": 0.19480544526595622,
+      "trainmap_psnr_dec": 24.83378154039383
      }
     },
     "17": {
@@ -1530,7 +1538,7 @@
     },
     "psnr": {
      "median": 0.5288123811365285,
-     "min": 0.3284220500070481,
+     "min": 0.3229988833716369,
      "n": 12
     }
    },
@@ -1605,7 +1613,7 @@
    "censored": 0,
    "gpu_hours_headline_by_card": {
     "A6000": {
-     "median": 0.7509675655100081,
+     "median": 0.7497908293207487,
      "n": 12,
      "arenas": [
       6,
@@ -2995,7 +3003,7 @@
      0.29239138204138726
     ],
     "4000": [
-     23.14879509434104,
+     23.140934485010803,
      0.18197309090464842
     ]
    }
@@ -3368,6 +3376,7 @@
    "psnr_share_4k": 0.49268248017251487,
    "directional_0": 0.7109375,
    "directional_8k": 0.76953125,
+   "directional_4k": 0.76953125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 24.559945978224277,
    "forgetting_dec": -1.6114604696631432
@@ -3381,6 +3390,7 @@
    "psnr_share_4k": 0.339169117792039,
    "directional_0": 0.81640625,
    "directional_8k": 0.83984375,
+   "directional_4k": 0.8203125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.100749641656876,
    "forgetting_dec": -1.070656806230545
@@ -3394,6 +3404,7 @@
    "psnr_share_4k": 0.4832859975219142,
    "directional_0": 0.7734375,
    "directional_8k": 0.84375,
+   "directional_4k": 0.83984375,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 24.518973395228386,
    "forgetting_dec": -1.6524330526590347
@@ -3407,6 +3418,7 @@
    "psnr_share_4k": 1.6843276518103103,
    "directional_0": 0.85546875,
    "directional_8k": 0.87890625,
+   "directional_4k": 0.8828125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.889505811035633,
    "forgetting_dec": -0.28190063685178757
@@ -3420,6 +3432,7 @@
    "psnr_share_4k": 3.118656617352501,
    "directional_0": 0.89453125,
    "directional_8k": 0.8984375,
+   "directional_4k": 0.90234375,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.745331063866615,
    "forgetting_dec": -0.42607538402080536
@@ -3433,6 +3446,7 @@
    "psnr_share_4k": 2.982273334433997,
    "directional_0": 0.828125,
    "directional_8k": 0.84765625,
+   "directional_4k": 0.86328125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.665768273174763,
    "forgetting_dec": -0.5056381747126579
@@ -3446,6 +3460,7 @@
    "psnr_share_4k": 0.4830425974065937,
    "directional_0": 0.84375,
    "directional_8k": 0.86328125,
+   "directional_4k": 0.86328125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.351979814469814,
    "forgetting_dec": -0.8194266334176064
@@ -3459,6 +3474,7 @@
    "psnr_share_4k": 0.475505744429793,
    "directional_0": 0.80078125,
    "directional_8k": 0.81640625,
+   "directional_4k": 0.83203125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.687795963138342,
    "forgetting_dec": -0.48361048474907875
@@ -3472,6 +3488,7 @@
    "psnr_share_4k": 0.2686723607899209,
    "directional_0": 0.74609375,
    "directional_8k": 0.8359375,
+   "directional_4k": 0.828125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.054417997598648,
    "forgetting_dec": -1.1169884502887726
@@ -3485,6 +3502,7 @@
    "psnr_share_4k": 0.4907620916659449,
    "directional_0": 0.71875,
    "directional_8k": 0.7734375,
+   "directional_4k": 0.77734375,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.711777113378048,
    "forgetting_dec": -0.4596293345093727
@@ -3498,6 +3516,7 @@
    "psnr_share_4k": 0.3856471324390549,
    "directional_0": 0.80859375,
    "directional_8k": 0.84375,
+   "directional_4k": 0.828125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.577431607991457,
    "forgetting_dec": -0.5939748398959637
@@ -3511,6 +3530,7 @@
    "psnr_share_4k": 0.24080407535555182,
    "directional_0": 0.828125,
    "directional_8k": 0.875,
+   "directional_4k": 0.86328125,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.60255701839924,
    "forgetting_dec": -0.5688494294881821
@@ -3524,6 +3544,7 @@
    "psnr_share_4k": 0.30958207631317286,
    "directional_0": 0.7890625,
    "directional_8k": 0.84375,
+   "directional_4k": 0.84765625,
    "trainmap_psnr_dec_0": 26.17140644788742,
    "trainmap_psnr_dec_8k": 25.349075756967068,
    "forgetting_dec": -0.8223306909203529

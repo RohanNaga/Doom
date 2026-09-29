@@ -284,6 +284,7 @@ def guard_reads(run_dirs):
         out[int(m.group(1))] = {
             "directional_0": guard[0]["directional_correct_frac"],
             "directional_8k": guard[8000]["directional_correct_frac"],
+            "directional_4k": guard[4000]["directional_correct_frac"] if 4000 in guard else None,
             "trainmap_psnr_dec_0": psnr[0], "trainmap_psnr_dec_8k": psnr[8000],
             "forgetting_dec": psnr[8000] - psnr[0] if None not in psnr.values() else None}
     return out
@@ -816,7 +817,7 @@ def results_table(names, home, zero, directional, roots, stamp=""):
 
 
 def merged_table(names, home, zero, directional, gstats, block_stats, unet_guards, budgets_final, blocks=(),
-                 stamp="", with_8k=True, with_budget=True):
+                 stamp="", with_8k=True, with_budget=True, directional_at=8000):
     """Tables 1 and 2 as one full-width table (Rohan, Sep 29: nothing in the supplement that was in the body, and
     Table 1 used three quarters of the width). Columns: the row's maps; scene PSNR at 0, 4k, 8k; scene LPIPS at 0,
     4k, 8k; the directional score at 0 and 8k; the recovered shares (PSNR, LPIPS, the score columns' order; per map, then the median); the
@@ -828,7 +829,10 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
     their blocks (`guards` per map and step). The groups' rows run easy, medium, hard (`TABLE_GROUP_ORDER`).
     Without `with_8k` the PSNR and LPIPS columns at 8k are left out (the body reports 4k; the per-map table in
     the appendix keeps 8k) and the directional score keeps its two reads, 0 and 8k. Without `with_budget` the
-    budget column is left out (Rohan, Sep 29: the text gives the medians, the appendix the budget per map)."""
+    budget column is left out (Rohan, Sep 29: the text gives the medians, the appendix the budget per map).
+    `directional_at` is the adapted directional column's update count (8000, or 4000 since the 4k guard rows of
+    Sep 29); at 4000 the unseen rows take both directional columns from the adapter runs' guard rows (the same
+    windows and weights at 0 and 4k, medians over maps), and the training row keeps the pooled read."""
     def num(v, d):
         return "--" if v is None else f"{v:.{d}f}"
 
@@ -850,8 +854,11 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
              "& \\multicolumn{3}{c}{Scene PSNR (dB) $\\uparrow$} & \\multicolumn{3}{c}{Scene LPIPS $\\downarrow$} & "
              "\\multicolumn{2}{c}{Directional} & \\multicolumn{2}{c}{Recovered (\\%)} & Budget to \\\\",
              "\\cmidrule(lr){2-4}\\cmidrule(lr){5-7}\\cmidrule(lr){8-9}\\cmidrule(lr){10-11}",
-             "Model, maps & 0 & 4k & 8k & 0 & 4k & 8k & 0 & 8k & PSNR & LPIPS & half the rise \\\\"]
+             f"Model, maps & 0 & 4k & 8k & 0 & 4k & 8k & 0 & {fs.step_label(directional_at)} & PSNR & LPIPS & "
+             "half the rise \\\\"]
     keys = {"unet": "unet_lora", "pixart": "pixart_lora", "sd35": "sd35_lora"}
+    unet_key = "directional_8k" if directional_at == 8000 else "directional_4k"
+    paired = directional_at != 8000
     for name in names:
         who = fs.backbone_of(name)
         label, pooled, d = TABLE_LABELS[who], home[name]["pooled"], directional.get(name) or {}
@@ -863,7 +870,9 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
         unseen_dir = num((d.get("unseen") or {}).get("correct"), 3)
         if who == "unet":
             g = gstats["all"]
-            eight = unet_guard_median(g["arenas"], "directional_8k")
+            eight = unet_guard_median(g["arenas"], unet_key)
+            if paired:
+                unseen_dir = num(unet_guard_median(g["arenas"], "directional_0"), 3)
             lines.append(f"unseen maps (all {g['n']}) & {num(g['psnr_zero_shot'], 2)} & {num(g['psnr_4k'], 2)} & "
                          f"{num(g['psnr_8k'], 2)} & {num(g['lpips_zero_shot'], 3)} & {num(g['lpips_4k'], 3)} & "
                          f"{num(g['lpips_8k'], 3)} & {unseen_dir} & {num(eight, 3)} & "
@@ -877,7 +886,7 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                              f"{num(g['psnr_4k'], 2)} & {num(g['psnr_8k'], 2)} & {num(g['lpips_zero_shot'], 3)} & "
                              f"{num(g['lpips_4k'], 3)} & {num(g['lpips_8k'], 3)} & "
                              f"{num(unet_guard_median(g['arenas'], 'directional_0'), 3)} & "
-                             f"{num(unet_guard_median(g['arenas'], 'directional_8k'), 3)} & "
+                             f"{num(unet_guard_median(g['arenas'], unet_key), 3)} & "
                              f"{share_cell(g['psnr_share_4k'])} & {share_cell(g['lpips_share_4k'])} & "
                              f"{_budget_cell(g, budgets_final)} \\\\")
             full = block_stats.get("unet_full")
@@ -887,14 +896,16 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                              f"{num(full['psnr_4k'], 2)} & {num(full['psnr_8k'], 2)} & "
                              f"{num(full['lpips_zero_shot'], 3)} & {num(full['lpips_4k'], 3)} & "
                              f"{num(full['lpips_8k'], 3)} & {num(guard_median(full, 0), 3)} & "
-                             f"{num(guard_median(full, 8000), 3)} & {share_cell(shares.get('psnr'))} & "
+                             f"{num(guard_median(full, directional_at), 3)} & {share_cell(shares.get('psnr'))} & "
                              f"{share_cell(shares.get('lpips'))} & {block_budget_cell(full)} \\\\")
         elif block.get("n"):
             shares = block.get("shares") or {}
+            if paired and guard_median(block, 0) is not None:
+                unseen_dir = num(guard_median(block, 0), 3)
             lines.append(f"{block_label('unseen maps', block, True)} & {num(block['psnr_zero_shot'], 2)} & "
                          f"{num(block['psnr_4k'], 2)} & {num(block['psnr_8k'], 2)} & "
                          f"{num(block['lpips_zero_shot'], 3)} & {num(block['lpips_4k'], 3)} & "
-                         f"{num(block['lpips_8k'], 3)} & {unseen_dir} & {num(guard_median(block, 8000), 3)} & "
+                         f"{num(block['lpips_8k'], 3)} & {unseen_dir} & {num(guard_median(block, directional_at), 3)} & "
                          f"{share_cell(shares.get('psnr'))} & {share_cell(shares.get('lpips'))} & "
                          f"{block_budget_cell(block)} \\\\")
     if not with_8k:
@@ -1863,7 +1874,7 @@ def main(argv=None):
     merged = os.path.join(a.tables_dir, "results_merged.tex")
     with open(merged, "w") as f:
         f.write(merged_table(names, home, zero, directional, gstats, block_stats, guards, grid_complete,
-                             blocks=block_rows, with_8k=False, with_budget=False))
+                             blocks=block_rows, with_8k=False, with_budget=False, directional_at=4000))
     merged_caption_path = os.path.join(a.tables_dir, "results_merged_caption.tex")
     with open(merged_caption_path, "w") as f:
         f.write(merged_caption(names, home, directional, gstats, block_stats))

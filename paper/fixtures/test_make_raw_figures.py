@@ -93,12 +93,14 @@ def export(tmp_path):
         path = tmp_path / "directional" / "unet200k_ema" / f"directional_map{m:02d}_{set_name}_ema.json"
         os.makedirs(path.parent, exist_ok=True)
         json.dump({"summary": {"windows": n_windows, "correct_frac": correct, "ref_raw_frac": 0.9}}, open(path, "w"))
-    # the guard reads of the 8k-grid runs: directional and the training maps' decoded-reference scene PSNR at 0, 8k
+    # the guard reads of the 8k-grid runs: directional at 0, 4k and 8k, and the training maps' decoded-reference
+    # scene PSNR at 0 and 8k
     adapt = tmp_path / "adapt"
-    for a, (psnr0, psnr8, dir0, dir8) in {6: (25.0, 24.0, 0.80, 0.85), 9: (25.0, 24.5, 0.70, 0.75)}.items():
+    for a, (psnr0, psnr8, dir0, dir4, dir8) in {6: (25.0, 24.0, 0.80, 0.84, 0.85),
+                                                9: (25.0, 24.5, 0.70, 0.74, 0.75)}.items():
         run = adapt / f"unet200k_arenas13_map{a:02d}_r16_k8_s0_g8k"
         rows = []
-        for step, psnr, frac in ((0, psnr0, dir0), (8000, psnr8, dir8)):
+        for step, psnr, frac in ((0, psnr0, dir0), (4000, psnr8, dir4), (8000, psnr8, dir8)):
             stepdir = f"step{step:07d}_live_guard"
             write_windows(str(run / "scores" / stepdir / "trainmap" / "per_window.csv"),
                           [{"episode": 6000 + i, "map": 2 + i % 4, "dup_latent": 0, "scene_psnr_dec": psnr + off}
@@ -879,10 +881,10 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
                                     "full fine-tune (1 of 2)", "PixArt-$\\alpha$, training maps",
                                     "unseen maps (all 2)", "SD 3.5 Medium, training maps", "unseen maps (1 of 2)"]
     assert body[0][1:] == ["22.45", "", "0.150", "", "0.850", "", "", ""]
-    assert body[1][1:] == ["18.50", "21.25", "0.280", "0.205", "0.733", "0.800", "76", "58"]                       # shares PSNR then LPIPS; the budget waits on the grid
-    assert body[2][5:7] == ["0.750", "0.800"]
+    assert body[1][1:] == ["18.50", "21.25", "0.280", "0.205", "0.750", "0.790", "76", "58"]                       # shares PSNR then LPIPS; the budget waits on the grid
+    assert body[2][5:7] == ["0.750", "0.790"]                       # both from the guard rows, at 0 and 4k
     assert body[3][1:] == ["18.00", "23.00", "0.300", "0.180", "--", "--", "112", "80"]
-    assert "& 0 & 8k & PSNR & LPIPS \\\\" in merged                      # the score columns' order
+    assert "& 0 & 4k & PSNR & LPIPS \\\\" in merged                      # the score columns' order
     assert body[4][1:6] == ["22.65", "", "0.150", "", "--"]                 # no directional read: "--"
     assert body[5][1:3] == ["18.70", "20.70"]                                       # maps 6, 9
     assert body[6][1] == "21.95"
