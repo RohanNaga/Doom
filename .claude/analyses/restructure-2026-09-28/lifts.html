@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MINIMAL Edits To Approve</title>
+<style>
+:root{--bg:#fbfaf7;--ink:#1a1a1a;--muted:#6b665c;--rule:#d9d3c7;--old:#f6d3d0;--old-ink:#7a1f1a;--new:#d6efdb;--new-ink:#1d5a33;--panel:#fff;--tag:#e7e2d7}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151412;--ink:#e8e4da;--muted:#a39c8e;--rule:#3a362e;--old:#4a2320;--old-ink:#f0a49b;--new:#1e3a27;--new-ink:#9fd7b1;--panel:#1f1d17;--tag:#2c2a24}}
+:root[data-theme="dark"]{--bg:#151412;--ink:#e8e4da;--muted:#a39c8e;--rule:#3a362e;--old:#4a2320;--old-ink:#f0a49b;--new:#1e3a27;--new-ink:#9fd7b1;--panel:#1f1d17;--tag:#2c2a24}
+body{font-family:Georgia,"Source Serif 4",serif;background:var(--bg);color:var(--ink);margin:0;line-height:1.5}
+main{max-width:900px;margin:0 auto;padding:32px 16px 80px}
+h1{font-size:28px;margin:0 0 4px;text-wrap:balance}h2{font-size:20px;margin:36px 0 10px;border-top:1px solid var(--rule);padding-top:14px}
+.sub{color:var(--muted);margin:0 0 18px}
+.item{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:12px 14px;margin:10px 0;font-size:15px}
+.item b{display:block;margin-bottom:6px}
+.old{background:var(--old);color:var(--old-ink);padding:8px 10px;border-radius:4px;margin:6px 0}
+.new{background:var(--new);color:var(--new-ink);padding:8px 10px;border-radius:4px;margin:6px 0}
+.lab{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;margin-right:6px}
+.why{color:var(--muted);font-size:14px;margin-top:6px}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--panel)}th,td{border:1px solid var(--rule);padding:7px 9px;text-align:left;vertical-align:top}th{background:var(--tag)}
+p{max-width:75ch}
+</style>
+</head>
+<body><main>
+<h1>MINIMAL: the exact edits to approve</h1>
+<p class="sub">Everything below is against the MINIMAL text now in the Overleaf zip. Red is the current sentence, green is the proposed one. Nothing is applied yet. Sept 28, 11:35 PM.</p>
+
+<h2>A. The SD 3.5 headline (your decision)</h2>
+<div class="item"><b>Abstract, sentence 5</b>
+<div class="old"><span class="lab">now</span>All three keep their response to the controls and lose the scene: the U-Net's perceptual error (LPIPS) doubles, from 0.158 to a median 0.303, its scene PSNR drops 2.9 dB, from 25.2 to a median 22.3 dB, and two transformers of 0.6 and 2.3 B parameters lose as much.</div>
+<div class="new"><span class="lab">proposed</span>All three keep their response to the controls and lose the scene: SD 3.5's perceptual error (LPIPS) doubles, from 0.126 to a median 0.262, and its scene PSNR drops 3.3 dB, from 25.4 to a median 22.1 dB; the SD 1.4 U-Net, GameNGen's backbone, and PixArt-α lose the same way.</div></div>
+<div class="item"><b>Abstract, sentence 6</b>
+<div class="old"><span class="lab">now</span>Very little adaptation repairs it: rank-16 adapters trained on 8 episodes of each unseen map with 2% of the original training updates recover 72% of the lost perceptual quality and about half of the lost PSNR on the U-Net, and 76% and 77% of the perceptual loss on the two transformers.</div>
+<div class="new"><span class="lab">proposed</span>Very little adaptation repairs it: rank-16 adapters trained on 8 episodes of each unseen map with 2% of the original training updates recover 77% of SD 3.5's lost perceptual quality and half of its lost PSNR, and 72% and 76% of the perceptual loss on the other two backbones.</div></div>
+<div class="item"><b>Contribution bullet 2, the LPIPS example</b>
+<div class="old"><span class="lab">now</span>... while their perceptual error roughly doubles (LPIPS 0.158 to a median 0.303 for the U-Net) and their scene PSNR drops 2.8 to 3.3 dB.</div>
+<div class="new"><span class="lab">proposed</span>... while their perceptual error roughly doubles (LPIPS 0.126 to a median 0.262 for SD 3.5) and their scene PSNR drops 2.8 to 3.3 dB.</div></div>
+<div class="item"><b>Contribution bullet 3, the recovery numbers</b>
+<div class="old"><span class="lab">now</span>... it closes a median 94 percent of that distance and recovers 72 percent of the lost perceptual quality. The same procedure recovers 76 and 77 percent on PixArt-α and SD 3.5.</div>
+<div class="new"><span class="lab">proposed</span>... it recovers 77 percent of SD 3.5's lost perceptual quality and half of its lost PSNR; unchanged, the same procedure recovers 72 and 76 percent on the U-Net and PixArt-α.</div>
+<div class="why">The U-Net stays the deep-dive backbone (Table 2's groups, the full fine-tune, the data ladder); the abstract and bullets lead with SD 3.5 as the best of the three. The "94 percent of that distance" clause is the upper-bound share; see section D.</div></div>
+
+<h2>B. The three lifts from FULL (the judges' structural pieces)</h2>
+<div class="item"><b>Lift 1. Study design, the adaptation paragraph's heading and first sentence</b>
+<div class="old"><span class="lab">now</span><b style="display:inline">Adaptation.</b> To move a trained model to a new map we keep its weights frozen and train a small adapter on a few episodes of that map, then score the adapted model on held-out episodes at each update budget.</div>
+<div class="new"><span class="lab">proposed</span><b style="display:inline">Adaptation as a measurement.</b> To measure how much adaptation a map needs, we keep the trained model frozen and train a standard adapter on a few episodes of that map, then score the adapted model on held-out episodes at each update budget.</div>
+<div class="why">Says in the text what the title asks; "standard adapter" answers the professor's second comment. The rest of the paragraph stays as it is.</div></div>
+<div class="item"><b>Lift 2. Metrics, one definition of the excess gap, inserted after the sentence that defines the gap</b>
+<div class="new"><span class="lab">insert</span>A map's <i>excess gap</i> is how much further below this reference the model sits there than on the training maps.</div>
+<div class="why">The budget rule and the recovery shares both use it; today the paper says "extra distance", "excess gap" and "gap to the upper bound" for the same thing. Only applies if the reference stays (section D).</div></div>
+<div class="item"><b>Lift 3. Results, the predictor sentence gets its conclusion</b>
+<div class="old"><span class="lab">now</span>Neither the model's own latent-space score nor a frame distance between a map's recordings and the training maps predicts how far a map gets (supplement).</div>
+<div class="new"><span class="lab">proposed</span>Neither the model's own latent-space score nor a frame distance between a map's recordings and the training maps predicts how far a map gets (supplement), so with the predictors we tried a map's budget has to be measured, not predicted.</div>
+<div class="why">Turns a negative result into the argument for the benchmark. "With the predictors we tried" is Astra's qualification.</div></div>
+
+<h2>C. The judges' fixes (both drafts had these)</h2>
+<div class="item"><b>Fix 1. Intro, "prohibitively costly" contradicts the 0.8-hour full fine-tune in Results</b>
+<div class="old"><span class="lab">now</span>Pretraining one model on every map a deployment might meet is costly and never complete, and fine-tuning a separate model per map is prohibitively costly.</div>
+<div class="new"><span class="lab">proposed</span>Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map from scratch is prohibitively costly.</div></div>
+<div class="item"><b>Fix 2. Data, the 8,000-episode release next to the 500 per map the models used</b>
+<div class="new"><span class="lab">insert after the release sentence</span>This paper trains on 500 of the released episodes per training map and evaluates on 25 more.</div></div>
+<div class="item"><b>Fix 3. "control" overstates a 0.04 drop in the directional score</b>
+<div class="old"><span class="lab">now (bullet 2 head, abstract, Results head)</span>A scene shift breaks appearance, not control. / All three keep their response to the controls / The shift breaks the scene, not the controls.</div>
+<div class="new"><span class="lab">proposed</span>A scene shift breaks appearance, not the turn response. / All three largely keep their turn response / The shift breaks the scene, not the turn response.</div>
+<div class="why">Three judges said "control" claims more than a turn-reversal check shows. "Turn response" is what was measured. Your call: this softens the hook; the alternative is to keep "control" and add "(measured as the turn response)" once in the abstract.</div></div>
+<div class="item"><b>Fix 4. "not of its architecture or scale" is a reading of three runs</b>
+<div class="old"><span class="lab">now (bullet 2 and Results)</span>so it follows what the models were exposed to, not their architecture or scale</div>
+<div class="new"><span class="lab">proposed</span>so across our three backbones it follows what the models were exposed to, not their architecture or scale</div></div>
+<div class="item"><b>Fix 5. The recovery shares are medians of per-map shares; dividing Table 1's medians gives 64 percent, not 72</b>
+<div class="new"><span class="lab">insert in Metrics, after the directional definition</span>Recovered shares are computed per map (the fraction of that map's LPIPS rise undone, of its PSNR loss regained) and then summarised as the median over maps.</div></div>
+<div class="item"><b>Fix 6. Budget rule hard-codes the U-Net's 3.4 dB reference</b>
+<div class="old"><span class="lab">now</span>... falls to the midpoint between its zero-shot gap and the training maps' 3.4 dB ...</div>
+<div class="new"><span class="lab">proposed</span>... falls to the midpoint between its zero-shot gap and that backbone's in-distribution gap (3.4 dB for the U-Net and PixArt-α, 6.5 dB for SD 3.5) ...</div>
+<div class="why">Only applies if the reference stays (section D); with the LPIPS budget it is replaced.</div></div>
+
+<h2>D. The reconstruction upper bound: every place it appears</h2>
+<p><b>The literature answer.</b> The game world-model papers do not report one: GameNGen fine-tunes its decoder but gives no reconstruction number, DIAMOND is pixel-space and has none, MultiGen and Matrix-Game report absolute scores only. The papers that do report a reconstruction ceiling are the latent-forecasting and physics-world-model ones we cite for it: OccWorld, DINO-Foresight, and Kang et al. (ICML 2025), who use it exactly as we do, to show the error sits in prediction, not reconstruction. Two judges also noted that "bound" is the wrong word: it is an empirical reference, not a proven maximum.</p>
+<table>
+<tr><th>Where</th><th>What it says now</th><th>If removed</th></tr>
+<tr><td>Bullet 1</td><td>"... against recorded frames and against each decoder's reconstruction upper bound, which separates the model's error from the renderer's."</td><td>"... against recorded frames and their decoder's own reconstruction, which separates the model's error from the renderer's." (one clause kept, no "bound")</td></tr>
+<tr><td>Bullet 2, last sentence</td><td>"And it lives in the model, since the decoder renders the unseen maps nearly as well as the training maps."</td><td>Unchanged; this needs no bound.</td></tr>
+<tr><td>Bullet 3</td><td>"closes half of the extra distance the shift opened to the upper bound in a median 150 updates" and "closes a median 94 percent of that distance"</td><td>Both clauses go. Replaced by the LPIPS budget: "recovers half of its lost perceptual quality in a median N updates" (N recomputed by the lead).</td></tr>
+<tr><td>Related work</td><td>The reconstruction-upper-bound sentence with the OccWorld and DINO-Foresight citations.</td><td>Goes, with its two citations (refs.bib keeps them, unused).</td></tr>
+<tr><td>Metrics</td><td>The definition ("the decoder D applied to the ground-truth latent, ... the best a prediction rendered through D can score (median 27.3 dB on the unseen maps, 28.6 on the training maps)") and "the gap to the upper bound is the upper bound's PSNR minus the prediction's".</td><td>Replaced by one sentence: "As a diagnostic, the decoder applied to the ground-truth latent scores 27.3 dB on the unseen maps and 28.6 on the training maps, so the decoder itself loses little on the shift."</td></tr>
+<tr><td>Decoder paragraph</td><td>"its own error is what the reconstruction upper bound measures"</td><td>"its own error is what its reconstruction score measures"</td></tr>
+<tr><td>Adaptation, budget rule</td><td>"the first grid point at which it closes half of its excess gap over the in-distribution gap to the reconstruction upper bound ..."</td><td>"the first grid point at which it recovers half of its rise in LPIPS over the training maps". Table 2's budget column recomputed.</td></tr>
+<tr><td>Figure 2 caption and panel (d)</td><td>"(d) evaluation against the raw ground-truth frame and the reconstruction upper bound"; the panel's label</td><td>"(d) evaluation against the raw ground-truth frame"; the lead relabels the panel.</td></tr>
+<tr><td>Table 1</td><td>The "Upper bound (dB)" column.</td><td>Column removed (four columns remain: PSNR, LPIPS, directional, per training and unseen).</td></tr>
+<tr><td>Results, zero-shot</td><td>"and its gap to the reconstruction upper bound grows from 3.4 to a median 5.0 dB"; "The decoder is not the limit: it reconstructs the unseen maps nearly as well as the training maps (median 27.3 against 28.6 dB, LPIPS 0.05 to 0.09)."</td><td>The gap clause goes; the decoder sentence stays as the "loss is in the model" evidence.</td></tr>
+<tr><td>Results, adaptation</td><td>"Most of the PSNR still missing against the training maps (1.6 dB) reflects the unseen maps' lower upper bound (27.3 against 28.6 dB), not the model."; "In domain the model sits 3.4 dB below its reconstruction upper bound; zero-shot ... 5.0 dB ... after 4k ... 3.4 dB again, so per map the adapter closes a median 94 percent of the extra distance the shift opened, and at least half on every map"; the budget sentence "closes half of that extra distance ... median of 150 updates (50 to 2k per map, none censored)".</td><td>First sentence becomes "Most of the PSNR still missing against the training maps (1.6 dB) matches the decoder's own lower reconstruction on the unseen maps (27.3 against 28.6 dB)." The 94-percent sentence goes. The budget sentence is rewritten on LPIPS with the recomputed medians.</td></tr>
+<tr><td>Results, PixArt and SD 3.5 sentences</td><td>"closes 101 percent of its excess gap", "closes 94 percent", budgets 150 and 250 "the first point of its grid".</td><td>Gap shares go; LPIPS budgets replace them (SD 3.5's caveat may go away once tonight's full grid is scored).</td></tr>
+<tr><td>Table 2</td><td>Groups ordered by zero-shot gap to the upper bound; the "gap" columns; the budget column; the caption.</td><td>Groups reordered by zero-shot LPIPS; gap columns removed; budget recomputed; caption rewritten by the lead.</td></tr>
+<tr><td>Figure 3</td><td>Already removed (the ticks).</td><td>Nothing.</td></tr>
+<tr><td>Supplement</td><td>About 20 mentions: the per-map tables' upper-bound columns, the distance section's correlations with the gap, the decoder section.</td><td>Columns dropped, correlations restated on LPIPS where the per-window files allow, otherwise the sentence goes.</td></tr>
+</table>
+<p><b>What removal costs and buys.</b> Costs: the 94 / 101 / 94 percent "distance closed" numbers, which were the strongest-sounding recovery figures, and about two hours of lead time to recompute budgets and Table 2. Buys: one fewer concept in a four-page paper, no "bound" claim to defend, and an evaluation that matches the game world-model papers a reviewer will compare us to. The "loss is in the model, not the renderer" claim survives on the decoder's own reconstruction numbers. My recommendation stays "keep, renamed reference", but the removal is clean and I will do it on your word.</p>
+</main></body></html>
