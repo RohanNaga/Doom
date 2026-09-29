@@ -1,0 +1,156 @@
+\documentclass{article}
+\usepackage[preprint]{corl_2026} % submission: \usepackage{corl_2026}, which anonymises the authors; final: [final]
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+
+\newif\ifdraftmarks \draftmarksfalse
+\newif\ifwithappendix \withappendixfalse % submission: body plus references; \withappendixtrue for the camera-ready or an anonymous supplement
+\newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplementary material\fi}
+\newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[tbd]}\else[tbd]\fi}
+\newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[#1]}\else[#1]\fi}
+\newcommand{\prov}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{#1}\else#1\fi}
+% \figslot{file}{width}{height}{what it will show}: the figure when its file exists, a labelled box otherwise
+\newcommand{\figslot}[4]{\IfFileExists{#1}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1}}{\fbox{\parbox[c][\dimexpr#3-2\fboxsep-2\fboxrule\relax][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize\textbf{#4}\\[2pt]{\tiny\nolinkurl{#1}}\\[1pt]\textcolor[rgb]{0.8,0,0}{pending}}}}}
+
+\title{DoomShift: How Much Adaptation Do World Models Need Under Domain Shift?}
+
+\author{
+  Rohan Nagabhirava\\
+  Carnegie Mellon University\\
+  Pittsburgh, PA, United States\\
+  \texttt{rnagabhi@andrew.cmu.edu}
+  \And
+  Keerthana Chirumamilla\\
+  Carnegie Mellon University\\
+  Pittsburgh, PA, United States\\
+  \texttt{kchiruma@andrew.cmu.edu}
+  \And
+  Changliu Liu\\
+  Carnegie Mellon University\\
+  Pittsburgh, PA, United States\\
+  \texttt{cliu6@andrew.cmu.edu}
+}
+
+\begin{document}
+\raggedbottom
+\setlength{\textfloatsep}{12pt plus 2pt minus 4pt}
+\maketitle
+
+%===============================================================================
+
+\begin{abstract}
+World models have become capable simulators, but they are evaluated almost exclusively on held-out rollouts from the domain they were trained on.
+A small domain shift, such as a new map of the same game, a new texture set, a lighting change or a different cast of enemies, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
+With DoomShift, a controlled version of this domain shift in Doom, we measure what it breaks and how much adaptation it takes to repair.
+We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-domain data and on 13 out-of-distribution maps that it never saw.
+All three keep their response to controls and lose the scene: SD~3.5's perceptual error (LPIPS) doubles, from 0.126 to a median 0.262, and its scene PSNR drops 3.3~dB, from 25.4 to a median 22.1~dB; the SD~1.4 U-Net, GameNGen's backbone, and PixArt-$\alpha$ lose the same way.
+Very little adaptation repairs it: rank-16 adapters trained on 8 episodes of each unseen map with 2\% of the original training updates recover 77\% of SD~3.5's lost perceptual quality and half of its lost PSNR, and 72\% and 76\% of the perceptual loss on the other two backbones.
+\end{abstract}
+
+\keywords{World models, Few-shot adaptation}
+
+%===============================================================================
+
+\section{Introduction}
+\label{sec:intro}
+
+Game world models now render playable worlds~\citep{valevski2024gamengen,alonso2024diamond,bruce2024genie}.
+Each is evaluated only on held-out rollouts from its own environment, and none has been shown to generalize to a new environment within the same game.
+
+A learned simulator is useful only where it is faithful, and an agent or a robot moving to a new room or level needs to know how much of its world model still holds and what it costs to make the rest hold.
+Game worlds let us pose this question with the engine held fixed: a new map of the same game preserves the physics and the controls exactly, and only the layout, textures and lighting differ.
+Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses, and how few episodes and updates recover the rest.
+
+\begin{figure}[b]
+\centering
+\figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, two rows}
+\caption{On an unseen map (right, map 7) the U-Net still moves and fires but renders the training maps' masonry; eight adaptation episodes restore the map.}
+\label{fig:teaser}
+\end{figure}
+
+In short, a world model moved to a new map keeps playing the game but draws the wrong world, and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
+\begin{itemize}\setlength{\itemsep}{0pt}
+\item \textbf{DoomShift, a benchmark that isolates a scene shift.} We build the pipeline end to end (\appref{app:overview}): every-tic recordings, three diffusion world models initialized from pretrained image models and trained on four maps under one recipe, a fine-tuned decoder and a standard adapter, scored on the 13 maps the models never saw, zero-shot and after adaptation. Recordings, models, decoders and adapters are released.
+\item \textbf{A scene shift breaks appearance, not control.} On the unseen maps all three models keep their turn response while their perceptual error roughly doubles and their scene PSNR drops 2.8 to 3.3~dB. The loss is the same for a U-Net and two transformers from 0.6 to 2.3~B parameters, so across our three backbones it follows what the models were exposed to, not their architecture or scale. It is a step, not a slope: every unseen map is worse in LPIPS than every training map. And it lives in the model, since the decoder renders the unseen maps nearly as well as the training maps (Table~\ref{tab:unseen}, Figure~\ref{fig:teaser}).
+\item \textbf{How much adaptation it takes: very little.} A standard LoRA adapter on the frozen model (0.49 percent of the U-Net's parameters), trained on eight episodes of the new map, recovers half of its lost perceptual quality in a median 250 updates and, by 4k updates (2 percent of pretraining, about one A4000 GPU-hour), 72 to 77 percent of it; a full fine-tune with 205 times the trainable parameters recovers 87 percent against the adapter's 71 on four maps (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
+\end{itemize}
+
+
+%===============================================================================
+
+\section{Related work}
+\label{sec:related}
+
+\textbf{Game world models.} GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen} and DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond}; both are evaluated only on rollouts from their own environment. MultiGen trains a single Doom model across 100 procedurally generated maps~\citep{po2026multigen} and still reports its metrics only on its training distribution. Held-out evaluation of world models holds out a new game~\citep{rigter2024avid,gao2025adaworld} or a new building~\citep{koh2021pathdreamer}, not a map of the same game; Doom maps are held out only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom}, and game world models that show new scenes generate them from an image, with no recorded frames to score against~\citep{bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training.
+
+\textbf{Adaptation.} Our adapter is not new: a small adapter on a frozen video model moves it to a new setting in AVID~\citep{rigter2024avid} and adds action control in Vista~\citep{gao2024vista}, and AdaWorld adapts with a short full fine-tune~\citep{gao2025adaworld}, which we run as the comparator. None reports what adapting to one new scene costs in episodes and updates, which we measure.
+
+%===============================================================================
+
+\section{Study design}
+\label{sec:bench}
+
+\textbf{Data.} The Arnold agent~\citep{lample2017arnold} plays 150-second ViZDoom~\citep{kempka2016vizdoom} deathmatches against 8 bots on the 17 Doom maps it ships with; each has its own layout, textures and lighting. We record every tic (1/35~s): a 320$\times$240 frame and the 19 buttons the engine executed. Four maps (2 to 5) are the training maps: 500 training and 25 validation episodes each (512 windows). The other 13 (1, 6 to 17) are never trained on: 24 new episodes each, 16 for adaptation (8 used here) and 8 held out for scoring (256 windows per map).
+
+\textbf{Three backbones, one recipe.} Our anchor is the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), GameNGen's backbone~\citep{valevski2024gamengen}. PixArt-$\alpha$~\citep{chen2023pixart}, a 628M transformer in the same latent space, changes the architecture at similar scale; SD~3.5 Medium~\citep{esser2024sd3}, a 2.27B MMDiT whose 16-channel latents give its decoder a higher reconstruction score (31.8 against 28.6~dB on the training maps), changes the scale. All three become next-tic world models under one recipe (\appref{app:overview}): 32 context tics, $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen, 200k updates at batch 32 on one A6000 per backbone, an fp32 EMA at 0.9999, and 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency.
+
+
+
+\textbf{Metrics.} We score the scene rows (0 to 207; the HUD below them does not change with the map) of each frame predicted one tic ahead against the raw recorded frame: PSNR for accuracy and LPIPS~\citep{zhang2018lpips} for realism. Absolute PSNR alone does not compare maps, because it rises with how static a recording is: the persistence baseline, the last context frame copied forward~\citep{mathieu2016deep}, already scores 19.8~dB on the unseen maps, so we read every score against the same model's level on the training maps. For control, the \emph{directional} score is the fraction of turning windows whose predicted view turns the other way once we swap left and right in the newest control.
+
+\textbf{Decoder.} The encoder stays frozen, since its latents are every backbone's training target; fine-tuning the decoder changes what we can see, not what the model knows: we fine-tune each backbone's decoder on training-map frames paired with their frozen-encoder latents (MSE plus 0.1~LPIPS; \appref{app:protocol}); it never sees an unseen map. The SD~1 decoder's scene reconstruction rises from 26.9 to 28.4~dB and its LPIPS falls from 0.092 to 0.060. Every pixel score below uses the fine-tuned decoders.
+
+\textbf{Adaptation as a measurement.} To measure how much adaptation a map needs, we keep the trained model frozen and train a standard adapter on a few episodes of that map: rank-16 LoRA~\citep{hu2022lora} on every attention projection~\citep{gao2024vista}, with the control MLP, input projection and noise-bucket embedding trained in full~\citep{xie2023difffit} (4.2M parameters, 0.49 percent of the U-Net; the transformers' counts in \appref{app:perarena-adapt}). We train on 8 episodes, about 1 A4000 GPU-hour per map for 4k updates, and score the held-out episodes at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates; the forgetting and directional checks run at 0 and 8k. We report 4k updates, 2 percent of pretraining, everywhere, since it captures on average 96 percent of each map's 8k gain; 8k is the check. A map's \emph{budget} is the first grid point at which it recovers at least half of its zero-shot LPIPS rise over the training maps. As a comparator we fine-tune all 860M parameters of the U-Net on maps 6, 7, 8 and 16 with the same episodes.
+
+\begin{table}[t]
+\centering\footnotesize
+\input{tables/tuned/results_merged_caption.tex}
+\label{tab:unseen}
+{\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/tuned/results_merged.tex}}
+\end{table}
+
+%===============================================================================
+
+\section{Results}
+\label{sec:results}
+
+\textbf{The shift breaks the scene, not the controls.} On the unseen maps the turn response survives: the directional score goes from 0.855, 0.842 and 0.840 in distribution to 0.804, 0.808 and 0.800 for the U-Net, PixArt-$\alpha$ and SD~3.5 (ground-truth frames 0.885 and 0.892; Figure~\ref{fig:teaser}). The appearance does not: the U-Net's scene PSNR falls from 25.2~dB to a median 22.3 and its LPIPS rises from 0.158 to 0.303 (per map, Figure~\ref{fig:adapt}); pooled over the 13 maps, one predicted frame in five has an LPIPS above 0.4, against one in 73 on the training maps, concentrated in maps 16, 17, 13 and 1. The loss sits in the scene: its rows fall 2.9~dB while the map-independent HUD rows fall 0.2~dB (29.7 to 29.5).
+
+\textbf{The same loss in every backbone, and a step.} Scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 (Table~\ref{tab:unseen}; \appref{app:distance}): across our three backbones the shift looks like a property of the task, not of the architecture or the scale. It is a step, not a slope: every unseen map has a worse LPIPS than every training map, for all three backbones.
+
+\begin{figure}[t]
+\centering
+\figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{1.8in}{Figure 3: the shift and its repair}
+\caption{The shift and its repair, per unseen map and per backbone. (a) Scene PSNR and (b) LPIPS zero-shot (open) to 4k adapter updates (filled) for the U-Net, PixArt-$\alpha$ and SD~3.5, with each backbone's in-distribution level on the training maps (dashed); (c, d) medians over the 13 unseen maps against updates.}
+\label{fig:adapt}
+\end{figure}
+
+\textbf{How much adaptation: updates, episodes, parameters.} Very little. Eight episodes and 4k updates raise the U-Net's median scene PSNR from 22.3 to 23.6~dB and lower its median LPIPS from 0.303 to 0.210 (Figure~\ref{fig:adapt}, Table~\ref{tab:unseen}). Per map the adapter undoes a median 72 percent of the rise in LPIPS and regains 48 percent of the lost PSNR (above 100 on the static easy maps, which pass the training-map level); about a decibel of the PSNR still missing is the decoder's own reconstruction drop on the unseen maps, which no adapter of the world model can recover. It is fast: half of a map's LPIPS rise is undone in a median 250 updates (100 to 8k per map). Unchanged, the procedure carries over: PixArt-$\alpha$ goes from 22.4 to 23.7~dB and 0.285 to 0.205, recovering 76 percent of its LPIPS rise and 48 percent of its lost PSNR with a median budget of 250 updates; SD~3.5 goes from 22.1 to 24.0~dB and 0.262 to 0.165, recovering 77 and 50 percent, also at a median 250 updates. Parameters buy a little more: a full fine-tune of all 860M U-Net parameters on the same eight episodes beats the adapter on each of maps 6, 7, 8 and 16 (median 23.1~dB and 0.182 against 22.9~dB and 0.209 at 4k), recovering 87 percent of the LPIPS rise against 71, at 205 times the trainable parameters. Data matters less than the first updates (one episode already gives most of the gain of sixteen), and the adapters trade a little in-distribution skill for it (training-map PSNR falls a median 0.59~dB at 8k, the directional score rises from 0.81 to 0.84; \appref{app:perarena-adapt}).
+
+
+%===============================================================================
+
+\section{Conclusion}
+\label{sec:limits}
+
+The claims cover 13 unseen maps of one game, one agent, one-tic scoring and mostly one seed, and one-tic quality does not guarantee stable rollouts (\appref{app:closedloop}).
+Next are other games, detecting a shift from the model's own scores so that it repairs itself, and closed-loop evaluation of the adapted models.
+The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.
+\label{body-end}
+
+%===============================================================================
+
+\clearpage
+\acknowledgments{\tbd}
+
+{\hyphenpenalty=10000\exhyphenpenalty=10000\sloppy\bibliography{refs}}
+
+\ifwithappendix
+\clearpage
+\appendix
+\input{appendix}
+\fi
+
+\end{document}

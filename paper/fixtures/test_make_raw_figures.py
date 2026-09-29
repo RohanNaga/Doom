@@ -702,7 +702,7 @@ def test_arenas_group_by_zero_shot_psnr_four_five_four_and_the_table_lists_them(
     assert "half the rise" in tex and "Unseen maps (by zero-shot LPIPS rise)" in tex
     # the shares print as whole percents: the hard group regains 2 of 15 to 12 dB (13 to 17 percent, median 15)
     hard = next(ln for ln in tex.splitlines() if ln.startswith("Hard"))
-    assert hard.rstrip(" \\\\").split(" & ")[-3:-1] == ["50", "15"]
+    assert hard.rstrip(" \\\\").split(" & ")[-3:-1] == ["15", "50"]   # PSNR, then LPIPS
     # until every grid step has a raw read, the budget cells wait
     assert "${>}$8k" not in mrf.groups_table(stats, budgets_final=False)
     # by the zero-shot LPIPS rise over the training maps, the largest rise is the hardest

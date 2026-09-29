@@ -925,7 +925,8 @@ def merged_caption(names, home, directional, gstats, block_stats):
 def groups_table(stats, stamp="", budgets_final=True, blocks=()):
     """Table 2: rows hard, medium, easy (their maps listed; terciles of the zero-shot LPIPS rise) and all maps,
     medians of the U-Net's raw scene reads through the fine-tuned decoder at zero-shot, 4k and 8k, the recovered
-    shares at 4k (LPIPS, PSNR; per map, then the median) and the budget (\\tbd cells until `budgets_final`); then
+    shares at 4k (PSNR, LPIPS, the score columns' order; per map, then the median) and the budget (\\tbd cells until
+    `budgets_final`); then
     the per-backbone blocks (`blocks`: [(label, block_summary, decoder identity)]), each \\tbd where it has no map
     yet, "--" at 8k where its grid stops at 4k. No upper bound or gap (Rohan, Sep 28 night)."""
     def num(v, d):
@@ -941,7 +942,7 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
              "& \\multicolumn{3}{c}{Scene PSNR (dB) $\\uparrow$} & \\multicolumn{3}{c}{Scene LPIPS $\\downarrow$} & "
              "\\multicolumn{2}{c}{Recovered (\\%)} & Budget to \\\\",
              "\\cmidrule(lr){2-4}\\cmidrule(lr){5-7}\\cmidrule(lr){8-9}",
-             "Unseen maps (by zero-shot LPIPS rise) & zero-shot & 4k & 8k & zero-shot & 4k & 8k & LPIPS & PSNR & "
+             "Unseen maps (by zero-shot LPIPS rise) & zero-shot & 4k & 8k & zero-shot & 4k & 8k & PSNR & LPIPS & "
              "half the rise \\\\",
              "\\midrule"]
     for name in list(GROUP_NAMES) + ["all"]:
@@ -951,7 +952,7 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
             lines.append("\\midrule")
         lines.append(f"{label} & {num(g['psnr_zero_shot'], 2)} & {num(g['psnr_4k'], 2)} & {num(g['psnr_8k'], 2)} & "
                      f"{num(g['lpips_zero_shot'], 3)} & {num(g['lpips_4k'], 3)} & {num(g['lpips_8k'], 3)} & "
-                     f"{share_cell(g['lpips_share_4k'])} & {share_cell(g['psnr_share_4k'])} & "
+                     f"{share_cell(g['psnr_share_4k'])} & {share_cell(g['lpips_share_4k'])} & "
                      f"{_budget_cell(g, budgets_final)} \\\\")
     if blocks:
         lines.append("\\midrule")
@@ -962,7 +963,7 @@ def groups_table(stats, stamp="", budgets_final=True, blocks=()):
         shares = b.get("shares") or {}
         lines.append(f"{label} & {num(b['psnr_zero_shot'], 2)} & {num(b['psnr_4k'], 2)} & {num(b['psnr_8k'], 2)} & "
                      f"{num(b['lpips_zero_shot'], 3)} & {num(b['lpips_4k'], 3)} & {num(b['lpips_8k'], 3)} & "
-                     f"{share_cell(shares.get('lpips'))} & {share_cell(shares.get('psnr'))} & "
+                     f"{share_cell(shares.get('psnr'))} & {share_cell(shares.get('lpips'))} & "
                      f"{block_budget_cell(b)} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"] + block_comment_lines(blocks)
     return "\n".join(lines) + "\n"
