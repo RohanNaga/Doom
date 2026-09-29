@@ -26,8 +26,8 @@ STATUS = [
     ("All three keep their response to controls", DONE),
     ("Very little adaptation repairs it", DONE),
     # introduction
-    ("Game world models now render playable worlds", CONFIRM),      # citations regrouped for him
-    ("Each of these models is evaluated only", DONE),
+    ("Recent advances in diffusion models", CONFIRM),               # opener drafted on the structure he gave
+    ("However, these models are still evaluated only", CONFIRM),
     ("A learned simulator is useful only", DONE),
     ("Game worlds let us pose this question", DONE),
     ("Yet unchanged dynamics alone", DONE),                          # his sentence, restored on his word
