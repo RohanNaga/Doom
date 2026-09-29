@@ -158,7 +158,7 @@ The zero-shot latent skill score $S_0=10\,\overline{\log_{10}(\text{persistence 
 
 \begin{table}[ht]
 \centering\scriptsize\setlength{\tabcolsep}{2.5pt}
-\caption{Per unseen map, in map order: the zero-shot PSNR deficit $G_0$ against the decoder's own reconstruction and the former half-deficit threshold (columns pending regeneration), the budget (\todo{budget}: the first grid read at which the map recovers half of its zero-shot PSNR deficit against the training maps; ${>}$8k: censored), and scene PSNR and LPIPS against the raw frame at 0, 4k and 8k updates. $^\dagger$Control checks at the 8k check, stock decoder: the change in the training maps' scene PSNR against the decoded ground truth, where persistence cancels (negative is loss), and the directional score.}
+\caption{Per unseen map, in map order: the zero-shot PSNR deficit against the training maps, the budget (the first grid read at which the map recovers half of that deficit; ${>}$8k: censored), scene PSNR and LPIPS against the raw frame at 0, 4k and 8k updates, and the recovered shares at 4k (of the zero-shot LPIPS rise over the in-distribution level undone and of the lost scene PSNR regained). $^\dagger$Control checks at the 8k check, stock decoder: the change in the training maps' scene PSNR against the decoded ground truth, where persistence cancels (negative is loss), and the directional score.}
 \label{tab:perarena-adapt}
 \input{tables/tuned/adapt_perarena.tex}
 \end{table}
@@ -166,7 +166,7 @@ The zero-shot latent skill score $S_0=10\,\overline{\log_{10}(\text{persistence 
 \begin{figure}[ht]
 \centering
 \figslot{figures/raw/raw_figA_adapt_arenas.pdf}{\linewidth}{3.0in}{Per-map adaptation curves}
-\caption{Each panel is one map's scene PSNR against the raw frame at each grid read from 0 to 8k adapter updates (large filled mark: 4k), with the decoder's own reconstruction score on that map (solid), the former half-deficit threshold (dotted) and the training maps' level (dashed); colour: group by zero-shot PSNR deficit (dark: hard). U-Net, non-EMA adapter weights, seed 0, fine-tuned decoder, 256 held-out windows per map.}
+\caption{Each panel is one map's scene PSNR against the raw frame at each grid read from 0 to 8k adapter updates (large filled mark: 4k), with the budget's threshold, half of the map's zero-shot PSNR deficit recovered (dotted), and the training maps' level (dashed); colour: group by zero-shot PSNR deficit (dark: hard). U-Net, non-EMA adapter weights, seed 0, fine-tuned decoder, 256 held-out windows per map.}
 \label{fig:adapt-arenas}
 \end{figure}
 
