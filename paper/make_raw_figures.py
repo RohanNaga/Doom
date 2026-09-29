@@ -1167,11 +1167,13 @@ def fig_backbones(curves, levels, out_dir, headline=HEADLINE_STEP, stem="raw_bac
 
 
 def per_arena_backbone_panel(ax, arenas, backbones, key, levels, marker_size, offset=0.27, headline=HEADLINE_STEP):
-    """(a) or (b) of the per-backbone row: one slot per arena in number order; inside it each backbone at its own
-    small horizontal offset, in its encoding colour and marker: its reconstruction upper bound as a short tick,
-    zero-shot open, the `headline` read filled, a thin connector between them; each backbone's training-map level
-    as a thin dashed line in its colour. `backbones` is [(block key, zero-shot reads {arena: {psnr, lpips,
-    ceiling_psnr, ceiling_lpips}}, headline reads {arena: {psnr, lpips}})], `levels` {block key: (psnr, lpips)}."""
+    """(a) or (b) of the per-backbone row: one slot per unseen map in number order; inside it each backbone at its
+    own small horizontal offset, in its encoding colour and marker: zero-shot open, the `headline` read filled, a
+    thin connector between them; each backbone's training-map level as a thin dashed line in its colour. No
+    reconstruction upper bound here (Rohan, Sep 28 night: the SD 3.5 ticks at 29 to 33 dB stretched the axis and
+    shrank the drops and recoveries; the y axes now fit the reads and the levels). `backbones` is [(block key,
+    zero-shot reads {map: {psnr, lpips}}, headline reads {map: {psnr, lpips}})], `levels` {block key: (psnr,
+    lpips)}. The paper calls the arenas "unseen maps" in this figure; the tick labels stay the map numbers."""
     pos = {a: i for i, a in enumerate(arenas)}
     j = 0 if key == "psnr" else 1
     for k, (bkey, zero, after) in enumerate(backbones):
@@ -1183,10 +1185,6 @@ def per_arena_backbone_panel(ax, arenas, backbones, key, levels, marker_size, of
             if a not in zero:
                 continue
             x = pos[a] + dx
-            upper = zero[a].get(f"ceiling_{key}")
-            if upper is not None:
-                ax.plot([x - 0.45 * offset, x + 0.45 * offset], [upper, upper], color=ent.colour, lw=CEILING_LW,
-                        zorder=2.6, solid_capstyle="butt")
             z, d = zero[a][key], after.get(a, {}).get(key)
             if d is not None:
                 ax.plot([x, x], [z, d], color=ent.colour, lw=0.7, solid_capstyle="butt", zorder=2.7)
@@ -1197,13 +1195,13 @@ def per_arena_backbone_panel(ax, arenas, backbones, key, levels, marker_size, of
     ax.set_xticks([pos[a] for a in arenas], [str(a) for a in arenas])
     ax.tick_params(axis="x", length=0, labelsize=fs.MIN_PT, pad=1.0)
     ax.set_xlim(-0.6, len(arenas) - 0.4)
-    ax.set_xlabel("unseen arena")
+    ax.set_xlabel("unseen map")
 
 
 def row_v2_keys(fig, backbones, headline=HEADLINE_STEP):
     """The per-backbone row's two keys: above, each backbone's colour and marker, then what open and filled mean;
-    below, the reference marks. The panels draw the marks and references in each backbone's colour; the key shows
-    them in the first backbone's (as `backbone_key` does), and its labels say so."""
+    below, the training-map level. The panels draw the marks and the level in each backbone's colour; the key
+    shows them in the first backbone's (as `backbone_key` does), and its label says so."""
     handles, labels = [], []
     for bkey, *_ in backbones:
         ent, marker, _ = backbone_style(bkey)
@@ -1216,16 +1214,15 @@ def row_v2_keys(fig, backbones, headline=HEADLINE_STEP):
     labels += ["zero-shot", f"after {fs.step_label(headline)} updates"]
     fig.legend(handles, labels, loc="outside upper center", ncol=len(labels), handlelength=1.2, columnspacing=1.2,
                handletextpad=0.4, borderaxespad=0.1)
-    refs = [Line2D([], [], color=grey, lw=CEILING_LW), Line2D([], [], color=grey, lw=fs.MIN_LW, ls=fs.TRAINING_DASH)]
-    fig.legend(refs, [f"{UPPER} (each backbone's colour)", f"{IN_DISTRIBUTION}, per backbone"],
-               loc="outside lower center", ncol=2, handlelength=1.4, columnspacing=1.4, handletextpad=0.4,
-               borderaxespad=0.1)
+    fig.legend([Line2D([], [], color=grey, lw=fs.MIN_LW, ls=fs.TRAINING_DASH)],
+               [f"{IN_DISTRIBUTION}, per backbone in its colour"], loc="outside lower center", ncol=1,
+               handlelength=1.4, handletextpad=0.4, borderaxespad=0.1)
 
 
 def fig_row_v2(arenas, backbones, curves, levels, out_dir, headline=HEADLINE_STEP, tall=False):
-    """Figure 3 rebuilt per backbone (Rohan, Sep 28 night): (a) raw scene PSNR and (b) LPIPS per unseen arena,
+    """Figure 3 rebuilt per backbone (Rohan, Sep 28 night): (a) raw scene PSNR and (b) LPIPS per unseen map,
     zero-shot (open) to the `headline` read (filled), for every backbone in its colour at its own offset inside the
-    arena's slot, with each backbone's reconstruction upper bound (ticks) and training-map level (dashed); (c, d)
+    map's slot, with each backbone's training-map level (dashed; no upper bound ticks); (c, d)
     the shared panel's median curves against adapter updates (`curves` and `levels` as `fig_backbones` takes them).
     One row of four at the slot height, or with `tall` two rows of two (a, b above c, d) with the per-arena panels
     at twice the width and full-size marks."""
@@ -1701,8 +1698,7 @@ def main(argv=None):
         "row_v2": {"stems": v2_stems, "backbones": [b[0] for b in v2_backbones],
                    "headline": {b[0]: {str(m): (r["psnr"], r["lpips"]) for m, r in sorted(b[2].items())}
                                 for b in v2_backbones},
-                   "upper_bound": {b[0]: {str(m): (b[1][m]["ceiling_psnr"], b[1][m]["ceiling_lpips"])
-                                          for m in arenas if m in b[1]} for b in v2_backbones}},
+                   "levels": {b[0]: levels.get(b[0]) for b in v2_backbones}},
         "per_arena_table": per_arena_rows,
         "named_curves": list(named),
         "g8k_4k_minus_base_4k": {"psnr": diff("psnr"), "lpips": diff("lpips")},

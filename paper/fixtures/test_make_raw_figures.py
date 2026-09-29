@@ -856,10 +856,12 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert v2["headline"]["unet_lora"]["6"] == [pytest.approx(19.0), pytest.approx(0.22)]      # adapt4000 row
     assert v2["headline"]["pixart_lora"]["6"] == [pytest.approx(20.2), pytest.approx(0.26)]    # its LoRA's 4k read
     assert v2["headline"]["sd35_lora"] == {"6": [pytest.approx(19.5), pytest.approx(0.25)]}    # arena 6 only
-    assert v2["upper_bound"]["unet_lora"]["9"] == [pytest.approx(27.0), pytest.approx(0.07)]
+    assert v2["levels"]["pixart_lora"] == [pytest.approx(22.65), pytest.approx(0.15)]         # its training maps
     for stem in v2["stems"]:
         assert {"U-Net", "PixArt-α", "SD 3.5", "zero-shot", "after 4k updates"} <= set(legends[stem]), stem
-        assert any(t.startswith("reconstruction upper bound") for t in legends[stem])
+        # no upper bound ticks and no "arena" anywhere in the keys (the figure says "unseen map")
+        assert not any("upper bound" in t or "arena" in t for t in legends[stem]), legends[stem]
+        assert any(t.startswith("training maps (in distribution)") for t in legends[stem])
     body = s["body_candidates"]
     assert body["arenas"] == [6] and body["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]   # the LoRAs only
     assert body["stems"] == ["raw_row_backbones", "raw_backbones_body"]
