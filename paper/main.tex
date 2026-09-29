@@ -116,7 +116,6 @@ For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\cit
 \textbf{Adaptation.} For each unseen map we adapt each trained backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}, which is 0.49, 4.1 and 1.8 percent of the parameters of the U-Net, PixArt-$\alpha$ and SD~3.5.
 We train on 8 episodes of the map and score on its 8 held-out episodes at update counts from 0 to 8k.
 We report 4k updates throughout, 2 percent of pretraining, since it gives on average 96 percent of the gain at 8k.
-A map's budget is the first update count at which it recovers half of its zero-shot LPIPS rise over the training maps; a map that never does is censored~\citep{taylor2009transfer}.
 As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (\appref{app:perarena-adapt}).
 
 \begin{table}[t]
