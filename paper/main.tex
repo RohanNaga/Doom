@@ -113,10 +113,11 @@ For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\cit
 
 \textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the decoder never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share, and from 30.0 to 31.8~dB for the SD~3.5 decoder (\appref{app:protocol}).
 
-\textbf{Adaptation.} To measure how much adaptation a map needs, we keep the trained model frozen and train a standard adapter on a few episodes of that map, then score the adapted model on held-out episodes at each update budget.
-For each unseen map we adapt each backbone's 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent of the U-Net; 25.9M, 4.1 percent, of PixArt-$\alpha$; 40.6M, 1.8 percent, of SD~3.5)~\citep{xie2023difffit}.
-We train on 8 adaptation episodes (for the U-Net about 1 A4000 GPU-hour per map for 4k updates) and score the non-EMA weights at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates (PixArt-$\alpha$ to 4k; SD~3.5 at 0, 250, 500, 1k, 2k and 4k), with the control checks (forgetting, the scene PSNR on the training maps, and the directional check) at 0 and 8k. 4k updates is the elbow of the curve, and we report it everywhere: across the 13 unseen maps it captures most of the benefit (on average 96 percent of each map's 8k gain; Figure~\ref{fig:adapt}) at the smallest budget; 8k serves as the check. As a baseline we fine-tune all 860.5M parameters of the U-Net at $2\times10^{-5}$ on maps 6, 7, 8 and 16 with the same eight episodes and score it at 4k.
-A map's budget is the first grid point at which it recovers at least half of its zero-shot LPIPS rise over the training maps; maps that do not by 8k are right-censored~\citep{taylor2009transfer}.
+\textbf{Adaptation.} For each unseen map we adapt each trained backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}, which is 0.49, 4.1 and 1.8 percent of the parameters of the U-Net, PixArt-$\alpha$ and SD~3.5.
+We train on 8 episodes of the map and score on its 8 held-out episodes at update counts from 0 to 8k.
+We report 4k updates throughout, 2 percent of pretraining, since it gives on average 96 percent of the gain at 8k.
+A map's budget is the first update count at which it recovers half of its zero-shot LPIPS rise over the training maps; a map that never does is censored~\citep{taylor2009transfer}.
+As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (\appref{app:perarena-adapt}).
 
 \begin{table}[t]
 \centering\footnotesize\setlength{\tabcolsep}{3.2pt}
