@@ -249,8 +249,11 @@ def _figure(width, height):
 
 
 def _place(fig, width, height, x, y, w, h, img):
+    """One frame as an image axes at (x, y) inches from the top left, w x h inches, embedded at its own pixels."""
     ax = fig.add_axes([x / width, 1 - (y + h) / height, w / width, h / height])
-    ax.imshow(img, interpolation="lanczos", aspect="auto")
+    # any smoothing interpolation makes the PDF backend resample to the figure's 100 dpi (a 320 px frame printed
+    # 0.65 in wide went in as 65 px); "none" embeds the frame's own pixels and leaves the scaling to the viewer
+    ax.imshow(img, interpolation="none", aspect="auto")
     ax.set_axis_off()
     return ax
 

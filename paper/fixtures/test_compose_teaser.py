@@ -132,3 +132,19 @@ def test_layout_b_without_the_training_map_column_needs_no_training_window(tmp_p
     assert rec["home"] is None and all("home_tic" not in r for r in rec["rows"])
     w, h = mediabox(str(tmp_path / "out" / "fig_teaser_actions.pdf"))
     assert (w, h) == (pytest.approx(5.5, abs=0.01), pytest.approx(1.5, abs=0.01))
+
+
+def embedded_image_sizes(path):
+    """(width, height) in pixels of every image XObject a PDF embeds."""
+    raw = open(path, "rb").read()
+    return [(int(w), int(h)) for w, h in re.findall(rb"/Subtype\s*/Image.*?/Width\s+(\d+).*?/Height\s+(\d+)", raw,
+                                                        re.S)]
+
+
+def test_frames_are_embedded_at_their_own_resolution(tmp_path):
+    # matplotlib resamples a smoothed imshow to the figure's 100 dpi in a PDF, which shrank every 320 x 208 scene
+    # crop to about 65 x 43 pixels and blurred the teaser's textures; the frames must go in at native size
+    root = export(tmp_path)
+    ct.layout_b(root, str(tmp_path / "out"), pick=["attack", "move right"], slot_height=1.5)
+    sizes = embedded_image_sizes(str(tmp_path / "out" / "fig_teaser_actions.pdf"))
+    assert sizes and set(sizes) == {(320, 208)}
