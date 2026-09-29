@@ -1,23 +1,4 @@
 
-\section{Study overview and the cost of adaptation}
-\label{app:overview}
-Figure~\ref{fig:method} draws the pipeline the body describes; Table~\ref{tab:cost} gives the cost of adaptation by group of unseen maps and for the other backbones and the full fine-tune.
-\label{app:cost}
-
-\begin{figure}[h]
-\centering
-\figslot{figures/fig1_method.pdf}{\linewidth}{1.8in}{Figure 2: method overview}
-\caption{What we built: (a) the benchmark, (b) three backbones under one recipe, (c) adaptation, (d) evaluation against the raw ground-truth frame.}
-\label{fig:method}
-\end{figure}
-
-\begin{table}[h]
-\centering\footnotesize
-\caption{What closing the gap takes. The U-Net's adapter by group of unseen maps (terciles of the zero-shot LPIPS rise; hard: largest) and over all 13; its full fine-tune on maps 6, 7, 8 and 16 (the adapter on the same maps: 22.88~dB / 0.209, 71 percent); and the same procedure on PixArt-$\alpha$ and SD~3.5 over all 13. Medians per row; non-EMA adapter weights, scene rows against the raw frame, fine-tuned decoders. Recovered: the share of the LPIPS rise undone and of the lost PSNR regained, per map then the median. --: not scored (grids stop at 4k). Budget: the first grid point recovering half of the LPIPS rise (${>}$4k: censored; the full fine-tune is scored at 4k only; nine SD~3.5 maps cross at 250, the first point of its grid; two values where the two middle maps differ).}
-\label{tab:cost}
-{\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/tuned/adapt_groups.tex}}
-\end{table}
-
 \section{Protocol details}
 \label{app:protocol}
 
