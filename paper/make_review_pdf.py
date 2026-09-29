@@ -56,7 +56,8 @@ STATUS = [
     ("We train on 8 episodes of the map", DONE),
     ("We report 4k updates throughout", DONE),
     ("As a baseline, we fine-tune all of the U-Net", DONE),
-    ("\\textbf{In-distribution vs.", DONE),                          # Table 1 caption, his title
+    ("\\textbf{In-distribution vs.", DONE),
+    ("\\textbf{Zero-shot vs.\\ adapted results per unseen map.}", DONE),   # Figure 3 caption, his title                          # Table 1 caption, his title
     ("Architecture does not change what survives the shift", CONFIRM),
 ]
 SPLIT_BEFORE = ["To test control, we swap turn-left", "This raises the scene reconstruction"]   # a status change inside one source line
