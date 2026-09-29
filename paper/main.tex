@@ -67,8 +67,8 @@ Pretraining one model on every map a deployment might meet is never complete, an
 In short, a world model moved to a new map keeps playing the game but draws the wrong world, and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item We introduce DoomShift, a benchmark that isolates a scene shift: 17 Doom maps share the same physics and game engine and differ only in their surroundings, with four maps for training and 13 held out. We release the recordings, models, decoders and adapters.
-\item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error roughly doubles.
-\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72 to 77 percent of the lost perceptual quality with 2 percent of the original training updates.
+\item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8 to 3.3~dB.
+\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72 to 77 percent of the lost perceptual quality and roughly half of the lost PSNR, using only 2 percent of the original training updates.
 \end{itemize}
 
 \begin{figure}[t]

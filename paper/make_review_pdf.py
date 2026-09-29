@@ -33,9 +33,9 @@ STATUS = [
     ("Yet unchanged dynamics alone", DONE),                          # his sentence, restored on his word
     ("Pretraining one model on every map", DONE),
     ("In short, a world model moved to a new map", DONE),
-    ("We introduce DoomShift, a benchmark", CONFIRM),               # bullets shortened to one sentence each for him
-    ("We show that a scene shift breaks appearance", CONFIRM),
-    ("We measure how much adaptation repairs", CONFIRM),
+    ("We introduce DoomShift, a benchmark", DONE),               # short bullets, approved with his two additions
+    ("We show that a scene shift breaks appearance", DONE),
+    ("We measure how much adaptation repairs", DONE),
     ("\\textbf{Zero-shot vs.", DONE),                                # his title and his chosen ending
     # related work: rewritten on his direction
     ("\\textbf{Game world models.}", CONFIRM),
