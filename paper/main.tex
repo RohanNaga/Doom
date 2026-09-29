@@ -109,13 +109,9 @@ We turn all three into next-tic world models under one shared recipe (Figure~\re
 
 \textbf{Metrics.} We score the part of each frame that shows the world (rows 0 to 207) and leave out the HUD rows below it, which do not change with the map.
 
-For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\citep{zhang2018lpips}. For turning, we compute the \emph{directional} score: we predict each turning window twice, once with the recorded control and once with left and right swapped in the newest control, and report the fraction of windows whose predicted view turns the other way. A model that ignores the control scores 0, and the ground-truth frames turn the way their control says in 0.89 of the windows, which is the reference for the score (\appref{app:protocol}).
+For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\citep{zhang2018lpips}. To test control, we swap turn-left and turn-right in the last action and check whether the predicted view turns the other way. The \emph{directional} score is the fraction of turning windows in which it does: 0 for a model that ignores actions, and 0.89 when measured on ground-truth frames (\appref{app:protocol}).
 
-\textbf{Decoder fine-tuning.} Every backbone is trained on latents from its frozen encoder, so the latent space is the contract between encoder, world model and decoder: changing the encoder would move every training target and invalidate the trained backbones, the adapters and the decoder's reconstruction scores.
-The decoder only renders: it sits after the model, and its own error is what its reconstruction score measures, so fine-tuning it changes what we can see, not what the model knows.
-We fine-tune the SD~1 decoder $D$ on training-map frames paired with their frozen-encoder latents, using MSE plus 0.1~LPIPS for 3,486 updates and gating it on held-out training-map frames (\appref{app:protocol}); it never sees an unseen map.
-On 200 validation frames it raises the scene reconstruction from 26.9 to 28.4~dB and lowers its LPIPS from 0.092 to 0.060; the LPIPS term is there because MSE alone more than triples scene LPIPS (0.092 to 0.339).
-We use it for every pixel score of the U-Net and PixArt-$\alpha$ unless stated otherwise; SD~3.5 uses its own decoder, fine-tuned the same way.
+\textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the decoder never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share, and from 30.0 to 31.8~dB for the SD~3.5 decoder (\appref{app:protocol}).
 
 \textbf{Adaptation.} To measure how much adaptation a map needs, we keep the trained model frozen and train a standard adapter on a few episodes of that map, then score the adapted model on held-out episodes at each update budget.
 For each unseen map we adapt each backbone's 200k EMA weights with rank-16 LoRA~\citep{hu2022lora} on every attention projection of the frozen backbone~\citep{gao2024vista} and train the control MLP, input projection and noise-bucket embedding in full (4.2M parameters, 0.49 percent of the U-Net; 25.9M, 4.1 percent, of PixArt-$\alpha$; 40.6M, 1.8 percent, of SD~3.5)~\citep{xie2023difffit}.
@@ -124,7 +120,7 @@ A map's budget is the first grid point at which it recovers at least half of its
 
 \begin{table}[t]
 \centering\footnotesize\setlength{\tabcolsep}{3.2pt}
-\caption{Scene PSNR and LPIPS one tic ahead against the raw frame and the directional score: training maps (pooled over 512 validation windows) and unseen maps (medians over the 13 unseen maps), each backbone through its own fine-tuned decoder; directional pooled over the turning windows (ground-truth frames 0.885, 0.892).}
+\caption{\textbf{In-distribution vs.\ out-of-distribution zero-shot results.} Scene PSNR, LPIPS and directional score one tic ahead, on the training maps and on the 13 unseen maps (medians).}
 \label{tab:unseen}
 \input{tables/tuned/results_full.tex}
 \end{table}

@@ -49,10 +49,13 @@ STATUS = [
     ("We train each backbone for 200k updates", DONE),
     ("\\textbf{Metrics.}", DONE),                                    # read Sep 29
     ("For accuracy, we compute PSNR", DONE),                         # persistence sentence cut on his word
-    ("For turning, we compute the \\emph{directional} score", CONFIRM),
+    ("To test control, we swap turn-left", DONE),                     # directional score, his option B
+    ("\\textbf{Decoder fine-tuning.}", DONE),                        # his option B with the SD 3.5 numbers
+    ("This raises the scene reconstruction", DONE),
+    ("\\textbf{In-distribution vs.", DONE),                          # Table 1 caption, his title
     ("Architecture does not change what survives the shift", CONFIRM),
 ]
-SPLIT_BEFORE = ["For turning, we compute the \\emph{directional} score"]   # a status change inside one source line
+SPLIT_BEFORE = ["To test control, we swap turn-left", "This raises the scene reconstruction"]   # a status change inside one source line
 COLORS = {DONE: "reviewdone", CONFIRM: "reviewconfirm"}
 PREAMBLE = r"""
 \usepackage{xcolor}
