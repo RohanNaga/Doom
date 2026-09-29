@@ -962,7 +962,7 @@ def _text_entry():
 
 def row_legends(fig, key_colours, headline=HEADLINE_STEP):
     """The row's two keys: above it, what each mark and line means; below it, the colour of the map groups by
-    the zero-shot LPIPS rise over the training maps (`key_colours`: [(group, colour)])."""
+    the zero-shot PSNR deficit against the training maps (`key_colours`: [(group, colour)])."""
     ink = fs.BACKBONES["unet"].colour
     marks = [Line2D([], [], ls="none", marker="o", ms=fs.MARKER_SIZE, mfc="white", mec=ink, mew=0.8),
              Line2D([], [], ls="none", marker="o", ms=fs.MARKER_SIZE, mfc=ink, mec=ink, mew=0.6),
@@ -971,7 +971,7 @@ def row_legends(fig, key_colours, headline=HEADLINE_STEP):
                loc="outside upper center",
                ncol=3, handlelength=1.4, columnspacing=1.4, handletextpad=0.4, borderaxespad=0.1)
     swatches = [_text_entry()] + [Patch(facecolor=c, edgecolor="none") for _, c in key_colours]
-    fig.legend(swatches, ["zero-shot LPIPS rise over the training maps:"] + [g for g, _ in key_colours],
+    fig.legend(swatches, ["zero-shot PSNR deficit against the training maps:"] + [g for g, _ in key_colours],
                loc="outside lower center", ncol=len(swatches), handlelength=1.0, handleheight=0.8,
                columnspacing=1.0, handletextpad=0.35, borderaxespad=0.1)
 
