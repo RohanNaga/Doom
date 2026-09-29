@@ -33,7 +33,7 @@ STATUS = [
     ("Yet unchanged dynamics alone", DONE),                          # his sentence, restored on his word
     ("Pretraining one model on every map", DONE),
     ("In short, a world model moved to a new map", DONE),
-    ("\\textbf{Zero-shot vs.", CONFIRM),                             # his title, the high-level body he asked for
+    ("\\textbf{Zero-shot vs.", DONE),                                # his title and his chosen ending
     # related work: rewritten on his direction
     ("\\textbf{Game world models.}", CONFIRM),
     ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),
