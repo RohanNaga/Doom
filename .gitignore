@@ -222,3 +222,6 @@ results
 # local mirror of Spiderman result files (paper/sync_results.sh)
 paper/results_mirror/
 paper/figures/*.png
+
+# highlighted review copy of the paper (paper/make_review_pdf.py)
+paper/review/

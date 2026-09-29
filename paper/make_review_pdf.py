@@ -1,0 +1,124 @@
+"""Build paper/review/main_review.pdf: the working paper with each passage highlighted by review status.
+
+    python3 paper/make_review_pdf.py
+
+Green: Rohan read it and his edits are in. Yellow: he gave a direction and the text was written or changed
+for him, so it needs one confirming read. No highlight: not read yet. The status of a passage is looked up
+by the start of its source line in `STATUS` (default: not read); update that table as the review moves on.
+The highlighted copy is for reading only; `paper/main.tex` is never modified.
+"""
+import os
+import re
+import shutil
+import subprocess
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "review")
+
+DONE, CONFIRM = "done", "confirm"
+# start of a source line (after any \item or \caption{) -> status
+STATUS = [
+    # abstract: read on Sep 29, his three edits applied
+    ("World models have become capable simulators", DONE),
+    ("A small domain shift, such as a new map", DONE),
+    ("With DoomShift, a controlled version", DONE),
+    ("We train three diffusion backbones, initialized", DONE),
+    ("All three keep their response to controls", DONE),
+    ("Very little adaptation repairs it", DONE),
+    # introduction
+    ("Game world models now render playable worlds", CONFIRM),      # citations regrouped for him
+    ("Each of these models is evaluated only", DONE),
+    ("A learned simulator is useful only", DONE),
+    ("Game worlds let us pose this question", DONE),
+    ("Yet unchanged dynamics alone", DONE),                          # his sentence, restored on his word
+    ("Pretraining one model on every map", DONE),
+    ("In short, a world model moved to a new map", DONE),
+    ("On an unseen map (right, map 7)", CONFIRM),                    # caption shortened for him
+    # related work: rewritten on his direction
+    ("\\textbf{Game world models.}", CONFIRM),
+    ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),
+    # method and results: single passages written for him
+    ("For turning, we compute the \\emph{directional} score", CONFIRM),
+    ("Architecture does not change what survives the shift", CONFIRM),
+]
+SPLIT_BEFORE = ["For turning, we compute the \\emph{directional} score"]   # a status change inside one source line
+COLORS = {DONE: "reviewdone", CONFIRM: "reviewconfirm"}
+PREAMBLE = r"""
+\usepackage{xcolor}
+\usepackage{soul}
+\usepackage{eso-pic}
+\definecolor{reviewdone}{rgb}{0.78,0.93,0.78}
+\definecolor{reviewconfirm}{rgb}{1.0,0.90,0.55}
+\soulregister\citep7 \soulregister\citet7 \soulregister\ref7 \soulregister\appref7
+\DeclareRobustCommand{\hldone}[1]{{\sethlcolor{reviewdone}\hl{#1}}}
+\DeclareRobustCommand{\hlconfirm}[1]{{\sethlcolor{reviewconfirm}\hl{#1}}}
+\AddToShipoutPictureBG{\AtPageUpperLeft{\raisebox{-0.55in}{\hspace{1in}\footnotesize\sffamily
+  \colorbox{reviewdone}{\strut read, your edits are in}\quad
+  \colorbox{reviewconfirm}{\strut changed for you, confirm}\quad
+  \fbox{\strut not read yet}}}}
+"""
+
+
+def status_of(text):
+    for start, status in STATUS:
+        if text.startswith(start):
+            return status
+    return None
+
+
+def wrap(text, status):
+    return text if status is None else f"\\hl{status}{{{text}}}"
+
+
+def mark(tex):
+    """The review copy of the paper's source: every body line wrapped by its status."""
+    for s in SPLIT_BEFORE:
+        tex = tex.replace(" " + s, "\n" + s)
+    out, in_body = [], False
+    for line in tex.split("\n"):
+        if line.startswith("\\begin{abstract}"):
+            in_body = True
+        if line.startswith("\\label{body-end}"):
+            in_body = False
+        m = re.match(r"(\\item |\\caption\{)?(.*)$", line)
+        head, text = m.group(1) or "", m.group(2)
+        if not in_body or not text or (not head and text.startswith(("\\", "%", "{"))
+                                       and not text.startswith("\\textbf{")):
+            out.append(line)
+            continue
+        status = status_of(text)
+        if head == "\\caption{":
+            out.append(head + wrap(text[:-1], status) + "}")
+        elif text.startswith("\\textbf{") and status:        # keep the run-in heading outside the highlight
+            h = re.match(r"(\\textbf\{[^}]*\}) ?(.*)$", text)
+            out.append(head + h.group(1) + " " + wrap(h.group(2), status))
+        else:
+            # several sentences can share a source line, each with its own status: split on the known starts
+            out.append(head + wrap(text, status))
+    return "\n".join(out).replace("\\begin{document}", PREAMBLE + "\\begin{document}", 1)
+
+
+def main():
+    os.makedirs(OUT, exist_ok=True)
+    for name in os.listdir(HERE):
+        src = os.path.join(HERE, name)
+        if name in ("review", "versions") or name.startswith("main."):
+            continue
+        dst = os.path.join(OUT, name)
+        if not os.path.lexists(dst):
+            os.symlink(src, dst)
+    with open(os.path.join(HERE, "main.tex")) as f:
+        tex = mark(f.read())
+    with open(os.path.join(OUT, "main_review.tex"), "w") as f:
+        f.write(tex)
+    subprocess.run(["latexmk", "-pdf", "-interaction=nonstopmode", "main_review.tex"], cwd=OUT,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log = open(os.path.join(OUT, "main_review.log"), errors="replace").read()
+    print(re.search(r"Output written on .*", log).group(0) if "Output written" in log else "BUILD FAILED")
+    print("errors:", len(re.findall(r"^! ", log, flags=re.M)))
+    for e in re.findall(r"^! .*\n.*\n.*", log, flags=re.M)[:5]:
+        print(e)
+
+
+if __name__ == "__main__":
+    main()
