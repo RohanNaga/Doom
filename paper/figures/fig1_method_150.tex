@@ -92,7 +92,7 @@
 % C*L x 32 x 40); backbones.py:153-181 (control MLP + learned positions), :236-238 (C(L+1) input channels: the 32
 % context latents and the noisy next latent stacked on channels); eval_tf.py:502-505 and score_adapt.py:604
 % (10 DDIM steps); parameter counts are in paper/appendix.tex tab:recipe
-\node[anchor=north west, inner sep=0pt] at (1.52,\H) {\panel{b}{One recipe, three pretrained backbones}};
+\node[anchor=north west, inner sep=0pt] at (1.52,\H) {\panel{b}{Models and training}};
 \node[anchor=south west, lab, inner sep=0pt] at (1.52,1.478) {context and the noisy next latent stacked on channels};
 \node[box, text width=0.68in, minimum height=0.15in] (noise) at (1.88,1.357) {noise $q{<}0.7$};
 \node[box, text width=0.68in, minimum height=0.15in] (bucket) at (1.88,1.137) {10 buckets $b$};
@@ -122,7 +122,7 @@
 \node[anchor=west, lab] at (2.87,0.72) {200k EMA weights};
 \node[box, anchor=north, text width=1.20in] (adapt) at (2.84,0.62)
   {world model: map adaptation\\(rank-16 LoRA, 8 episodes)};
-\node[box, anchor=north, text width=0.84in] (tune) at (4.00,0.62) {renderer:\\decoder fine-tune\\(MSE + 0.1 LPIPS)};
+\node[box, anchor=north, text width=0.84in] (tune) at (4.00,0.62) {decoder fine-tuning\\(MSE + 0.1 LPIPS)};
 \draw[flow] (sdec.east) -- (4.00,0.13) -- (tune.south);
 
 % ============================================================================ (d) evaluation
@@ -142,6 +142,6 @@
 }
 \draw[flow] (ddim.east) -- (4.75,1.137) -- (in0.north);
 \node[anchor=north, align=center, inner sep=0pt] at (4.75,0.62) {PSNR, LPIPS};
-\node[anchor=north west, inner sep=0pt] at (4.52,0.29) {directional check};
+\node[anchor=north west, inner sep=0pt] at (4.52,0.29) {directional score};
 \end{tikzpicture}
 \end{document}
