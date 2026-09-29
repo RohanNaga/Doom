@@ -1,0 +1,295 @@
+{
+ "variant": "B",
+ "action": "forward",
+ "unseen": "unseen_arena07_ep210_s2888_t217",
+ "tics": [
+  1,
+  2,
+  4,
+  8,
+  16
+ ],
+ "scene_psnr": {
+  "zero-shot": {
+   "+1": 21.54,
+   "+2": 18.234,
+   "+4": 15.623,
+   "+8": 14.162,
+   "+16": 13.712
+  },
+  "adapted": {
+   "+1": 25.287,
+   "+2": 23.82,
+   "+4": 21.075,
+   "+8": 22.504,
+   "+16": 22.422
+  }
+ },
+ "held_all_16": [
+  "forward",
+  "speed"
+ ],
+ "frame_in": [
+  0.719,
+  0.467
+ ],
+ "size_in": [
+  5.5,
+  1.8
+ ],
+ "frames": [
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "context",
+   "tic": 0,
+   "file": "unseen_arena07_ep210_s2888_t217/truth_raw/tic_00_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    0.12,
+    0.787
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "zero-shot",
+   "tic": 1,
+   "file": "unseen_arena07_ep210_s2888_t217/unet_tuned/tic_01_scene.png",
+   "scene_psnr": 21.54,
+   "at_in": [
+    1.591,
+    0.271
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "zero-shot",
+   "tic": 2,
+   "file": "unseen_arena07_ep210_s2888_t217/unet_tuned/tic_02_scene.png",
+   "scene_psnr": 18.234,
+   "at_in": [
+    2.358,
+    0.271
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "zero-shot",
+   "tic": 4,
+   "file": "unseen_arena07_ep210_s2888_t217/unet_tuned/tic_04_scene.png",
+   "scene_psnr": 15.623,
+   "at_in": [
+    3.126,
+    0.271
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "zero-shot",
+   "tic": 8,
+   "file": "unseen_arena07_ep210_s2888_t217/unet_tuned/tic_08_scene.png",
+   "scene_psnr": 14.162,
+   "at_in": [
+    3.893,
+    0.271
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "zero-shot",
+   "tic": 16,
+   "file": "unseen_arena07_ep210_s2888_t217/unet_tuned/tic_16_scene.png",
+   "scene_psnr": 13.712,
+   "at_in": [
+    4.661,
+    0.271
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "adapted",
+   "tic": 1,
+   "file": "unseen_arena07_ep210_s2888_t217/adapter_tuned/tic_01_scene.png",
+   "scene_psnr": 25.287,
+   "at_in": [
+    1.591,
+    0.787
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "adapted",
+   "tic": 2,
+   "file": "unseen_arena07_ep210_s2888_t217/adapter_tuned/tic_02_scene.png",
+   "scene_psnr": 23.82,
+   "at_in": [
+    2.358,
+    0.787
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "adapted",
+   "tic": 4,
+   "file": "unseen_arena07_ep210_s2888_t217/adapter_tuned/tic_04_scene.png",
+   "scene_psnr": 21.075,
+   "at_in": [
+    3.126,
+    0.787
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "adapted",
+   "tic": 8,
+   "file": "unseen_arena07_ep210_s2888_t217/adapter_tuned/tic_08_scene.png",
+   "scene_psnr": 22.504,
+   "at_in": [
+    3.893,
+    0.787
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "adapted",
+   "tic": 16,
+   "file": "unseen_arena07_ep210_s2888_t217/adapter_tuned/tic_16_scene.png",
+   "scene_psnr": 22.422,
+   "at_in": [
+    4.661,
+    0.787
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "ground truth",
+   "tic": 1,
+   "file": "unseen_arena07_ep210_s2888_t217/truth_raw/tic_01_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    1.591,
+    1.303
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "ground truth",
+   "tic": 2,
+   "file": "unseen_arena07_ep210_s2888_t217/truth_raw/tic_02_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    2.358,
+    1.303
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "ground truth",
+   "tic": 4,
+   "file": "unseen_arena07_ep210_s2888_t217/truth_raw/tic_04_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    3.126,
+    1.303
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "ground truth",
+   "tic": 8,
+   "file": "unseen_arena07_ep210_s2888_t217/truth_raw/tic_08_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    3.893,
+    1.303
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "ground truth",
+   "tic": 16,
+   "file": "unseen_arena07_ep210_s2888_t217/truth_raw/tic_16_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    4.661,
+    1.303
+   ],
+   "size_in": [
+    0.719,
+    0.467
+   ]
+  }
+ ],
+ "command": "python3 tools/teaser_v2.py --restart-root /Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser_restart --compare 'today, as in the paper (fig_teaser_B.pdf)=paper/figures/fig_teaser_B.pdf' 'today, rebuilt with frames at native resolution=paper/figures/candidates/fig1_today_sharp.pdf'",
+ "git_head": "8749b26c",
+ "encoding": {
+  "zero-shot": {
+   "colour": "#E69F00",
+   "outline": "dashed"
+  },
+  "adapted": {
+   "colour": "#00466E",
+   "outline": "solid"
+  },
+  "tags": "scene PSNR (dB) against the raw ground-truth frame, scene rows 0 to 207"
+ }
+}

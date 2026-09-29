@@ -1,0 +1,121 @@
+{
+ "variant": "C",
+ "action": "forward",
+ "horizon": 16,
+ "unseen": "unseen_arena07_ep210_s2888_t217",
+ "training": "train_map05_ep6059_s4104_t239",
+ "scene_psnr": {
+  "prediction": 23.662,
+  "zero-shot": 13.712,
+  "adapted": 22.422
+ },
+ "held_all_16": {
+  "unseen": [
+   "forward",
+   "speed"
+  ],
+  "training": null
+ },
+ "frame_in": [
+  1.178,
+  0.766
+ ],
+ "reference_frame_in": [
+  0.552,
+  0.359
+ ],
+ "size_in": [
+  5.5,
+  1.067
+ ],
+ "frames": [
+  {
+   "moment": "train_map05_ep6059_s4104_t239",
+   "role": "prediction",
+   "tic": 16,
+   "file": "train_map05_ep6059_s4104_t239/unet_tuned/tic_16_scene.png",
+   "scene_psnr": 23.662,
+   "at_in": [
+    0.577,
+    0.271
+   ],
+   "size_in": [
+    0.552,
+    0.359
+   ]
+  },
+  {
+   "moment": "train_map05_ep6059_s4104_t239",
+   "role": "ground truth",
+   "tic": 16,
+   "file": "train_map05_ep6059_s4104_t239/truth_raw/tic_16_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    0.577,
+    0.678
+   ],
+   "size_in": [
+    0.552,
+    0.359
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "zero-shot",
+   "tic": 16,
+   "file": "unseen_arena07_ep210_s2888_t217/unet_tuned/tic_16_scene.png",
+   "scene_psnr": 13.712,
+   "at_in": [
+    1.295,
+    0.271
+   ],
+   "size_in": [
+    1.178,
+    0.766
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "adapted",
+   "tic": 16,
+   "file": "unseen_arena07_ep210_s2888_t217/adapter_tuned/tic_16_scene.png",
+   "scene_psnr": 22.422,
+   "at_in": [
+    3.075,
+    0.271
+   ],
+   "size_in": [
+    1.178,
+    0.766
+   ]
+  },
+  {
+   "moment": "unseen_arena07_ep210_s2888_t217",
+   "role": "ground truth",
+   "tic": 16,
+   "file": "unseen_arena07_ep210_s2888_t217/truth_raw/tic_16_scene.png",
+   "scene_psnr": null,
+   "at_in": [
+    4.302,
+    0.271
+   ],
+   "size_in": [
+    1.178,
+    0.766
+   ]
+  }
+ ],
+ "command": "python3 tools/teaser_v2.py --restart-root /Users/rohan/Documents/Github/Doom/.claude/worktrees/vibrant-ritchie-6f6280/results/teaser_restart --compare 'today, as in the paper (fig_teaser_B.pdf)=paper/figures/fig_teaser_B.pdf' 'today, rebuilt with frames at native resolution=paper/figures/candidates/fig1_today_sharp.pdf'",
+ "git_head": "8749b26c",
+ "encoding": {
+  "zero-shot": {
+   "colour": "#E69F00",
+   "outline": "dashed"
+  },
+  "adapted": {
+   "colour": "#00466E",
+   "outline": "solid"
+  },
+  "tags": "scene PSNR (dB) against the raw ground-truth frame, scene rows 0 to 207"
+ }
+}
