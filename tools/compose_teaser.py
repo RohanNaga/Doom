@@ -147,11 +147,11 @@ def frame_path(row_dir, tic):
 
 
 def place_name(window):
-    """'training map 2' or 'unseen arena 7' from a window name."""
+    """'training map 2' or 'unseen map 7' from a window name."""
     m = WINDOW_RE.match(window)
     digits = re.search(r"(\d+)$", m["map"]) if m else None
     number = str(int(digits.group(1))) if digits else ""
-    return (f"unseen arena {number}" if is_unseen(window) else f"training map {number}").strip()
+    return (f"unseen map {number}" if is_unseen(window) else f"training map {number}").strip()
 
 
 def frame(row_dir, tic):

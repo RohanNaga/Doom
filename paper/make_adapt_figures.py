@@ -1080,7 +1080,7 @@ def cost_table(records, summary, decoder, budget, prov, stats=None):
     a median row and, with the across-arena statistics, an IQM row, both with arena-bootstrap intervals."""
     b = budget_label(budget)
     others = sorted({d for r in records for d in r["other_decoders"]})
-    head = ["Arena", "$d$", "$A_0$", f"$A_{{\\mathrm{{{b}}}}}$", "Half-gap line", "Budget", "$S_0$",
+    head = ["Unseen map", "$d$", "$A_0$", f"$A_{{\\mathrm{{{b}}}}}$", "Half-gap line", "Budget", "$S_0$",
             f"$S_{{\\mathrm{{{b}}}}}$", "LPIPS$_0$", f"LPIPS$_{{\\mathrm{{{b}}}}}$"]
     head += [f"$A_{{\\mathrm{{{b}}}}}$, {DECODER_NAMES.get(d, d)}" for d in others]
     body = []
@@ -1116,7 +1116,7 @@ def cost_table(records, summary, decoder, budget, prov, stats=None):
 def perarena_table(records, budget, prov):
     """The appendix table `tab:perarena-adapt`: the columns appendix.tex declares, one row per arena."""
     b = budget_label(budget)
-    head = ["Arena", "$d$", "$A_0$", "Half-gap line", "Half gap", "Training-maps line", f"$A$ at {b}",
+    head = ["Unseen map", "$d$", "$A_0$", "Half-gap line", "Half gap", "Training-maps line", f"$A$ at {b}",
             f"$M$ at {b}",
             "Forgetting", "Directional"]
     body = [[str(r["arena"]), num(r["D"], 3, prov=prov), num(r["A0"], 2, True, prov),
@@ -1156,7 +1156,7 @@ def table3(records, summary, stats, home, home_ci, budget, prov):
     rows = [
         ["Parameters trained; GPU-hours", f"{LORA_PARAMS}; \\tbd{{}}", "4.2M; \\tbd{}", f"{FULL_PARAMS}; \\tbd{{}}"],
         ["$A_\\text{train}$ (dB), training maps (in-distribution)", home_cell, "--", "--"],
-        [f"Arenas past half gap / $A\\geq{FIXED_THRESHOLD:g}$ dB by {b}",
+        [f"Unseen maps past half gap / $A\\geq{FIXED_THRESHOLD:g}$ dB by {b}",
          f"{cnt(stats and stats['half_gap_by_budget'])} / {cnt(stats and stats['fixed_by_budget'])} of {n}", "--",
          "--"],
         [f"Share of the gap closed at {b}",
@@ -1177,8 +1177,8 @@ def table3(records, summary, stats, home, home_ci, budget, prov):
          (f"{num(comp['forgetting_budget'], 2, True, prov)} / {num(comp['directional_budget'], 2, prov=prov)}"
           if comp else "\\tbd{} / \\tbd{}"), "\\tbd{} / \\tbd{}"],
     ]
-    head = ["", f"LoRA, {n} arenas, median [95\\% arena bootstrap]", f"LoRA, arena {COMPARATOR_ARENA}",
-            f"Full, arena {COMPARATOR_ARENA}"]
+    head = ["", f"LoRA, {n} unseen maps, median [95\\% map bootstrap]", f"LoRA, map {COMPARATOR_ARENA}",
+            f"Full, map {COMPARATOR_ARENA}"]
     return tabular("lrrr", head, rows)
 
 
@@ -1419,7 +1419,7 @@ def fig_dots(stats, records, home, out_dir, band=None):
     bx.tick_params(axis="x", length=0)
     bx.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
     bx.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
-    bx.set_xlabel("unseen arena")
+    bx.set_xlabel("unseen map")
     bx.set_ylabel("share of gap\nclosed at " + step_label(stats["budget"]))
     fs.panel_letter(bx, "b")
     return fs.save(fig, out_dir, "fig4_dots")
@@ -1496,7 +1496,7 @@ def fig_arenas(records, runs, home, budget, out_dir, band=None):
             cx = z if r["cost_half_gap"] == 0 else r["cost_half_gap"]
             ax.plot([cx, cx], [r["half_gap_line"] - 0.35, r["half_gap_line"] + 0.35], color=fs.INK, lw=0.8,
                     zorder=4, gid="decor")
-        ax.text(0.97, 0.07, f"arena {r['arena']}", transform=ax.transAxes, ha="right", va="bottom",
+        ax.text(0.97, 0.07, f"map {r['arena']}", transform=ax.transAxes, ha="right", va="bottom",
                 fontsize=fs.ANNOT_PT, gid="decor")
         ax.set_ylim(-0.2, top + 0.4)
         ax.yaxis.set_major_locator(ticker.MultipleLocator(2))
@@ -1570,7 +1570,7 @@ def fig_profiles(stats, home, out_dir, band=None):
     ax.yaxis.set_major_locator(ticker.FixedLocator([0, 0.5, 1]))
     ax.yaxis.set_major_formatter(ticker.FixedFormatter(["0", "0.5", "1"]))
     ax.set_xlabel("threshold $\\tau$ on " + fs.A_LABEL)
-    ax.set_ylabel("arenas at or above $\\tau$\n(fraction)")
+    ax.set_ylabel("unseen maps at or above $\\tau$\n(fraction)")
     return fs.save(fig, out_dir, "figA_adapt_profiles")
 
 
@@ -1710,7 +1710,7 @@ def fig_recipe(recipe, anchors, base, seeds, records_of, home, decoder, out_dir,
             ax.text(0.0, brec["half_gap_line"], " half-gap line", transform=ax.get_yaxis_transform(), ha="left",
                     va="bottom", fontsize=fs.ANNOT_PT, color=fs.CONTEXT_INK)
         fs.training_line(ax, home, where=0.0, band=band)
-        ax.text(0.98, 0.04, f"arena {arena}", transform=ax.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT)
+        ax.text(0.98, 0.04, f"map {arena}", transform=ax.transAxes, ha="right", va="bottom", fontsize=fs.ANNOT_PT)
         ax.set_ylabel(fs.A_LABEL if i == 0 else "")
         ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
         fs.panel_letter(ax, "abcdefgh"[i])
@@ -1821,7 +1821,7 @@ def fig_zero_shot_absolute(absolute, arenas, out_dir, decoder="tuned", stem="fig
         t.set_fontsize(fs.MIN_PT)
         t.set_linespacing(0.9)
     lx.set_xlim(-0.1, xpos[arenas[-1]] + 0.6)
-    lx.set_xlabel("unseen arena")
+    lx.set_xlabel("unseen map")
     fill = decoder != STOCK
     handles = ([Line2D([], [], color=PERSISTENCE_INK, lw=1.3)] if persistence_shown else []) + [
         Line2D([], [], ls="none", marker=fs.BACKBONES[b].marker, ms=fs.MARKER_SIZE, mew=0.6,
@@ -1901,7 +1901,7 @@ def fig_zero_shot_paired(paired, order, out_dir):
         t.set_fontsize(fs.MIN_PT)
         t.set_linespacing(0.9)
     mx.set_xlim(-0.1, xpos[order[-1]] + 0.6 if order else train_w + 0.5)
-    mx.set_xlabel("unseen arena, by the U-Net's zero-shot skill $S_0$")
+    mx.set_xlabel("unseen map, by the U-Net's zero-shot skill $S_0$")
     return fs.save(fig, out_dir, "fig3b_zero_shot_paired")
 
 
@@ -1942,7 +1942,7 @@ def fig_zero_shot(zero_shot, order, key, out_dir, stem, ylabel, zero=False):
     ax.set_xticks(range(len(arenas)), [str(a) for a in arenas])
     ax.tick_params(axis="x", length=0)
     ax.set_xlim(-0.6, len(arenas) + 0.4)
-    ax.set_xlabel("arena, by zero-shot skill $S_0$")
+    ax.set_xlabel("unseen map, by zero-shot skill $S_0$")
     ax.set_ylabel(ylabel)
     ax.yaxis.set_major_locator(ticker.MultipleLocator(1.0 if key == "A" else 0.05))
     return fs.save(fig, out_dir, stem)
@@ -2023,7 +2023,7 @@ def margins_from_adapter_row(records, zero_shot, budget, notes):
                     filled += 1
             if filled:
                 notes.append(f"{key} at {budget}: the adapter rows carry no {column}; read from {row['source']} "
-                             f"({filled} arenas)")
+                             f"({filled} unseen maps)")
             break
 
 

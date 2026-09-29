@@ -259,7 +259,7 @@ def test_a_block_mixing_raw_and_decoded_arenas_reports_the_raw_ones_and_lists_th
         ("psnr_zero_shot", "psnr_4k", "psnr_8k", "ceiling", "lpips_zero_shot", "lpips_4k", "lpips_8k"))}
     tex = mrf.groups_table({g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}, budgets_final=False,
                            blocks=[("SD 3.5 LoRA (2 of 4)", b, "sha256:sd35tuned")])
-    assert "arenas 8, 9 read against the decoded ground truth only" in tex
+    assert "maps 8, 9 read against the decoded ground truth only" in tex
     # with no raw arena the block reports them all, daggered
     only_dec = mrf.block_summary({a: data[a] for a in (8, 9)}, [6, 7, 8, 9], 3.0, "half_excess_gap", 4000)
     assert (only_dec["arenas"], only_dec["quantity"], only_dec["decoded_only"]) == ([8, 9], "dec", [])
@@ -281,7 +281,7 @@ def test_an_arena_still_training_stays_out_of_its_block_until_it_has_the_headlin
         ("psnr_zero_shot", "psnr_4k", "psnr_8k", "ceiling", "lpips_zero_shot", "lpips_4k", "lpips_8k"))}
     tex = mrf.groups_table({g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}, budgets_final=False,
                            blocks=[("PixArt LoRA (2 of 3)", b, "sha256:sd1tuned")])
-    assert "arenas 10 still training (no 4k read yet)" in tex
+    assert "maps 10 still training (no 4k read yet)" in tex
     assert mrf.finished(data[6], 4000) and not mrf.finished(data[10], 4000)
     assert mrf.finished({"grid": [0, 250], "reads": {0: {}, 250: {}}}, 4000)          # a grid that stops before
 
@@ -551,7 +551,7 @@ def test_the_slim_results_table_has_one_row_per_backbone_and_the_comparison_on_f
     caption = mrf.slim_caption(rows, 512)
     assert caption.startswith("\\caption{") and caption.rstrip().endswith("}")
     for phrase in ("after 4k adapter updates", "scene crop (rows 0 to 207)", "512 validation windows",
-                   "medians over the 13 unseen arenas", "four comparator arenas (6, 7, 8, 16)", "(Gap)"):
+                   "medians over the 13 unseen maps", "four comparator maps 6, 7, 8 and 16", "(Gap)"):
         assert phrase in caption, phrase
 
 
@@ -768,15 +768,15 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert "U-Net LoRA (1 of 4)" in lines
     # the full fine-tune's arena 6 has its 4k read and the U-Net LoRA's step 0 (the same checkpoint): 1 of 4
     ft = lines["U-Net full fine-tune (1 of 4)"]
-    assert " & 18.00 & 23.00 & " in ft and "zero-shot of arenas 6 from the U-Net LoRA's step 0" in tex
+    assert " & 18.00 & 23.00 & " in ft and "zero-shot of maps 6 from the U-Net LoRA's step 0" in tex
     assert ft.endswith(" & ${\\le}$4k \\\\")                          # scored at 0 and 4k only
     px = lines["PixArt-$\\alpha$ LoRA (all 2)"]
     assert " & 20.70 & " in px and px.split(" & ")[3] == "--"                         # 4k median; its grid stops at 4k
     sd = lines["SD 3.5 LoRA (1 of 2)"]
     assert " & 19.50 & " in sd and "\\tbd{}" in sd                                    # budget waits on its grid
     # the arena lists live in the comment lines under the table
-    assert "% SD 3.5 LoRA (1 of 2): arenas 6; decoder sha256:sd35tuned" in tex
-    assert "% U-Net LoRA (1 of 4): arenas 6; decoder" in tex
+    assert "% SD 3.5 LoRA (1 of 2): maps 6; decoder sha256:sd35tuned" in tex
+    assert "% U-Net LoRA (1 of 4): maps 6; decoder" in tex
     blocks = s["blocks"]
     assert blocks["pixart_lora"]["quantity"] == "raw" and blocks["pixart_lora"]["decoder"] == "tuned"
     assert blocks["pixart_lora"]["budget_final"] is True and blocks["pixart_lora"]["budget_middle"] == [4000]
@@ -789,7 +789,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert sd35["g_train"] is None and sd35["budget_final"] is False and "tuned" in sd35["g_train_note"]
     # Superman's decoded-only arena 9 stays out of the raw medians until it is rescored raw, and the table says so
     assert (sd35["arenas"], sd35["decoded_only"], sd35["quantity"]) == ([6], [9], "raw")
-    assert "$^\\ddagger$" not in sd and "arenas 9 read against the decoded ground truth only" in tex
+    assert "$^\\ddagger$" not in sd and "maps 9 read against the decoded ground truth only" in tex
     assert blocks["pixart_lora"]["g_train"] == pytest.approx(28.0 - (22.45 + 0.2)) and not blocks["pixart_lora"].get(
         "g_train_note")
     assert (blocks["unet_full"]["n"], blocks["unet_full"]["zero_shot_borrowed"]) == (1, [6])
@@ -826,7 +826,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
                                                            "n": 1}
     caption = open(tables / "results_slim_caption.tex").read()
     assert "after 4k adapter updates" in caption and "16 validation windows" in caption      # 4 maps x 4 windows
-    assert "medians over the 2 unseen arenas" in caption and "four comparator arenas (6, 7, 8, 16)" in caption
+    assert "medians over the 2 unseen maps" in caption and "four comparator maps 6, 7, 8 and 16" in caption
     # Table 1's copy: the step check's reads plus the directional column, pooled by windows (arena 9 has 64)
     full = open(tables / "results_full.tex").read()
     t1 = [line.rstrip(" \\").split(" & ") for line in full.splitlines() if " & " in line and not line.startswith("%")]

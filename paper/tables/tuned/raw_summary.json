@@ -1,6 +1,6 @@
 {
  "generated_by": "paper/make_raw_figures.py",
- "generated_at": "2026-09-28T22:23:32-04:00",
+ "generated_at": "2026-09-28T22:43:56-04:00",
  "definitions": {
   "psnr": "scene PSNR of D(z_hat) against the raw frame, rows 0 to 207",
   "lpips": "scene LPIPS of D(z_hat) against the raw frame",
@@ -11,7 +11,7 @@
    "sd35_200000": "fine-tuned SD 3.5"
   },
   "budget": "first adapter read reaching the half_excess_gap threshold (budget_threshold)",
-  "groups": "arenas sorted by the zero-shot gap to the reconstruction upper bound (dB), hardest first, split 4, 5, 4"
+  "groups": "unseen maps sorted by the zero-shot gap to the reconstruction upper bound (dB), hardest first, split 4, 5, 4"
  },
  "group_key": "zero-shot gap to the reconstruction upper bound (dB)",
  "headline_step": 4000,
@@ -1834,7 +1834,7 @@
    "sd35_lora"
   ],
   "not_drawn": {
-   "unet_full": "a subset of arenas: drawn on the shared panel once it covers the shared arenas"
+   "unet_full": "a subset of the unseen maps: drawn on the shared panel once it covers the shared maps"
   },
   "arenas": {
    "unet_lora": [

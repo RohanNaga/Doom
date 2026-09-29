@@ -79,7 +79,7 @@
 \thumbstack{0,0.965}{train_map02_forward_ep6000_s225}{train_map02_strafe_ep6000_s1838}{train_map02_turn_left_ep6000_s837}
 \node[anchor=north west, align=left, inner sep=0pt] at (0,0.705) {4 training maps,\\500 episodes each};
 \thumbstack{0.80,0.965}{unseen_arena07_fight_ep314_s3728}{unseen_arena07_forward_ep41_s209}{unseen_arena07_strafe_ep41_s345}
-\node[anchor=north west, align=left, inner sep=0pt] at (0.80,0.705) {13 unseen arenas,\\24 each};
+\node[anchor=north west, align=left, inner sep=0pt] at (0.80,0.705) {13 unseen maps,\\24 each};
 \node[box, anchor=west] (sdec) at (0,0.13) {decoder $D$ (stock)};
 
 % ============================================================================ (b) one recipe, three backbones
@@ -118,7 +118,7 @@
 \draw[flow] (unet.south) -- (2.84,0.66);
 \node[anchor=west, lab] at (2.87,0.78) {200k EMA weights};
 \node[box, anchor=north, text width=1.20in] (adapt) at (2.84,0.66)
-  {world model: arena adaptation\\(rank-16 LoRA, 8 episodes)};
+  {world model: map adaptation\\(rank-16 LoRA, 8 episodes)};
 \node[box, anchor=north, text width=0.84in] (tune) at (4.00,0.66) {renderer:\\decoder fine-tune\\(MSE + 0.1 LPIPS)};
 \draw[flow] (sdec.east) -- (4.00,0.13) -- (tune.south);
 

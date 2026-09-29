@@ -511,7 +511,9 @@ def test_table_3_carries_arena_bootstrap_intervals_and_states_the_censoring(tmp_
     s = summary(tables)
     assert s["home"] == pytest.approx(HOME) and s["home_ci"]["ci"][0] < HOME < s["home_ci"]["ci"][1]
     t3 = open(os.path.join(tables, "adapt_table3.tex")).read()
-    assert "\\toprule" in t3 and "arena bootstrap" in t3
+    assert "\\toprule" in t3 and "map bootstrap" in t3
+    # Rohan's vocabulary: no "arena" in what the table prints (the comment lines carry this test's own tmp path)
+    assert "arena" not in "\n".join(ln for ln in t3.splitlines() if not ln.startswith("%")).lower()
     assert "1 [" in t3 and "of 2" in t3                      # one of two past the half-gap line, with its interval
     assert "1 of 2 censored" in t3                            # the median budget states its censoring
     assert "4.00 [" in t3                                     # home with its episode interval
