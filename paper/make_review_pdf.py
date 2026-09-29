@@ -63,6 +63,10 @@ STATUS = [
     ("Fine-tuning all of the U-Net", CONFIRM),
     ("One episode already gives most", CONFIRM),
     ("Adaptation costs some in-distribution", CONFIRM),
+    ("We introduced DoomShift to measure", CONFIRM),                   # the Conclusion, rewritten for him
+    ("On unseen maps of the same game, three diffusion", CONFIRM),
+    ("\\textbf{Limitations.}", CONFIRM),
+    ("Future work includes other games", CONFIRM),
     ("\\textbf{Zero-shot vs.\\ adapted results on training", DONE),   # the combined table's caption, his title
     ("\\textbf{Zero-shot vs.\\ adapted results per unseen map.}", DONE),   # Figure 3 caption, his title                          # Table 1 caption, his title
     ("\\textbf{Zero-shot evaluation on unseen maps.}", DONE),      # condensed on his outline

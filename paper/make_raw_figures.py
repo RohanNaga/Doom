@@ -816,7 +816,7 @@ def results_table(names, home, zero, directional, roots, stamp=""):
 
 
 def merged_table(names, home, zero, directional, gstats, block_stats, unet_guards, budgets_final, blocks=(),
-                 stamp="", with_8k=True):
+                 stamp="", with_8k=True, with_budget=True):
     """Tables 1 and 2 as one full-width table (Rohan, Sep 29: nothing in the supplement that was in the body, and
     Table 1 used three quarters of the width). Columns: the row's maps; scene PSNR at 0, 4k, 8k; scene LPIPS at 0,
     4k, 8k; the directional score at 0 and 8k; the recovered shares (PSNR, LPIPS, the score columns' order; per map, then the median); the
@@ -827,7 +827,8 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
     `unet_guards` is `guard_reads`' {map: {directional_0, directional_8k}}; the other backbones' guards come from
     their blocks (`guards` per map and step). The groups' rows run easy, medium, hard (`TABLE_GROUP_ORDER`).
     Without `with_8k` the PSNR and LPIPS columns at 8k are left out (the body reports 4k; the per-map table in
-    the appendix keeps 8k) and the directional score keeps its two reads, 0 and 8k."""
+    the appendix keeps 8k) and the directional score keeps its two reads, 0 and 8k. Without `with_budget` the
+    budget column is left out (Rohan, Sep 29: the text gives the medians, the appendix the budget per map)."""
     def num(v, d):
         return "--" if v is None else f"{v:.{d}f}"
 
@@ -898,6 +899,8 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
                          f"{block_budget_cell(block)} \\\\")
     if not with_8k:
         lines = [_without_8k(line) for line in lines]
+    if not with_budget:
+        lines = [_without_budget(line) for line in lines]
     lines += ["\\bottomrule", "\\end{tabular}"] + block_comment_lines(blocks)
     return "\n".join(lines) + "\n"
 
@@ -917,6 +920,15 @@ def _without_8k(line):
         return line
     cells = line[:-len(" \\\\")].split(" & ")
     return " & ".join(c for i, c in enumerate(cells) if i not in (3, 6)) + " \\\\"
+
+
+def _without_budget(line):
+    """One line of the merged table without its last column, the budget."""
+    if line.startswith("\\begin{tabular}"):
+        return line[:-2] + "}" if line.endswith("r}") else line
+    if line.startswith("%") or " & " not in line:
+        return line
+    return line[:line.rindex(" & ")] + " \\\\"
 
 
 def merged_caption(names, home, directional, gstats, block_stats):
@@ -1851,7 +1863,7 @@ def main(argv=None):
     merged = os.path.join(a.tables_dir, "results_merged.tex")
     with open(merged, "w") as f:
         f.write(merged_table(names, home, zero, directional, gstats, block_stats, guards, grid_complete,
-                             blocks=block_rows, with_8k=False))
+                             blocks=block_rows, with_8k=False, with_budget=False))
     merged_caption_path = os.path.join(a.tables_dir, "results_merged_caption.tex")
     with open(merged_caption_path, "w") as f:
         f.write(merged_caption(names, home, directional, gstats, block_stats))

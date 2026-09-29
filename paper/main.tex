@@ -120,7 +120,7 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (
 
 \begin{table}[t]
 \centering\footnotesize
-\caption{\textbf{Zero-shot vs.\ adapted results on training and unseen maps.} Medians over each row's maps, zero-shot (0) and after 4k updates. Easy, medium and hard: terciles of the zero-shot LPIPS rise. Recovered: share of the zero-shot loss regained at 4k. Budget: updates to recover half the rise.}
+\caption{\textbf{Zero-shot vs.\ adapted results on training and unseen maps.} Medians over each row's maps, zero-shot (0) and after 4k updates. Easy, medium and hard: terciles of the zero-shot LPIPS rise. Recovered: share of the zero-shot loss regained at 4k.}
 \label{tab:unseen}
 {\footnotesize\setlength{\tabcolsep}{2.6pt}\input{tables/tuned/results_merged.tex}}
 \end{table}
@@ -145,7 +145,7 @@ The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\
 \textbf{Adaptation cost.} Adaptation recovers most of what the shift took (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
 After 4k updates on eight episodes, the adapter recovers 72 to 77 percent of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100 percent where the adapted model passes the training-map level), and training to 8k adds little.
 Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
-Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k).
+Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k; per map in \appref{app:perarena-adapt}).
 Fine-tuning all of the U-Net's parameters recovers more, 88 percent of the LPIPS rise, but trains 205 times as many parameters.
 One episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.59~dB.
@@ -156,10 +156,10 @@ Adaptation costs some in-distribution quality: the training maps' scene PSNR fal
 \section{Conclusion}
 \label{sec:limits}
 
-The claims cover 13 unseen maps of one game, one agent, one-tic scoring and mostly one seed.
-One-tic quality does not guarantee stable rollouts (\appref{app:closedloop}).
-Next are other Doom maps and other games, to see whether the same procedure transfers; detecting a shift from the model's own zero-shot scores so that it repairs itself; closed-loop evaluation of the adapted models; and agents trained inside the adapted model.
-The pattern we measure, control kept, appearance lost, most of it relearned from a few episodes, is what a deployed world model would need to detect and repair on its own, and DoomShift is a testbed for that loop.
+We introduced DoomShift to measure what a small domain shift does to a world model and how much adaptation repairs it.
+On unseen maps of the same game, three diffusion backbones keep their response to controls and lose the scene, and a LoRA adapter trained on eight episodes for 2 percent of the original training updates recovers most of the lost perceptual quality and about half of the lost PSNR.
+\textbf{Limitations.} Our results cover one game and one agent, are scored one tic ahead and mostly use one seed; one-tic quality does not guarantee stable rollouts (\appref{app:closedloop}).
+Future work includes other games, closed-loop evaluation of the adapted models, and detecting a shift from the model's own predictions so that it adapts without supervision.
 \label{body-end}
 
 %===============================================================================

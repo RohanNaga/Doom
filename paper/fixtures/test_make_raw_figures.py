@@ -871,21 +871,21 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # Tables 1 and 2 merged: one row block per backbone; the training row carries the in-distribution reads and
     # Table 1's training directional in the 0 columns, the unseen row Table 1's unseen directional at 0 and the
     # guards' median at 8k (maps 6 and 9: 0.85 and 0.75), the group row the guards' medians at both; the body's
-    # table leaves the PSNR and LPIPS columns at 8k out (Rohan, Sep 29), so a row has ten cells
+    # table leaves the PSNR and LPIPS columns at 8k and the budget out (Rohan, Sep 29), so a row has nine cells
     merged = open(tables / "results_merged.tex").read()
     body = [[c.strip() for c in line.rstrip("\\ ").split("&")] for line in merged.splitlines()
             if " & " in line and not line.startswith("%")][2:]                   # after the two header rows
     assert [r[0] for r in body] == ["SD 1.4 U-Net, training maps", "unseen maps (all 2)", "unseen medium (6, 9)",
                                     "full fine-tune (1 of 2)", "PixArt-$\\alpha$, training maps",
                                     "unseen maps (all 2)", "SD 3.5 Medium, training maps", "unseen maps (1 of 2)"]
-    assert body[0][1:] == ["22.45", "", "0.150", "", "0.850", "", "", "", ""]
-    assert body[1][1:] == ["18.50", "21.25", "0.280", "0.205", "0.733", "0.800", "76", "58", "\\tbd{}"]                       # shares PSNR then LPIPS; the budget waits on the grid
+    assert body[0][1:] == ["22.45", "", "0.150", "", "0.850", "", "", ""]
+    assert body[1][1:] == ["18.50", "21.25", "0.280", "0.205", "0.733", "0.800", "76", "58"]                       # shares PSNR then LPIPS; the budget waits on the grid
     assert body[2][5:7] == ["0.750", "0.800"]
-    assert body[3][1:] == ["18.00", "23.00", "0.300", "0.180", "--", "--", "112", "80", "${\\le}$4k"]
-    assert "& 0 & 8k & PSNR & LPIPS & half the rise" in merged                      # the score columns' order
+    assert body[3][1:] == ["18.00", "23.00", "0.300", "0.180", "--", "--", "112", "80"]
+    assert "& 0 & 8k & PSNR & LPIPS \\\\" in merged                      # the score columns' order
     assert body[4][1:6] == ["22.65", "", "0.150", "", "--"]                 # no directional read: "--"
-    assert body[5][1:3] == ["18.70", "20.70"] and body[5][-1] == "${>}$4k; 2 of 2 censored"   # maps 6, 9
-    assert body[6][1] == "21.95" and body[7][-1] == "\\tbd{}"
+    assert body[5][1:3] == ["18.70", "20.70"]                                       # maps 6, 9
+    assert body[6][1] == "21.95"
     assert "% SD 3.5 LoRA (1 of 2): maps 6; decoder sha256:sd35tuned" in merged            # the comment lines
     assert "upper bound" not in merged and "arena" not in merged.lower()
     cap = open(tables / "results_merged_caption.tex").read()

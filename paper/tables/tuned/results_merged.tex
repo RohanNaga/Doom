@@ -4,24 +4,24 @@
 % pooled directional reads (Table 1) and at 8k from the adapter runs' guard rows (medians over maps);
 % recovered: shares per map at 4k, then the median; budget: the first grid read recovering half of the
 % map's LPIPS rise over its backbone's in-distribution level
-\begin{tabular}{lrrrrrrrrr}
+\begin{tabular}{lrrrrrrrr}
 \toprule
-& \multicolumn{2}{c}{PSNR (dB) $\uparrow$} & \multicolumn{2}{c}{LPIPS $\downarrow$} & \multicolumn{2}{c}{Directional} & \multicolumn{2}{c}{Recovered (\%)} & Budget to \\
+& \multicolumn{2}{c}{PSNR (dB) $\uparrow$} & \multicolumn{2}{c}{LPIPS $\downarrow$} & \multicolumn{2}{c}{Directional} & \multicolumn{2}{c}{Recovered (\%)} \\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
-Model, maps & 0 & 4k & 0 & 4k & 0 & 8k & PSNR & LPIPS & half the rise \\
+Model, maps & 0 & 4k & 0 & 4k & 0 & 8k & PSNR & LPIPS \\
 \midrule
-SD 1.4 U-Net, training maps & 25.20 &  & 0.158 &  & 0.855 &  &  &  &  \\
-unseen maps (all 13) & 22.30 & 23.60 & 0.303 & 0.210 & 0.804 & 0.844 & 48 & 72 & 250 \\
-unseen easy (7, 9, 10, 11) & 23.38 & 24.92 & 0.255 & 0.170 & 0.836 & 0.855 & 173 & 87 & 150 \\
-unseen medium (6, 8, 12, 14, 15) & 22.80 & 23.98 & 0.303 & 0.210 & 0.809 & 0.840 & 48 & 68 & 250 \\
-unseen hard (1, 13, 16, 17) & 21.65 & 22.56 & 0.391 & 0.233 & 0.768 & 0.840 & 29 & 65 & 250--2k \\
-full fine-tune (12 of 13) & 22.20 & 23.77 & 0.292 & 0.182 & -- & 0.863 & 53 & 88 & ${\le}$4k \\
+SD 1.4 U-Net, training maps & 25.20 &  & 0.158 &  & 0.855 &  &  &  \\
+unseen maps (all 13) & 22.30 & 23.60 & 0.303 & 0.210 & 0.804 & 0.844 & 48 & 72 \\
+unseen easy (7, 9, 10, 11) & 23.38 & 24.92 & 0.255 & 0.170 & 0.836 & 0.855 & 173 & 87 \\
+unseen medium (6, 8, 12, 14, 15) & 22.80 & 23.98 & 0.303 & 0.210 & 0.809 & 0.840 & 48 & 68 \\
+unseen hard (1, 13, 16, 17) & 21.65 & 22.56 & 0.391 & 0.233 & 0.768 & 0.840 & 29 & 65 \\
+full fine-tune (12 of 13) & 22.20 & 23.77 & 0.292 & 0.182 & -- & 0.863 & 53 & 88 \\
 \midrule
-PixArt-$\alpha$, training maps & 25.18 &  & 0.159 &  & 0.842 &  &  &  &  \\
-unseen maps (all 13) & 22.38 & 23.72 & 0.285 & 0.204 & 0.808 & 0.848 & 48 & 76 & 250 \\
+PixArt-$\alpha$, training maps & 25.18 &  & 0.159 &  & 0.842 &  &  &  \\
+unseen maps (all 13) & 22.38 & 23.72 & 0.285 & 0.204 & 0.808 & 0.848 & 48 & 76 \\
 \midrule
-SD 3.5 Medium, training maps & 25.38 &  & 0.126 &  & 0.840 &  &  &  &  \\
-unseen maps (all 13) & 22.09 & 23.83 & 0.262 & 0.166 & 0.800 & 0.844 & 47 & 76 & 150 \\
+SD 3.5 Medium, training maps & 25.38 &  & 0.126 &  & 0.840 &  &  &  \\
+unseen maps (all 13) & 22.09 & 23.83 & 0.262 & 0.166 & 0.800 & 0.844 & 47 & 76 \\
 \bottomrule
 \end{tabular}
 % U-Net full fine-tune (12 of 13): maps 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 12 maps; against the adapter's 23.37 dB / 0.208 and 73 percent (LPIPS) / 48 percent (PSNR) recovered on the same maps 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, budget 250; zero-shot of maps 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 from the U-Net LoRA's step 0 (the same checkpoint and windows); budget grid starts at 4k: ${\le}$4k means reached by 4k, the rule cannot resolve finer; 8k over the 10 maps scored there so far (7, 8, 9, 10, 11, 12, 13, 14, 15, 17)
