@@ -50,6 +50,7 @@ STATUS = [
     ("\\textbf{Metrics.}", DONE),                                    # read Sep 29
     ("For accuracy, we compute PSNR", DONE),                         # persistence sentence cut on his word
     ("To test control, we swap turn-left", DONE),                     # directional score, his option B
+    ("A model that ignores actions scores 0", CONFIRM),              # the ceiling stated exactly (audit, Sep 29)
     ("\\textbf{Decoder fine-tuning.}", DONE),                        # his option B with the SD 3.5 numbers
     ("This raises the scene reconstruction", DONE),
     ("\\textbf{Adaptation.} For each unseen map we adapt", DONE),  # shortened on his direction
@@ -70,11 +71,11 @@ STATUS = [
     ("\\textbf{Zero-shot vs.\\ adapted results on training", DONE),   # the combined table's caption, his title
     ("\\textbf{Zero-shot vs.\\ adapted results per unseen map.}", DONE),   # Figure 3 caption, his title                          # Table 1 caption, his title
     ("\\textbf{Zero-shot evaluation on unseen maps.}", DONE),      # condensed on his outline
-    ("Control survives:", DONE),
+    ("Control survives:", CONFIRM),
     ("The scene does not:", DONE),
     ("The loss is nearly the same for all three", DONE),
 ]
-SPLIT_BEFORE = ["To test control, we swap turn-left", "This raises the scene reconstruction"]   # a status change inside one source line
+SPLIT_BEFORE = ["To test control, we swap turn-left", "This raises the scene reconstruction", "A model that ignores actions scores 0"]   # a status change inside one source line
 COLORS = {DONE: "reviewdone", CONFIRM: "reviewconfirm"}
 PREAMBLE = r"""
 \usepackage{xcolor}
