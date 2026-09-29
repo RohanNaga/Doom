@@ -481,7 +481,9 @@ def layout_c(root, out_dir, rows, adapted_label="adapted", adapted_note="(8 epis
     for i in range(ncols):
         xs.append(x)
         x += fw + (group_gap if i == 2 else GUTTER)
-    away_place = "unseen map" if simple else place_name(rows[0]["window"])
+    away_place = place_name(rows[0]["window"])
+    if simple:   # "unseen map (map 7)": the header names the map, so the caption need not
+        away_place = re.sub(r"^unseen map (\d+)$", r"unseen map (map \1)", away_place)
     home_places = [place_name(r["home"]["window"]) for r in rows]
     # rows from different training maps: the header says "training maps" and each in-domain context names its map
     mixed = len(set(home_places)) > 1

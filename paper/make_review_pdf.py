@@ -33,7 +33,7 @@ STATUS = [
     ("Yet unchanged dynamics alone", DONE),                          # his sentence, restored on his word
     ("Pretraining one model on every map", DONE),
     ("In short, a world model moved to a new map", DONE),
-    ("On an unseen map (right, map 7)", CONFIRM),                    # shortened for him, then the rollout facts added
+    ("On an unseen map the U-Net's zero-shot prediction", CONFIRM),  # the high-level caption he asked for
     # related work: rewritten on his direction
     ("\\textbf{Game world models.}", CONFIRM),
     ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),

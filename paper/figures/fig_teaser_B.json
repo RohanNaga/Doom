@@ -27,19 +27,19 @@
    "name": "ground truth"
   },
   {
-   "block": "unseen map",
+   "block": "unseen map (map 7)",
    "name": "context"
   },
   {
-   "block": "unseen map",
+   "block": "unseen map (map 7)",
    "name": "zero-shot"
   },
   {
-   "block": "unseen map",
+   "block": "unseen map (map 7)",
    "name": "adapted"
   },
   {
-   "block": "unseen map",
+   "block": "unseen map (map 7)",
    "name": "ground truth"
   }
  ],
