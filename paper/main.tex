@@ -64,6 +64,13 @@ A learned simulator is useful only where it is faithful, and an agent moving to 
 Game worlds let us pose this question with the engine held fixed: a new map of the same game preserves the physics and the controls exactly, and only the layout, textures and lighting differ.
 Pretraining one model on every map a deployment might meet is never complete, and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses, and how few episodes and updates recover the rest.
 
+\begin{figure}[b]
+\centering
+\figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, two rows}
+\caption{On an unseen map the U-Net still moves and fires but renders the training maps' masonry; eight adaptation episodes restore the map. Left: training maps (in distribution). Right: unseen map 7, zero-shot and after adaptation.}
+\label{fig:teaser}
+\end{figure}
+
 In short, a world model moved to a new map keeps playing the game but draws the wrong world, and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item \textbf{DoomShift, a benchmark that isolates a scene shift.} We build the pipeline end to end (Figure~\ref{fig:method}): every-tic recordings, three diffusion world models initialized from pretrained image models and trained on four maps under one recipe, a fine-tuned decoder and a standard adapter, scored on the 13 maps the models never saw, zero-shot and after adaptation. Recordings, models, decoders and adapters are released (link withheld).
@@ -71,12 +78,6 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 \item \textbf{How much adaptation it takes: very little.} A standard LoRA adapter on the frozen model (0.49 percent of the U-Net's parameters), trained on eight episodes of the new map, recovers half of its lost perceptual quality in a median 250 updates and, by 4k updates (2 percent of pretraining, about one A4000 GPU-hour), 72 to 77 percent of it; a full fine-tune with 205 times the trainable parameters recovers 87 percent against the adapter's 71 on four maps (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
 \end{itemize}
 
-\begin{figure}[t]
-\centering
-\figslot{figures/fig_teaser_B.pdf}{\linewidth}{1.5in}{Figure 1: teaser, two rows}
-\caption{On an unseen map the U-Net still moves and fires but renders the training maps' masonry; eight adaptation episodes restore the map. Left: training maps (in distribution). Right: unseen map 7, zero-shot and after adaptation.}
-\label{fig:teaser}
-\end{figure}
 
 %===============================================================================
 
@@ -89,18 +90,19 @@ Held-out evaluation of world models holds out a new robot body~\citep{chen2026xe
 
 \section{Study design}
 \label{sec:bench}
+\begin{figure}[b]
+\centering
+\figslot{figures/fig1_method_150.pdf}{\linewidth}{1.25in}{Figure 2: method overview}
+\caption{What we built: (a) the benchmark, (b) three backbones under one recipe, (c) adaptation, (d) evaluation against the raw ground-truth frame.}
+\label{fig:method}
+\end{figure}
+
 
 \textbf{Data.} The Arnold agent~\citep{lample2017arnold} plays 150-second ViZDoom~\citep{kempka2016vizdoom} deathmatches against 8 bots on the 17 Doom maps it ships with; each has its own layout, textures and lighting. We record every tic (1/35~s): a 320$\times$240 frame and the 19 buttons the engine executed. Four maps (2 to 5) are the training maps: 500 training and 25 validation episodes each (512 windows). The other 13 (1, 6 to 17) are never trained on: 24 new episodes each, 16 for adaptation (8 used here) and 8 held out for scoring (256 windows per map).
 
 \textbf{Three backbones, one recipe.} Our anchor is the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters), GameNGen's backbone~\citep{valevski2024gamengen}. PixArt-$\alpha$~\citep{chen2023pixart}, a 628M transformer in the same latent space, changes the architecture at similar scale; SD~3.5 Medium~\citep{esser2024sd3}, a 2.27B MMDiT whose 16-channel latents give its decoder a higher reconstruction score (31.8 against 28.6~dB on the training maps), changes the scale. All three become next-tic world models under one recipe (Figure~\ref{fig:method}; \appref{app:protocol}): 32 context tics, $v$-prediction~\citep{salimans2022progressive}, context noise augmentation as in GameNGen, 200k updates at batch 32 on one A6000 per backbone, an fp32 EMA at 0.9999, and 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency.
 
 
-\begin{figure}[t]
-\centering
-\figslot{figures/fig1_method_150.pdf}{\linewidth}{1.25in}{Figure 2: method overview}
-\caption{What we built: (a) the benchmark, (b) three backbones under one recipe, (c) adaptation, (d) evaluation against the raw ground-truth frame.}
-\label{fig:method}
-\end{figure}
 
 \textbf{Metrics.} We score the scene rows (0 to 207; the HUD below them does not change with the map) of each frame predicted one tic ahead against the raw recorded frame: PSNR for accuracy and LPIPS~\citep{zhang2018lpips} for realism. Absolute PSNR alone does not compare maps, because it rises with how static a recording is: the persistence baseline, the last context frame copied forward~\citep{mathieu2016deep}, already scores 19.8~dB on the unseen maps, so we read every score against the same model's level on the training maps. For control, the \emph{directional} score is the fraction of turning windows whose predicted view turns the other way once we swap left and right in the newest control.
 
@@ -108,6 +110,11 @@ Held-out evaluation of world models holds out a new robot body~\citep{chen2026xe
 
 \textbf{Adaptation as a measurement.} To measure how much adaptation a map needs, we keep the trained model frozen and train a standard adapter on a few episodes of that map: rank-16 LoRA~\citep{hu2022lora} on every attention projection~\citep{gao2024vista}, with the control MLP, input projection and noise-bucket embedding trained in full~\citep{xie2023difffit} (4.2M parameters, 0.49 percent of the U-Net; the transformers' counts in \appref{app:perarena-adapt}). We train on 8 episodes, about 1 A4000 GPU-hour per map for 4k updates, and score the held-out episodes at 0, 50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates (PixArt-$\alpha$ to 4k; SD~3.5 from 250); the forgetting and directional checks run at 0 and 8k. We report 4k updates, 2 percent of pretraining, everywhere, since it captures on average 96 percent of each map's 8k gain; 8k is the check. A map's \emph{budget} is the first grid point at which it recovers at least half of its zero-shot LPIPS rise over the training maps. As a comparator we fine-tune all 860M parameters of the U-Net on maps 6, 7, 8 and 16 with the same episodes.
 
+
+%===============================================================================
+
+\section{Results}
+\label{sec:results}
 \begin{table}[t]
 \centering\footnotesize
 \input{tables/tuned/results_merged_caption.tex}
@@ -115,16 +122,13 @@ Held-out evaluation of world models holds out a new robot body~\citep{chen2026xe
 {\scriptsize\setlength{\tabcolsep}{2.5pt}\input{tables/tuned/results_merged.tex}}
 \end{table}
 
-%===============================================================================
-
-\section{Results}
-\label{sec:results}
 
 \textbf{The shift breaks the scene, not the controls.} On the unseen maps the turn response survives: the directional score goes from 0.855, 0.842 and 0.840 in distribution to 0.804, 0.808 and 0.800 for the U-Net, PixArt-$\alpha$ and SD~3.5 (ground-truth frames 0.885 and 0.892; Figure~\ref{fig:teaser}). The appearance does not: the U-Net's scene PSNR falls from 25.2~dB to a median 22.3 and its LPIPS rises from 0.158 to 0.303 (per map, Figure~\ref{fig:adapt}); pooled over the 13 maps, one predicted frame in five has an LPIPS above 0.4, against one in 73 on the training maps, concentrated in maps 16, 17, 13 and 1. The loss sits in the scene: its rows fall 2.9~dB while the map-independent HUD rows fall 0.2~dB (29.7 to 29.5).
 
 \textbf{The same loss in every backbone, and a step.} Scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 (Table~\ref{tab:unseen}; \appref{app:distance}): across our three backbones the shift looks like a property of the task, not of the architecture or the scale. It is a step, not a slope: every unseen map has a worse LPIPS than every training map, for all three backbones.
 
-\begin{figure}[t]
+
+\begin{figure}[b]
 \centering
 \figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{2.0in}{Figure 3: the shift and its repair}
 \caption{The shift and its repair, per unseen map and per backbone. (a) Scene PSNR and (b) LPIPS zero-shot (open) to 4k adapter updates (filled) for the U-Net, PixArt-$\alpha$ and SD~3.5, with each backbone's in-distribution level on the training maps (dashed); (c, d) medians over the 13 unseen maps against updates.}
