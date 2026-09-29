@@ -26,14 +26,14 @@ STATUS = [
     ("All three keep their response to controls", DONE),
     ("Very little adaptation repairs it", DONE),
     # introduction
-    ("Recent advances in diffusion models", CONFIRM),               # opener drafted on the structure he gave
-    ("However, these models are still evaluated only", CONFIRM),
+    ("World models learned from recorded play", DONE),              # the opener he chose (variation 1)
+    ("However, these models are still evaluated only", DONE),
     ("A learned simulator is useful only", DONE),
     ("Game worlds let us pose this question", DONE),
     ("Yet unchanged dynamics alone", DONE),                          # his sentence, restored on his word
     ("Pretraining one model on every map", DONE),
     ("In short, a world model moved to a new map", DONE),
-    ("On an unseen map (right, map 7)", CONFIRM),                    # caption shortened for him
+    ("On an unseen map (right, map 7)", CONFIRM),                    # shortened for him, then the rollout facts added
     # related work: rewritten on his direction
     ("\\textbf{Game world models.}", CONFIRM),
     ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),
