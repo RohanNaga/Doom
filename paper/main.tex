@@ -133,7 +133,7 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (
 \textbf{Zero-shot evaluation on unseen maps.} All three models do poorly on the unseen maps (Table~\ref{tab:unseen}).
 Control survives: the directional score goes from 0.84 to 0.86 on the training maps to 0.80 to 0.81 on the unseen maps, against 0.89 for ground-truth frames.
 The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5, and every unseen map has a worse LPIPS than every training map (\appref{app:distance}).
-The loss is nearly the same for all three backbones, so it does not depend on the architecture or the scale.
+The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
 
 \begin{figure}[t]
 \centering
