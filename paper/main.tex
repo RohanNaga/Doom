@@ -103,7 +103,7 @@ We turn all three into next-tic world models under one shared recipe (Figure~\re
 \begin{figure}[!ht]
 \centering
 \figslot{figures/fig1_method.pdf}{\linewidth}{1.8in}{Figure 2: method overview}
-\caption{What we built: (a) the benchmark, (b) three backbones under one recipe, (c) adaptation, (d) evaluation against the raw ground-truth frame.}
+\caption{\textbf{Method overview.} (a) We record frames and the executed buttons on 17 Doom maps and encode each frame with a frozen encoder. (b) Three pretrained backbones are trained as next-tic world models under one recipe. (c) Each model is adapted to an unseen map with LoRA on eight episodes, and the decoder is fine-tuned. (d) Predictions are decoded and scored against the raw frame.}
 \label{fig:method}
 \end{figure}
 

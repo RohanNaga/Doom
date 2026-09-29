@@ -42,6 +42,7 @@ STATUS = [
     ("\\textbf{Generalization of world models.}", DONE),
     ("\\textbf{Adaptation.} Pretrained video and world models", DONE),
     # method and results: single passages written for him
+    ("\\textbf{Method overview.}", DONE),                            # the caption he chose (option A)
     ("\\textbf{Data.}", DONE),                                       # read Sep 29, no edits
     ("\\textbf{Models and training.}", DONE),                        # simplified on his wording, approved
     ("We turn all three into next-tic world models", DONE),
