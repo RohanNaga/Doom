@@ -68,7 +68,7 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item We introduce DoomShift, a benchmark that isolates a scene shift: 17 Doom maps share the same physics and game engine and differ only in their surroundings, with four maps for training and 13 held out. We release the recordings, models, decoders and adapters.
 \item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8 to 3.3~dB.
-\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72 to 77 percent of the lost perceptual quality and roughly half of the lost PSNR, using only 2 percent of the original training updates.
+\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72 to 77\% of the lost perceptual quality and roughly half of the lost PSNR, using only 2\% of the original training updates.
 \end{itemize}
 
 \begin{figure}[t]
@@ -87,7 +87,7 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 
 \textbf{Generalization of world models.} World models have been evaluated on a new robot body~\citep{chen2026xeworld} and on a whole new game~\citep{rigter2024avid} or simulator~\citep{gao2025adaworld}, where the dynamics change along with the scene. For indoor navigation, Pathdreamer is evaluated in buildings not seen during training~\citep{koh2021pathdreamer}, the closest analogue to an unseen map, but its scenes are static and it does not study adaptation. Doom maps have been held out, but only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom}, and game world models that do show new scenes generate them from an image, with no recorded frames to score against~\citep{tong2026scope,bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training.
 
-\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use low-rank adaptation (LoRA)~\citep{hu2022lora} for its efficiency: it trains under 5 percent of each backbone's parameters, which lowers the memory and compute that adaptation needs. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
+\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use low-rank adaptation (LoRA)~\citep{hu2022lora} for its efficiency: it trains under 5\% of each backbone's parameters, which lowers the memory and compute that adaptation needs. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
 
 %===============================================================================
 
@@ -113,9 +113,9 @@ For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\cit
 
 \textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the decoder never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share, and from 30.0 to 31.8~dB for the SD~3.5 decoder (\appref{app:protocol}).
 
-\textbf{Adaptation.} For each unseen map we adapt each trained backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}, which is 0.49, 4.1 and 1.8 percent of the parameters of the U-Net, PixArt-$\alpha$ and SD~3.5.
+\textbf{Adaptation.} For each unseen map we adapt each trained backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}, which is 0.49, 4.1 and 1.8\% of the parameters of the U-Net, PixArt-$\alpha$ and SD~3.5.
 We train on eight episodes of the map and score on its eight held-out episodes at update counts from 0 to 8k.
-We report 4k updates throughout, 2 percent of pretraining, since it gives on average 96 percent of the gain at 8k.
+We report 4k updates throughout, 2\% of pretraining, since it gives on average 96\% of the gain at 8k.
 As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (\appref{app:perarena-adapt}).
 
 \begin{table}[t]
@@ -143,10 +143,10 @@ The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\
 \end{figure}
 
 \textbf{Adaptation cost.} Adaptation recovers most of what the shift took (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
-After 4k updates on eight episodes, the adapter recovers 72 to 77 percent of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100 percent where the adapted model passes the training-map level), and training to 8k adds little.
+After 4k updates on eight episodes, the adapter recovers 72 to 77\% of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100\% where the adapted model passes the training-map level), and training to 8k adds little.
 Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
 Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k; per map in \appref{app:perarena-adapt}).
-Fine-tuning all of the U-Net's parameters recovers more, 88 percent of the LPIPS rise, but trains 205 times as many parameters.
+Fine-tuning all of the U-Net's parameters recovers more, 88\% of the LPIPS rise, but trains 205 times as many parameters.
 One episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.59~dB.
 
@@ -157,7 +157,7 @@ Adaptation costs some in-distribution quality: the training maps' scene PSNR fal
 \label{sec:limits}
 
 We introduced DoomShift to measure what a small domain shift does to a world model and how much adaptation repairs it.
-On unseen maps of the same game, three diffusion backbones keep their response to controls and lose the scene, and a LoRA adapter trained on eight episodes for 2 percent of the original training updates recovers most of the lost perceptual quality and about half of the lost PSNR.
+On unseen maps of the same game, three diffusion backbones keep their response to controls and lose the scene, and a LoRA adapter trained on eight episodes for 2\% of the original training updates recovers most of the lost perceptual quality and about half of the lost PSNR.
 Future work includes other games, closed-loop evaluation of the adapted models, and detecting a shift from the model's own predictions so that it adapts without supervision.
 
 \textbf{Limitations.} (1) We study one game and one agent, so the shift changes a map's layout, textures and lighting but not its dynamics. (2) We score one tic ahead, and one-tic quality does not guarantee stable rollouts (\appref{app:closedloop}). (3) Most results use one seed.
