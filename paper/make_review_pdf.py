@@ -39,6 +39,7 @@ STATUS = [
     ("\\textbf{Zero-shot vs.", DONE),                                # his title and his chosen ending
     # related work: rewritten on his direction
     ("\\textbf{Game world models.}", CONFIRM),
+    ("\\textbf{Generalization of world models.}", CONFIRM),
     ("\\textbf{Adaptation.} Our adapter is not new", CONFIRM),
     # method and results: single passages written for him
     ("For turning, we compute the \\emph{directional} score", CONFIRM),
