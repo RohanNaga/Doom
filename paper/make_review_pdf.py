@@ -52,10 +52,10 @@ STATUS = [
     ("To test control, we swap turn-left", DONE),                     # directional score, his option B
     ("\\textbf{Decoder fine-tuning.}", DONE),                        # his option B with the SD 3.5 numbers
     ("This raises the scene reconstruction", DONE),
-    ("\\textbf{Adaptation.} For each unseen map we adapt", CONFIRM),  # shortened on his direction
-    ("We train on 8 episodes of the map", CONFIRM),
-    ("We report 4k updates throughout", CONFIRM),
-    ("As a baseline, we fine-tune all of the U-Net", CONFIRM),
+    ("\\textbf{Adaptation.} For each unseen map we adapt", DONE),  # shortened on his direction
+    ("We train on 8 episodes of the map", DONE),
+    ("We report 4k updates throughout", DONE),
+    ("As a baseline, we fine-tune all of the U-Net", DONE),
     ("\\textbf{In-distribution vs.", DONE),                          # Table 1 caption, his title
     ("Architecture does not change what survives the shift", CONFIRM),
 ]
