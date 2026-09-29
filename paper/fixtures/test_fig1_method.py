@@ -152,3 +152,28 @@ def test_the_committed_pdf_is_the_build_of_the_committed_source(pdf):
     if producer(built) != producer(committed):
         pytest.skip(f"committed PDF from {producer(committed)!r}, this build from {producer(built)!r}")
     assert built == committed, "paper/figures/fig1_method.pdf is stale: rebuild it from fig1_method.tex"
+
+
+def test_the_150_alternate_is_the_same_figure_at_1_5_in(tmp_path):
+    """`fig1_method_150.tex`, the 1.5 in alternate for the page-4 fit: the text column wide, 1.5 in tall, the same
+    fonts and images, nothing under 6 pt, and its committed PDF is the build of its source."""
+    source = os.path.join(FIGURES, "fig1_method_150.tex")
+    r = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", f"-output-directory={tmp_path}",
+                        source], cwd=FIGURES, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout[-2000:]
+    built = open(os.path.join(tmp_path, "fig1_method_150.pdf"), "rb").read()
+    m = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]", built)
+    assert (float(m.group(1)) / 72, float(m.group(2)) / 72) == (pytest.approx(TEXT_WIDTH_IN, abs=0.01),
+                                                                pytest.approx(1.5, abs=0.01))
+    assert b"/Type3" not in built and (b"NimbusRomNo9L" in built or b"Times" in built)
+    assert not re.search(rb"/[A-Z]{6}\+CM(MI|R|SY)5\b", built)
+    sizes = {float(s) for body in content_streams(built) for s in re.findall(rb"([\d.]+)\s+Tf\b", body)}
+    assert sizes and min(sizes) >= MIN_BP - 1e-3, sorted(sizes)
+    # the same assets, and the same panel labels, as the 1.8 in figure
+    main_src, alt_src = open(SOURCE).read(), open(source).read()
+    assert set(re.findall(r"assets/(fig1_[^}]+)", alt_src)) == set(re.findall(r"assets/(fig1_[^}]+)", main_src))
+    assert re.findall(r"\\panel\{(\w)\}\{([^}]+)\}", alt_src) == re.findall(r"\\panel\{(\w)\}\{([^}]+)\}", main_src)
+    committed = open(os.path.join(FIGURES, "fig1_method_150.pdf"), "rb").read()
+    if producer(built) != producer(committed):
+        pytest.skip(f"committed PDF from {producer(committed)!r}, this build from {producer(built)!r}")
+    assert built == committed, "paper/figures/fig1_method_150.pdf is stale: rebuild it from fig1_method_150.tex"

@@ -1,0 +1,148 @@
+% Figure 1, the method overview, at 1.5 in height: the alternate of fig1_method.tex (1.8 in) for the page-4
+% fit (Rohan, Sep 28 evening). Derived by scratch script from fig1_method.tex: the y unit is 0.8333 in so the
+% same coordinates give a 5.5 x 1.5 in page, every label keeps its 7 pt size, the two images are smaller, and
+% three nodes sit a little lower. Keep the two files in step when the 1.8 in figure changes.
+% Drawn at the printed width of the text column (5.5 in, \linewidth in main.tex) and included at scale 1, so every
+% label prints at its nominal size: 7 pt text, 8 pt bold panel letters, 6 pt math sub- and superscripts, nothing
+% smaller (paper/FIGURE_STANDARDS.md section 2).
+%
+% Build (from paper/figures):  pdflatex fig1_method_150.tex && pdftoppm -r 300 -png -singlefile fig1_method_150.pdf fig1_method_150
+%
+% Encoding (standard section 1 and the round-1 review, paper/review_figures_round1_fable.md "Agreed set"): the three
+% backbone boxes carry the only colour, as outlines in their Okabe-Ito colours (U-Net #0072B2, PixArt #D55E00,
+% SD 3.5 #009E73, paper/figstyle.py BACKBONES); every other box is a plain black square outline with no fill; arrows
+% are straight 0.6 pt black segments; no hatching, shading, rounded corners or icons. The images are real frames.
+%
+% The images (paper/figures/assets/) are the first-column true frame of rollout strips in paper/figures/figure1/
+% (strip rows are true / model / copy-last, 320 x 240 per frame), cropped to the scored scene rows 0 to 207:
+%   fig1_<stem>_truth0.png       = strip.crop((0, 0, 320, 208))              the gameplay frame in (a)
+%   fig1_<stem>_truth0_half.png  = strip.crop((0, 0, 320, 208)).reduce(2)    the thumbnails (PIL box filter)
+% where <stem> is the strip file name without "_strip.png"; paper/fixtures/test_fig1_method.py re-derives each one.
+% The pressed cells of the 19-button bar are illustrative (forward and attack); the strips do not carry controls.
+\documentclass[border=0pt]{standalone}
+% no creation date or trailer id, so an unchanged figure rebuilds byte-identical (as figstyle.save does);
+% no object streams, so the page box and font names stay readable in the file (paper/fixtures/test_fig1_method.py)
+\pdfinfoomitdate=1\pdftrailerid{}\pdfsuppressptexinfo=-1\pdfobjcompresslevel=0
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc}
+% the CoRL style's text font (corl_2026.sty: \rmdefault ptm); math stays Computer Modern, as in the paper, with
+% script sizes raised to 6 pt so no sub- or superscript prints under the standard's 6 pt floor
+\renewcommand{\rmdefault}{ptm}
+\DeclareMathSizes{7}{7}{6}{6}
+\DeclareMathSizes{8}{8}{6}{6}
+
+% paper/figstyle.py: BACKBONES and CONTEXT_INK
+\definecolor{unet}{HTML}{0072B2}
+\definecolor{pixart}{HTML}{D55E00}
+\definecolor{sdmmdit}{HTML}{009E73}
+\definecolor{ctx}{HTML}{404040}
+
+\newcommand{\fs}{\fontsize{7}{8.2}\selectfont}
+% panel letter 8 pt bold lowercase, then the panel's name in the 7 pt text face
+\newcommand{\panel}[2]{{\fontsize{8}{9.6}\selectfont\bfseries #1}\hspace{0.5em}{\fs #2}}
+% a stack of three thumbnails (#2, #3, #4 from back to front); #1 = top-left corner of the back card's column
+\newcommand{\thumbstack}[4]{%
+  \foreach \img [count=\k from 0] in {#2,#3,#4} {
+    \node[anchor=north west, inner sep=0pt, draw=white, line width=0.8pt]
+      at ($(#1)+({(2-\k)*0.03},{-\k*0.025})$) {\includegraphics[width=0.26in]{assets/fig1_\img_truth0_half.png}};
+  }}
+
+\begin{document}
+\fs\hyphenpenalty=10000\exhyphenpenalty=10000
+\begin{tikzpicture}[x=1in, y=0.8333in,
+  every node/.style={font=\fs, text=black, inner sep=1.5pt},
+  flow/.style={-{Stealth[length=3pt,width=2.4pt]}, line width=0.6pt, draw=black},
+  box/.style={draw=black, line width=0.5pt, inner sep=2pt, align=center},
+  bb/.style={draw=#1, line width=0.9pt, text width=0.70in, minimum height=0.17in, inner sep=1pt, align=center},
+  lab/.style={font=\fs, text=ctx, inner sep=1pt},
+]
+\def\H{1.80}   % 1.80 y units = 1.50 in
+\useasboundingbox (0,0) rectangle (5.5,\H);
+
+% ============================================================================ (a) data
+% record_arnold.py:14 and :373 (320 x 240 RGB with HUD; 150 game-seconds); scripts/spiderman/record_dense.sh:28-31
+% and :51 (maps 2, 3, 4, 5; --n_bots 8); release/dense_split.json (training ids 0:2000, 500 per map);
+% adapt_split.py:66-67 (16 adaptation and 8 held-out episodes per unseen arena, 24 in all);
+% transitions.py:32 and docs/cards/arnold/buttons.json (19 executed buttons); encode_parquet.py:155-170 and :252
+% (the frozen encoder's posterior mean of the full frame padded to 320 x 256; C x 32 x 40 latents)
+\node[anchor=north west, inner sep=0pt] at (0,\H) {\panel{a}{Data}};
+% one recorded tic: a true frame of map 2 (scene rows) and its 19-button executed control
+\node[anchor=north west, inner sep=0pt] (frame) at (0,1.66)
+  {\includegraphics[width=0.60in]{assets/fig1_train_map02_fight_ep6024_s1428_truth0.png}};
+\node[box, text width=0.44in] (enc) at (1.10,1.357) {encoder $E$\\(frozen)};
+\draw[flow] (0.60,1.357) -- node[above, inner sep=1pt] {$x_t$} (enc.west);
+\foreach \b [count=\i from 0] in {1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0} {
+  \ifnum\b=1 \def\bc{black}\else\def\bc{white}\fi
+  \draw[line width=0.5pt, draw=black, fill=\bc] ({\i*0.72/19},1.115) rectangle ++({0.72/19},0.055);
+}
+\node[anchor=north west, inner sep=0pt] at (0,1.095) {$u_t$: 19 executed buttons};
+% the two data groups side by side, three true frames each: map 2 for the training maps, arena 7 for the unseen
+\thumbstack{0,0.965}{train_map02_forward_ep6000_s225}{train_map02_strafe_ep6000_s1838}{train_map02_turn_left_ep6000_s837}
+\node[anchor=north west, align=left, inner sep=0pt] at (0,0.68) {4 training maps,\\500 episodes each};
+\thumbstack{0.80,0.965}{unseen_arena07_fight_ep314_s3728}{unseen_arena07_forward_ep41_s209}{unseen_arena07_strafe_ep41_s345}
+\node[anchor=north west, align=left, inner sep=0pt] at (0.80,0.68) {13 unseen arenas,\\24 each};
+\node[box, anchor=west] (sdec) at (0,0.13) {decoder $D$ (stock)};
+
+% ============================================================================ (b) one recipe, three backbones
+% scripts/spiderman/launch_nexttic.sh:220-222 (context 32, action history 32, noise 0.7 in 10 buckets, batch 32,
+% lr 5e-5, v objective, EMA 0.9999 every 8 updates); train_wm.py:813-815, :427-430 and :845 (fp32 EMA);
+% diffusion_v.py:63-65 (v target) and :135-151 (context noise, bucket); doom_data.py TicWindowDataset (context
+% C*L x 32 x 40); backbones.py:153-181 (control MLP + learned positions), :236-238 (C(L+1) input channels: the 32
+% context latents and the noisy next latent stacked on channels); eval_tf.py:502-505 and score_adapt.py:604
+% (10 DDIM steps); parameter counts are in paper/appendix.tex tab:recipe
+\node[anchor=north west, inner sep=0pt] at (1.52,\H) {\panel{b}{One recipe, three pretrained backbones}};
+\node[anchor=south west, lab, inner sep=0pt] at (1.52,1.478) {context and the noisy next latent stacked on channels};
+\node[box, text width=0.68in, minimum height=0.15in] (noise) at (1.88,1.357) {noise $q{<}0.7$};
+\node[box, text width=0.68in, minimum height=0.15in] (bucket) at (1.88,1.137) {10 buckets $b$};
+\node[box, text width=0.68in, minimum height=0.15in] (mlp) at (1.88,0.917) {MLP + positions};
+\draw[flow] (enc.east) -- node[above, inner sep=1pt] {$z_t$} (noise.west);
+\draw[flow] (noise.south) -- (bucket.north);
+\draw[flow] (0.72,1.1425) -- (1.40,1.1425) -- (1.40,0.917) -- (mlp.west);
+% the denoiser slot: one of three pretrained backbones, SD 3.5 on top so the U-Net sits above its adapter in (c)
+\draw[line width=0.5pt] (2.42,1.472) rectangle (3.26,0.802);
+\node[bb=sdmmdit] (sd35) at (2.84,1.357) {SD 3.5 Medium};
+\node[bb=pixart]  (pix)  at (2.84,1.137) {PixArt-$\alpha$};
+\node[bb=unet]    (unet) at (2.84,0.917) {U-Net (SD 1.4)};
+\draw[flow] (noise.east) -- (2.42,1.357);
+\draw[flow] (bucket.east) -- (2.42,1.137);
+\draw[flow] (mlp.east) -- (2.42,0.917);
+\node[box, text width=0.64in] (ddim) at (3.78,1.137) {10-step DDIM\\sampler};
+\draw[flow] (3.26,1.137) -- node[above, inner sep=1pt] {$\hat v$} (ddim.west);
+
+% ============================================================================ (c) adaptation
+% lora.py:44-46 and backbones.py:170-174 (rank-16 LoRA on attention, control path in full); adapt_wm.py:84, :88,
+% :504-507 (rank 16, alpha 16, lr 1e-4, 4k updates); adapt_split.py:69 (k = 8 episodes); source weights = the
+% U-Net's 200k snapshot EMA (results/adapt/unet200k_arenas13_map07_r16_k8_s0/config.json);
+% finetune_decoder.py:60-74 (encoder frozen, decoder trained) and :601-613 (z = E(x), MSE + w LPIPS), w = 0.1 per
+% RESEARCH_CONTEXT 2026-09-27 01:10 and 03:30 (vae_decoder_sd1x_mse_lpips, the paper's tuned decoder)
+\node[anchor=north west, inner sep=0pt] at (1.52,0.75) {\panel{c}{Adaptation}};
+\draw[flow] (unet.south) -- (2.84,0.62);
+\node[anchor=west, lab] at (2.87,0.72) {200k EMA weights};
+\node[box, anchor=north, text width=1.20in] (adapt) at (2.84,0.62)
+  {world model: arena adaptation\\(rank-16 LoRA, 8 episodes)};
+\node[box, anchor=north, text width=0.84in] (tune) at (4.00,0.62) {renderer:\\decoder fine-tune\\(MSE + 0.1 LPIPS)};
+\draw[flow] (sdec.east) -- (4.00,0.13) -- (tune.south);
+
+% ============================================================================ (d) evaluation
+% eval_tf.py:643 (one tic), :633 and :479 (clean context), :143-158 (the prediction and the true latent through
+% the one decoder), :73 and :111-113 (scene rows 0-207); the raw-frame columns scene_psnr_raw and scene_lpips_raw
+% (the prediction D(z_hat) against the raw frame x) and scene_vae_psnr (D(z) against x: the reconstruction upper
+% bound); directional_check.py (turn direction under swapped controls); paper/make_raw_figures.py (Sep 27)
+\node[anchor=north west, inner sep=0pt] at (4.50,\H) {\panel{d}{Evaluation}};
+\node[anchor=north west, align=left, inner sep=0pt] at (4.50,1.64)
+  {one tic ahead, scene rows\\0--207, against the raw\\frame $x_{t+1}$};
+\node[box, text width=0.84in] (dec) at (5.00,0.80) {decoder $D$};
+\draw[flow] (tune.east) -- (4.47,0.46) |- (dec.west);
+\foreach \lbl/\x [count=\i from 0] in {{$\hat z_{t+1}$}/4.75, {$z_{t+1}$}/5.25} {
+  \node[anchor=south, inner sep=1pt] (in\i) at (\x,0.985) {\lbl};
+  \draw[flow] (\x,0.985) -- (\x,0.885);
+  \draw[flow] (\x,0.715) -- (\x,0.635);
+}
+\draw[flow] (ddim.east) -- (4.75,1.137) -- (in0.north);
+\node[anchor=north, align=center, inner sep=0pt] at (4.72,0.62) {PSNR,\\LPIPS};
+\node[anchor=north east, align=right, inner sep=0pt] at (5.49,0.62) {reconstruction\\upper bound};
+\node[anchor=north west, inner sep=0pt] at (4.52,0.29) {directional check};
+\end{tikzpicture}
+\end{document}

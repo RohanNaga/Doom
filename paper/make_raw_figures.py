@@ -97,7 +97,9 @@ SIZES = {"raw_row": (5.5, 1.75), "raw_row_grid": (5.5, 3.0), "raw_figA_adapt_are
          "raw_fig3a_lpips": (2.25, 1.5),
          # the body candidates (Rohan chooses): the row with the backbones as (e, f) on a line beneath it (1.75 in of
          # row and 1.35 in of backbone panels with their key), and the separate figure
-         "raw_row_backbones": (5.5, 3.1), "raw_backbones_body": (5.5, 1.6)}
+         "raw_row_backbones": (5.5, 3.1), "raw_backbones_body": (5.5, 1.6),
+         # the row again at the 1.5 in height the page-4 fit may need (Rohan, Sep 28 evening): same panels and type
+         "raw_row_150": (5.5, 1.5)}
 UPPER = "reconstruction upper bound"             # never "ceiling" in a label
 IN_DISTRIBUTION = "training maps (in distribution)"
 BAND_LABEL = "train vs train $d$"               # the training maps' own d range (tools/family_step.py)
@@ -987,9 +989,10 @@ def fig_row(arenas, zero, adapted, ceilings, level, trajectories, colour_of, nam
     candidate) adds (e) and (f) on a line of their own under the unchanged row (six panels in one 5.5 in row leave
     the 13 arena numbers overlapping): the median raw PSNR and LPIPS of each backbone's adapter over the arenas they
     share, on their own y axes, from `backbones` = (curves, levels) as `fig_backbones` takes them, keyed below."""
-    stem = {"row": "raw_row", "grid": "raw_row_grid", "row_backbones": "raw_row_backbones"}[layout]
+    stem = {"row": "raw_row", "row_150": "raw_row_150", "grid": "raw_row_grid",
+            "row_backbones": "raw_row_backbones"}[layout]
     extra, subs = (), None
-    if layout == "row":
+    if layout in ("row", "row_150"):        # the same row; "row_150" only at the 1.5 in slot height
         fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=4, width_ratios=[1.6, 1.6, 0.8, 0.8], wspace=0.02)
     elif layout == "row_backbones":
         fig, subs, (pa, la, pc, lc), extra = row_backbones_figure(SIZES[stem], SIZES["raw_row"])
@@ -1386,7 +1389,7 @@ def main(argv=None):
 
     def colour_of(m):
         return shade_of.get(m, fs.BACKBONES["adapter"].colour)
-    for layout in ("row", "grid"):
+    for layout in ("row", "row_150", "grid"):
         written += fig_row(arenas, zero[PRIMARY], after, ceilings, level, trajectories, colour_of, named, a.out_dir,
                            layout=layout, key_colours=key_colours, headline=a.headline_step)
     written += fig_arenas_raw(arenas, trajectories, adaptation, level["psnr"], colour_of, a.out_dir, a.headline_step)

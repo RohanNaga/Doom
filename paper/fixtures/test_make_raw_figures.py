@@ -847,7 +847,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # only the merged row's panels are lettered (a to d, in both layouts); the single supplement panels carry none
     # the row, its grid layout, both backbone panels and the full fine-tune panel, then the two body candidates: the
     # row with the backbones as (e, f) and the separate backbone figure
-    assert letters == list("abcd") * 2 + list("ab") * 3 + list("abcdef") + list("ab")
+    assert letters == list("abcd") * 3 + list("ab") * 3 + list("abcdef") + list("ab")     # row, row_150, grid
     body = s["body_candidates"]
     assert body["arenas"] == [6] and body["drawn"] == ["unet_lora", "pixart_lora", "sd35_lora"]   # the LoRAs only
     assert body["stems"] == ["raw_row_backbones", "raw_backbones_body"]
