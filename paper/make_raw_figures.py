@@ -918,9 +918,8 @@ def merged_caption(names, home, directional, gstats, block_stats):
             "(groups: terciles of the zero-shot LPIPS rise"
             + ("; 8k: over the maps scored there" if partial_8k else "") + "). Directional "
             f"(ground truth {ref_train:.3f} / {ref_unseen:.3f}). Recovered: LPIPS rise and lost PSNR regained, "
-            "per map then median; PSNR shares above 100: the adapted map scores above the training-map level, "
-            "which happens on static maps whose absolute PSNR is high. Budget: first grid read recovering half "
-            "the rise.}\n")
+            "per map then median; PSNR shares above 100: static maps whose adapted PSNR passes the training-map "
+            "level. Budget: first grid read recovering half the rise.}\n")
 
 
 def groups_table(stats, stamp="", budgets_final=True, blocks=()):
