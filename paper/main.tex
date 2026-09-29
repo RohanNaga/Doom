@@ -106,7 +106,7 @@ We turn all three into next-tic world models under one shared recipe (Figure~\re
 
 \textbf{Metrics.} We score the part of each frame that shows the world (rows 0 to 207) and leave out the HUD rows below it, which do not change with the map.
 
-For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\citep{zhang2018lpips}. Absolute PSNR alone does not compare maps, because it rises with how static a recording is: copying the last context frame forward, the persistence baseline of video prediction~\citep{mathieu2016deep}, already scores 19.8~dB on the unseen maps (18.5 to 22.5 per map). For turning, we compute the \emph{directional} score: the fraction of turning windows whose predicted view turns the other way once we swap left and right in the newest control.
+For accuracy, we compute PSNR against the raw frame, and for realism, LPIPS~\citep{zhang2018lpips}. Absolute PSNR alone does not compare maps, because it rises with how static a recording is: copying the last context frame forward, the persistence baseline of video prediction~\citep{mathieu2016deep}, already scores 19.8~dB on the unseen maps (18.5 to 22.5 per map). For turning, we compute the \emph{directional} score: we predict each turning window twice, once with the recorded control and once with left and right swapped in the newest control, and report the fraction of windows whose predicted view turns the other way. A model that ignores the control scores 0, and the ground-truth frames turn the way their control says in 0.89 of the windows, which is the reference for the score (\appref{app:protocol}).
 
 \textbf{Decoder fine-tuning.} Every backbone is trained on latents from its frozen encoder, so the latent space is the contract between encoder, world model and decoder: changing the encoder would move every training target and invalidate the trained backbones, the adapters and the decoder's reconstruction scores.
 The decoder only renders: it sits after the model, and its own error is what its reconstruction score measures, so fine-tuning it changes what we can see, not what the model knows.
@@ -131,7 +131,7 @@ A map's budget is the first grid point at which it recovers at least half of its
 \section{Results}
 \label{sec:results}
 
-\textbf{The shift breaks the scene, not the controls.} On unseen maps the turn response survives (U-Net directional scores 0.73 to 0.86 per map against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
+\textbf{Zero-shot evaluation on unseen maps.} On unseen maps the turn response survives (U-Net directional scores 0.73 to 0.86 per map against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
 The appearance does not: the U-Net's scene PSNR falls from 25.2~dB on the training maps to a median 22.3~dB (20.5 to 24.7 per map) and its LPIPS rises from 0.158 to 0.303 (0.229 to 0.401).
 Pooled over the 13 unseen maps, one predicted frame in five has an LPIPS above 0.4, against one in 73 on the training maps; such frames concentrate in maps 16, 17, 13 and 1 (32 to 59 percent of their windows), while seven maps stay below 10 percent.
 The decoder is not the limit: it reconstructs the unseen maps nearly as well as the training maps (median 27.3 against 28.6~dB, LPIPS 0.05 to 0.09).
@@ -146,7 +146,7 @@ What the model keeps is how actions act on the world: zero-shot on map 7 the wea
 \label{fig:adapt}
 \end{figure}
 
-\textbf{How much adaptation: updates, episodes, parameters.}
+\textbf{Adaptation cost.}
 Eight episodes and 4k updates raise the median scene PSNR from 22.3 to 23.6~dB and lower the median LPIPS from 0.303 to 0.210 (Figure~\ref{fig:adapt}, Table~\ref{tab:cost}); the 8k check adds little (23.7~dB, 0.204).
 A map's budget, the first of the grid reads (50, 100, 150, 250, 500, 1k, 2k, 4k and 8k updates) at which it recovers half of its zero-shot rise in LPIPS over the training maps, has a median of 250 updates (100 to 8k per map, none censored; 12 of the 13 maps cross by 4k), and half of each map's 8k gain arrives within 100 updates on average.
 By the same 4k updates it recovers a median 72 percent of each map's rise in LPIPS over the training maps (at least 48 percent) and a median 48 percent of its lost scene PSNR (over 100 percent on maps 8, 9 and 10, whose static recordings already sit near the training maps' PSNR).

@@ -36,6 +36,8 @@ Updates per second & 1.78 to 1.83 & about 1.4 & 0.50 to 0.55 \\
 \label{fig:training-curves}
 \end{figure}
 
+\textbf{Directional score.} A turning window is a validation window whose newest control holds exactly one of turn left and turn right and no strafe. We predict each window twice from the same context and the same noise (DDIM, $\eta = 0$), once with the recorded controls and once with turn left and turn right swapped in the newest control only, so the two predictions differ only through the control. For each prediction we measure the horizontal shift of its content against the last context frame: the peak of a normalised cross-correlation over shifts of up to 32 pixels on rows 48 to 120 of the frame, above the weapon and away from the HUD, refined to sub-pixel precision. One tic of turning moves the view 5 to 20 pixels, and shifts under one pixel count as no motion. The directional score is the fraction of windows whose shift changes sign under the swap, on 128 turning windows per map. Copying the last context frame scores 0 by construction. Measured on the ground-truth next frames, the shift has the sign the control implies in 0.885 of the training-map windows and 0.892 of the unseen-map windows, which is the reference for the models' scores.
+
 \textbf{Sampler.} Fewer DDIM steps land nearer the conditional mean, which wins PSNR and loses LPIPS. U-Net 200k, non-EMA weights, one tic, training-map windows, linear spacing: 4 steps 22.35~dB / 0.272, 8 steps 22.34 / 0.199, 10 steps 22.29 / 0.186, 16 steps 22.20 / 0.171, 50 steps 22.04 / 0.162. Every number in the paper uses 10 steps.
 
 \section{Per-arena zero-shot scores}
