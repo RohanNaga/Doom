@@ -1,0 +1,8 @@
+% Results' zero-shot paragraph before it was condensed on Sep 29 2026 (Rohan)
+\textbf{Zero-shot evaluation on unseen maps.} On unseen maps the turn response survives (U-Net directional scores 0.73 to 0.86 per map against 0.79 to 0.91 in distribution; Table~\ref{tab:unseen}).
+The appearance does not: the U-Net's scene PSNR falls from 25.2~dB on the training maps to a median 22.3~dB (20.5 to 24.7 per map) and its LPIPS rises from 0.158 to 0.303 (0.229 to 0.401).
+Pooled over the 13 unseen maps, one predicted frame in five has an LPIPS above 0.4, against one in 73 on the training maps; such frames concentrate in maps 16, 17, 13 and 1 (32 to 59 percent of their windows), while seven maps stay below 10 percent.
+The decoder is not the limit: it reconstructs the unseen maps nearly as well as the training maps (median 27.3 against 28.6~dB, LPIPS 0.05 to 0.09).
+Architecture does not change what survives the shift: in distribution the U-Net's and PixArt-$\alpha$'s scene PSNR differs by 0.02~dB and their LPIPS by 0.001, and the three backbones lose the same things (Table~\ref{tab:unseen}; \appref{app:distance}): scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136, so across our three backbones the shift looks like a property of the task, not of the architecture or the scale.
+It is a step, not a slope: every unseen map has a worse LPIPS than every training map for all three backbones (\appref{app:distance}).
+What the model keeps is how actions act on the world: zero-shot on map 7 the weapon fires and the view advances as in the ground truth (Figure~\ref{fig:teaser}); the loss sits in the scene, whose rows fall 2.9~dB while the map-independent HUD rows fall 0.2~dB (29.7 to 29.5).

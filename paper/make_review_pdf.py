@@ -58,7 +58,10 @@ STATUS = [
     ("As a baseline, we fine-tune all of the U-Net", DONE),
     ("\\textbf{In-distribution vs.", DONE),
     ("\\textbf{Zero-shot vs.\\ adapted results per unseen map.}", DONE),   # Figure 3 caption, his title                          # Table 1 caption, his title
-    ("Architecture does not change what survives the shift", CONFIRM),
+    ("\\textbf{Zero-shot evaluation on unseen maps.}", CONFIRM),      # condensed on his outline
+    ("Control survives:", CONFIRM),
+    ("The scene does not:", CONFIRM),
+    ("The loss is nearly the same for all three", CONFIRM),
 ]
 SPLIT_BEFORE = ["To test control, we swap turn-left", "This raises the scene reconstruction"]   # a status change inside one source line
 COLORS = {DONE: "reviewdone", CONFIRM: "reviewconfirm"}

@@ -88,6 +88,8 @@ PixArt-$\alpha$ & training & 24.49 & 0.194 \\
 \end{tabular}
 \end{table}
 
+\textbf{Where the loss sits.} Pooled over the 13 unseen maps, one frame in five predicted by the U-Net has an LPIPS above 0.4, against one in 73 on the training maps; such frames concentrate in maps 16, 17, 13 and 1 (32 to 59 percent of their windows), while seven maps stay below 10 percent. The loss is in the scene: the scene rows fall 2.9~dB (25.2 to a median 22.3) while the HUD rows, which do not change with the map, fall 0.2~dB (29.7 to 29.5). Zero-shot on map 7 the weapon fires and the view advances as in the ground truth (Figure~\ref{fig:teaser}).
+
 \textbf{What the variation between maps follows.} Across the 13 unseen maps the model's absolute scene PSNR tracks how static the recordings are (Spearman 0.95 with the PSNR of the last frame copied forward), which is why every map is read against the same model's in-distribution level. On the full frame the 32 HUD rows, which the stock decoder renders at about 18~dB and which barely change from one tic to the next (the previous frame matches them at 88 to 99~dB), carry 37 to 62 percent of the stock decoder's reconstruction error per map; every pixel score in the paper therefore uses the scene rows. The fine-tuned decoder raises the model's raw scene PSNR by 0.24 to 0.71~dB (median 0.35) and lowers its LPIPS on all 13 unseen maps (by 0.019 to 0.044).
 
 \section{The distance}
