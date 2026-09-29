@@ -16,11 +16,11 @@ Easy (7, 9, 10, 11) & 23.38 & 24.92 & 24.99 & 0.255 & 0.170 & 0.165 & 87 & 173 &
 \midrule
 All 13 & 22.30 & 23.60 & 23.69 & 0.303 & 0.210 & 0.204 & 72 & 48 & 250 \\
 \midrule
-U-Net full fine-tune (7 of 13) & 22.30 & 23.98 & 26.51 & 0.277 & 0.172 & 0.146 & 89 & 60 & ${\le}$4k \\
-PixArt-$\alpha$ LoRA (all 13) & 22.38 & 23.72 & 23.31 & 0.285 & 0.204 & 0.203 & 76 & 48 & 250 \\
+U-Net full fine-tune (8 of 13) & 22.81 & 24.11 & 25.45 & 0.278 & 0.172 & 0.148 & 89 & 57 & ${\le}$4k \\
+PixArt-$\alpha$ LoRA (all 13) & 22.38 & 23.72 & 23.13 & 0.285 & 0.204 & 0.202 & 76 & 48 & 250 \\
 SD 3.5 LoRA (all 13) & 22.09 & 23.83 & 23.58 & 0.262 & 0.165 & 0.149 & 76 & 50 & 250 \\
 \bottomrule
 \end{tabular}
-% U-Net full fine-tune (7 of 13): maps 6, 7, 8, 9, 10, 11, 16; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 7 maps; against the adapter's 23.60 dB / 0.189 and 77 percent (LPIPS) / 48 percent (PSNR) recovered on the same maps 6, 7, 8, 9, 10, 11, 16, budget 150; zero-shot of maps 6, 7, 8, 9, 10, 11, 16 from the U-Net LoRA's step 0 (the same checkpoint and windows); budget grid starts at 4k: ${\le}$4k means reached by 4k, the rule cannot resolve finer; 8k over the 3 maps scored there so far (9, 10, 11)
-% PixArt-$\alpha$ LoRA (all 13): maps 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 13 maps; 8k over the 5 maps scored there so far (1, 6, 13, 14, 15); full grid (every read 0 to 8k) on maps 1, 6, 13, 14, 15
+% U-Net full fine-tune (8 of 13): maps 6, 7, 8, 9, 10, 11, 12, 16; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 8 maps; against the adapter's 23.91 dB / 0.190 and 75 percent (LPIPS) / 48 percent (PSNR) recovered on the same maps 6, 7, 8, 9, 10, 11, 12, 16, budget 150--250; zero-shot of maps 6, 7, 8, 9, 10, 11, 12, 16 from the U-Net LoRA's step 0 (the same checkpoint and windows); budget grid starts at 4k: ${\le}$4k means reached by 4k, the rule cannot resolve finer; 8k over the 4 maps scored there so far (9, 10, 11, 12)
+% PixArt-$\alpha$ LoRA (all 13): maps 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17; decoder sha256:21b26edf65b301e0685b3b24ddbe29e379a6c2f54ac60b9c516e8f635b38f646, reads raw, 13 maps; 8k over the 6 maps scored there so far (1, 6, 7, 13, 14, 15); full grid (every read 0 to 8k) on maps 1, 6, 7, 13, 14, 15
 % SD 3.5 LoRA (all 13): maps 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17; decoder sha256:a8d22f2af42b10dd322ce0fa823403cedbe350b6375150d2e9a22a600add1d05, reads raw, 13 maps; budget at the first point of its grid for maps 6, 7, 9, 10, 12, 17 (250), where the rule cannot resolve finer; 8k over the 2 maps scored there so far (11, 16); full grid (every read 0 to 8k) on maps 11, 16; partial rerun on maps 15
