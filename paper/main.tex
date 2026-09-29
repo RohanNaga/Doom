@@ -135,7 +135,7 @@ Control survives: the directional score goes from 0.84 to 0.86 on the training m
 The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5, and every unseen map has a worse LPIPS than every training map (\appref{app:distance}).
 The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
 
-\begin{figure}[t]
+\begin{figure}[b]
 \centering
 \figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{3.0in}{Figure 3: the shift and its repair}
 \caption{\textbf{Zero-shot vs.\ adapted results per unseen map.} (a, b) Scene PSNR and LPIPS, zero-shot (open) and after 4k updates (filled); dashed: in distribution. (c, d) Medians against adapter updates.}
