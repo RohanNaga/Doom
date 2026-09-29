@@ -12,8 +12,8 @@ Every figure and generated table in the paper reports raw scene quantities (Roha
 - **Steps**: 4k adapter updates is the headline (filled marks); 8k is the check. Adapter reads use non-EMA weights.
 - **Deficit**: a map's zero-shot PSNR deficit is its backbone's in-distribution PSNR minus its zero-shot PSNR (`psnr_deficit`); its LPIPS rise is zero-shot LPIPS minus the in-distribution LPIPS (`lpips_rise`).
 - **Recovered shares**: per map, then the median: (LPIPS at 0 − LPIPS at 4k) / LPIPS rise and (PSNR at 4k − PSNR at 0) / PSNR deficit (`lpips_share_4k`, `psnr_share_4k`; a map with no deficit is left out).
-- **Groups**: terciles of the zero-shot PSNR deficit against the training maps, split 4, 5, 4: hard 6, 7, 13, 17; medium 1, 11, 14, 15, 16; easy 8, 9, 10, 12.
-- **Budget**: the first grid read at which a map recovers at least half of its zero-shot PSNR deficit (`psnr_threshold`, rule `half_psnr_deficit`); censored prints as ">8k" or ">4k" at the grid's last read; a map that crosses at the first point of its grid is listed in the table's comment line; a block scored only at 0 and 4k prints "≤4k".
+- **Groups**: terciles of the zero-shot LPIPS rise over the training maps (Rohan, Sep 29 00:30: the budget's own quantity), split 4, 5, 4: hard 1, 13, 16, 17; medium 6, 8, 12, 14, 15; easy 7, 9, 10, 11.
+- **Budget**: the first grid read at which a map recovers at least half of its zero-shot LPIPS rise (`lpips_threshold`, rule `half_lpips_rise`); censored prints as ">8k" or ">4k" at the grid's last read; a map that crosses at the first point of its grid is listed in the table's comment line; a block scored only at 0 and 4k prints "≤4k". Table 2 no longer carries the "U-Net LoRA (6, 7, 8, 16)" row: the full fine-tune's comment line (and the caption) carry the adapter's matched numbers on the same four maps.
 - **GPU-hours** are reported per card (A6000 on Spiderman, A4000 on Superman), never as one median (`gpu_hours_headline_by_card`).
 
 Every number drawn or tabled by the generator is in `paper/tables/tuned/raw_summary.json`, with the sha256 of every input file.
@@ -71,21 +71,20 @@ It writes `paper/figures/raw/`, `paper/tables/tuned/{adapt_groups,adapt_perarena
 
 U-Net (Figure 3, Table 2 "All 13"): training maps 25.20 dB and LPIPS 0.158; zero-shot 22.30 and 0.303; after 4k 23.60 and 0.210; the 8k check 23.69 and 0.204. 3 of 13 maps reach the training maps' PSNR at 4k and 0 their LPIPS.
 
-Budgets under the PSNR-deficit rule (Sep 28 night; the old rule, half of the excess gap to the upper bound, in brackets): U-Net all 13 >8k with 7 of 13 censored (was 150); groups hard (6, 7, 13, 17) >8k, 4 censored (was 1k–2k on 7, 11, 14, 15), medium (1, 11, 14, 15, 16) 8k, 2 censored (was 150 on 8, 9, 10, 13, 17), easy (8, 9, 10, 12) 50–100, 1 censored (was 100 on 1, 6, 12, 16); per map 1: 8k, 6: censored, 7: censored, 8: 100, 9: 50, 10: 50, 11: 8k, 12: censored, 13: censored, 14: 8k, 15: censored, 16: censored, 17: censored. Half of the deficit is recovered by 4k on 3 maps and by 8k on 6. The alternative Rohan is weighing, half of the LPIPS rise: all 13 at 250 with none censored (12 by 4k; map 1 at 8k), groups 250 / 250 / 250, PixArt 250 (map 1 censored), SD 3.5 250 (9 maps at its grid's first point), the U-Net LoRA on 6, 7, 8, 16 150–250, the full fine-tune ≤4k on all four.
+Budgets under the LPIPS-rise rule (Rohan, Sep 29 00:30; 99c6e0bb): U-Net all 13 at 250, none censored (12 maps by 4k, map 1 at 8k); groups hard (1, 13, 16, 17) 250–2k, medium (6, 8, 12, 14, 15) 250, easy (7, 9, 10, 11) 150, so easy maps are quick and hard maps slower; per map 1: 8k, 6: 250, 7: 150, 8: 4k, 9: 250, 10: 150, 11: 150, 12: 250, 13: 2k, 14: 1k, 15: 250, 16: 100, 17: 250. For the record, the two earlier rules gave: half of the excess gap to the upper bound (until Sep 28 evening) all 13 at 150, groups 1k–2k / 150 / 100 on gap-ordered members; half of the zero-shot PSNR deficit (Sep 28 night, a3c1b2fc) all 13 >8k with 7 of 13 censored.
 
-| Table 2 block | maps | PSNR 0 / 4k | LPIPS 0 / 4k | shares LPIPS / PSNR | budget (PSNR deficit) | GPU-hours to 4k |
+| Table 2 block | maps | PSNR 0 / 4k | LPIPS 0 / 4k | shares LPIPS / PSNR | budget (LPIPS rise) | GPU-hours to 4k |
 |---|---|---|---|---|---|---|
-| U-Net LoRA | 4 of 4 (6, 7, 8, 16) | 21.71 / 22.88 | 0.292 / 0.209 | 71 / 41 | >8k, 3 of 4 censored (map 8 at 100) | A4000 1.10 (n 4) |
-| U-Net full fine-tune | 4 of 4 (6, 7, 8, 16) | 21.71 / 23.11 | 0.292 / 0.182 | 87 / 46 | ≤4k on 7 and 8, >4k on 6 and 16 | A6000 0.83 (n 4) |
-| PixArt-α LoRA | 13 of 13 (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) | 22.38 / 23.72 | 0.285 / 0.205 | 76 / 48 | >4k, 9 of 13 censored (8, 9, 10 at 50, 1 at 4k) | A6000 0.88 (n 13) |
-| SD 3.5 LoRA | 13 of 13 (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) | 22.09 / 24.00 | 0.262 / 0.165 | 77 / 50 | 4k, 6 of 13 censored (8, 9, 10 at 250, the first point of its grid) | A4000 3.35 (n 9); A6000 1.33 (n 4) |
+| U-Net full fine-tune | 4 of 4 (6, 7, 8, 16) | 21.71 / 23.11 | 0.292 / 0.182 | 87 / 46 | ≤4k (scored at 0 and 4k); the adapter on the same maps: 22.88 / 0.209, 71 / 41, budget 150–250 (comment line, not a row) | A6000 0.83 (n 4) |
+| PixArt-α LoRA | 13 of 13 (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) | 22.38 / 23.72 | 0.285 / 0.205 | 76 / 48 | 250, 1 of 13 censored (map 1 at its 4k grid) | A6000 0.88 (n 13) |
+| SD 3.5 LoRA | 13 of 13 (1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17) | 22.09 / 24.00 | 0.262 / 0.165 | 77 / 50 | 250, none censored; 6, 7, 9, 10, 11, 12, 15, 16, 17 cross at 250, the first point of its grid | A4000 3.35 (n 9); A6000 1.33 (n 4) |
 
 Shared-map medians (the body candidates; 13 maps: 1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17), zero-shot to 4k:
 - U-Net: PSNR 22.30 to 23.60 dB, LPIPS 0.303 to 0.210.
 - PixArt-α: PSNR 22.38 to 23.72 dB, LPIPS 0.285 to 0.205.
 - SD 3.5: PSNR 22.09 to 24.00 dB, LPIPS 0.262 to 0.165.
 
-SD 3.5 per-map budgets (PSNR deficit): 1: 4k, 6: censored, 7: 1k, 8: 250, 9: 250, 10: 250, 11: 500, 12: censored, 13: censored, 14: 4k, 15: censored, 16: censored, 17: censored (its grid starts at 250, so 8, 9 and 10 are floors).
+SD 3.5 per-map budgets (LPIPS rise): 1: 4k, 6: 250, 7: 250, 8: 1k, 9: 250, 10: 250, 11: 250, 12: 250, 13: 500, 14: 500, 15: 250, 16: 250, 17: 250 (its grid starts at 250, so the nine 250s are floors). PixArt-α per map: 1: censored, 6: 250, 7: 150, 8: 1k, 9: 150, 10: 100, 11: 100, 12: 250, 13: 1k, 14: 500, 15: 250, 16: 100, 17: 150.
 
 Recovered shares at 4k (`blocks.<key>.shares` in `raw_summary.json`; per-map shares, then the median, LPIPS / PSNR): U-Net 72 / 48, PixArt-α 76 / 48, SD 3.5 77 / 50; on the comparator maps the U-Net LoRA 71 / 41 and the full fine-tune 87 / 46. The shares do not depend on the budget rule. The text quotes the first three rows and the two LPIPS shares of the comparison.
 

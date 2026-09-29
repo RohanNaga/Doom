@@ -200,12 +200,12 @@ def test_means_by_map_leave_duplicates_out_and_group_by_the_map_column(tmp_path)
     assert got[2]["scene_psnr_raw_tuned"] == pytest.approx(20.1) and got[2]["n"] == 3
 
 
-def test_the_budget_is_the_first_read_recovering_half_of_the_psnr_deficit_and_censored_otherwise():
-    # zero-shot 18, training maps 22: the deficit is 4 dB, half of it is recovered at 20 (Rohan, Sep 28 night)
-    assert mrf.psnr_threshold(18.0, 22.0) == pytest.approx(20.0)
-    assert mrf.budget_step([(4000, 19.0), (8000, 20.5)], 20.0) == 8000
-    assert mrf.budget_step([(8000, 20.0), (4000, 20.0)], 20.0) == 4000                # reaching counts
-    assert mrf.budget_step([(4000, 19.0), (8000, 19.9)], 20.0) is None                 # censored
+def test_the_budget_is_the_first_read_recovering_half_of_the_lpips_rise_and_censored_otherwise():
+    # zero-shot LPIPS 0.30, training maps 0.15: the rise is 0.15, half of it is recovered at 0.225 (Rohan, Sep 29)
+    assert mrf.lpips_threshold(0.30, 0.15) == pytest.approx(0.225)
+    assert mrf.budget_step([(4000, 0.23), (8000, 0.22)], 0.225) == 8000
+    assert mrf.budget_step([(8000, 0.225), (4000, 0.225)], 0.225) == 4000              # reaching counts
+    assert mrf.budget_step([(4000, 0.23), (8000, 0.226)], 0.225) is None               # censored
     # a share: recovered over the deficit, None when there is no deficit to recover
     assert mrf.share(1.0, 4.0) == pytest.approx(0.25) and mrf.share(1.0, 0.0) is None and mrf.share(None, 4.0) is None
 
@@ -393,34 +393,33 @@ def test_a_full_fine_tune_without_its_step_0_read_borrows_the_lora_one_only_from
 
 
 def test_a_block_scored_only_at_0_and_4k_prints_its_budget_as_at_most_4k():
-    def arena(p4):
-        return {"grid": [0, 4000], "gpu_hours": {}, "reads": {0: {"quantity": "raw", "psnr": 20.0, "lpips": 0.3,
-                                                                  "upper": 26.0},
-                                                              4000: {"quantity": "raw", "psnr": p4, "lpips": 0.2,
-                                                                     "upper": 26.0}}}
-    # training maps at 23, zero-shot 20: half of the 3 dB deficit is recovered at 21.5, by 4k at 22, not at 21
+    def arena(l4):
+        return {"grid": [0, 4000], "gpu_hours": {}, "reads": {0: {"quantity": "raw", "psnr": 20.0, "lpips": 0.3},
+                                                              4000: {"quantity": "raw", "psnr": 22.0, "lpips": l4}}}
+    # training maps at 0.15, zero-shot 0.30: half of the rise is recovered at 0.225, by 4k at 0.22, not at 0.23
     empty = {"arenas": [], "n": 0, "budget_middle": None, "censored": None, **dict.fromkeys(
         ("psnr_zero_shot", "psnr_4k", "psnr_8k", "lpips_zero_shot", "lpips_4k", "lpips_8k", "lpips_share_4k",
          "psnr_share_4k"))}
     stats = {g: empty for g in list(mrf.GROUP_NAMES) + ["all"]}
 
     def cell(data):
-        b = mrf.block_summary(data, [6, 7, 8, 16], (23.0, 0.15), 4000)
+        b = mrf.block_summary(data, [6, 7, 8, 16], (22.0, 0.15), 4000)
         tex = mrf.groups_table(stats, budgets_final=False, blocks=[("U-Net full fine-tune (x)", b, "sha256:t")])
         row = next(ln for ln in tex.splitlines() if ln.startswith("U-Net full fine-tune"))
         return b, row.split(" & ")[-1].rstrip(" \\"), tex
-    b, budget, tex = cell({8: arena(22.0)})
+    b, budget, tex = cell({8: arena(0.22)})
     assert b["coarse_grid"] is True and budget == "${\\le}$4k"
     assert "budget grid 0 and 4k only" in tex
-    _, budget, _ = cell({8: arena(21.0)})
+    _, budget, _ = cell({8: arena(0.23)})
     assert budget == "${>}$4k; 1 of 1 censored"                    # not reached by 4k: above 4k, never above 8k
-    _, budget, _ = cell({8: arena(22.0), 16: arena(22.0), 6: arena(21.0)})
+    _, budget, _ = cell({8: arena(0.22), 16: arena(0.22), 6: arena(0.23)})
     assert budget == "${\\le}$4k; 1 of 3 censored"
-    # a finer grid keeps the rule's own label
-    fine = {8: {**arena(22.0), "grid": [0, 250, 4000]}}
-    fine[8]["reads"][250] = {"quantity": "raw", "psnr": 21.8, "lpips": 0.25, "upper": 26.0}
+    # a finer grid keeps the rule's own label, and a crossing at the grid's first read is named
+    fine = {8: {**arena(0.22), "grid": [0, 250, 4000]}}
+    fine[8]["reads"][250] = {"quantity": "raw", "psnr": 21.8, "lpips": 0.22}
     b, budget, tex = cell(fine)
     assert b["coarse_grid"] is False and budget == "250" and "budget grid 0 and 4k only" not in tex
+    assert b["budget_at_first_read"] == [8] and "first point of its grid (250) for maps 8" in tex
 
 
 def test_the_full_fine_tune_panel_waits_for_every_comparator_arena_the_lora_has():
@@ -688,15 +687,15 @@ def test_arenas_group_by_zero_shot_psnr_four_five_four_and_the_table_lists_them(
     assert "& fine-tune" not in tex and "Full \\\\" not in tex   # the full fine-tune is a row block now, not a column
     assert "${>}$8k; 4 of 4 censored" in tex
     assert "arena" not in tex.lower() and "ceiling" not in tex.lower() and "upper bound" not in tex
-    assert "half the deficit" in tex and "Unseen maps (by zero-shot deficit)" in tex
+    assert "half the rise" in tex and "Unseen maps (by zero-shot LPIPS rise)" in tex
     # the shares print as whole percents: the hard group regains 2 of 15 to 12 dB (13 to 17 percent, median 15)
     hard = next(ln for ln in tex.splitlines() if ln.startswith("Hard"))
     assert hard.rstrip(" \\\\").split(" & ")[-3:-1] == ["50", "15"]
     # until every grid step has a raw read, the budget cells wait
     assert "${>}$8k" not in mrf.groups_table(stats, budgets_final=False)
-    # by the zero-shot deficit against the training maps, the largest deficit is the hardest
-    deficit = {a: 20.0 - i for i, a in enumerate(ALL_13)}                # map 1 has the largest deficit
-    assert mrf.group_arenas(deficit, higher_is_harder=True)[0] == ("hard", [1, 6, 7, 8])
+    # by the zero-shot LPIPS rise over the training maps, the largest rise is the hardest
+    rise = {a: 0.20 - 0.01 * i for i, a in enumerate(ALL_13)}            # map 1 has the largest rise
+    assert mrf.group_arenas(rise, higher_is_harder=True)[0] == ("hard", [1, 6, 7, 8])
     # an empty group (fewer than three arenas) prints dashes, not a crash
     two = mrf.group_stats(mrf.group_arenas({6: 1.0, 9: 2.0}), {a: per[a] for a in (6, 9)})
     assert "--" in mrf.groups_table(two)
@@ -739,17 +738,19 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     s = json.load(open(side))
     # the step without persistence: every arena below every training map in PSNR and above in LPIPS, all backbones
     assert all(s["step"][b]["psnr"]["holds"] and s["step"][b]["lpips"]["holds"] for b in mrf.BACKBONES)
-    # the budget recovers half of the zero-shot PSNR deficit against the training maps' level (22.45 dB)
+    # the budget recovers half of the zero-shot LPIPS rise over the training maps' level (0.150)
     home_psnr = sum(22.0 + 0.3 * (m - 2) for m in TRAINING) / 4
     ab = s["adaptation"]
-    assert ab["rule"] == "half_psnr_deficit" and ab["in_distribution"]["psnr"] == pytest.approx(home_psnr)
+    assert ab["rule"] == "half_lpips_rise" and ab["in_distribution"] == {"psnr": pytest.approx(home_psnr),
+                                                                          "lpips": pytest.approx(0.15)}
     assert ab["per_arena"]["6"]["psnr_deficit"] == pytest.approx(home_psnr - 18.0)
-    assert ab["per_arena"]["6"]["threshold"] == pytest.approx((18.0 + home_psnr) / 2)    # 20.225: 4k (19.0) short
-    assert ab["per_arena"]["6"]["budget"] == 8000 and ab["per_arena"]["9"]["budget"] == 4000
-    assert (ab["past_half_by_4k"], ab["past_half_by_8k"]) == (1, 2) and ab["grid_complete"] is False
-    assert ab["median_budget"] == {"value": 6000.0, "censored": False, "label": "6000"}
-    # maps group and colour by the zero-shot PSNR deficit against the training maps (map 6: 4.45, map 9: 3.45)
-    assert s["group_key"] == "zero-shot PSNR deficit against the training maps (dB)"
+    assert ab["per_arena"]["6"]["lpips_rise"] == pytest.approx(0.15)
+    assert ab["per_arena"]["6"]["threshold"] == pytest.approx(0.225)        # 4k (0.22) crosses; map 9: 0.205, 0.19
+    assert ab["per_arena"]["6"]["budget"] == 4000 and ab["per_arena"]["9"]["budget"] == 4000
+    assert (ab["past_half_by_4k"], ab["past_half_by_8k"]) == (2, 2) and ab["grid_complete"] is False
+    assert ab["median_budget"] == {"value": 4000, "censored": False, "label": "4000"}
+    # maps group and colour by the zero-shot LPIPS rise over the training maps (map 6: 0.15, map 9: 0.11)
+    assert s["group_key"] == "zero-shot LPIPS rise over the training maps"
     assert s["groups"]["all"]["n"] == 2 and s["groups"]["all"]["lpips_share_4k"] == pytest.approx(
         (0.08 / 0.15 + 0.07 / 0.11) / 2)
     assert "upper_bound" not in s["definitions"] and "ceiling_psnr" not in s["zero_shot"]["unet200k_ema"]["6"]
@@ -771,24 +772,28 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     # Table 2's per-backbone blocks at the 4k headline; the full fine-tune column is gone (its rows carry it)
     assert "& fine-tune \\\\" not in tex and "\\tbd{} (6" not in tex
     lines = {line.split(" & ")[0]: line for line in tex.splitlines() if " & " in line}
-    assert "U-Net LoRA (1 of 4)" in lines
+    assert "U-Net LoRA (1 of 4)" not in lines                          # the adapter row left Table 2 (Sep 29)
     # the full fine-tune's arena 6 has its 4k read and the U-Net LoRA's step 0 (the same checkpoint): 1 of 4
     ft = lines["U-Net full fine-tune (1 of 4)"]
     assert " & 18.00 & 23.00 & " in ft and "zero-shot of maps 6 from the U-Net LoRA's step 0" in tex
     assert ft.endswith(" & ${\\le}$4k \\\\")                          # scored at 0 and 4k only
+    # the caption's comparison: the adapter's own reads on the same maps, in the table's comment line
+    assert "against the adapter's 19.00 dB / 0.220 and 53 percent (LPIPS) / 22 percent (PSNR) recovered on the " \
+        "same maps 6" in tex
+    assert s["blocks"]["unet_full"]["matched_adapter"]["arenas"] == [6]
     px = lines["PixArt-$\\alpha$ LoRA (all 2)"]
     assert " & 20.70 & " in px and px.split(" & ")[3] == "--"                         # 4k median; its grid stops at 4k
     sd = lines["SD 3.5 LoRA (1 of 2)"]
     assert " & 19.50 & " in sd and "\\tbd{}" in sd                                    # budget waits on its grid
     # the arena lists live in the comment lines under the table
     assert "% SD 3.5 LoRA (1 of 2): maps 6; decoder sha256:sd35tuned" in tex
-    assert "% U-Net LoRA (1 of 4): maps 6; decoder" in tex
+    assert "% U-Net LoRA (1 of 4)" not in tex                         # its row and comment line are gone
     blocks = s["blocks"]
     assert blocks["pixart_lora"]["quantity"] == "raw" and blocks["pixart_lora"]["decoder"] == "tuned"
-    # PixArt's map 6 never recovers half of its 4.45 dB deficit on its 4k grid (20.2 against a 20.425 threshold),
-    # map 9 does at 4k: the pair prints as "4k--${>}$4k" with one censored
-    assert blocks["pixart_lora"]["budget_final"] is True and blocks["pixart_lora"]["budget_middle"] == [4000, None]
-    assert blocks["pixart_lora"]["censored"] == 1 and " & 4k--${>}$4k; 1 of 2 censored \\\\" in px
+    # neither PixArt map recovers half of its LPIPS rise on its 4k grid (0.26 against 0.225, 0.22 against 0.205):
+    # censored at the grid's last read
+    assert blocks["pixart_lora"]["budget_final"] is True and blocks["pixart_lora"]["budget_middle"] == [None]
+    assert blocks["pixart_lora"]["censored"] == 2 and " & ${>}$4k; 2 of 2 censored \\\\" in px
     assert blocks["pixart_lora"]["gpu_hours_headline_by_card"] == {
         "A6000": {"median": pytest.approx(1.5), "n": 2, "arenas": [6, 9]}}
     # SD 3.5's own fine-tuned decoder has no training-map read: no in-distribution level, so no budget and no
@@ -887,21 +892,21 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert ft["labels"] == ["U-Net LoRA (1)", "full fine-tune (0, 4k)"]
     # the appendix's per-map table: the deficit, its threshold, the shares, the reads, the guards
     per = s["per_arena_table"]
-    assert per["6"]["psnr_deficit"] == pytest.approx(home_psnr - 18.0)
-    assert per["6"]["threshold"] == pytest.approx((18.0 + home_psnr) / 2)
+    assert per["6"]["psnr_deficit"] == pytest.approx(home_psnr - 18.0) and per["6"]["lpips_rise"] == pytest.approx(0.15)
+    assert per["6"]["threshold"] == pytest.approx(0.225)
     assert per["6"]["lpips_share_4k"] == pytest.approx(0.08 / 0.15) and per["9"]["psnr_share_4k"] == pytest.approx(
         4.5 / (home_psnr - 19.0))
     assert per["6"]["forgetting_dec"] == pytest.approx(-1.0) and per["9"]["forgetting_dec"] == pytest.approx(-0.5)
     assert (per["6"]["directional_0"], per["6"]["directional_8k"]) == (pytest.approx(0.80), pytest.approx(0.85))
     rows = open(tables / "adapt_perarena.tex").read()
     assert "\\tbd" in rows and "$-$1.00" in rows and "0.85" in rows and "decoded" in rows
-    assert "Deficit" in rows and "upper" not in rows.lower() and "gap" not in rows.lower()
+    assert "LPIPS & & " in rows and "& rise & Budget" in rows and "upper" not in rows.lower() and "gap" not in rows.lower()
     # legends: the marks and the colour key on the row (both layouts), the backbones and the band on the step panels
     shown = [g for g in ("hard", "medium", "easy") if s["groups"][g]["n"]]      # two arenas: medium only
     assert shown == ["medium"]
     for stem in ("raw_row", "raw_row_grid"):
         for text in ["zero-shot", "after 4k updates", "training maps (in distribution)",
-                     "zero-shot PSNR deficit against the training maps:"] + shown:
+                     "zero-shot LPIPS rise over the training maps:"] + shown:
             assert text in legends[stem], (stem, text)
         assert not any("upper bound" in t for t in legends[stem]), stem
         assert not {"hard", "easy"} & set(legends[stem])               # an empty group gets no swatch
@@ -911,9 +916,9 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     t = s["text_numbers"]
     assert t["provisional"] is True and t["pending"]["forgetting"] and t["pending"]["gain_step"]
     assert t["past_threshold_by_8k"]["count"] == 2 and len(t["past_threshold_by_8k"]["interval"]) == 2
-    assert t["past_threshold_by_4k"]["count"] == 1
     assert t["median_lpips_share_4k"]["value"] == pytest.approx((0.08 / 0.15 + 0.07 / 0.11) / 2)
-    assert t["median_psnr_share_4k"]["n"] == 2 and t["median_budget"]["value"] == 6000.0
+    assert t["median_psnr_share_4k"]["n"] == 2 and t["median_budget"]["value"] == 4000
+    assert t["past_threshold_by_4k"]["count"] == 2
     # the share of each arena's 0-to-8k raw gain in place by 4k, averaged: (1/4.5 + 4.5/5) / 2
     assert t["gain_share_by_step"]["4000"] == pytest.approx((1.0 / 4.5 + 4.5 / 5.0) / 2)
     assert set(t["spearman_S0"]) == {"lpips_share_4k", "gain_8k", "budget"}   # two maps: no rho yet
