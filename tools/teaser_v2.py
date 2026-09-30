@@ -253,6 +253,58 @@ def variant_a(restart_root, rows, out_dir, horizon=DEFAULT_HORIZON, height=1.5, 
     return save(s, out_dir, stem, record), record
 
 
+def variant_d(restart_root, rows, out_dir, horizon=DEFAULT_HORIZON, height=1.55, stem="fig1_vD", numbers=True):
+    """Two rows (one per action), five frames each at +`horizon` tics: training map (prediction, ground truth), then
+    the unseen map (zero-shot, adapted, ground truth). The pictures take the space (Rohan, Sep 29 night): no
+    outlines, boxes or arrows, two small header lines, a small italic row label, and the scene PSNR as small text
+    inside each predicted frame's corner (`numbers`). The frames are as wide as the text width allows at `height`."""
+    import matplotlib.patheffects as pe
+    ms = [(a, moment(restart_root, u), moment(restart_root, h)) for a, u, h in rows]
+    aspect = aspect_of(ms[0][1])
+    n = len(ms)
+    gutter, group_gap, row_gap = 2 / 72, 8 / 72, 4 / 72
+    head = TOP + 2 * LINE + 1 / 72
+    label_w = max(ct.text_width(a, style="italic") for a, _, _ in ms) + 5 / 72
+    fw = (fs.TEXT_WIDTH - label_w - 3 * gutter - group_gap) / 5
+    fh = fw * aspect
+    if head + n * fh + (n - 1) * row_gap > height:            # the height binds: shrink the frames to it
+        fh = (height - head - (n - 1) * row_gap) / n
+        fw = fh / aspect
+    height = head + n * fh + (n - 1) * row_gap + 0.01
+    x0 = (fs.TEXT_WIDTH - (label_w + 5 * fw + 3 * gutter + group_gap)) / 2
+    xs = [x0 + label_w + i * (fw + gutter) + (group_gap - gutter if i >= 2 else 0) for i in range(5)]
+    s = Sheet(fs.TEXT_WIDTH, height)
+    home_places = {h["place"] for _, _, h in ms}
+    home_title = ("training maps" if len(home_places) > 1 else home_places.pop()) + " (in distribution)"
+    away_title = re.sub(r"^unseen map (\d+)$", r"unseen map (map \1)", ms[0][1]["place"])
+    s.text((xs[0] + xs[1] + fw) / 2, TOP, "(a) " + home_title, ha="center", va="top")
+    s.text((xs[2] + xs[4] + fw) / 2, TOP, "(b) " + away_title, ha="center", va="top")
+    for x, name in zip(xs, ("prediction", ct.TRUTH_LABEL, "zero-shot", "adapted", ct.TRUTH_LABEL)):
+        s.text(x + fw / 2, TOP + LINE, name, ha="center", va="top")
+    record = {"variant": "D", "horizon": horizon, "rows": []}
+    for r, (action, u, h) in enumerate(ms):
+        y = head + r * (fh + row_gap)
+        nums = {"prediction": psnr_of(h, "model", horizon), "zero-shot": psnr_of(u, "model", horizon),
+                "adapted": psnr_of(u, "adapted", horizon)}
+        for x, m, row, role in ((xs[0], h, "model", "prediction"), (xs[1], h, "truth", "ground truth"),
+                                (xs[2], u, "model", "zero-shot"), (xs[3], u, "adapted", "adapted"),
+                                (xs[4], u, "truth", "ground truth")):
+            img, path = frame_of(m, row, horizon)
+            ct._place(s.fig, s.w, s.h, x, y, fw, fh, img)
+            v = nums.get(role)
+            if numbers and v is not None:
+                s.fig.text(s.fx(x + 2.5 / 72), s.fy(y + fh - 2 / 72), f"{v:.1f} dB", ha="left", va="bottom",
+                           color="white", fontsize=fs.ANNOT_PT - 0.5, transform=s.fig.transFigure,
+                           path_effects=[pe.withStroke(linewidth=1.6, foreground="black")])
+            s.frames.append({"moment": m["name"], "role": role, "tic": horizon, "file": path, "scene_psnr": v,
+                             "at_in": [round(x, 3), round(y, 3)], "size_in": [round(fw, 3), round(fh, 3)]})
+        s.text(xs[0] - 4 / 72, y + fh / 2, action, ha="right", va="center", style="italic")
+        record["rows"].append({"action": action, "unseen": u["name"], "training": h["name"], "scene_psnr": nums,
+                               "held_all_16": {"unseen": u["held_all_16"], "training": h["held_all_16"]}})
+    record["frame_in"] = [round(fw, 3), round(fh, 3)]
+    return save(s, out_dir, stem, record), record
+
+
 def variant_b(restart_root, row, out_dir, strip=DEFAULT_STRIP, height=1.8, stem="fig1_vB"):
     """One action on the unseen map as a time strip: rows zero-shot, adapted and ground truth at `strip` tics after
     the context, the one ground-truth context frame at the left feeding all three rows. No training-map block."""
@@ -401,12 +453,14 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Figure 1 candidates A, B and C from the restart export.")
     p.add_argument("--restart-root", default=os.path.join(REPO, "results", "teaser_restart"))
     p.add_argument("--out-dir", default=os.path.join(REPO, "paper", "figures", "candidates"))
-    p.add_argument("--variant", choices=("A", "B", "C", "all"), default="all")
+    p.add_argument("--variant", choices=("A", "B", "C", "D", "all"), default="all")
     p.add_argument("--rows", default=None, help="action:<unseen moment>:<training moment>,... (default: today's)")
     p.add_argument("--horizon", type=int, default=DEFAULT_HORIZON, help="A and C: tics after the context")
     p.add_argument("--strip-tics", default=",".join(map(str, DEFAULT_STRIP)), help="B: the strip's tics")
     p.add_argument("--height-a", type=float, default=1.5)
     p.add_argument("--height-b", type=float, default=1.8)
+    p.add_argument("--height-d", type=float, default=1.55)
+    p.add_argument("--no-numbers", action="store_true", help="D: no PSNR text inside the frames")
     p.add_argument("--compare", nargs="*", default=None,
                    help="label=path.pdf entries drawn above the candidates on fig1_compare.png")
     a = p.parse_args(argv)
@@ -421,6 +475,8 @@ def main(argv=None):
         made.append(("B: time strip on the unseen map", written[-3]))
     if a.variant in ("C", "all"):
         written += variant_c(a.restart_root, rows[0], a.out_dir, a.horizon)[0]
+    if a.variant in ("D", "all"):
+        written += variant_d(a.restart_root, rows, a.out_dir, a.horizon, a.height_d, numbers=not a.no_numbers)[0]
         made.append(("C: one moment at hero size", written[-3]))
     if a.compare is not None:
         extra = [tuple(e.split("=", 1)) for e in a.compare]
