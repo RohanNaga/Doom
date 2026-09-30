@@ -6,8 +6,9 @@
 \usepackage{amsmath}
 
 \newif\ifdraftmarks \draftmarksfalse
-\newif\ifwithappendix \withappendixtrue % the appendix follows the references and pointers read "Appendix A" (CoRL: the appendix does not count toward the page limit); \withappendixfalse builds body plus references, with pointers to "the supplementary material"
+\newif\ifwithappendix \withappendixfalse % submission: body and references only, and every appendix pointer vanishes; \withappendixtrue attaches the appendix after the references and the pointers read "(Appendix A)"
 \newcommand{\appref}[1]{\ifwithappendix Appendix~\ref{#1}\else the supplementary material\fi}
+\newcommand{\apppar}[1]{\ifwithappendix\ (Appendix~\ref{#1})\fi} % a pointer that leaves no trace without the appendix
 \newcommand{\tbd}{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[tbd]}\else[tbd]\fi}
 \newcommand{\todo}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{[#1]}\else[#1]\fi}
 \newcommand{\prov}[1]{\ifdraftmarks\textcolor[rgb]{0,0.3,0.75}{#1}\else#1\fi}
@@ -98,7 +99,7 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 
 \textbf{Models and training.} We choose three pretrained backbones: the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters) as a control that follows GameNGen~\citep{valevski2024gamengen}; PixArt-$\alpha$~\citep{chen2023pixart} (a 628M transformer in the same latent space) to see the effect of a different architecture; and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT with 16-channel latents) to see the effect of a larger model. SD~3.5's 16-channel latents give its decoder a higher reconstruction score (31.8 against 28.6~dB on the training maps).
 
-We turn all three models into next-tic world models under one shared recipe (Figure~\ref{fig:method}). We give each model 32 context tics so it can see motion, train with $v$-prediction~\citep{salimans2022progressive} for stable training across noise levels and add context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors. We train each backbone for 200k updates at batch size 32, keep an EMA at 0.9999 in fp32 and sample with 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency (sampler sweep in \appref{app:protocol}).
+We turn all three models into next-tic world models under one shared recipe (Figure~\ref{fig:method}). We give each model 32 context tics so it can see motion, train with $v$-prediction~\citep{salimans2022progressive} for stable training across noise levels and add context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors. We train each backbone for 200k updates at batch size 32, keep an EMA at 0.9999 in fp32 and sample with 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency\apppar{app:protocol}.
 
 \begin{figure}[!ht]
 \centering
@@ -109,12 +110,12 @@ We turn all three models into next-tic world models under one shared recipe (Fig
 
 \textbf{Metrics.} We score the part of each frame that shows the world (rows 0 to 207) and leave out the HUD rows below it, which do not change with the map.
 
-For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. To test control, we swap turn-left and turn-right in the last action and check whether the predicted view turns the other way. The \emph{directional} score is the fraction of turning windows in which it does. A model that ignores actions scores 0 and the score's ceiling is 0.89, the fraction of ground-truth frames with a measurable turn in the action's direction (\appref{app:protocol}).
+For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. To test control, we swap turn-left and turn-right in the last action and check whether the predicted view turns the other way. The \emph{directional} score is the fraction of turning windows in which it does. A model that ignores actions scores 0 and the score's ceiling is 0.89, the fraction of ground-truth frames with a measurable turn in the action's direction\apppar{app:protocol}.
 
-\textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the decoder never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder (\appref{app:protocol}).
+\textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the decoder never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
 
 \textbf{Adaptation.} For each unseen map we adapt each backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}: 0.49, 4.1 and 1.8\% of the U-Net, PixArt-$\alpha$ and SD~3.5.
-We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. Updates, not data, limit adaptation: one episode gives 75 to 101\% of the gain of sixteen (\appref{app:perarena-adapt}).
+We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. Updates, not data, limit adaptation: one episode gives 75 to 101\% of the gain of sixteen\apppar{app:perarena-adapt}.
 We report 4k updates throughout, 2\% of pretraining, which gives 96\% of the gain at 8k.
 As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 
@@ -132,7 +133,7 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 
 \textbf{Zero-shot evaluation on unseen maps.} All three models do poorly on the unseen maps before adaptation (Table~\ref{tab:unseen}).
 Control survives: the directional score goes from 0.84 to 0.86 on the training maps to 0.79 to 0.81 on the unseen maps, which is about 90\% of its ceiling of 0.89.
-The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5 and every unseen map has a worse LPIPS than every training map (\appref{app:distance}).
+The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5 and every unseen map has a worse LPIPS than every training map\apppar{app:distance}.
 The loss is nearly the same for all three backbones and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
 
 \begin{figure}[b]
@@ -145,7 +146,7 @@ The loss is nearly the same for all three backbones and the U-Net and PixArt-$\a
 \textbf{Adaptation cost.} Adaptation recovers most of what the shift took (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
 After 4k updates on eight episodes, the adapter recovers 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100\% where the adapted model passes the training-map level) and training to 8k adds little.
 The directional score returns to the training-map level (0.83 to 0.85). Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
-Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k; per map in \appref{app:perarena-adapt}).
+Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k)\apppar{app:perarena-adapt}.
 Fine-tuning all of the U-Net's parameters recovers more, 88\% of the LPIPS rise against the adapter's 72\%, but trains 205 times as many parameters.
 Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.59~dB.
 
@@ -159,7 +160,7 @@ We introduced DoomShift to measure what a small domain shift does to a world mod
 On unseen maps of the same game, three diffusion backbones keep their response to controls and lose the scene and a LoRA adapter trained on eight episodes for 2\% of the original training updates recovers most of the lost perceptual quality and about half of the lost PSNR.
 Future work includes other games, closed-loop evaluation of the adapted models and detecting a shift from the model's own predictions so that it adapts without supervision.
 
-\textbf{Limitations.} (1) We study one game and one agent, so the shift changes a map's layout, textures and lighting but not its dynamics. (2) We score one tic ahead and one-tic quality does not guarantee stable rollouts (\appref{app:closedloop}). (3) We test control through turning only.
+\textbf{Limitations.} (1) We study one game and one agent, so the shift changes a map's layout, textures and lighting but not its dynamics. (2) We score one tic ahead and one-tic quality does not guarantee stable rollouts\apppar{app:closedloop}. (3) We test control through turning only.
 \label{body-end}
 
 %===============================================================================
