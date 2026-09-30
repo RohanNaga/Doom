@@ -58,7 +58,7 @@ Very little adaptation repairs it: rank-16 adapters trained on eight episodes of
 \label{sec:intro}
 
 World models learned from recorded play now render whole games in real time, predicting each update to the world from the player's actions in place of complex, hand-crafted game engines~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
-However, these models are only evaluated on held-out rollouts from the environment they were trained on~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2,po2026multigen}: none has been shown to generalize to a new environment within the same game.
+However, these models are only evaluated on held-out rollouts from their training environment~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2,po2026multigen}: none has been shown to generalize to a new map within the same game.
 
 A learned simulator is useful only where it is faithful and an agent or a robot moving to a new room, level or workspace needs to know how much of its world model still holds there and what it costs to make the rest hold.
 Game worlds let us pose this question with the engine held fixed and only the environment changed: a new map of the same game preserves the physics and the controls exactly and only the layout, textures and lighting differ.
