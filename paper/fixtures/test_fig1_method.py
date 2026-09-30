@@ -104,7 +104,7 @@ def test_the_panels_carry_the_agreed_labels(pdf):
     for phrase in ("4 training maps,", "500 episodes each", "13 unseen maps,", "24 each", "19 executed buttons",
                    "context and the noisy next latent stacked on channels", "10-step DDIM", "Adaptation",
                    "world model:", "map adaptation", "rank-16 LoRA,", "8 episodes)",
-                   "decoder fine-tuning", "(MSE + 0.1 LPIPS)", "decoder D (stock)", "directional score",
+                   "decoder fine-tuning", "(MSE + 0.1 LPIPS)", "decoder D (stock)",
                    "Models and training"):
         assert phrase in text, phrase
     assert "arena" not in text.lower()          # Rohan's vocabulary: unseen maps and training maps, never arenas

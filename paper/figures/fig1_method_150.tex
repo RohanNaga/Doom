@@ -135,13 +135,12 @@
   {one tic ahead, scene rows\\0--207, against the raw\\frame $x_{t+1}$};
 \node[box, text width=0.84in] (dec) at (5.00,0.80) {decoder $D$};
 \draw[flow] (tune.east) -- (4.47,0.46) |- (dec.west);
-\foreach \lbl/\x [count=\i from 0] in {{$\hat z_{t+1}$}/4.75} {
+\foreach \lbl/\x [count=\i from 0] in {{$\hat z_{t+1}$}/5.00} {
   \node[anchor=south, inner sep=1pt] (in\i) at (\x,0.985) {\lbl};
   \draw[flow] (\x,0.985) -- (\x,0.885);
   \draw[flow] (\x,0.715) -- (\x,0.635);
 }
-\draw[flow] (ddim.east) -- (4.75,1.137) -- (in0.north);
-\node[anchor=north, align=center, inner sep=0pt] at (4.75,0.62) {PSNR, LPIPS};
-\node[anchor=north west, inner sep=0pt] at (4.52,0.29) {directional score};
+\draw[flow] (ddim.east) -- (5.00,1.137) -- (in0.north);
+\node[anchor=north, align=center, inner sep=0pt] at (5.00,0.62) {PSNR, LPIPS};
 \end{tikzpicture}
 \end{document}
