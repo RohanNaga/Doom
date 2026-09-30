@@ -146,7 +146,7 @@ The loss is nearly the same for all three backbones, and the U-Net and PixArt-$\
 After 4k updates on eight episodes, the adapter recovers 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100\% where the adapted model passes the training-map level), and training to 8k adds little.
 The directional score returns to the training-map level (0.83 to 0.85). Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
 Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k; per map in \appref{app:perarena-adapt}).
-Fine-tuning all of the U-Net's parameters recovers more, 88\% of the LPIPS rise against the adapter's 73\% on the same maps, but trains 205 times as many parameters.
+Fine-tuning all of the U-Net's parameters recovers more, 88\% of the LPIPS rise against the adapter's 72\%, but trains 205 times as many parameters.
 One episode already gives most of the gain of sixteen (\appref{app:perarena-adapt}).
 Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.59~dB.
 
