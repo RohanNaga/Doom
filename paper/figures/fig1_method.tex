@@ -130,14 +130,13 @@
 \node[anchor=north west, inner sep=0pt] at (4.50,\H) {\panel{d}{Evaluation}};
 \node[anchor=north west, align=left, inner sep=0pt] at (4.50,1.64)
   {one tic ahead, scene rows\\0--207, against the raw\\frame $x_{t+1}$};
-\node[box, text width=0.84in] (dec) at (5.00,0.60) {decoder $D$};
-\draw[flow] (tune.east) -- (4.47,0.46) |- (dec.west);
-\foreach \lbl/\x [count=\i from 0] in {{$\hat z_{t+1}$}/5.00} {
-  \node[anchor=south, inner sep=1pt] (in\i) at (\x,0.885) {\lbl};
-  \draw[flow] (\x,0.885) -- (\x,0.685);
-  \draw[flow] (\x,0.515) -- (\x,0.435);
-}
+% the decoder sits level with the decoder fine-tuning box (Rohan, Sep 30); its input and outputs hang off its anchors
+\node[box, text width=0.84in] (dec) at (5.00,0 |- tune.center) {decoder $D$};
+\draw[flow] (tune.east) -- (dec.west);
+\node[anchor=south, inner sep=1pt] (in0) at ([yshift=0.19in]dec.north) {$\hat z_{t+1}$};
+\draw[flow] (in0.south) -- (dec.north);
 \draw[flow] (ddim.east) -- (5.00,1.206) -- (in0.north);
-\node[anchor=north, align=center, inner sep=0pt] at (5.00,0.42) {PSNR, LPIPS};
+\draw[flow] (dec.south) -- ([yshift=-0.08in]dec.south);
+\node[anchor=north, align=center, inner sep=0pt] at ([yshift=-0.10in]dec.south) {PSNR, LPIPS};
 \end{tikzpicture}
 \end{document}
