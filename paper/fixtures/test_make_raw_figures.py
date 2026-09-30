@@ -883,7 +883,7 @@ def test_the_raw_set_is_drawn_at_its_slot_sizes_and_the_numbers_are_recorded(tmp
     assert body[0][1:] == ["22.45", "", "0.150", "", "0.850", "", "", ""]
     assert body[1][1:] == ["18.50", "21.25", "0.280", "0.205", "0.750", "0.790", "76", "58"]                       # shares PSNR then LPIPS; the budget waits on the grid
     assert body[2][5:7] == ["0.750", "0.790"]                       # both from the guard rows, at 0 and 4k
-    assert body[3][1:] == ["18.00", "23.00", "0.300", "0.180", "--", "--", "112", "80"]
+    assert body[3][1:] == ["18.00", "23.00", "0.300", "0.180", "0.800", "--", "112", "80"]   # step 0 from the shared checkpoint
     assert "& 0 & 4k & PSNR & LPIPS \\\\" in merged                      # the score columns' order
     assert body[4][1:6] == ["22.65", "", "0.150", "", "--"]                 # no directional read: "--"
     assert body[5][1:3] == ["18.70", "20.70"]                                       # maps 6, 9
