@@ -68,8 +68,8 @@ Pretraining one model on every map a deployment might meet is never complete and
 In short, a world model moved to a new map keeps playing the game but draws the wrong world and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item We introduce DoomShift, a benchmark that isolates a scene shift: 17 Doom maps share the same physics and game engine and differ only in their surroundings, with four maps for training and 13 held out. We release the recordings, models, decoders and adapters.
-\item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8 to 3.3~dB.
-\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72 to 76\% of the lost perceptual quality and roughly half of the lost PSNR, using only 2\% of the original training updates.
+\item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8 to 3.3~dB (Table~\ref{tab:unseen}).
+\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72 to 76\% of the lost perceptual quality and roughly half of the lost PSNR, using only 2\% of the original training updates (Table~\ref{tab:unseen}).
 \end{itemize}
 
 \begin{figure}[t]
@@ -95,11 +95,11 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 \section{Method}
 \label{sec:bench}
 
-\textbf{Data.} We collect the data for this research by running experiments with the Arnold agent~\citep{lample2017arnold} through ViZDoom~\citep{kempka2016vizdoom} deathmatches: free-for-all matches where each player scores by killing the others. Arnold ships with 17 Doom maps; each has its own layout, textures and lighting. For every episode, we let Arnold play against eight bots for 150 seconds. We record every tic, the engine's 1/35~s simulation step, capturing a 320$\times$240 frame and the 19 buttons the engine executed. Four maps (2 to 5) are our training maps: we train on 500 episodes of each and score on 25 further validation episodes per map (512 windows). The other thirteen maps (1, 6 to 17) are never trained on: we record 24 new episodes on each, using 16 for adaptation and holding out eight (256 windows) for scoring. In total we collect 2,412 episodes, about 96 hours of play and about 12.1 million frames.
+\textbf{Data.} We collect the data for this research by running experiments with the Arnold agent~\citep{lample2017arnold} through ViZDoom~\citep{kempka2016vizdoom} deathmatches: free-for-all matches where each player scores by killing the others. Arnold ships with 17 Doom maps; each has its own layout, textures and lighting. For every episode, we let Arnold play against eight bots for 150 seconds. We record every tic, the engine's 1/35~s simulation step, capturing a 320$\times$240 frame and the 19 buttons the engine executed. Four maps (2 to 5) are our training maps: we train on 500 episodes of each and score on 25 further validation episodes per map (512 windows). The other thirteen maps (1, 6 to 17) are never trained on: we record 24 new episodes on each, using 16 for adaptation and holding out eight (256 windows) for scoring. In total we collect 2,412 episodes, about 96 hours of play, 12.1 million frames and 1.8~TB of recordings.
 
 \textbf{Models and training.} We choose three pretrained backbones: the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters) as a control that follows GameNGen~\citep{valevski2024gamengen}; PixArt-$\alpha$~\citep{chen2023pixart} (a 628M transformer in the same latent space) to see the effect of a different architecture; and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT with 16-channel latents) to see the effect of a larger model. SD~3.5's 16-channel latents give its decoder a higher reconstruction score (31.8 against 28.6~dB on the training maps).
 
-We turn all three models into next-tic world models under one shared recipe (Figure~\ref{fig:method}). We give each model 32 context tics so it can see motion, train with $v$-prediction~\citep{salimans2022progressive} for stable training across noise levels and add context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors. We train each backbone for 200k updates at batch size 32, keep an EMA at 0.9999 in fp32 and sample with 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency\apppar{app:protocol}.
+We turn all three models into next-tic world models under one shared recipe (Figure~\ref{fig:method}). We give each model 32 context tics so it can see motion, train with $v$-prediction~\citep{salimans2022progressive}, a mean-squared error on the velocity target of the next latent given the context and the action, for stable training across noise levels and add context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors. We train each backbone for 200k updates at batch size 32, keep an EMA at 0.9999 in fp32 and sample with 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency\apppar{app:protocol}.
 
 \begin{figure}[!ht]
 \centering
@@ -135,6 +135,7 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 Control survives: the directional score goes from 0.84 to 0.86 on the training maps to 0.79 to 0.81 on the unseen maps, which is about 90\% of its ceiling of 0.89.
 The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5 and every unseen map has a worse LPIPS than every training map\apppar{app:distance}.
 The loss is nearly the same for all three backbones and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
+Qualitatively, the zero-shot model keeps the weapon, the motion and the turn but paints the unseen map with the training maps' walls and floors (Figure~\ref{fig:teaser}).
 
 \begin{figure}[b]
 \centering
@@ -145,7 +146,7 @@ The loss is nearly the same for all three backbones and the U-Net and PixArt-$\a
 
 \textbf{Adaptation cost.} Adaptation recovers most of what the shift took (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
 After 4k updates on eight episodes, the adapter recovers 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100\% where the adapted model passes the training-map level) and training to 8k adds little.
-The directional score returns to the training-map level (0.83 to 0.85). Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
+The directional score returns to the training-map level (0.83 to 0.85). Qualitatively, the map's own textures, colours and lighting return and what remains is blur on distant enemies and small objects (Figure~\ref{fig:teaser}). Part of the remaining PSNR gap is the decoder's, which reconstructs the unseen maps 1.3~dB worse than the training maps.
 Most of the gain comes early: half of the LPIPS rise is recovered within a median of 150 to 250 updates, sooner on the easy maps (150) than on the hard ones (250 to 2k)\apppar{app:perarena-adapt}.
 Fine-tuning all of the U-Net's parameters recovers more, 88\% of the LPIPS rise against the adapter's 72\%, but trains 205 times as many parameters.
 Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.59~dB.
