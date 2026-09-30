@@ -892,10 +892,15 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
             full = block_stats.get("unet_full")
             if full and full["n"]:
                 shares = full.get("shares") or {}
+                # the full fine-tune starts from the same 200k checkpoint as the LoRA, so its zero-shot directional
+                # read is the LoRA runs' step-0 guard over the same maps (its own scoring starts at 4k)
+                full_dir0 = guard_median(full, 0)
+                if full_dir0 is None:
+                    full_dir0 = unet_guard_median(full["arenas"], "directional_0")
                 lines.append(f"{block_label('full fine-tune', full, True)} & {num(full['psnr_zero_shot'], 2)} & "
                              f"{num(full['psnr_4k'], 2)} & {num(full['psnr_8k'], 2)} & "
                              f"{num(full['lpips_zero_shot'], 3)} & {num(full['lpips_4k'], 3)} & "
-                             f"{num(full['lpips_8k'], 3)} & {num(guard_median(full, 0), 3)} & "
+                             f"{num(full['lpips_8k'], 3)} & {num(full_dir0, 3)} & "
                              f"{num(guard_median(full, directional_at), 3)} & {share_cell(shares.get('psnr'))} & "
                              f"{share_cell(shares.get('lpips'))} & {block_budget_cell(full)} \\\\")
         elif block.get("n"):
