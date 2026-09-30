@@ -58,12 +58,12 @@ Very little adaptation repairs it: rank-16 adapters trained on eight episodes of
 \label{sec:intro}
 
 World models learned from recorded play now render whole games in real time, predicting each update to the world from the player's actions in place of complex, hand-crafted game engines~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
-However, these models are only evaluated on held-out rollouts from their training environment~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2,po2026multigen}: none has been shown to generalize to a new map within the same game.
+However, these models are only evaluated on held-out rollouts from their training environment~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2,po2026multigen}: none has been shown to generalize to a new environment in the same game.
 
 A learned simulator is useful only where it is faithful and an agent or a robot moving to a new room, level or workspace needs to know how much of its world model still holds there and what it costs to make the rest hold.
 Game worlds let us pose this question with the engine held fixed and only the environment changed: a new map of the same game preserves the physics and the controls exactly and only the layout, textures and lighting differ.
 Yet unchanged dynamics alone do not guarantee a faithful render: pretrained video and world models are typically moved to a new domain only through a further full fine-tune~\citep{gao2025adaworld} or a dedicated adapter on the frozen backbone~\citep{rigter2024avid} and a model trained on a handful of maps tends to fall back on the appearance it already knows once the surroundings change.
-Pretraining one model on every map a deployment might meet is never complete and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses and how few episodes and updates recover the rest.
+Pretraining one model on every map a deployment might meet is never complete and training a separate model per map is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses and how few episodes and updates recover the rest.
 
 In short, a world model moved to a new map keeps playing the game but draws the wrong world and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
 \begin{itemize}\setlength{\itemsep}{0pt}
