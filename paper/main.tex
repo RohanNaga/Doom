@@ -113,10 +113,10 @@ For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\cite
 
 \textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the decoder never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder (\appref{app:protocol}).
 
-\textbf{Adaptation.} For each unseen map we adapt each trained backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}, which is 0.49, 4.1 and 1.8\% of the parameters of the U-Net, PixArt-$\alpha$ and SD~3.5.
-We train on eight episodes of the map and score on its eight held-out episodes at update counts from 0 to 8k. We found that total updates, not episodes of data, limited adaptation, as a single episode provided 75 to 101\% of the gain of sixteen (\appref{app:perarena-adapt}).
-We report 4k updates throughout, 2\% of pretraining, since it gives on average 96\% of the gain at 8k.
-As a baseline, we fine-tune all of the U-Net's parameters on the same episodes (\appref{app:perarena-adapt}).
+\textbf{Adaptation.} For each unseen map we adapt each backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}: 0.49, 4.1 and 1.8\% of the U-Net, PixArt-$\alpha$ and SD~3.5.
+We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. Updates, not data, limit adaptation: one episode gives 75 to 101\% of the gain of sixteen (\appref{app:perarena-adapt}).
+We report 4k updates throughout, 2\% of pretraining, which gives 96\% of the gain at 8k.
+As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 
 \begin{table}[t]
 \centering\footnotesize
