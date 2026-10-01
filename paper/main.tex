@@ -47,7 +47,7 @@ A small domain shift, such as a new map of the same game, a lighting change, a n
 With DoomShift, a controlled version of this domain shift in Doom, we measure what it breaks and how much adaptation it takes to repair.
 We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-distribution data and on 13 out-of-distribution maps that it never saw.
 All three keep their response to controls and lose the scene: SD~3.5's perceptual error (LPIPS) doubles, from 0.126 to a median 0.262 and its scene PSNR drops 3.3~dB, from 25.4 to a median 22.1~dB; the SD~1.4 U-Net, GameNGen's backbone and PixArt-$\alpha$ lose the same way.
-Very little adaptation repairs it: rank-16 adapters trained on eight episodes of each unseen map with 2\% of the original training updates recover 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three backbones.
+Very little adaptation repairs it: rank-16 adapters trained on eight episodes per unseen map with 2\% of the original training updates recover 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three.
 \end{abstract}
 
 \keywords{World Models, Diffusion Models, Few-shot Adaptation}
@@ -57,7 +57,7 @@ Very little adaptation repairs it: rank-16 adapters trained on eight episodes of
 \section{Introduction}
 \label{sec:intro}
 
-World models learned from recorded play now render whole games in real time, predicting each update to the world from the player's actions in place of complex, hand-crafted game engines~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
+World models learned from recorded play now render whole games in real time, predicting each update to the world from the player's actions in place of hand-crafted game engines~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
 However, these models are only scored against ground truth on held-out rollouts from their training environment~\citep{valevski2024gamengen,alonso2024diamond,po2026multigen}: none has been shown to generalize to a new environment in the same game.
 
 A learned simulator is useful only where it is faithful and an agent or a robot moving to a new room, level or workspace needs to know how much of its world model still holds and the cost of fixing the rest.
