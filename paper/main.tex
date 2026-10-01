@@ -147,8 +147,8 @@ The zero-shot model keeps the weapon, motion and turn but paints the unseen map 
 \textbf{Adaptation cost.} Adaptation recovers most of what the shift took (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
 After 4k updates on eight episodes, the adapter regains 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100\% where it passes the training-map level) and training to 8k adds little.
 The directional score barely moves (0.83 to 0.85, from 0.79 to 0.81), while the map's own textures, colours and lighting return (Figure~\ref{fig:teaser}). Part of the remaining PSNR gap is the decoder's, 1.3~dB worse on the unseen maps.
-Most of the gain comes early: half of the LPIPS rise returns within a median of 150 to 250 updates, sooner on easy maps (150) than on hard ones (250 to 2k)\apppar{app:perarena-adapt}.
-Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.59~dB (1.61~dB under full fine-tuning).
+Most of the gain comes early: half of the LPIPS rise returns within a median of 150 to 250 updates\apppar{app:perarena-adapt}.
+Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.40~dB (1.08~dB under full fine-tuning).
 Fine-tuning the whole U-Net recovers 88\% of the LPIPS rise against the adapter's 72\%, but at a cost: 205x the trainable parameters, a 48 instead of a 16~GB GPU, a 3.4~GB model copy per map against a 17~MB adapter and 2.7x the forgetting.
 
 %===============================================================================
