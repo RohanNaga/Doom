@@ -112,7 +112,7 @@ We turn all three models into next-tic world models under one shared recipe (Fig
 
 For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. The \emph{directional} score tests control: we flip the turn direction of the last action and count the fraction of windows whose predicted view flips with it. A model that ignores actions scores 0 and the ceiling is 0.89, since 11\% of ground-truth turns are too small to measure within one tic\apppar{app:protocol}.
 
-\textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the this happens once, before adaptation, the decoder stays frozen during it and it never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
+\textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); this happens once, before adaptation, the decoder stays frozen during it and it never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
 
 \textbf{Adaptation.} For each unseen map we adapt each backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}: 0.49, 4.1 and 1.8\% of the U-Net, PixArt-$\alpha$ and SD~3.5.
 We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. We found that updates, not data, limit adaptation: a single episode gave 75 to 101\% of the gain of sixteen\apppar{app:perarena-adapt}.
@@ -140,7 +140,7 @@ Qualitatively, the zero-shot model keeps the weapon, the motion and the turn but
 \begin{figure}[b]
 \centering
 \figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{3.0in}{Figure 3: the shift and its repair}
-\caption{\textbf{Zero-shot vs.\ adapted results per unseen map.} (a, b) Scene PSNR and LPIPS, zero-shot (open) and after 4k adaptation updates (filled).(c, d) Median statistics against adapter updates.}
+\caption{\textbf{Zero-shot vs.\ adapted results per unseen map.} (a, b) Scene PSNR and LPIPS, zero-shot (open) and after 4k adaptation updates (filled). (c, d) Median statistics against adapter updates.}
 \label{fig:adapt}
 \end{figure}
 
