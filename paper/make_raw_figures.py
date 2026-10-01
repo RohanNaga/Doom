@@ -1428,7 +1428,7 @@ def row_v2_keys(fig, backbones, headline=HEADLINE_STEP):
     fig.legend(handles, labels, loc="outside upper center", ncol=len(labels), handlelength=1.2, columnspacing=1.2,
                handletextpad=0.4, borderaxespad=0.1)
     fig.legend([Line2D([], [], color=grey, lw=fs.MIN_LW, ls=fs.TRAINING_DASH)],
-               [f"{IN_DISTRIBUTION}, per backbone in its colour"], loc="outside lower center", ncol=1,
+               [f"{IN_DISTRIBUTION}, per backbone in its color"], loc="outside lower center", ncol=1,
                handlelength=1.4, handletextpad=0.4, borderaxespad=0.1)
 
 
