@@ -70,8 +70,8 @@ Pretraining one model on every map a deployment might meet is never complete and
 In short, a world model moved to a new map keeps playing the game but draws the wrong world and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item We introduce DoomShift, a benchmark that isolates a scene shift: 17 Doom maps share the same physics and game engine and differ only in their surroundings, with four maps for training and 13 held out. We release the recordings, models, decoders and adapters.
-\item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8 to 3.3~dB (Table~\ref{tab:unseen}).
-\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72 to 76\% of the lost perceptual quality and roughly half of the lost PSNR, using only 2\% of the original training updates (Table~\ref{tab:unseen}).
+\item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8--3.3~dB (Table~\ref{tab:unseen}).
+\item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72--76\% of the lost perceptual quality and roughly half of the lost PSNR, using only 2\% of the original training updates (Table~\ref{tab:unseen}).
 \end{itemize}
 
 \begin{figure}[t]
@@ -117,7 +117,7 @@ For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\cite
 \textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); this happens once, before adaptation, the decoder stays frozen during it and it never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
 
 \textbf{Adaptation.} For each unseen map we adapt each backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}: 0.49, 4.1 and 1.8\% of the U-Net, PixArt-$\alpha$ and SD~3.5.
-We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. We found that updates, not data, limit adaptation: a single episode gave 75 to 101\% of the gain of sixteen\apppar{app:perarena-adapt}.
+We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. We found that updates, not data, limit adaptation: a single episode gave 75--101\% of the gain of sixteen\apppar{app:perarena-adapt}.
 We report 4k updates throughout, 2\% of pretraining, which gives 96\% of the gain at 8k.
 As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 
@@ -153,7 +153,7 @@ After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS r
 The map's textures, colors and lighting return (Figure~\ref{fig:teaser}) without substantially changing the already-preserved control behavior.
 
 Most of this recovery happens early: half of the LPIPS rise is recovered within a median of 150--250 updates\apppar{app:perarena-adapt}, and extending training to 8k provides little additional gain.
-Full U-Net fine-tuning recovers more of the LPIPS rise (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters and a 48 instead of a 16~GB GPU, and causes 2.7$\times$ more forgetting on the training maps.
+Full U-Net fine-tuning recovers more of the LPIPS rise (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters and a 48 instead of a 16~GB GPU, and causes 2.7$\times$ more forgetting on the training maps (1.08 vs.\ 0.40~dB).
 Thus, lightweight adaptation recovers most of the lost perceptual quality while largely preserving what already transfers to the new map.
 %===============================================================================
 
