@@ -43,11 +43,13 @@
 
 \begin{abstract}
 World models have become capable simulators, but they are evaluated almost exclusively on held-out rollouts from the domain they were trained on.
-A small domain shift, such as a new map of the same game, a lighting change, a new texture set or new enemies, makes their outputs drift and lose realism, though the underlying physics and game engine are exactly the same.
-With DoomShift, a controlled version of this domain shift in Doom, we measure what it breaks and how much adaptation it takes to repair.
-We train three diffusion backbones, initialized from pretrained diffusion image models, on four maps of Doom and score each on in-distribution data and on 13 out-of-distribution maps that it never saw.
-All three keep their response to controls and lose the scene: SD~3.5's perceptual error (LPIPS) doubles, from 0.126 to a median 0.262 and its scene PSNR drops 3.3~dB, from 25.4 to a median 22.1~dB; the SD~1.4 U-Net, GameNGen's backbone and PixArt-$\alpha$ lose the same way.
-Very little adaptation repairs it: rank-16 adapters trained on eight episodes per unseen map with 2\% of the original training updates recover 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three.
+A small domain shift, such as a new map of the same game, lighting, textures or enemies, can make their outputs drift even when the underlying physics and game engine are unchanged.
+With DoomShift, a controlled version of this shift in Doom, we measure what breaks and how much adaptation is needed to repair it.
+We train three diffusion backbones, initialized from pretrained diffusion image models, on four Doom maps and evaluate them on 13 unseen maps.
+All three preserve their response to controls but fail to reproduce the new scene: scene PSNR drops by 2.8--3.3~dB and LPIPS rises by 0.126--0.145 across the three backbones.
+This consistent gap shows that action-conditioned behavior transfers more reliably than scene appearance, independent of architecture or model scale.
+Yet the lost appearance is relatively cheap to recover: rank-16 adapters trained on only eight episodes and 2\% of the original training updates recover 72--76\% of the LPIPS loss and about half of the lost PSNR.
+Together, these results suggest that adapting a world model to a new environment may require repairing its scene representation rather than relearning the underlying game.
 \end{abstract}
 
 \keywords{World Models, Diffusion Models, Few-shot Adaptation}
@@ -131,11 +133,12 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 \section{Results}
 \label{sec:results}
 
-\textbf{Zero-shot evaluation on unseen maps.} All three models do poorly on unseen maps before adaptation (Table~\ref{tab:unseen}).
-Control survives: the directional score is 0.79 to 0.81 on the unseen maps against 0.84 to 0.86 on the training maps, about 90\% of its 0.89 ceiling.
-The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5 and every unseen map has a worse LPIPS than every training map\apppar{app:distance}.
-The loss is nearly the same for all three backbones and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
-The zero-shot model keeps the weapon, motion and turn but paints the unseen map with the training maps' walls and floors (Figure~\ref{fig:teaser}, a 16-tic rollout).
+\textbf{Zero-shot evaluation on unseen maps.}
+On unseen maps, the models preserve control but fail to reproduce the new scene.
+Directional scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while PSNR drops by 2.8--3.3~dB and LPIPS increases substantially.
+Every unseen map has worse LPIPS than every training map\apppar{app:distance}.
+The rollouts show the same pattern: weapon position, motion and turning remain consistent, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
+This behavior is consistent across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting that the failure is not specific to one architecture or model scale.
 
 \begin{figure}[t]
 \centering
@@ -144,22 +147,23 @@ The zero-shot model keeps the weapon, motion and turn but paints the unseen map 
 \label{fig:adapt}
 \end{figure}
 
-\textbf{Adaptation cost.} Adaptation recovers most of what the shift took (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
-After 4k updates on eight episodes, the adapter regains 72 to 76\% of the LPIPS rise and about half of the lost PSNR on all three backbones (above 100\% where it passes the training-map level) and training to 8k adds little.
-The directional score barely moves (0.83 to 0.85, from 0.79 to 0.81), while the map's own textures, colours and lighting return (Figure~\ref{fig:teaser}). Part of the remaining PSNR gap is the decoder's, 1.3~dB worse on the unseen maps.
-Most of the gain comes early: half of the LPIPS rise returns within a median of 150 to 250 updates\apppar{app:perarena-adapt}.
-Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.40~dB (1.08~dB under full fine-tuning).
-Fine-tuning the whole U-Net recovers 88\% of the LPIPS rise against the adapter's 72\%, but at a cost: 205x the trainable parameters, a 48 instead of a 16~GB GPU, a 3.4~GB model copy per map against a 17~MB adapter and 2.7x the forgetting.
+\textbf{Adaptation cost.}
+Adaptation primarily repairs the scene rather than the model's response to actions.
+After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS loss and about half of the PSNR loss, while directional scores change only slightly.
+The map's textures, colours and lighting return without substantially changing the already-preserved control behavior.
+
+Most of this recovery happens early: half of the LPIPS loss is recovered within 150--250 updates\apppar{app:perarena-adapt}, and extending training to 8k provides little additional gain.
+Full U-Net fine-tuning recovers more LPIPS (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters, more GPU memory, and causes 2.7$\times$ more forgetting.
+Thus, lightweight adaptation recovers most of the lost scene quality while largely preserving what already transfers to the new map.
 
 %===============================================================================
 
 \section{Conclusion}
 \label{sec:limits}
 
-DoomShift shows that under a small domain shift three diffusion world models keep their response to controls but lose the scene and that a LoRA adapter trained on eight episodes recovers most of the LPIPS rise and about half of the lost PSNR.
-Future work includes other games and closed-loop evaluation of the adapted models.
+DoomShift shows that under domain shift, world models largely preserve control but lose the appearance of the new scene. Across three diffusion backbones, lightweight LoRA adaptation on only eight episodes restores much of this lost perceptual quality without relearning the game dynamics.
 
-\textbf{Limitations.} We study one game, score one tic ahead and measure control on turning actions.
+\textbf{Limitations.} We study one game, evaluate one tic ahead, and measure control only through turning actions.
 \label{body-end}
 
 %===============================================================================
