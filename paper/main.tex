@@ -48,8 +48,8 @@ With DoomShift, a controlled version of this shift in Doom, we measure what brea
 We train three diffusion backbones, initialized from pretrained diffusion image models, on four Doom maps and evaluate them on 13 unseen maps.
 All three preserve their response to controls but fail to reproduce the new scene: scene PSNR drops by 2.8--3.3~dB and LPIPS rises by 0.126--0.145 across the three backbones.
 This consistent gap shows that action-conditioned behavior transfers more reliably than scene appearance, independent of architecture or model scale.
-Yet the lost appearance is relatively cheap to recover: rank-16 adapters trained on only eight episodes and 2\% of the original training updates recover 72--76\% of the LPIPS loss and about half of the lost PSNR.
-Together, these results suggest that adapting a world model to a new environment may require repairing its scene representation rather than relearning the underlying game.
+Yet the lost appearance is relatively cheap to recover: rank-16 adapters trained on only eight episodes and 2\% of the original training updates recover 72--76\% of the LPIPS rise and about half of the lost PSNR.
+Together, these results suggest that adapting a world model to a new environment may require restoring the scene's appearance rather than relearning the underlying game.
 \end{abstract}
 
 \keywords{World Models, Diffusion Models, Few-shot Adaptation}
@@ -134,8 +134,8 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 \label{sec:results}
 
 \textbf{Zero-shot evaluation on unseen maps.}
-On unseen maps, the models preserve control but fail to reproduce the new scene.
-Directional scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while PSNR drops by 2.8--3.3~dB and LPIPS increases substantially.
+On unseen maps, the models preserve control but fail to reproduce the new scene (Table~\ref{tab:unseen}).
+Directional scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while scene PSNR drops by 2.8--3.3~dB and LPIPS roughly doubles.
 Every unseen map has worse LPIPS than every training map\apppar{app:distance}.
 The rollouts show the same pattern: weapon position, motion and turning remain consistent, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
 This behavior is consistent across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting that the failure is not specific to one architecture or model scale.
@@ -148,14 +148,13 @@ This behavior is consistent across the U-Net, PixArt-$\alpha$ and SD~3.5, sugges
 \end{figure}
 
 \textbf{Adaptation cost.}
-Adaptation primarily repairs the scene rather than the model's response to actions.
-After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS loss and about half of the PSNR loss, while directional scores change only slightly.
-The map's textures, colours and lighting return without substantially changing the already-preserved control behavior.
+Adaptation primarily repairs the scene rather than the model's response to actions (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
+After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS rise and about half of the lost PSNR (above 100\% where a map passes the training-map level), while directional scores change only slightly.
+The map's textures, colours and lighting return (Figure~\ref{fig:teaser}) without substantially changing the already-preserved control behavior.
 
-Most of this recovery happens early: half of the LPIPS loss is recovered within 150--250 updates\apppar{app:perarena-adapt}, and extending training to 8k provides little additional gain.
-Full U-Net fine-tuning recovers more LPIPS (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters, more GPU memory, and causes 2.7$\times$ more forgetting.
-Thus, lightweight adaptation recovers most of the lost scene quality while largely preserving what already transfers to the new map.
-
+Most of this recovery happens early: half of the LPIPS rise is recovered within a median of 150--250 updates\apppar{app:perarena-adapt}, and extending training to 8k provides little additional gain.
+Full U-Net fine-tuning recovers more of the LPIPS rise (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters and a 48 instead of a 16~GB GPU, and causes 2.7$\times$ more forgetting on the training maps.
+Thus, lightweight adaptation recovers most of the lost perceptual quality while largely preserving what already transfers to the new map.
 %===============================================================================
 
 \section{Conclusion}
