@@ -156,10 +156,10 @@ Fine-tuning the whole U-Net recovers 88\% of the LPIPS rise against the adapter'
 \section{Conclusion}
 \label{sec:limits}
 
-We introduced DoomShift to measure what a small domain shift does to a world model and how much adaptation repairs it.
-Future work includes other games, closed-loop evaluation of the adapted models and detecting a shift from the model's own predictions so that it adapts without supervision.
+DoomShift shows that under a small domain shift three diffusion world models keep their response to controls but lose the scene and that a LoRA adapter trained on eight episodes recovers most of the LPIPS rise and about half of the lost PSNR.
+Future work includes other games and closed-loop evaluation of the adapted models.
 
-\textbf{Limitations.} We study one game, score one tic ahead and test control through turning only.
+\textbf{Limitations.} We study one game, score one tic ahead and measure control through turning.
 \label{body-end}
 
 %===============================================================================
