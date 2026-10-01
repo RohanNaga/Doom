@@ -1,5 +1,5 @@
 \documentclass{article}
-\usepackage[preprint]{corl_2026} % submission: \usepackage{corl_2026}, which anonymises the authors; final: [final]
+\usepackage{corl_2026} % anonymised submission build; [preprint] shows the authors, [final] is the camera-ready
 \usepackage[T1]{fontenc}
 \usepackage{graphicx}
 \usepackage{booktabs}
@@ -137,9 +137,9 @@ The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.14
 The loss is nearly the same for all three backbones and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
 The zero-shot model keeps the weapon, motion and turn but paints the unseen map with the training maps' walls and floors (Figure~\ref{fig:teaser}, a 16-tic rollout).
 
-\begin{figure}[b]
+\begin{figure}[t]
 \centering
-\figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{3.0in}{Figure 3: the shift and its repair}
+\figslot{figures/raw/raw_row_v2.pdf}{\linewidth}{1.75in}{Figure 3: the shift and its repair}
 \caption{\textbf{Zero-shot vs.\ adapted results per unseen map.} (a, b) Scene PSNR and LPIPS, zero-shot (open) and after 4k adaptation updates (filled). (c, d) Median statistics against adapter updates.}
 \label{fig:adapt}
 \end{figure}
@@ -157,10 +157,9 @@ Fine-tuning the whole U-Net recovers 88\% of the LPIPS rise against the adapter'
 \label{sec:limits}
 
 We introduced DoomShift to measure what a small domain shift does to a world model and how much adaptation repairs it.
-On unseen maps of the same game, three diffusion backbones keep their response to controls and lose the scene and a LoRA adapter trained on eight episodes for 2\% of the original training updates recovers most of the lost perceptual quality and about half of the lost PSNR.
 Future work includes other games, closed-loop evaluation of the adapted models and detecting a shift from the model's own predictions so that it adapts without supervision.
 
-\textbf{Limitations.} (1) We study one game and one agent, so the shift changes a map's layout, textures and lighting but not its dynamics. (2) We score one tic ahead and one-tic quality does not guarantee stable rollouts\apppar{app:closedloop}. (3) We test control through turning only.
+\textbf{Limitations.} We study one game, score one tic ahead and test control through turning only.
 \label{body-end}
 
 %===============================================================================
