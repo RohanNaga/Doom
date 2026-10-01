@@ -57,10 +57,10 @@ Very little adaptation repairs it: rank-16 adapters trained on eight episodes of
 \section{Introduction}
 \label{sec:intro}
 
-World models learned from recorded play now render whole games in real time, predicting each update to the world from the player's actions in place of complex, hand-crafted game engines~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
+World models learned from recorded play now render whole games in real time, predicting each update to the world from the player's actions in place of complex, hand crafted game engines~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2}.
 However, these models are only evaluated on held-out rollouts from their training environment~\citep{valevski2024gamengen,alonso2024diamond,he2025matrixgame2,po2026multigen}: none has been shown to generalize to a new environment in the same game.
 
-A learned simulator is useful only where it is faithful and an agent or a robot moving to a new room, level or workspace needs to know how much of its world model still holds there and the cost of fixing the rest.
+A learned simulator is useful only where it is faithful and an agent or a robot moving to a new room, level or workspace needs to know how much of its world model still holds and the cost of fixing the rest.
 Game worlds let us pose this question with the engine held fixed and only the environment changed: a new map of the same game preserves the physics and the controls exactly and only the layout, textures and lighting differ.
 Yet unchanged dynamics alone do not guarantee a faithful render: pretrained video and world models are typically moved to a new domain only through a further full fine-tune~\citep{gao2025adaworld} or a dedicated adapter on the frozen backbone~\citep{rigter2024avid} and a model trained on a handful of maps tends to fall back on the appearance it already knows once the surroundings change.
 Pretraining one model on every map a deployment might meet is never complete and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses and how few episodes and updates recover the rest.
@@ -99,7 +99,7 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 
 \textbf{Models and training.} We choose three pretrained backbones: the SD~1.4 U-Net~\citep{rombach2022ldm} (860M parameters) as a control that follows GameNGen~\citep{valevski2024gamengen}; PixArt-$\alpha$~\citep{chen2023pixart} (a 628M transformer in the same latent space) to see the effect of a different architecture; and SD~3.5 Medium~\citep{esser2024sd3} (a 2.27B MMDiT with 16-channel latents) to see the effect of a larger model. SD~3.5's 16-channel latents give its decoder a higher reconstruction score (31.8 against 28.6~dB on the training maps).
 
-We turn all three models into next-tic world models under one shared recipe (Figure~\ref{fig:method}). We give each model 32 context tics so it can see motion, train with $v$-prediction~\citep{salimans2022progressive}, minimizing $\mathrm{E}\,\|v_\theta(z_t, t, \mathbf{c}, a) - v\|^2$ with $v = \sqrt{\bar\alpha_t}\,\epsilon - \sqrt{1-\bar\alpha_t}\,z_0$ for the next latent $z_0$, its noised version $z_t$, the 32 context latents $\mathbf{c}$ and the action $a$, for stable training across noise levels and add context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors. We train each backbone for 200k updates at batch size 32, keep an EMA at 0.9999 in fp32 and sample with 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency\apppar{app:protocol}.
+We turn all three models into next-tic world models under one shared recipe (Figure~\ref{fig:method}). We give each model 32 context tics so it can see motion, train with $v$-prediction~\citep{salimans2022progressive}, minimizing $\mathrm{E}\,\|v_\theta(z_t, t, \mathbf{c}, a) - v\|^2$ with $v = \sqrt{\bar\alpha_t}\,\epsilon - \sqrt{1-\bar\alpha_t}\,z_0$ for the next latent $z_0$, its noised version $z_t$, the 32 context latents $\mathbf{c}$ and the action $a$, for stable training across noise levels and add context noise augmentation as in GameNGen~\citep{valevski2024gamengen} so the model tolerates its own rollout errors. We train each backbone for 200k updates at batch size 32, keep an EMA at 0.9999 in fp32 and sample with 10-step DDIM~\citep{song2021ddim}, which we found to be a strong balance between quality and efficiency\apppar{app:protocol}.  
 
 \begin{figure}[!ht]
 \centering
@@ -112,7 +112,7 @@ We turn all three models into next-tic world models under one shared recipe (Fig
 
 For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. The \emph{directional} score tests control: we flip the turn direction of the last action and count the fraction of windows whose predicted view flips with it. A model that ignores actions scores 0 and the ceiling is 0.89, since 11\% of ground-truth turns are too small to measure within one tic\apppar{app:protocol}.
 
-\textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); this happens once, before adaptation, the decoder stays frozen during it and it never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
+\textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); the this happens once, before adaptation, the decoder stays frozen during it and it never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
 
 \textbf{Adaptation.} For each unseen map we adapt each backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}: 0.49, 4.1 and 1.8\% of the U-Net, PixArt-$\alpha$ and SD~3.5.
 We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. We found that updates, not data, limit adaptation: a single episode gave 75 to 101\% of the gain of sixteen\apppar{app:perarena-adapt}.
@@ -131,7 +131,7 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 \section{Results}
 \label{sec:results}
 
-\textbf{Zero-shot evaluation on unseen maps.} All three models do poorly on the unseen maps (Table~\ref{tab:unseen}).
+\textbf{Zero-shot evaluation on unseen maps.} All three models do poorly on unseen maps before adaptation (Table~\ref{tab:unseen}).
 Control survives: the directional score is 0.79 to 0.81 on the unseen maps against 0.84 to 0.86 on the training maps, about 90\% of its 0.89 ceiling.
 The scene does not: scene PSNR drops 2.9, 2.8 and 3.3~dB and LPIPS rises by 0.145, 0.126 and 0.136 for the U-Net, PixArt-$\alpha$ and SD~3.5 and every unseen map has a worse LPIPS than every training map\apppar{app:distance}.
 The loss is nearly the same for all three backbones and the U-Net and PixArt-$\alpha$ also match in distribution (within 0.02~dB), so it does not depend on the architecture or the scale.
@@ -140,7 +140,7 @@ Qualitatively, the zero-shot model keeps the weapon, the motion and the turn but
 \begin{figure}[b]
 \centering
 \figslot{figures/raw/raw_row_v2_tall.pdf}{\linewidth}{3.0in}{Figure 3: the shift and its repair}
-\caption{\textbf{Zero-shot vs.\ adapted results per unseen map.} (a, b) Scene PSNR and LPIPS, zero-shot (open) and after 4k updates (filled); dashed: in distribution. (c, d) Medians against adapter updates.}
+\caption{\textbf{Zero-shot vs.\ adapted results per unseen map.} (a, b) Scene PSNR and LPIPS, zero-shot (open) and after 4k adaptation updates (filled).(c, d) Median statistics against adapter updates.}
 \label{fig:adapt}
 \end{figure}
 
@@ -149,8 +149,7 @@ After 4k updates on eight episodes, the adapter regains 72 to 76\% of the LPIPS 
 The directional score barely moves (0.83 to 0.85, from 0.79 to 0.81), while the map's own textures, colours and lighting return (Figure~\ref{fig:teaser}). Part of the remaining PSNR gap is the decoder's, 1.3~dB worse on the unseen maps.
 Most of the gain comes early: half of the LPIPS rise returns within a median of 150 to 250 updates, sooner on easy maps (150) than on hard ones (250 to 2k)\apppar{app:perarena-adapt}.
 Adaptation costs some in-distribution quality: the training maps' scene PSNR falls by a median 0.59~dB (1.61~dB under full fine-tuning).
-Fine-tuning the whole U-Net recovers 88\% of the LPIPS rise against the adapter's 72\%, but at a cost: 205 times the trainable parameters, a 49 instead of a 16~GB GPU, a 3.4~GB model copy per map against a 17~MB adapter and 2.7 times the forgetting.
-
+Fine-tuning the whole U-Net recovers 88\% of the LPIPS rise against the adapter's 72\%, but at a cost: 205x the trainable parameters, a 49 instead of a 16~GB GPU, a 3.4~GB model copy per map against a 17~MB adapter and 2.7x the forgetting.
 
 %===============================================================================
 
