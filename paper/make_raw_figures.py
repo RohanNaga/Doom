@@ -1443,7 +1443,7 @@ def fig_row_v2(arenas, backbones, curves, levels, out_dir, headline=HEADLINE_STE
     if tall:
         fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=2, nrows=2, wspace=0.08, hspace=0.08)
     else:
-        fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=4, width_ratios=[1.6, 1.6, 0.8, 0.8], wspace=0.02)
+        fig, (pa, la, pc, lc) = fs.new_figure(SIZES[stem], ncols=4, width_ratios=[1.4, 1.4, 1.0, 1.0], wspace=0.02)
     # three marks per arena slot: full-size marks fit only when the panel is two rows' width
     marker = fs.MARKER_SIZE if tall else 2.8
     for ax, key in ((pa, "psnr"), (la, "lpips")):
