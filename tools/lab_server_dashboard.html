@@ -9,19 +9,19 @@
 :root{
   --bg:#f6f5f1; --surface:#ffffff; --ink:#1e2226; --ink-2:#5b636b; --line:#dcd9d1; --line-2:#ebe8e1;
   --accent:#1f6f8b; --ours:#1f6f8b; --others:#b8b1a3; --good:#2f8f5b; --warn:#c2801a; --crit:#b23a3a;
-  --track:#ece9e2;
+  --track:#ece9e2; --keep:#1f6f8b; --remove:#2f8f5b; --decide:#c2801a; --copy:#8d8778;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#15181b; --surface:#1d2125; --ink:#e7e5df; --ink-2:#9aa1a8; --line:#2f353b; --line-2:#272c31;
     --accent:#5fb3d0; --ours:#5fb3d0; --others:#5c6168; --good:#4fbf82; --warn:#e0a03a; --crit:#e06666;
-    --track:#2a2f34;
+    --track:#2a2f34; --keep:#5fb3d0; --remove:#4fbf82; --decide:#e0a03a; --copy:#7d838a;
   }
 }
 :root[data-theme="dark"]{
   --bg:#15181b; --surface:#1d2125; --ink:#e7e5df; --ink-2:#9aa1a8; --line:#2f353b; --line-2:#272c31;
   --accent:#5fb3d0; --ours:#5fb3d0; --others:#5c6168; --good:#4fbf82; --warn:#e0a03a; --crit:#e06666;
-  --track:#2a2f34;
+  --track:#2a2f34; --keep:#5fb3d0; --remove:#4fbf82; --decide:#e0a03a; --copy:#7d838a;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.45}
@@ -56,6 +56,23 @@ td.num,th.num{text-align:right}
 .legend{display:flex;gap:16px;color:var(--ink-2);font-size:12.5px;margin:6px 0 0}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .empty{color:var(--ink-2);font-style:italic;padding:8px 0}
+section.hold{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px 18px;margin-bottom:16px}
+section.hold h2{margin:0 0 2px;font-size:17px;font-weight:600}
+.holdgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:8px 28px}
+.stack{display:flex;height:14px;border-radius:2px;overflow:hidden;background:var(--track);margin:8px 0 6px}
+.stack i{display:block;height:100%}
+.k-keep{background:var(--keep)} .k-remove{background:var(--remove)} .k-decide{background:var(--decide)} .k-copy{background:var(--copy)}
+.tag{display:inline-block;padding:1px 7px;border-radius:10px;font-size:12px;font-weight:500;line-height:1.5;white-space:nowrap}
+.tag.keep{background:color-mix(in srgb,var(--keep) 16%,transparent);color:var(--keep)}
+.tag.remove{background:color-mix(in srgb,var(--remove) 18%,transparent);color:var(--remove)}
+.tag.decide{background:color-mix(in srgb,var(--decide) 20%,transparent);color:var(--decide)}
+.tag.copy{background:color-mix(in srgb,var(--copy) 22%,transparent);color:var(--ink-2)}
+.totals{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13px;color:var(--ink-2);margin-bottom:8px}
+.totals b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.totals i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.holdscroll{overflow-x:auto}
+td.what{min-width:170px} td.why{color:var(--ink-2);min-width:200px}
+.status{font-size:13.5px;margin:10px 0 0;padding:8px 10px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
 .note{color:var(--ink-2);font-size:13px;margin-top:20px}
 svg.spark{width:100%;height:56px;display:block}
 .hist{margin-top:8px}
@@ -69,6 +86,7 @@ svg.spark{width:100%;height:56px;display:block}
   <h1>Lab server watch</h1>
   <span id="stamp" class="stamp">loading the latest snapshot…</span>
 </header>
+<div id="holdings"></div>
 <div id="servers" class="grid"><p class="empty">Waiting for the shared database.</p></div>
 <p class="note">Snapshots come from <span class="mono">tools/server_usage.py</span> in the Doom repo, written to this page's database about once an hour while the main session runs. Rules: Superman leaves 2 of 8 cards free and needs 250 GB free on disk; Spiderman jobs fill their card and keep the study jobs thread-capped. "Ours" is rohan on Superman and rnagabhi on Spiderman.</p>
 </main>
@@ -126,6 +144,30 @@ function storageRows(detail) {
     `<tr><td class="mono">${esc(p.replace(/^\/sata2\/data\/rnagabhi\/doom\//, "doom/").replace(/^\/home\/rohan\//, "~/"))}</td><td class="num mono">${fmtGB(b)} GB</td></tr>`).join("") + `</tbody></table>`;
 }
 
+const KINDS = {keep: "keep", remove: "backed up, removable", decide: "no backup, decide", copy: "copy held elsewhere"};
+function renderHoldings(h) {
+  const el = document.getElementById("holdings");
+  if (!h || !h.servers) { el.innerHTML = ""; return; }
+  const blocks = Object.entries(h.servers).map(([name, s]) => {
+    const items = (s.items || []).slice().sort((a, b) => b.gb - a.gb);
+    const sum = k => items.filter(i => i.kind === k).reduce((t, i) => t + i.gb, 0);
+    const ours = items.reduce((t, i) => t + i.gb, 0), total = s.disk_gb || ours;
+    const seg = Object.keys(KINDS).map(k => `<i class="k-${k}" style="width:${(100 * sum(k) / total).toFixed(2)}%" title="${KINDS[k]}: ${Math.round(sum(k)).toLocaleString()} GB"></i>`).join("");
+    const totals = Object.keys(KINDS).filter(k => sum(k) > 0).map(k => `<span><i class="k-${k}"></i>${KINDS[k]} <b>${Math.round(sum(k)).toLocaleString()} GB</b></span>`).join("");
+    const rows = items.map(i => `<tr><td class="what">${esc(i.what)}<div class="mono" style="color:var(--ink-2)">${esc(i.path || "")}</div></td>
+      <td class="num mono">${Math.round(i.gb).toLocaleString()}</td><td><span class="tag ${i.kind}">${KINDS[i.kind] || esc(i.kind)}</span></td><td class="why">${esc(i.note || "")}</td></tr>`).join("");
+    return `<div><h3>${esc(s.label || name)}</h3>
+      <p class="sub" style="margin:0">ours <b>${Math.round(ours).toLocaleString()} GB</b> of ${Math.round(total).toLocaleString()} GB on ${esc(s.mount || "")} · ${Math.round(s.free_gb)} GB free</p>
+      <div class="stack" role="img" aria-label="our storage on ${esc(name)} by status, as a share of the whole disk">${seg}</div>
+      <div class="totals">${totals}</div>
+      <div class="holdscroll"><table><thead><tr><th>what</th><th class="num">GB</th><th>status</th><th>note</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }).join("");
+  el.innerHTML = `<section class="hold"><h2>What we hold</h2>
+    <p class="sub">surveyed ${new Date((h.surveyed_at || 0) * 1000).toLocaleString()} · bar widths are shares of each whole disk</p>
+    ${h.status ? `<p class="status">${esc(h.status)}</p>` : ""}
+    <div class="holdgrid">${blocks}</div></section>`;
+}
+
 function spark(points, key) {
   if (points.length < 2) return "";
   const xs = points.map(p => p.t), ys = points.map(p => p[key]);
@@ -178,6 +220,10 @@ function render(snap, history) {
   db.doc("usage/latest").onSnapshot(doc => {
     const snap = doc && doc.data ? doc.data() : doc;
     if (snap && snap.servers) render(snap, history);
+  });
+  db.doc("usage/holdings").onSnapshot(doc => {
+    const h = doc && doc.data ? doc.data() : doc;
+    renderHoldings(h);
   });
 })();
 </script>
