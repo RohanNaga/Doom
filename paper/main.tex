@@ -76,7 +76,7 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 
 \begin{figure}[t]
 \centering
-\figslot{figures/fig_teaser_D.pdf}{\linewidth}{1.4in}{Figure 1: teaser, two rows}
+\figslot{figures/fig_teaser_D.pdf}{\linewidth}{1.56in}{Figure 1: teaser, two rows}
 \caption{\textbf{Zero-shot vs.\ adapted world models under domain shift.} (a) On the training maps the prediction is close to the ground truth; (b) on an unseen map it is not, until adapted on eight episodes.}
 \label{fig:teaser}
 \end{figure}
@@ -88,9 +88,9 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 
 \textbf{Game world models.} Our work is most closely related to diffusion models that simulate a game from the player's actions: GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond}, Matrix-Game~2 scales the recipe to open worlds~\citep{he2025matrixgame2} and MultiGen trains a single Doom model across 100 procedurally generated maps~\citep{po2026multigen}. We build on GameNGen's backbone and training procedure and evaluate on maps the model never saw.
 
-\textbf{Generalization of world models.} A shift can change the dynamics, as with a new body or game, or only the scene, with the engine and its rules fixed. Most evaluations test the first kind: world models have been evaluated on a new robot body~\citep{chen2026xeworld} and on a whole new game~\citep{rigter2024avid} or simulator~\citep{gao2025adaworld}, where the dynamics change along with the scene. Scene shifts are rarer. For indoor navigation, Pathdreamer is evaluated in buildings not seen during training~\citep{koh2021pathdreamer}, the closest analogue to an unseen map, but its scenes are static and it does not study adaptation. Doom maps have been held out, but only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom} and game world models that do show new scenes generate them from an image, with no recorded frames to score against~\citep{tong2026scope,bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training.
+\textbf{Generalization of world models.} A world model can meet two kinds of shift: one that changes the dynamics, such as a new body or a new game, and a scene shift, in which the engine and its rules stay fixed and only the surroundings change. Most evaluations test the first kind: world models have been evaluated on a new robot body~\citep{chen2026xeworld} and on a whole new game~\citep{rigter2024avid} or simulator~\citep{gao2025adaworld}, where the dynamics change along with the scene. Scene shifts are rarer. For indoor navigation, Pathdreamer is evaluated in buildings not seen during training~\citep{koh2021pathdreamer}, the closest analogue to an unseen map, but its scenes are static and it does not study adaptation. Doom maps have been held out, but only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom} and game world models that do show new scenes generate them from an image, with no recorded frames to score against~\citep{tong2026scope,bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training.
 
-\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use LoRA~\citep{hu2022lora}, which lowers the memory and compute adaptation needs. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
+\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use low-rank adaptation (LoRA)~\citep{hu2022lora} for its efficiency: it trains under 5\% of each backbone's parameters, which lowers the memory and compute that adaptation needs. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
 
 %===============================================================================
 
@@ -105,25 +105,25 @@ We turn all three models into next-tic world models under one shared recipe (Fig
 
 \begin{figure}[!ht]
 \centering
-\figslot{figures/fig1_method_150.pdf}{\linewidth}{1.2in}{Figure 2: method overview}
+\figslot{figures/fig1_method_150.pdf}{\linewidth}{1.5in}{Figure 2: method overview}
 \caption{\textbf{Method overview.} (a) Data, (b) models and training, (c) adaptation and decoder fine-tuning, (d) evaluation against the raw frame.}
 \label{fig:method}
 \end{figure}
 
 \textbf{Metrics.} We score the part of each frame that shows the world (rows 0 to 207) and leave out the HUD rows below it, which do not change with the map.
 
-For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. The \emph{directional} score tests control: we flip the turn direction of the last action and count the fraction of windows whose predicted view flips with it. A model that ignores actions scores 0 and the ceiling is 0.89, since 11\% of ground-truth turns are too small to measure within one tic\apppar{app:protocol}.
+For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. The \emph{directional} score tests control. For each held-out window whose last action turns left or right (128 per map), we predict the next frame twice from the same context and noise, once with the recorded turn and once with it reversed, and measure each prediction's horizontal shift against the last context frame by cross-correlation. The score is the fraction of windows whose shift changes sign, so a model that ignores the action scores 0. On the recorded frames themselves, the shift follows the turn in 0.89 of windows, because 11\% of turns move the view too little to measure in one tic; 0.89 is therefore the score of a perfect model and the ceiling\apppar{app:protocol}.
 
 \textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); this happens once, before adaptation, the decoder stays frozen during it and it never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
 
 \textbf{Adaptation.} For each unseen map we adapt each backbone with rank-16 LoRA~\citep{hu2022lora} on its attention layers~\citep{gao2024vista} and train its action and input embeddings in full~\citep{xie2023difffit}: 0.49, 4.1 and 1.8\% of the U-Net, PixArt-$\alpha$ and SD~3.5.
-We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. We found that updates, not data, limit adaptation: a single episode gave 75--101\% of the gain of sixteen\apppar{app:perarena-adapt}. We still use eight, as that check covers only the U-Net on four maps.
-We report 4k updates throughout, 2\% of the pretraining updates at the same batch size of 32 and, as each still runs a full forward and backward pass, about 2\% of its compute; they give 96\% of the gain at 8k.
+We train on eight episodes of the map and score on its eight held-out episodes at 0 to 8k updates. We found that updates, not data, limit adaptation: a single episode gave 75--101\% of the gain of sixteen\apppar{app:perarena-adapt}. We still use eight as the main setting, since that check covers only the U-Net on four maps.
+We report 4k updates throughout, which give 96\% of the gain at 8k. At the pretraining batch size of 32, 4k updates are 2\% of the pretraining updates; because each adapter update still runs a full forward and backward pass through the frozen backbone, they are also roughly 2\% of the pretraining compute, about one GPU-hour per map for the U-Net.
 As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 
 \begin{table}[t]
 \centering\footnotesize
-\caption{\textbf{Zero-shot vs.\ adapted results on training and unseen maps.} Medians over each row's maps, zero-shot and after 4k adaptation updates. Easy, medium and hard are terciles of the U-Net's zero-shot LPIPS rise. Recovered: the median over maps of $(L_0 - L_{4k})/(L_0 - L_{\mathrm{train}})$ for LPIPS and $(P_{4k} - P_0)/(P_{\mathrm{train}} - P_0)$ for PSNR, per map against the backbone's training-map level, so it does not follow from the medians shown; above 100\%, the map ended above that level.}
+\caption{\textbf{Zero-shot vs.\ adapted results on training and unseen maps.} Medians over each row's maps, zero-shot and after 4k adaptation updates. Easy, medium and hard split the 13 unseen maps into terciles by the U-Net's zero-shot LPIPS rise over its training-map level (easy: smallest rise). Recovered: for each map, $(L_0 - L_{4k})/(L_0 - L_{\mathrm{train}})$ for LPIPS and $(P_{4k} - P_0)/(P_{\mathrm{train}} - P_0)$ for PSNR, where $L_{\mathrm{train}}$ and $P_{\mathrm{train}}$ are the backbone's training-map level; the column is the median of these per-map ratios, so it does not follow from the medians shown, and a ratio above 100\% means the map ended above the training-map level.}
 \label{tab:unseen}
 {\footnotesize\setlength{\tabcolsep}{2.6pt}\input{tables/tuned/results_merged.tex}}
 \end{table}
@@ -137,22 +137,22 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 On unseen maps, the models preserve control but fail to reproduce the new scene (Table~\ref{tab:unseen}).
 Directional scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while scene PSNR drops by 2.8--3.3~dB and LPIPS roughly doubles.
 Every unseen map has worse LPIPS than every training map\apppar{app:distance}.
-The rollouts show the same pattern: weapon position, motion and turning remain consistent, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
-This holds across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting the failure is not specific to one architecture or scale.
+We measure control quantitatively only for turning. Qualitatively, the rollouts also respond as expected to moving forward and firing, and the weapon and motion stay consistent, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
+This behavior is consistent across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting that the failure is not specific to one architecture or model scale.
 
 \begin{figure}[t]
 \centering
-\figslot{figures/raw/raw_row_v2.pdf}{\linewidth}{1.55in}{Figure 3: the shift and its repair}
+\figslot{figures/raw/raw_row_v2.pdf}{\linewidth}{1.75in}{Figure 3: the shift and its repair}
 \caption{\textbf{Zero-shot vs.\ adapted results per unseen map.} (a, b) Scene PSNR and LPIPS, zero-shot (open) and after 4k adaptation updates (filled). (c, d) Median statistics against adapter updates.}
 \label{fig:adapt}
 \end{figure}
 
 \textbf{Adaptation cost.}
 Adaptation primarily repairs the scene rather than the model's response to actions (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
-After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS rise and about half of the lost PSNR (the easy group's 173\% comes from two maps that lost only 0.5~dB zero-shot), while directional scores change only slightly.
+After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS rise and about half of the lost PSNR (above 100\% where a map passes the training-map level; the easy group's 173\% comes from two maps that lost only 0.5~dB zero-shot), while directional scores change only slightly.
 The map's textures, colors and lighting return (Figure~\ref{fig:teaser}) without substantially changing the already-preserved control behavior.
 
-Most of this recovery happens early: half of the LPIPS rise is recovered within a median of 150--250 updates\apppar{app:perarena-adapt}, and training to 8k adds little.
+Most of this recovery happens early: half of the LPIPS rise is recovered within a median of 150--250 updates\apppar{app:perarena-adapt}, and extending training to 8k provides little additional gain.
 Full U-Net fine-tuning recovers more of the LPIPS rise (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters and a 48 instead of a 16~GB GPU, and causes 2.7$\times$ more forgetting on the training maps (1.08 vs.\ 0.40~dB).
 Thus, lightweight adaptation recovers most of the lost perceptual quality while largely preserving what already transfers to the new map.
 %===============================================================================
