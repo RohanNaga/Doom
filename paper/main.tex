@@ -65,9 +65,9 @@ However, they are only scored against ground truth on held-out rollouts from the
 A learned simulator is useful only where it is faithful and an agent or a robot moving to a new room, level or workspace needs to know how much of its world model still holds and the cost of fixing the rest.
 Game worlds let us pose this question with the engine held fixed and only the environment changed: a new map of the same game preserves the physics and the controls exactly and only the layout, textures and lighting differ.
 Yet unchanged dynamics alone do not guarantee a faithful render: pretrained video and world models are typically moved to a new domain only through a further full fine-tune~\citep{gao2025adaworld} or a dedicated adapter on the frozen backbone~\citep{rigter2024avid} and a model trained on a handful of maps tends to fall back on the appearance it already knows once the surroundings change.
-Pretraining one model on every map a deployment might meet is never complete and training a separate model per map from scratch is prohibitively costly. We therefore ask what a world model keeps on a new map, what it loses and how few episodes and updates of adaptation recover the rest.
+Pretraining one model on every map a deployment might meet is never complete and training a separate model per map from scratch is prohibitively costly. We therefore explore what it takes to close the domain gap that opens when a world model meets a shift in which the underlying physics and game engine are exactly the same and only the surroundings, scenario or scene change: what the model retains, what it loses and how few episodes and updates recover the rest.
 
-Our contributions (Figure~\ref{fig:teaser}):
+In short, a world model moved to a new map keeps playing the game but draws the wrong world and a small adapter trained on eight episodes draws the map back (Figure~\ref{fig:teaser}). Our contributions:
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item We introduce DoomShift, a benchmark that isolates a scene shift: 17 Doom maps share the same physics and game engine and differ only in their surroundings, with four maps for training and 13 held out. We release the recordings, models, decoders and adapters.
 \item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8--3.3~dB (Table~\ref{tab:unseen}).
@@ -76,7 +76,7 @@ Our contributions (Figure~\ref{fig:teaser}):
 
 \begin{figure}[t]
 \centering
-\figslot{figures/fig_teaser_D.pdf}{\linewidth}{1.56in}{Figure 1: teaser, two rows}
+\figslot{figures/fig_teaser_D.pdf}{\linewidth}{1.4in}{Figure 1: teaser, two rows}
 \caption{\textbf{Zero-shot vs.\ adapted world models under domain shift.} (a) On the training maps the prediction is close to the ground truth; (b) on an unseen map it is not, until adapted on eight episodes.}
 \label{fig:teaser}
 \end{figure}
@@ -90,7 +90,7 @@ Our contributions (Figure~\ref{fig:teaser}):
 
 \textbf{Generalization of world models.} A shift can change the dynamics, as with a new body or game, or only the scene, with the engine and its rules fixed. Most evaluations test the first kind: world models have been evaluated on a new robot body~\citep{chen2026xeworld} and on a whole new game~\citep{rigter2024avid} or simulator~\citep{gao2025adaworld}, where the dynamics change along with the scene. Scene shifts are rarer. For indoor navigation, Pathdreamer is evaluated in buildings not seen during training~\citep{koh2021pathdreamer}, the closest analogue to an unseen map, but its scenes are static and it does not study adaptation. Doom maps have been held out, but only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom} and game world models that do show new scenes generate them from an image, with no recorded frames to score against~\citep{tong2026scope,bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training.
 
-\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use low-rank adaptation (LoRA)~\citep{hu2022lora} for its efficiency: it trains under 5\% of each backbone's parameters, which lowers the memory and compute that adaptation needs. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
+\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use LoRA~\citep{hu2022lora}, which lowers the memory and compute adaptation needs. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
 
 %===============================================================================
 
@@ -138,7 +138,7 @@ On unseen maps, the models preserve control but fail to reproduce the new scene 
 Directional scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while scene PSNR drops by 2.8--3.3~dB and LPIPS roughly doubles.
 Every unseen map has worse LPIPS than every training map\apppar{app:distance}.
 The rollouts show the same pattern: weapon position, motion and turning remain consistent, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
-This behavior is consistent across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting that the failure is not specific to one architecture or model scale.
+This holds across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting the failure is not specific to one architecture or scale.
 
 \begin{figure}[t]
 \centering
