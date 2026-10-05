@@ -46,10 +46,10 @@ World models have become capable simulators, but they are evaluated almost exclu
 A small domain shift, such as a new map of the same game, lighting, textures or enemies, can make their outputs drift even when the underlying physics and game engine are unchanged.
 With DoomShift, a controlled version of this shift in Doom, we measure what breaks and how much adaptation is needed to repair it.
 We train three diffusion backbones, initialized from pretrained diffusion image models, on four Doom maps and evaluate them on 13 unseen maps.
-All three keep their one-tic response to turning but fail to reproduce the new scene: scene PSNR drops by 2.8--3.3~dB and LPIPS rises by 0.126--0.145 across the three backbones.
-This consistent gap shows that, one tic ahead, the response to turning transfers more reliably than scene appearance, independent of architecture or model scale.
+All three preserve their response to controls but fail to reproduce the new scene: scene PSNR drops by 2.8--3.3~dB and LPIPS rises by 0.126--0.145 across the three backbones.
+This consistent gap shows that action-conditioned behavior transfers more reliably than scene appearance, independent of architecture or model scale.
 Yet the lost appearance is relatively cheap to recover: rank-16 adapters trained on only eight episodes with 2\% of the original training updates recover 72--76\% of the LPIPS rise and about half of the lost PSNR.
-Together, these results suggest that adapting a world model to a new map of the same game may mainly require restoring the scene's appearance.
+Together, these results suggest that adapting a world model to a new environment may require restoring the scene's appearance rather than relearning the underlying game.
 \end{abstract}
 
 \keywords{World Models, Diffusion Models, Few-shot Adaptation}
@@ -70,7 +70,7 @@ Pretraining one model on every map a deployment might meet is never complete and
 Our contributions (Figure~\ref{fig:teaser}):
 \begin{itemize}\setlength{\itemsep}{0pt}
 \item We introduce DoomShift, a benchmark that isolates a scene shift: 17 Doom maps share the same physics and game engine and differ only in their surroundings, with four maps for training and 13 held out. We release the recordings, models, decoders and adapters.
-\item We show that a scene shift breaks appearance far more than the response to turning: across three diffusion backbones, the models keep most of their one-tic turn response on unseen maps while their LPIPS roughly doubles and their scene PSNR drops 2.8--3.3~dB (Table~\ref{tab:unseen}).
+\item We show that a scene shift breaks appearance, not control: across three diffusion backbones, the models keep their response to controls on the unseen maps while their perceptual error (LPIPS) roughly doubles and their scene PSNR drops 2.8--3.3~dB (Table~\ref{tab:unseen}).
 \item We measure how much adaptation repairs the shift: a standard LoRA adapter trained on eight episodes of an unseen map recovers 72--76\% of the lost perceptual quality and roughly half of the lost PSNR, using only 2\% of the original training updates (Table~\ref{tab:unseen}).
 \end{itemize}
 
@@ -112,7 +112,7 @@ We turn all three models into next-tic world models under one shared recipe (Fig
 
 \textbf{Metrics.} We score the part of each frame that shows the world (rows 0 to 207) and leave out the HUD rows below it, which do not change with the map.
 
-For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. The \emph{turn-response score} tests control. For each held-out window whose last action turns left or right (128 per map), we predict the next frame twice from the same context and noise, with the recorded turn and with it reversed, and measure each prediction's horizontal shift against the last context frame. The score is the fraction of windows whose shift changes sign, so ignoring the action scores 0. A perfect model scores about 0.89, since 11\% of recorded turns are too small to measure in one tic\apppar{app:protocol}.
+For accuracy, we compute PSNR against the raw frame and for realism, LPIPS~\citep{zhang2018lpips}. The \emph{directional} score tests control. For each held-out window whose last action turns left or right (128 per map), we predict the next frame twice from the same context and noise, with the recorded turn and with it reversed, and measure each prediction's horizontal shift against the last context frame. The score is the fraction of windows whose shift changes sign, so ignoring the action scores 0. The ceiling is 0.89, the score of a perfect model, since 11\% of recorded turns are too small to measure in one tic\apppar{app:protocol}.
 
 \textbf{Decoder fine-tuning.} As in GameNGen~\citep{valevski2024gamengen}, we fine-tune each backbone's decoder on training-map frames with the encoder frozen, adding an LPIPS term to the loss (MSE plus 0.1~LPIPS); this happens once, before adaptation, the decoder stays frozen during it and it never sees an unseen map. This raises the scene reconstruction from 26.9 to 28.4~dB for the SD~1 decoder, which the U-Net and PixArt-$\alpha$ share and from 30.0 to 31.8~dB for the SD~3.5 decoder\apppar{app:protocol}.
 
@@ -134,11 +134,11 @@ As a baseline, we fine-tune the whole U-Net on the same episodes.
 \label{sec:results}
 
 \textbf{Zero-shot evaluation on unseen maps.}
-On unseen maps, the models keep most of their turn response but fail to reproduce the new scene (Table~\ref{tab:unseen}).
-Turn-response scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while scene PSNR drops by 2.8--3.3~dB and LPIPS roughly doubles.
+On unseen maps, the models preserve control but fail to reproduce the new scene (Table~\ref{tab:unseen}).
+Directional scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while scene PSNR drops by 2.8--3.3~dB and LPIPS roughly doubles.
 Every unseen map has worse LPIPS than every training map\apppar{app:distance}.
-In the rollouts, moving forward, firing and turning all still produce the expected motion, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
-This holds across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting the failure is not specific to one architecture or scale.
+We measure control quantitatively only for turning, but in the rollouts moving forward and firing also produce the expected motion, while walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
+This behavior is consistent across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting that the failure is not specific to one architecture or model scale.
 
 \begin{figure}[t]
 \centering
@@ -148,21 +148,21 @@ This holds across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting the failure 
 \end{figure}
 
 \textbf{Adaptation cost.}
-Adaptation primarily repairs the scene rather than the turn response (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
-After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS rise and about half of the lost PSNR (the easy group's 173\% comes from two maps that lost only 0.5~dB zero-shot), while turn-response scores rise only slightly, to 0.83--0.84.
-The map's textures, colors and lighting return (Figure~\ref{fig:teaser}).
+Adaptation primarily repairs the scene rather than the model's response to actions (Table~\ref{tab:unseen}, Figure~\ref{fig:adapt}).
+After 4k updates on eight episodes, the adapters recover 72--76\% of the LPIPS rise and about half of the lost PSNR (the easy group's 173\% comes from two maps that lost only 0.5~dB zero-shot), while directional scores change only slightly.
+The map's textures, colors and lighting return (Figure~\ref{fig:teaser}) without substantially changing the already-preserved control behavior.
 
 Most of this recovery happens early: half of the LPIPS rise is recovered within a median of 150--250 updates\apppar{app:perarena-adapt}, and training to 8k adds little.
 Full U-Net fine-tuning recovers more of the LPIPS rise (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters and a 48 instead of a 16~GB GPU, and causes 2.7$\times$ more forgetting on the training maps (1.08 vs.\ 0.40~dB).
-Thus, lightweight adaptation recovers most of the lost perceptual quality while leaving the turn response largely unchanged.
+Thus, lightweight adaptation recovers most of the lost perceptual quality while largely preserving what already transfers to the new map.
 %===============================================================================
 
 \section{Conclusion}
 \label{sec:limits}
 
-DoomShift shows that under a scene shift, world models keep most of their one-tic response to turning, and by eye to moving and firing, but lose the appearance of the new scene. Across three diffusion backbones, lightweight LoRA adaptation on only eight episodes restores much of this lost perceptual quality, while the turn response stays near its training-map level.
+DoomShift shows that under domain shift, world models largely preserve control but lose the appearance of the new scene. Across three diffusion backbones, lightweight LoRA adaptation on only eight episodes restores much of this lost perceptual quality without relearning the game dynamics.
 
-\textbf{Limitations.} We study one game, evaluate one tic ahead, and measure control only through turning actions; moving and firing are judged by eye.
+\textbf{Limitations.} We study one game, evaluate one tic ahead, and measure control only through turning actions.
 \label{body-end}
 
 %===============================================================================
