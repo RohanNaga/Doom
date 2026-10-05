@@ -852,7 +852,7 @@ def merged_table(names, home, zero, directional, gstats, block_stats, unet_guard
              "% map's LPIPS rise over its backbone's in-distribution level",
              "\\begin{tabular}{lrrrrrrrrrrr}", "\\toprule",
              "& \\multicolumn{3}{c}{Scene PSNR (dB) $\\uparrow$} & \\multicolumn{3}{c}{Scene LPIPS $\\downarrow$} & "
-             "\\multicolumn{2}{c}{Turn resp.\ $\uparrow$} & \\multicolumn{2}{c}{Recovered (\\%)} & Budget to \\\\",
+             "\\multicolumn{2}{c}{Turn resp.\\ $\\uparrow$} & \\multicolumn{2}{c}{Recovered (\\%)} & Budget to \\\\",
              "\\cmidrule(lr){2-4}\\cmidrule(lr){5-7}\\cmidrule(lr){8-9}\\cmidrule(lr){10-11}",
              f"Model, maps & 0 & 4k & 8k & 0 & 4k & 8k & 0 & {fs.step_label(directional_at)} & PSNR & LPIPS & "
              "half the rise \\\\"]
