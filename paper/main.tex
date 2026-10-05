@@ -137,7 +137,7 @@ As a baseline, we fine-tune the whole U-Net on the same episodes.
 On unseen maps, the models keep most of their turn response but fail to reproduce the new scene (Table~\ref{tab:unseen}).
 Turn-response scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while scene PSNR drops by 2.8--3.3~dB and LPIPS roughly doubles.
 Every unseen map has worse LPIPS than every training map\apppar{app:distance}.
-The rollouts show the same pattern: weapon position, motion and turning remain consistent, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
+In the rollouts, moving forward, firing and turning all still produce the expected motion, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
 This holds across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting the failure is not specific to one architecture or scale.
 
 \begin{figure}[t]
@@ -160,9 +160,9 @@ Thus, lightweight adaptation recovers most of the lost perceptual quality while 
 \section{Conclusion}
 \label{sec:limits}
 
-DoomShift shows that under a scene shift, world models keep most of their one-tic response to turning but lose the appearance of the new scene. Across three diffusion backbones, lightweight LoRA adaptation on only eight episodes restores much of this lost perceptual quality, while the turn response stays near its training-map level.
+DoomShift shows that under a scene shift, world models keep most of their one-tic response to turning, and by eye to moving and firing, but lose the appearance of the new scene. Across three diffusion backbones, lightweight LoRA adaptation on only eight episodes restores much of this lost perceptual quality, while the turn response stays near its training-map level.
 
-\textbf{Limitations.} We study one game, evaluate one tic ahead, and measure control only through turning actions.
+\textbf{Limitations.} We study one game, evaluate one tic ahead, and measure control only through turning actions; moving and firing are judged by eye.
 \label{body-end}
 
 %===============================================================================
