@@ -88,9 +88,9 @@ In short, a world model moved to a new map keeps playing the game but draws the 
 
 \textbf{Game world models.} Our work is most closely related to diffusion models that simulate a game from the player's actions: GameNGen runs Doom inside a diffusion model~\citep{valevski2024gamengen}, DIAMOND learns Atari and Counter-Strike in pixel space~\citep{alonso2024diamond}, Matrix-Game~2 scales the recipe to open worlds~\citep{he2025matrixgame2} and MultiGen trains a single Doom model across 100 procedurally generated maps~\citep{po2026multigen}. We build on GameNGen's backbone and training procedure and evaluate on maps the model never saw.
 
-\textbf{Generalization of world models.} Two domain shifts are common for world models: a change in dynamics or a change in only the scene while the physics and engine are unchanged. Most evaluations test the first: world models have been evaluated on a new robot~\citep{chen2026xeworld}, game~\citep{rigter2024avid} or simulator~\citep{gao2025adaworld}, where the dynamics change along with the scene. For indoor navigation, Pathdreamer is evaluated in buildings not seen during training~\citep{koh2021pathdreamer}, the closest analogue to an unseen map, but its scenes are static and it does not study adaptation. Doom maps have been held out, but only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom} and game world models that do show new scenes generate them from an image, with no recorded frames to score against~\citep{tong2026scope,bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on maps of its own game that were deliberately held out from training.
+\textbf{Generalization of world models.} Two domain shifts are common for world models: a change in dynamics or a change in only the scene while the physics and engine are unchanged. Most evaluations test the first: world models have been evaluated on a new robot~\citep{chen2026xeworld}, game~\citep{rigter2024avid} or simulator~\citep{gao2025adaworld}, where the dynamics change along with the scene. For indoor navigation, Pathdreamer is evaluated in buildings not seen during training~\citep{koh2021pathdreamer}, the closest analogue to an unseen map, but its scenes are static and it does not study adaptation. Doom maps have been held out, but only to test the agents that play them~\citep{lample2017arnold,wydmuch2018vizdoom} and game world models that do show new scenes generate them from an image, with no recorded frames to score against~\citep{tong2026scope,bruce2024genie}. To our knowledge, no published game world model has been scored against recorded frames on held-out maps of its own game.
 
-\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use low-rank adaptation (LoRA)~\citep{hu2022lora} for its efficiency: it trains under 5\% of each backbone's parameters, which lowers the memory and compute that adaptation needs. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
+\textbf{Adaptation.} Pretrained video and world models are adapted to a new domain with a small adapter on a frozen backbone, as in AVID~\citep{rigter2024avid} and Vista~\citep{gao2024vista}, or with a short full fine-tune, as in AdaWorld~\citep{gao2025adaworld}. We use low-rank adaptation (LoRA)~\citep{hu2022lora} for its efficiency. None of these works reports what adapting to one new scene costs in episodes and updates, which is what we measure.
 
 %===============================================================================
 
@@ -138,7 +138,7 @@ On unseen maps, the models preserve control but fail to reproduce the new scene 
 Turn-response scores remain close to those on the training maps (0.79--0.81 vs.\ 0.84--0.86), while scene PSNR drops by 2.8--3.3~dB and LPIPS roughly doubles.
 Every unseen map has worse LPIPS than every training map\apppar{app:distance}.
 The rollouts show the same pattern: weapon position, motion and turning remain consistent, but walls, floors and textures are often replaced by appearances learned from the training maps (Figure~\ref{fig:teaser}).
-This behavior is consistent across the U-Net, PixArt-$\alpha$ and SD~3.5, suggesting that the failure is not specific to one architecture or model scale.
+This holds across the U-Net, PixArt-$\alpha$ and SD~3.5, so the failure is not specific to one architecture or model scale.
 
 \begin{figure}[t]
 \centering
@@ -154,7 +154,6 @@ The map's textures, colors and lighting return (Figure~\ref{fig:teaser}) without
 
 Most of this recovery happens early: half of the LPIPS rise is recovered within a median of 150--250 updates\apppar{app:perarena-adapt}, and extending training to 8k provides little additional gain.
 Full U-Net fine-tuning recovers more of the LPIPS rise (88\% vs.\ 72\%), but requires 205$\times$ more trainable parameters and a 48 instead of a 16~GB GPU, and causes 2.7$\times$ more forgetting on the training maps (1.08 vs.\ 0.40~dB).
-Thus, lightweight adaptation recovers most of the lost perceptual quality while largely preserving what already transfers to the new map.
 %===============================================================================
 
 \section{Conclusion}
@@ -162,7 +161,7 @@ Thus, lightweight adaptation recovers most of the lost perceptual quality while 
 
 DoomShift shows that under domain shift, world models largely preserve control but lose the appearance of the new scene. Across three diffusion backbones, lightweight LoRA adaptation on only eight episodes restores much of this lost perceptual quality without relearning the game dynamics.
 
-\textbf{Limitations.} We study one game, evaluate one tic ahead, and measure control only through turning actions.
+\textbf{Limitations.} We study one game, evaluate one tic ahead, and measure only basic control.
 \label{body-end}
 
 %===============================================================================
