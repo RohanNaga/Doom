@@ -123,7 +123,7 @@ As a baseline, we fine-tune all of the U-Net's parameters on the same episodes.
 
 \begin{table}[t]
 \centering\footnotesize
-\caption{\textbf{Zero-shot vs.\ adapted results on training and unseen maps.} Medians over each row's maps, zero-shot and after 4k updates. Map difficulty: terciles of the U-Net's zero-shot LPIPS. Recovered: median over maps of \mbox{$(M_{4k} - M_0)/(M_{\mathrm{tr}} - M_0)$}, tr: training.}
+\caption{\textbf{Zero-shot vs.\ adapted results on training and unseen maps.} Medians over each row's maps. Map difficulty: terciles of the U-Net's zero-shot LPIPS. Recovered: median over maps of \mbox{$(M_{4k} - M_0)/(M_{\mathrm{tr}} - M_0)$}; $M$: PSNR or LPIPS, 0: zero-shot, 4k: after 4k updates, tr: training.}
 \label{tab:unseen}
 {\footnotesize\setlength{\tabcolsep}{2.6pt}\input{tables/tuned/results_merged.tex}}
 \end{table}
